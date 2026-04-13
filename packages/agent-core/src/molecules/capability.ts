@@ -1,16 +1,17 @@
 /**
- * Capability class - Toolbox + Manual composition.
+ * Capability class - Toolbox + Manual + optional Playbook composition.
  *
  * A Capability is a specific pairing of tools with guidance.
  * Same Toolbox + different Manual = different Capability.
  */
 
 import type { Manual } from "./manual.js";
+import type { Playbook } from "./playbook.js";
 import type { ToolSchema } from "./tool-schema.js";
 import type { Toolbox } from "./toolbox.js";
 
 /**
- * A pairing of tools (Toolbox) with guidance (Manual).
+ * A pairing of tools (Toolbox) with guidance (Manual) and optional plays (Playbook).
  *
  * Capabilities represent what an agent can do and how they should
  * approach it. The same toolbox with different manuals creates
@@ -21,18 +22,30 @@ export class Capability {
   readonly description: string;
   readonly toolbox: Toolbox;
   readonly manual?: Manual;
+  readonly playbook?: Playbook;
 
-  constructor(name: string, description: string, toolbox: Toolbox, manual?: Manual) {
+  constructor(
+    name: string,
+    description: string,
+    toolbox: Toolbox,
+    manual?: Manual,
+    playbook?: Playbook,
+  ) {
     this.name = name;
     this.description = description;
     this.toolbox = toolbox;
     this.manual = manual;
+    this.playbook = playbook;
     Object.freeze(this);
   }
 
-  /** Get tool schemas from the toolbox. */
+  /** Get tool schemas from the toolbox and playbook. */
   getTools(): ToolSchema[] {
-    return this.toolbox.getToolSchemas();
+    const tools = this.toolbox.getToolSchemas();
+    if (this.playbook) {
+      tools.push(...this.playbook.getPlaySchemas());
+    }
+    return tools;
   }
 
   /** Get guidance from the manual, or empty string if no manual. */

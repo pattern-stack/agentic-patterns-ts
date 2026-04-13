@@ -4,8 +4,9 @@
  * Mirrors Python: agentic_patterns/core/systems/tools/sdk_bridge.py
  *
  * Each Capability becomes a named MCP server with tools derived from
- * the capability's Toolbox. The runner wires these servers into the
- * SDK options so Claude Code can call them as `mcp__{server}__{tool}`.
+ * the capability's Toolbox and optional Playbook. The runner wires these
+ * servers into the SDK options so Claude Code can call them as
+ * `mcp__{server}__{tool}`.
  */
 
 import type { Capability, ToolSchema, Toolbox } from "@agentic-patterns/core";
@@ -67,6 +68,25 @@ function toSnake(name: string): string {
 export function buildCapabilityServer(capability: Capability) {
   const serverName = toSnake(capability.name);
   const sdkTools = toolsFromToolbox(capability.toolbox);
+
+  // Add playbook plays as SDK tools if present
+  if (capability.playbook) {
+    for (const [name, def] of Object.entries(capability.playbook.plays)) {
+      const shape = extractShape(def.parameters);
+      const playbook = capability.playbook;
+      sdkTools.push(
+        sdkTool(name, def.description, shape, async (args: Record<string, unknown>) => {
+          const result = await playbook.execute(name, args);
+          const text = typeof result === "string" ? result : JSON.stringify(result ?? "");
+          const isError = typeof result === "object" && result !== null && "error" in result;
+          return {
+            content: [{ type: "text" as const, text }],
+            ...(isError ? { isError: true } : {}),
+          };
+        }),
+      );
+    }
+  }
 
   const serverConfig = createSdkMcpServer({
     name: serverName,

@@ -18,6 +18,9 @@ export type { ManualItem } from "./manual.js";
 
 export { Capability } from "./capability.js";
 
+export { Playbook } from "./playbook.js";
+export type { PlayDefinition } from "./playbook.js";
+
 export {
   WorkflowStepSchema,
   RuleDefinitionSchema,
