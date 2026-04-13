@@ -15,15 +15,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "agents",
-    "llm",
-    "ai",
-    "composable",
-    "primitives",
-    "zod",
-    "prompt-engineering"
-  ],
+  "keywords": ["agents", "llm", "ai", "composable", "primitives", "zod", "prompt-engineering"],
   "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
   "bugs": "https://github.com/pattern-stack/agentic-patterns-ts/issues",
   "main": "./dist/index.cjs",

@@ -15,15 +15,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "agents",
-    "llm",
-    "ai",
-    "runtime",
-    "vercel-ai-sdk",
-    "events",
-    "multi-agent"
-  ],
+  "keywords": ["agents", "llm", "ai", "runtime", "vercel-ai-sdk", "events", "multi-agent"],
   "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
   "bugs": "https://github.com/pattern-stack/agentic-patterns-ts/issues",
   "main": "./dist/index.cjs",
