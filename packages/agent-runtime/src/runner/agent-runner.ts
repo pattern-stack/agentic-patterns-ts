@@ -18,6 +18,7 @@ import {
   type ToolResultPart,
   generateId,
   generateText,
+  streamText,
 } from "ai";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
@@ -101,10 +102,6 @@ export class AgentRunner implements RunnerProtocol {
 
   /**
    * Convert agent tools to Vercel AI SDK tool format.
-   *
-   * Note: We build a tools record that the AI SDK generateText() consumes.
-   * We do NOT use the AI SDK tool() helper's built-in execute; instead we
-   * handle execution manually so we can emit events and run gate checks.
    */
   private convertTools(
     agent: AgentLike,
@@ -305,7 +302,6 @@ export class AgentRunner implements RunnerProtocol {
       }
 
       // Has tool calls — execute them in parallel
-      // First, emit intents and gate check
       for (const tc of resultToolCalls) {
         const intent = createEvent("agent.tool.intent", {
           traceId: effectiveTraceId,
@@ -324,7 +320,6 @@ export class AgentRunner implements RunnerProtocol {
       // Parallel tool execution
       const toolResults = await Promise.all(
         resultToolCalls.map(async (tc) => {
-          // Emit tool call start
           const tcStart = createEvent("agent.tool.start", {
             traceId: effectiveTraceId,
             runId,
@@ -359,7 +354,6 @@ export class AgentRunner implements RunnerProtocol {
           const durationMs = Date.now() - startTime;
           totalToolCalls++;
 
-          // Emit tool call end
           await this.emit(
             createEvent("agent.tool.end", {
               traceId: effectiveTraceId,
@@ -372,7 +366,7 @@ export class AgentRunner implements RunnerProtocol {
               result: toolResult,
               error: errorMsg,
               durationMs,
-              resultTokens: 0, // Token counting not available without provider-specific API
+              resultTokens: 0,
             }),
           );
 
@@ -384,7 +378,7 @@ export class AgentRunner implements RunnerProtocol {
         }),
       );
 
-      // Append assistant message with tool calls to messages
+      // Append messages for next iteration
       const assistantContent: Array<ToolCallPart | { type: "text"; text: string }> = [];
       if (result.text) {
         assistantContent.push({ type: "text" as const, text: result.text });
@@ -399,7 +393,6 @@ export class AgentRunner implements RunnerProtocol {
       }
       messages.push({ role: "assistant" as const, content: assistantContent });
 
-      // Append tool results
       const toolResultParts: ToolResultPart[] = toolResults.map((tr) => ({
         type: "tool-result" as const,
         toolCallId: tr.toolCallId,
@@ -422,7 +415,7 @@ export class AgentRunner implements RunnerProtocol {
       );
     }
 
-    // Max iterations exceeded — return gracefully per issue spec
+    // Max iterations exceeded
     return {
       response: "",
       inputTokens: totalInputTokens,
@@ -431,5 +424,387 @@ export class AgentRunner implements RunnerProtocol {
       iterations: maxIterations,
       finishReason: "max_iterations",
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // stream() — Streaming execution loop using fullStream
+  // ---------------------------------------------------------------------------
+
+  async *stream(
+    agent: AgentLike,
+    message: string,
+    options?: RunOptions,
+  ): AsyncGenerator<AgentEvent> {
+    if (options?.eventBus) {
+      this._eventBus = options.eventBus;
+    }
+
+    const runId = generateId();
+    const effectiveTraceId = options?.traceId ?? runId;
+    const maxIterations = options?.maxIterations ?? 10;
+    const toolExecutor = options?.toolExecutor;
+    const conversationId = generateId();
+
+    const modelName = agent.getModel();
+    const agentTools = agent.getTools();
+    const tools = this.convertTools(agent, toolExecutor);
+    const hasTools = agentTools.length > 0;
+
+    const system = agent.renderInitialPrompt();
+    const messages: CoreMessage[] = [];
+    if (options?.messageHistory) {
+      messages.push(...convertHistory(options.messageHistory));
+    }
+    messages.push({ role: "user" as const, content: message });
+
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalToolCalls = 0;
+    let fullText = "";
+
+    // Conversation start
+    const convStart = createEvent("agent.conversation.start", {
+      traceId: effectiveTraceId,
+      runId,
+      conversationId,
+      agentName: agent.role.name,
+    });
+    await this.emit(convStart);
+    yield convStart;
+
+    // Message start
+    const msgStart = createEvent("agent.message.start", {
+      traceId: effectiveTraceId,
+      runId,
+      parentSpanId: options?.parentSpanId,
+      agentName: agent.role.name,
+    });
+    const rootSpanId = msgStart.spanId;
+    await this.emit(msgStart);
+    yield msgStart;
+
+    for (let iteration = 0; iteration < maxIterations; iteration++) {
+      // Iteration start
+      const iterStart = createEvent("agent.iteration.start", {
+        traceId: effectiveTraceId,
+        runId,
+        parentSpanId: rootSpanId,
+        iteration,
+        maxIterations,
+      });
+      const iterSpanId = iterStart.spanId;
+      await this.emit(iterStart);
+      yield iterStart;
+
+      // LLM start
+      const llmStart = createEvent("agent.llm.start", {
+        traceId: effectiveTraceId,
+        runId,
+        parentSpanId: iterSpanId,
+        model: modelName,
+        messageCount: messages.length + 1,
+        hasTools,
+      });
+      const llmSpanId = llmStart.spanId;
+      await this.emit(llmStart);
+      yield llmStart;
+
+      const llmStartTime = Date.now();
+
+      // Use fullStream to get text + tool calls + errors in one pass
+      const streamResult = streamText({
+        model: this._model,
+        system,
+        messages,
+        tools: hasTools ? tools : undefined,
+        maxSteps: 1,
+      });
+
+      let iterText = "";
+      let chunkIndex = 0;
+      const pendingToolCalls: Array<{
+        toolCallId: string;
+        toolName: string;
+        args: Record<string, unknown>;
+      }> = [];
+      let stepUsage: { promptTokens: number; completionTokens: number } | undefined;
+      let stepFinishReason = "stop";
+      let hadError = false;
+
+      for await (const part of streamResult.fullStream) {
+        switch (part.type) {
+          case "text-delta": {
+            iterText += part.textDelta;
+            const chunkEvent = createEvent("agent.message.chunk", {
+              traceId: effectiveTraceId,
+              runId,
+              delta: part.textDelta,
+              chunkIndex: chunkIndex++,
+            });
+            await this.emit(chunkEvent);
+            yield chunkEvent;
+            break;
+          }
+          case "tool-call": {
+            pendingToolCalls.push({
+              toolCallId: part.toolCallId,
+              toolName: part.toolName,
+              args: part.args as Record<string, unknown>,
+            });
+            break;
+          }
+          case "step-finish": {
+            stepUsage = part.usage;
+            stepFinishReason = part.finishReason;
+            break;
+          }
+          case "error": {
+            hadError = true;
+            const llmDuration = Date.now() - llmStartTime;
+            const llmEndErr = createEvent("agent.llm.end", {
+              traceId: effectiveTraceId,
+              runId,
+              spanId: llmSpanId,
+              parentSpanId: iterSpanId,
+              model: modelName,
+              inputTokens: 0,
+              outputTokens: 0,
+              durationMs: llmDuration,
+              hasToolCalls: false,
+              finishReason: "error",
+            });
+            await this.emit(llmEndErr);
+            yield llmEndErr;
+
+            const err = part.error instanceof Error ? part.error : new Error(String(part.error));
+            const errEvent = createEvent("agent.error", {
+              traceId: effectiveTraceId,
+              runId,
+              parentSpanId: iterSpanId,
+              errorType: err.name,
+              message: err.message,
+              recoverable: false,
+              context: {},
+            });
+            await this.emit(errEvent);
+            yield errEvent;
+            break;
+          }
+          default:
+            // step-start, finish, etc. — skip
+            break;
+        }
+      }
+
+      if (hadError) {
+        const convEnd = createEvent("agent.conversation.end", {
+          traceId: effectiveTraceId,
+          runId,
+          conversationId,
+          reason: "error" as const,
+        });
+        await this.emit(convEnd);
+        yield convEnd;
+        return;
+      }
+
+      fullText += iterText;
+
+      // Update token tracking
+      const iterInputTokens = stepUsage?.promptTokens ?? 0;
+      const iterOutputTokens = stepUsage?.completionTokens ?? 0;
+      totalInputTokens += iterInputTokens;
+      totalOutputTokens += iterOutputTokens;
+
+      const hasToolCalls = pendingToolCalls.length > 0;
+      const llmDuration = Date.now() - llmStartTime;
+
+      // LLM end
+      const llmEnd = createEvent("agent.llm.end", {
+        traceId: effectiveTraceId,
+        runId,
+        spanId: llmSpanId,
+        parentSpanId: iterSpanId,
+        model: modelName,
+        inputTokens: iterInputTokens,
+        outputTokens: iterOutputTokens,
+        durationMs: llmDuration,
+        hasToolCalls,
+        finishReason: hasToolCalls ? "tool_calls" : stepFinishReason,
+      });
+      await this.emit(llmEnd);
+      yield llmEnd;
+
+      // No tool calls = done
+      if (!hasToolCalls) {
+        const iterEnd = createEvent("agent.iteration.end", {
+          traceId: effectiveTraceId,
+          runId,
+          spanId: iterSpanId,
+          parentSpanId: rootSpanId,
+          iteration,
+          toolCallsCount: 0,
+          hasMore: false,
+        });
+        await this.emit(iterEnd);
+        yield iterEnd;
+
+        const msgComplete = createEvent("agent.message.complete", {
+          traceId: effectiveTraceId,
+          runId,
+          spanId: rootSpanId,
+          parentSpanId: rootSpanId,
+          content: fullText,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          model: modelName,
+        });
+        await this.emit(msgComplete);
+        yield msgComplete;
+
+        const convEnd = createEvent("agent.conversation.end", {
+          traceId: effectiveTraceId,
+          runId,
+          conversationId,
+          reason: "completed" as const,
+        });
+        await this.emit(convEnd);
+        yield convEnd;
+        return;
+      }
+
+      // Process tool calls
+      for (const tc of pendingToolCalls) {
+        const intent = createEvent("agent.tool.intent", {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: iterSpanId,
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          arguments: tc.args,
+        });
+        await this.emit(intent);
+        yield intent;
+
+        const allowed = await this.emitIntent(intent);
+        if (!allowed) {
+          const errEvent = createEvent("agent.error", {
+            traceId: effectiveTraceId,
+            runId,
+            parentSpanId: iterSpanId,
+            errorType: "ToolCallBlocked",
+            message: `Tool call '${tc.toolName}' blocked by gate`,
+            recoverable: false,
+            context: {},
+          });
+          await this.emit(errEvent);
+          yield errEvent;
+
+          const convEnd = createEvent("agent.conversation.end", {
+            traceId: effectiveTraceId,
+            runId,
+            conversationId,
+            reason: "error" as const,
+          });
+          await this.emit(convEnd);
+          yield convEnd;
+          return;
+        }
+
+        const tcStart = createEvent("agent.tool.start", {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: iterSpanId,
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          arguments: tc.args,
+        });
+        const tcSpanId = tcStart.spanId;
+        await this.emit(tcStart);
+        yield tcStart;
+
+        const startTime = Date.now();
+        let toolResult: unknown;
+        let errorMsg: string | undefined;
+
+        try {
+          if (toolExecutor) {
+            toolResult = await toolExecutor.execute(tc.toolName, tc.args);
+          } else {
+            toolResult = { error: "No tool executor configured" };
+            errorMsg = "No tool executor configured";
+          }
+        } catch (e: unknown) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          toolResult = { error: err.message };
+          errorMsg = err.message;
+        }
+
+        const durationMs = Date.now() - startTime;
+        totalToolCalls++;
+
+        const tcEnd = createEvent("agent.tool.end", {
+          traceId: effectiveTraceId,
+          runId,
+          spanId: tcSpanId,
+          parentSpanId: iterSpanId,
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          arguments: tc.args,
+          result: toolResult,
+          error: errorMsg,
+          durationMs,
+          resultTokens: 0,
+        });
+        await this.emit(tcEnd);
+        yield tcEnd;
+      }
+
+      // Build messages for next iteration
+      const assistantContent: Array<ToolCallPart | { type: "text"; text: string }> = [];
+      if (iterText) {
+        assistantContent.push({ type: "text" as const, text: iterText });
+      }
+      for (const tc of pendingToolCalls) {
+        assistantContent.push({
+          type: "tool-call" as const,
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          args: tc.args,
+        });
+      }
+      messages.push({ role: "assistant" as const, content: assistantContent });
+
+      const toolResultParts: ToolResultPart[] = pendingToolCalls.map((tc) => ({
+        type: "tool-result" as const,
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        result: "ok",
+      }));
+      messages.push({ role: "tool" as const, content: toolResultParts });
+
+      // Iteration end
+      const iterEnd = createEvent("agent.iteration.end", {
+        traceId: effectiveTraceId,
+        runId,
+        spanId: iterSpanId,
+        parentSpanId: rootSpanId,
+        iteration,
+        toolCallsCount: pendingToolCalls.length,
+        hasMore: true,
+      });
+      await this.emit(iterEnd);
+      yield iterEnd;
+    }
+
+    // Max iterations reached
+    const convEnd = createEvent("agent.conversation.end", {
+      traceId: effectiveTraceId,
+      runId,
+      conversationId,
+      reason: "completed" as const,
+    });
+    await this.emit(convEnd);
+    yield convEnd;
   }
 }
