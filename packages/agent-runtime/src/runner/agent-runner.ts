@@ -519,6 +519,7 @@ export class AgentRunner implements RunnerProtocol {
         toolCallId: string;
         toolName: string;
         args: Record<string, unknown>;
+        result?: unknown;
       }> = [];
       let stepUsage: { promptTokens: number; completionTokens: number } | undefined;
       let stepFinishReason = "stop";
@@ -735,6 +736,7 @@ export class AgentRunner implements RunnerProtocol {
 
         const durationMs = Date.now() - startTime;
         totalToolCalls++;
+        tc.result = toolResult;
 
         const tcEnd = createEvent("agent.tool.end", {
           traceId: effectiveTraceId,
@@ -772,7 +774,7 @@ export class AgentRunner implements RunnerProtocol {
         type: "tool-result" as const,
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
-        result: "ok",
+        result: tc.result,
       }));
       messages.push({ role: "tool" as const, content: toolResultParts });
 
