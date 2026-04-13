@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Composable primitives for building LLM agents — atoms, protocols, molecules, rendering, organisms",
   "license": "MIT",
   "type": "module",
@@ -12,6 +12,20 @@
   "engines": {
     "node": ">=20"
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "agents",
+    "llm",
+    "ai",
+    "composable",
+    "primitives",
+    "zod",
+    "prompt-engineering"
+  ],
+  "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
+  "bugs": "https://github.com/pattern-stack/agentic-patterns-ts/issues",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
