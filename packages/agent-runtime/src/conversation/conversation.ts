@@ -5,7 +5,9 @@
  */
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";
+import { getAgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
+import { createEvent } from "../events/types.js";
 import type {
   CanonicalMessage,
   CanonicalMessagePart,
@@ -208,27 +210,48 @@ export class Conversation {
     this._exchangeCount += 1;
     const invocationId = generateUUID();
     const messageHistory = this._toMessageHistory();
+    const eventBus = options?.eventBus ?? getAgentEventBus();
+
+    // Get trace ID from message.start event (will be emitted by runner)
+    // For now, generate one
+    const traceId = invocationId;
+    const runId = generateUUID();
+
+    // Emit conversation start
+    const convStartEvent = createEvent("agent.conversation.start", {
+      traceId,
+      runId,
+      conversationId: this.id,
+      agentName: this.agent.role.name,
+    });
+    yield convStartEvent;
+    await eventBus.publish(convStartEvent);
 
     let fullResponse = "";
     let totalInput = 0;
     let totalOutput = 0;
+    let error: Error | undefined;
 
-    for await (const event of this.runner.stream(this.agent, message, {
-      messageHistory,
-      toolExecutor: this._toolExecutor,
-      eventBus: options?.eventBus,
-    })) {
-      yield event;
+    try {
+      for await (const event of this.runner.stream(this.agent, message, {
+        messageHistory,
+        toolExecutor: this._toolExecutor,
+        eventBus: options?.eventBus,
+      })) {
+        yield event;
 
-      // Accumulate response data from events
-      if (event.type === "agent.message.chunk") {
-        fullResponse += event.delta;
+        // Accumulate response data from events
+        if (event.type === "agent.message.chunk") {
+          fullResponse += event.delta;
+        }
+        if (event.type === "agent.message.complete") {
+          fullResponse = event.content;
+          totalInput = event.inputTokens;
+          totalOutput = event.outputTokens;
+        }
       }
-      if (event.type === "agent.message.complete") {
-        fullResponse = event.content;
-        totalInput = event.inputTokens;
-        totalOutput = event.outputTokens;
-      }
+    } catch (e) {
+      error = e instanceof Error ? e : new Error(String(e));
     }
 
     const exchange: Exchange = {
@@ -246,6 +269,21 @@ export class Conversation {
 
     if (this._store) {
       await this._persistExchange(exchange);
+    }
+
+    // Emit conversation end
+    const convEndEvent = createEvent("agent.conversation.end", {
+      traceId,
+      runId,
+      conversationId: this.id,
+      reason: error ? "error" : "completed",
+    });
+    yield convEndEvent;
+    await eventBus.publish(convEndEvent);
+
+    // Rethrow error after emitting conversation.end
+    if (error) {
+      throw error;
     }
   }
 

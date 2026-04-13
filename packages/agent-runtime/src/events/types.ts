@@ -146,6 +146,50 @@ export interface LLMCallEndEvent extends BaseEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Conversation events
+// ---------------------------------------------------------------------------
+
+export interface ConversationStartEvent extends BaseEvent {
+  readonly type: "agent.conversation.start";
+  readonly conversationId: string;
+  readonly agentName: string;
+}
+
+export interface ConversationEndEvent extends BaseEvent {
+  readonly type: "agent.conversation.end";
+  readonly conversationId: string;
+  readonly reason: "completed" | "error" | "cancelled";
+}
+
+// ---------------------------------------------------------------------------
+// Message cancel event
+// ---------------------------------------------------------------------------
+
+export interface MessageCancelEvent extends BaseEvent {
+  readonly type: "agent.message.cancel";
+  readonly reason?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Thinking lifecycle events
+// ---------------------------------------------------------------------------
+
+export interface ThinkingStartEvent extends BaseEvent {
+  readonly type: "agent.thinking.start";
+}
+
+// ---------------------------------------------------------------------------
+// Tool progress event
+// ---------------------------------------------------------------------------
+
+export interface ToolProgressEvent extends BaseEvent {
+  readonly type: "agent.tool.progress";
+  readonly toolCallId: string;
+  readonly progress?: number;
+  readonly statusText?: string;
+}
+
+// ---------------------------------------------------------------------------
 // Error event
 // ---------------------------------------------------------------------------
 
@@ -163,14 +207,19 @@ export interface ErrorEvent extends BaseEvent {
 // ---------------------------------------------------------------------------
 
 export type AgentEvent =
+  | ConversationStartEvent
+  | ConversationEndEvent
   | MessageStartEvent
   | MessageChunkEvent
   | MessageCompleteEvent
+  | MessageCancelEvent
   | ReasoningEvent
+  | ThinkingStartEvent
   | ToolCallIntent
   | ToolCallRejectedEvent
   | ToolCallStartEvent
   | ToolCallEndEvent
+  | ToolProgressEvent
   | IterationStartEvent
   | IterationEndEvent
   | LLMCallStartEvent
@@ -182,13 +231,18 @@ export type AgentEventType = AgentEvent["type"];
 
 /** Subset of events for backward-compatible StreamEvent alias. */
 export type StreamEvent =
+  | ConversationStartEvent
+  | ConversationEndEvent
   | MessageStartEvent
   | MessageChunkEvent
   | MessageCompleteEvent
+  | MessageCancelEvent
   | ReasoningEvent
+  | ThinkingStartEvent
   | ToolCallIntent
   | ToolCallStartEvent
   | ToolCallEndEvent
+  | ToolProgressEvent
   | IterationStartEvent
   | IterationEndEvent
   | LLMCallStartEvent
