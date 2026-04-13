@@ -11,6 +11,7 @@ export type {
 } from "./types.js";
 export { ClaudeCodeRunner } from "./claude-code-runner.js";
 export type { ClaudeCodeRunnerOptions } from "./claude-code-runner.js";
+export { ClaudeCodeAPIRunner } from "./claude-code-api-runner.js";
 export { buildAgentServers, buildCapabilityServer } from "./sdk-bridge.js";
 export type { AgentLikeForBridge } from "./sdk-bridge.js";
 export { MockRunner } from "./mock-runner.js";

@@ -9,13 +9,20 @@
  * not used.
  *
  * Event bridging:
+ * - PreToolUse hook  → ToolCallIntent (gate chain) + ToolCallStartEvent
+ * - PostToolUse hook → ToolCallEndEvent with result
  * - SDKAssistantMessage → MessageStart/Complete, Reasoning
  * - SDKResultMessage → MessageComplete with usage stats
- * - MCP tools → wired from agent capabilities via sdk-bridge
+ * - SDKPartialAssistantMessage → MessageChunk (streaming)
  */
 
 import type { ToolSchema } from "@agentic-patterns/core";
-import { type Options as SDKOptions, query } from "@anthropic-ai/claude-agent-sdk";
+import {
+  type HookCallback,
+  type HookCallbackMatcher,
+  type Options as SDKOptions,
+  query,
+} from "@anthropic-ai/claude-agent-sdk";
 import { generateId } from "ai";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
@@ -58,25 +65,50 @@ export interface ClaudeCodeRunnerOptions {
  * Claude Code manages its own tool loop, permissions, and file access.
  * This runner translates SDK messages into the AgentEvent stream so that
  * the rest of the framework (gates, exporters, UX) works transparently.
+ *
+ * Gate enforcement is handled via PreToolUse hooks — if a gate blocks a
+ * ToolCallIntent, the hook returns `permissionDecision: 'deny'` to the
+ * SDK so the tool is never executed.
  */
 export class ClaudeCodeRunner implements RunnerProtocol {
-  private _eventBus: AgentEventBus | undefined;
-  private readonly _defaults: Partial<SDKOptions>;
+  protected _eventBus: AgentEventBus | undefined;
+  protected readonly _defaults: Partial<SDKOptions>;
 
   constructor(opts?: ClaudeCodeRunnerOptions) {
     this._eventBus = opts?.eventBus;
     this._defaults = opts?.defaults ?? {};
   }
 
-  private get eventBus(): AgentEventBus {
+  protected get eventBus(): AgentEventBus {
     if (!this._eventBus) {
       this._eventBus = getAgentEventBus();
     }
     return this._eventBus;
   }
 
-  private async emit(event: AgentEvent): Promise<void> {
+  protected async emit(event: AgentEvent): Promise<void> {
     await this.eventBus.publish(event);
+  }
+
+  /**
+   * Publish a ToolCallIntent through the gate chain.
+   * Returns true if the intent was allowed, false if blocked.
+   */
+  protected async emitIntent(intent: AgentEvent & { type: "agent.tool.intent" }): Promise<boolean> {
+    // Track whether a gate blocked the intent by listening for rejection events.
+    // We can't use publish()'s return value because an empty array means either
+    // "blocked by gate" or "no subscribers" — both return [].
+    let blocked = false;
+    const onRejected = () => {
+      blocked = true;
+    };
+    this.eventBus.subscribe("agent.tool.rejected", onRejected);
+    try {
+      await this.eventBus.publish(intent);
+    } finally {
+      this.eventBus.unsubscribe("agent.tool.rejected", onRejected);
+    }
+    return !blocked;
   }
 
   async run(agent: AgentLikeForBridge, message: string, options?: RunOptions): Promise<RunResult> {
@@ -87,8 +119,12 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     const runId = generateId();
     const traceId = options?.traceId ?? runId;
 
-    // Build SDK options
-    const sdkOptions = this._buildOptions(agent, options);
+    // Build SDK options with hooks for gate enforcement
+    const sdkOptions = this._buildOptions(agent, options, {
+      runId,
+      traceId,
+      parentSpanId: options?.parentSpanId,
+    });
 
     // Emit message start
     const startEvent = createEvent("agent.message.start", {
@@ -129,7 +165,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
                   }),
                 );
               } else if ("name" in block) {
-                // ToolUseBlock — count but don't execute (SDK handles it)
+                // ToolUseBlock — count only; event emission handled by hooks
                 toolCallsMade++;
               }
             }
@@ -186,7 +222,153 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     };
   }
 
-  private _buildOptions(agent: AgentLikeForBridge, options?: RunOptions): SDKOptions {
+  // ---------------------------------------------------------------------------
+  // stream() — streaming mode with MessageChunk events
+  // ---------------------------------------------------------------------------
+
+  async *stream(
+    agent: AgentLikeForBridge,
+    message: string,
+    options?: RunOptions,
+  ): AsyncGenerator<AgentEvent> {
+    if (options?.eventBus) {
+      this._eventBus = options.eventBus;
+    }
+
+    const runId = generateId();
+    const traceId = options?.traceId ?? runId;
+
+    const sdkOptions = this._buildOptions(agent, options, {
+      runId,
+      traceId,
+      parentSpanId: options?.parentSpanId,
+      includePartialMessages: true,
+    });
+
+    // Emit and yield message start
+    const startEvent = createEvent("agent.message.start", {
+      traceId,
+      runId,
+      parentSpanId: options?.parentSpanId,
+      agentName: agent.role.name,
+      agentConfig: {
+        role: agent.role.name,
+        model: agent.getModel(),
+        tools: agent.getTools().map((t: ToolSchema) => t.name),
+      },
+    });
+    await this.emit(startEvent);
+    yield startEvent;
+
+    const contentParts: string[] = [];
+    let chunkIndex = 0;
+    let gotChunks = false;
+    let toolCallsMade = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const model = agent.getModel();
+
+    try {
+      for await (const msg of query({ prompt: message, options: sdkOptions })) {
+        // Partial/streaming messages → MessageChunk events
+        const msgType = msg.type as string;
+        if (msgType === "stream_event" && "event" in msg) {
+          const streamMsg = msg as unknown as { event?: { delta?: { text?: string } } };
+          const text = streamMsg.event?.delta?.text;
+          if (text) {
+            const chunkEvent = createEvent("agent.message.chunk", {
+              traceId,
+              runId,
+              parentSpanId: options?.parentSpanId,
+              delta: text,
+              chunkIndex,
+            });
+            await this.emit(chunkEvent);
+            yield chunkEvent;
+            contentParts.push(text);
+            chunkIndex++;
+            gotChunks = true;
+          }
+        } else if (msg.type === "assistant" && "message" in msg) {
+          const content = msg.message?.content;
+          if (Array.isArray(content)) {
+            for (const block of content) {
+              if ("text" in block && typeof block.text === "string") {
+                // Skip if chunks already captured this text
+                if (!gotChunks) {
+                  contentParts.push(block.text);
+                }
+              } else if ("thinking" in block && typeof block.thinking === "string") {
+                const reasoningEvent = createEvent("agent.reasoning", {
+                  traceId,
+                  runId,
+                  parentSpanId: options?.parentSpanId,
+                  content: block.thinking,
+                  isComplete: true,
+                });
+                await this.emit(reasoningEvent);
+                yield reasoningEvent;
+              } else if ("name" in block) {
+                // Count only; events emitted by hooks
+                toolCallsMade++;
+              }
+            }
+          }
+        } else if (msg.type === "result") {
+          if ("usage" in msg && msg.usage) {
+            const usage = msg.usage as unknown as Record<string, number>;
+            inputTokens = usage.input_tokens ?? 0;
+            outputTokens = usage.output_tokens ?? 0;
+          }
+          if ("result" in msg && typeof msg.result === "string" && contentParts.length === 0) {
+            contentParts.push(msg.result);
+          }
+        }
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const errorEvent = createEvent("agent.error", {
+        traceId,
+        runId,
+        parentSpanId: options?.parentSpanId,
+        errorType: error.name,
+        message: error.message,
+        recoverable: false,
+        context: {},
+      });
+      await this.emit(errorEvent);
+      throw err;
+    }
+
+    const finalContent = contentParts.join("");
+    const completeEvent = createEvent("agent.message.complete", {
+      traceId,
+      runId,
+      spanId: startEvent.spanId,
+      parentSpanId: startEvent.spanId,
+      content: finalContent,
+      inputTokens,
+      outputTokens,
+      model,
+    });
+    await this.emit(completeEvent);
+    yield completeEvent;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  protected _buildOptions(
+    agent: AgentLikeForBridge,
+    options: RunOptions | undefined,
+    context: {
+      runId: string;
+      traceId: string;
+      parentSpanId?: string;
+      includePartialMessages?: boolean;
+    },
+  ): SDKOptions {
     const sdkOpts: SDKOptions = {
       ...this._defaults,
       systemPrompt: agent.getSystemPrompt(),
@@ -194,7 +376,12 @@ export class ClaudeCodeRunner implements RunnerProtocol {
       maxTurns: options?.maxIterations ?? 10,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
+      hooks: this._makeHooks(context.runId, context.traceId, context.parentSpanId),
     };
+
+    if (context.includePartialMessages) {
+      sdkOpts.includePartialMessages = true;
+    }
 
     // Wire agent capabilities as SDK MCP servers
     if (agent.role.capabilities.length > 0) {
@@ -206,5 +393,105 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     }
 
     return sdkOpts;
+  }
+
+  /**
+   * Create SDK hook definitions that bridge to AgentEvent emissions.
+   *
+   * PreToolUse: emits ToolCallIntent through the gate chain. If gates
+   * block the intent, returns `permissionDecision: 'deny'` to the SDK
+   * so the tool is never executed. Otherwise emits ToolCallStartEvent.
+   *
+   * PostToolUse: emits ToolCallEndEvent with the tool result.
+   */
+  private _makeHooks(
+    runId: string,
+    traceId: string,
+    parentSpanId: string | undefined,
+  ): Partial<Record<string, HookCallbackMatcher[]>> {
+    // Map tool_use_id → span_id so start/end events share the same
+    // span_id (required by exporters like Langfuse to correlate them).
+    const tcSpanIds = new Map<string, string>();
+
+    const onPreToolUse: HookCallback = async (input, toolUseId, _opts) => {
+      const toolName = ((input as Record<string, unknown>).tool_name as string) ?? "";
+      const toolInput = (input as Record<string, unknown>).tool_input;
+      const tcId = toolUseId ?? generateId();
+      const args =
+        typeof toolInput === "object" && toolInput !== null
+          ? (toolInput as Record<string, unknown>)
+          : {};
+
+      // Run intent through gate chain
+      const intent = createEvent("agent.tool.intent", {
+        runId,
+        traceId,
+        toolCallId: tcId,
+        toolName,
+        arguments: args,
+      });
+
+      const allowed = await this.emitIntent(intent);
+
+      if (!allowed) {
+        // Gate blocked — tell the SDK to deny this tool call
+        return {
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse" as const,
+            permissionDecision: "deny" as const,
+            permissionDecisionReason: "Blocked by gate",
+          },
+        };
+      }
+
+      // Allowed — emit start event and remember its span_id
+      const startEvent = createEvent("agent.tool.start", {
+        runId,
+        traceId,
+        parentSpanId,
+        toolCallId: tcId,
+        toolName,
+        arguments: args,
+      });
+      tcSpanIds.set(tcId, startEvent.spanId);
+      await this.emit(startEvent);
+      return {};
+    };
+
+    const onPostToolUse: HookCallback = async (input, toolUseId, _opts) => {
+      const toolName = ((input as Record<string, unknown>).tool_name as string) ?? "";
+      const toolInput = (input as Record<string, unknown>).tool_input;
+      const toolResponse = (input as Record<string, unknown>).tool_response;
+      const tcId = toolUseId ?? generateId();
+      const args =
+        typeof toolInput === "object" && toolInput !== null
+          ? (toolInput as Record<string, unknown>)
+          : {};
+
+      // Reuse span_id from the matching start event so exporters
+      // can correlate the pair.
+      const spanId = tcSpanIds.get(tcId);
+      tcSpanIds.delete(tcId);
+
+      const endEvent = createEvent("agent.tool.end", {
+        runId,
+        traceId,
+        parentSpanId,
+        toolCallId: tcId,
+        toolName,
+        arguments: args,
+        result: toolResponse,
+        durationMs: 0,
+        resultTokens: 0,
+        ...(spanId ? { spanId } : {}),
+      });
+      await this.emit(endEvent);
+      return {};
+    };
+
+    return {
+      PreToolUse: [{ hooks: [onPreToolUse] }],
+      PostToolUse: [{ hooks: [onPostToolUse] }],
+    };
   }
 }
