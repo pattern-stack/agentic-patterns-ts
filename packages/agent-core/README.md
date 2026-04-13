@@ -111,14 +111,26 @@ Section-based prompt composition. The `PromptRenderer` assembles sections into a
 | `StateSection` | Current state, phase, progress |
 
 ```typescript
-import { PromptRenderer, IdentitySection, MissionSection } from "@agentic-patterns/core";
+import {
+  PromptRenderer,
+  IdentitySection,
+  BoundariesSection,
+  CapabilitiesSection,
+  ContextSection,
+  MissionSection,
+  MethodologySection,
+} from "@agentic-patterns/core";
 
-const renderer = new PromptRenderer([
-  new IdentitySection(persona),
+const renderer = new PromptRenderer(
+  new IdentitySection(persona, responsibilities),
+  new BoundariesSection(judgments),
+  new CapabilitiesSection(capabilities),
+  new ContextSection(background, awareness),
   new MissionSection(mission),
-]);
+  new MethodologySection(judgments),
+);
 
-const systemPrompt = renderer.render();
+const systemPrompt = renderer.renderInitial();
 ```
 
 ### Organisms (`src/organisms/`)
