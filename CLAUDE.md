@@ -8,8 +8,10 @@ TypeScript library for building composable LLM agents. Agents are built by compo
 |---------|------|-------------|
 | `@agentic-patterns/core` | `packages/agent-core/` | Atoms, protocols, molecules, rendering, organisms |
 | `@agentic-patterns/runtime` | `packages/agent-runtime/` | Runner, events, gates, transport, multi-agent, exporters, presets |
+| `@agentic-patterns/server` | `packages/agent-server/` | Hono HTTP server — routes, SSE streaming, admin API |
+| `@agentic-patterns/dashboard` | `packages/agent-dashboard/` | React SPA admin dashboard |
 
-**Runtime depends on core. Core never imports runtime.**
+**Runtime depends on core. Server depends on runtime + core. Dashboard is standalone. Core never imports runtime.**
 
 ## Architecture
 
