@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEvent } from "../../events/types.js";
-import { SSE_EVENT_NAMES, formatSSE } from "../../transport/sse-formatter.js";
+import { SSEFormatter, SSE_EVENT_NAMES, formatSSE } from "../../transport/sse-formatter.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,10 +34,22 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.tool.end"]).toBe("tool.end");
     expect(SSE_EVENT_NAMES["agent.tool.rejected"]).toBe("tool.rejected");
     expect(SSE_EVENT_NAMES["agent.error"]).toBe("error");
+    // New in B2
+    expect(SSE_EVENT_NAMES["agent.conversation.start"]).toBe("conversation.start");
+    expect(SSE_EVENT_NAMES["agent.conversation.end"]).toBe("conversation.end");
+    expect(SSE_EVENT_NAMES["agent.message.start"]).toBe("message.start");
+    expect(SSE_EVENT_NAMES["agent.message.cancel"]).toBe("message.cancel");
+    expect(SSE_EVENT_NAMES["agent.thinking.start"]).toBe("thinking.start");
+    expect(SSE_EVENT_NAMES["agent.tool.intent"]).toBe("tool.intent");
+    expect(SSE_EVENT_NAMES["agent.tool.progress"]).toBe("tool.progress");
+    expect(SSE_EVENT_NAMES["agent.iteration.start"]).toBe("iteration.start");
+    expect(SSE_EVENT_NAMES["agent.iteration.end"]).toBe("iteration.end");
+    expect(SSE_EVENT_NAMES["agent.llm.start"]).toBe("llm.start");
+    expect(SSE_EVENT_NAMES["agent.llm.end"]).toBe("llm.end");
   });
 
-  it("has exactly 7 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(7);
+  it("has exactly 18 mappings", () => {
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(18);
   });
 });
 
@@ -57,7 +69,7 @@ describe("formatSSE", () => {
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("message.delta");
     expect(data.delta).toBe("hello");
-    expect(data.chunkIndex).toBe(0);
+    expect(data.chunk_index).toBe(0);
     expect(data.traceId).toBe("trace-1");
     expect(data.timestamp).toBeDefined();
   });
@@ -75,8 +87,8 @@ describe("formatSSE", () => {
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("message.complete");
     expect(data.content).toBe("done");
-    expect(data.inputTokens).toBe(100);
-    expect(data.outputTokens).toBe(50);
+    expect(data.input_tokens).toBe(100);
+    expect(data.output_tokens).toBe(50);
     expect(data.model).toBe("gpt-4");
   });
 
@@ -91,7 +103,19 @@ describe("formatSSE", () => {
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("thinking");
     expect(data.content).toBe("thinking...");
-    expect(data.isComplete).toBe(false);
+  });
+
+  it("formats reasoning with isComplete as thinking.complete", () => {
+    const event = createEvent("agent.reasoning", {
+      ...baseFields,
+      content: "done thinking",
+      isComplete: true,
+    });
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name, data } = parseSSE(result!);
+    expect(name).toBe("thinking.complete");
+    expect(data.content).toBe("done thinking");
   });
 
   it("formats tool.start", () => {
@@ -105,8 +129,8 @@ describe("formatSSE", () => {
     expect(result).not.toBeNull();
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("tool.start");
-    expect(data.toolCallId).toBe("tc-1");
-    expect(data.toolName).toBe("search");
+    expect(data.tool_call_id).toBe("tc-1");
+    expect(data.tool_name).toBe("search");
     expect(data.arguments).toEqual({ query: "test" });
   });
 
@@ -124,10 +148,10 @@ describe("formatSSE", () => {
     expect(result).not.toBeNull();
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("tool.end");
-    expect(data.toolCallId).toBe("tc-1");
-    expect(data.toolName).toBe("search");
+    expect(data.tool_call_id).toBe("tc-1");
+    expect(data.tool_name).toBe("search");
     expect(data.result).toEqual({ items: [] });
-    expect(data.durationMs).toBe(150);
+    expect(data.duration_ms).toBe(150);
   });
 
   it("formats tool.end with error", () => {
@@ -165,9 +189,9 @@ describe("formatSSE", () => {
     expect(result).not.toBeNull();
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("tool.rejected");
-    expect(data.toolName).toBe("rm");
+    expect(data.tool_name).toBe("rm");
     expect(data.reason).toBe("blocked by safety gate");
-    expect(data.gateName).toBe("safety");
+    expect(data.gate_name).toBe("safety");
   });
 
   it("formats error", () => {
@@ -182,53 +206,65 @@ describe("formatSSE", () => {
     expect(result).not.toBeNull();
     const { event: name, data } = parseSSE(result!);
     expect(name).toBe("error");
-    expect(data.errorType).toBe("RuntimeError");
+    expect(data.error_type).toBe("RuntimeError");
     expect(data.message).toBe("something broke");
     expect(data.recoverable).toBe(false);
   });
 
   // ---------------------------------------------------------------------------
-  // Unmapped events return null
+  // Events now mapped (previously returned null)
   // ---------------------------------------------------------------------------
 
-  it("returns null for message.start", () => {
+  it("formats message.start", () => {
     const event = createEvent("agent.message.start", {
       ...baseFields,
       agentName: "test",
     });
-    expect(formatSSE(event)).toBeNull();
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name } = parseSSE(result!);
+    expect(name).toBe("message.start");
   });
 
-  it("returns null for iteration.start", () => {
+  it("formats iteration.start", () => {
     const event = createEvent("agent.iteration.start", {
       ...baseFields,
       iteration: 1,
       maxIterations: 10,
     });
-    expect(formatSSE(event)).toBeNull();
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name } = parseSSE(result!);
+    expect(name).toBe("iteration.start");
   });
 
-  it("returns null for iteration.end", () => {
+  it("formats iteration.end", () => {
     const event = createEvent("agent.iteration.end", {
       ...baseFields,
       iteration: 1,
       toolCallsCount: 0,
       hasMore: false,
     });
-    expect(formatSSE(event)).toBeNull();
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name } = parseSSE(result!);
+    expect(name).toBe("iteration.end");
   });
 
-  it("returns null for llm.start", () => {
+  it("formats llm.start", () => {
     const event = createEvent("agent.llm.start", {
       ...baseFields,
       model: "gpt-4",
       messageCount: 5,
       hasTools: true,
     });
-    expect(formatSSE(event)).toBeNull();
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name } = parseSSE(result!);
+    expect(name).toBe("llm.start");
   });
 
-  it("returns null for llm.end", () => {
+  it("formats llm.end", () => {
     const event = createEvent("agent.llm.end", {
       ...baseFields,
       model: "gpt-4",
@@ -238,17 +274,23 @@ describe("formatSSE", () => {
       hasToolCalls: false,
       finishReason: "stop",
     });
-    expect(formatSSE(event)).toBeNull();
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name } = parseSSE(result!);
+    expect(name).toBe("llm.end");
   });
 
-  it("returns null for tool.intent", () => {
+  it("formats tool.intent", () => {
     const event = createEvent("agent.tool.intent", {
       ...baseFields,
       toolCallId: "tc-1",
       toolName: "search",
       arguments: {},
     });
-    expect(formatSSE(event)).toBeNull();
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name } = parseSSE(result!);
+    expect(name).toBe("tool.intent");
   });
 
   // ---------------------------------------------------------------------------
@@ -274,5 +316,13 @@ describe("formatSSE", () => {
     const { data } = parseSSE(formatSSE(event)!);
     expect(data.traceId).toBe("trace-1");
     expect(typeof data.timestamp).toBe("string");
+  });
+
+  // ---------------------------------------------------------------------------
+  // SSEFormatter class
+  // ---------------------------------------------------------------------------
+
+  it("SSEFormatter.formatDone returns done event", () => {
+    expect(SSEFormatter.formatDone()).toBe("event: done\ndata: {}\n\n");
   });
 });
