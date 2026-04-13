@@ -5,5 +5,12 @@ export {
   exchangeTotalTokens,
   type Exchange,
   type ToolCallRecord,
-  type ConversationStore,
 } from "./conversation.js";
+
+export { MemoryStore } from "./store.js";
+export type {
+  ConversationStoreProtocol,
+  StoredConversation,
+  StoredMessage,
+  StoredMessagePart,
+} from "./store.js";

@@ -13,3 +13,5 @@ export { ClaudeCodeRunner } from "./claude-code-runner.js";
 export type { ClaudeCodeRunnerOptions } from "./claude-code-runner.js";
 export { buildAgentServers, buildCapabilityServer } from "./sdk-bridge.js";
 export type { AgentLikeForBridge } from "./sdk-bridge.js";
+export { MockRunner } from "./mock-runner.js";
+export type { MockResponse, MockCall } from "./mock-runner.js";

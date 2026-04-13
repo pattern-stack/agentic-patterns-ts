@@ -13,6 +13,7 @@ import type {
   RunnerProtocol,
   ToolExecutor,
 } from "../runner/types.js";
+import type { ConversationStoreProtocol } from "./store.js";
 
 // ---------------------------------------------------------------------------
 // Exchange
@@ -42,16 +43,6 @@ export interface Exchange {
  */
 export function exchangeTotalTokens(exchange: Exchange): number {
   return exchange.inputTokens + exchange.outputTokens;
-}
-
-// ---------------------------------------------------------------------------
-// ConversationStore
-// ---------------------------------------------------------------------------
-
-/** Persistence hook for conversation exchanges. */
-export interface ConversationStore {
-  save(id: string, exchange: Exchange): Promise<void>;
-  load(id: string): Promise<Exchange[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +78,8 @@ export class Conversation {
   readonly agent: AgentLike;
   readonly runner: RunnerProtocol;
 
-  private _store: ConversationStore | undefined;
+  private _store: ConversationStoreProtocol | undefined;
+  private _storeConversationId: string | undefined;
   private _toolExecutor: ToolExecutor | undefined;
   private _state: Record<string, unknown>;
   private _history: Exchange[] = [];
@@ -98,7 +90,7 @@ export class Conversation {
     runner: RunnerProtocol,
     options?: {
       id?: string;
-      store?: ConversationStore;
+      store?: ConversationStoreProtocol;
       toolExecutor?: ToolExecutor;
       state?: Record<string, unknown>;
       history?: Exchange[];
@@ -193,7 +185,7 @@ export class Conversation {
     this._history.push(exchange);
 
     if (this._store) {
-      await this._store.save(this.agent.role.name, exchange);
+      await this._persistExchange(exchange);
     }
 
     return exchange;
@@ -253,7 +245,7 @@ export class Conversation {
     this._history.push(exchange);
 
     if (this._store) {
-      await this._store.save(this.agent.role.name, exchange);
+      await this._persistExchange(exchange);
     }
   }
 
@@ -275,6 +267,39 @@ export class Conversation {
     forked._exchangeCount = forked._history.length;
 
     return forked;
+  }
+
+  // -------------------------------------------------------------------------
+  // Private
+  // -------------------------------------------------------------------------
+
+  /**
+   * Persist an exchange to the store using the new protocol.
+   */
+  private async _persistExchange(exchange: Exchange): Promise<void> {
+    if (!this._store) return;
+
+    if (!this._storeConversationId) {
+      const conv = await this._store.createConversation(
+        this.agent.role.name,
+        this.agent.getModel(),
+      );
+      this._storeConversationId = conv.id;
+    }
+
+    await this._store.addMessage(this._storeConversationId, "request", [
+      { type: "user_prompt", content: exchange.user },
+    ]);
+
+    await this._store.addMessage(
+      this._storeConversationId,
+      "response",
+      [{ type: "text", content: exchange.assistant }],
+      {
+        inputTokens: exchange.inputTokens,
+        outputTokens: exchange.outputTokens,
+      },
+    );
   }
 
   /**
