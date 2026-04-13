@@ -9,3 +9,4 @@ export * from "./exporters/index.js";
 export * from "./presets/index.js";
 export * from "./workflows/index.js";
 export * from "./admin/index.js";
+export * from "./streaming/index.js";
