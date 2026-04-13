@@ -1,0 +1,99 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PromptRenderer > snapshot: continuation prompt 1`] = `
+"## Current State
+Iteration: 5
+Phase: finishing
+Last action: Final review complete
+
+## Mission
+
+### Objective
+
+Review PR #42
+
+### Success Criteria
+
+- All issues flagged
+
+### Constraints
+
+- Complete within 30 minutes
+
+## Methodology
+
+### Code Quality
+
+- Check edge cases
+
+**Examples:**
+- **Scenario:** Missing error handling
+  - ✓ Add try-catch
+  - ✗ Ignore errors
+  - *Why:* Unhandled errors crash the app"
+`;
+
+exports[`PromptRenderer > snapshot: full initial prompt 1`] = `
+"## Identity
+
+You are a code review specialist.
+
+### Tone
+
+professional
+
+### Priorities
+
+- Quality
+
+### Responsibilities
+
+- **Code Review**: Review PRs
+
+## Boundaries
+
+### Constraints
+
+- No direct DB access
+
+### Escalate When
+
+- Security vulnerability found
+
+## Context
+
+## Team Context
+
+- **team**: Platform
+
+## Available Information Sources
+
+You can access:
+- **GitHub**: Repos (via API)
+
+## Mission
+
+### Objective
+
+Review PR #42
+
+### Success Criteria
+
+- All issues flagged
+
+### Constraints
+
+- Complete within 30 minutes
+
+## Methodology
+
+### Code Quality
+
+- Check edge cases
+
+**Examples:**
+- **Scenario:** Missing error handling
+  - ✓ Add try-catch
+  - ✗ Ignore errors
+  - *Why:* Unhandled errors crash the app"
+`;

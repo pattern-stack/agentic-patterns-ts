@@ -1,0 +1,113 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { EventBus } from "../event-bus.js";
+import {
+  EventProfile,
+  PROFILE_EVENT_TYPES,
+  subscribeProfile,
+  subscribeProfiles,
+  unsubscribeProfile,
+} from "../event-profiles.js";
+import type { BaseEvent } from "../types.js";
+
+function makeEvent(type: string): BaseEvent {
+  return {
+    type,
+    traceId: "t",
+    runId: "r",
+    spanId: "s",
+    timestamp: new Date(),
+  };
+}
+
+describe("Event Profiles", () => {
+  let bus: EventBus;
+
+  beforeEach(() => {
+    bus = new EventBus();
+  });
+
+  describe("PROFILE_EVENT_TYPES", () => {
+    it("UX profile includes all UI-relevant events", () => {
+      const types = PROFILE_EVENT_TYPES[EventProfile.UX];
+      expect(types).toContain("agent.message.start");
+      expect(types).toContain("agent.message.chunk");
+      expect(types).toContain("agent.message.complete");
+      expect(types).toContain("agent.tool.intent");
+      expect(types).toContain("agent.error");
+    });
+
+    it("OBSERVABILITY profile excludes chunks", () => {
+      const types = PROFILE_EVENT_TYPES[EventProfile.OBSERVABILITY];
+      expect(types).not.toContain("agent.message.chunk");
+      expect(types).toContain("agent.message.complete");
+    });
+
+    it("TOOLS profile includes only tool events", () => {
+      const types = PROFILE_EVENT_TYPES[EventProfile.TOOLS];
+      expect(types).toHaveLength(4);
+      expect(types).toContain("agent.tool.intent");
+      expect(types).toContain("agent.tool.rejected");
+      expect(types).toContain("agent.tool.start");
+      expect(types).toContain("agent.tool.end");
+    });
+
+    it("STREAMING profile includes only chunks", () => {
+      const types = PROFILE_EVENT_TYPES[EventProfile.STREAMING];
+      expect(types).toHaveLength(1);
+      expect(types).toContain("agent.message.chunk");
+    });
+  });
+
+  describe("subscribeProfile", () => {
+    it("subscribes handler to all events in profile", async () => {
+      const handler = vi.fn();
+      const types = subscribeProfile(bus, EventProfile.TOOLS, handler);
+
+      expect(types).toHaveLength(4);
+
+      await bus.publish(makeEvent("agent.tool.start"));
+      expect(handler).toHaveBeenCalledOnce();
+
+      await bus.publish(makeEvent("agent.message.start"));
+      expect(handler).toHaveBeenCalledOnce(); // Not called again
+    });
+
+    it("returns subscribed event types", () => {
+      const handler = vi.fn();
+      const types = subscribeProfile(bus, EventProfile.STREAMING, handler);
+
+      expect(types).toEqual(["agent.message.chunk"]);
+    });
+  });
+
+  describe("unsubscribeProfile", () => {
+    it("removes handler from all profile events", async () => {
+      const handler = vi.fn();
+      subscribeProfile(bus, EventProfile.TOOLS, handler);
+      unsubscribeProfile(bus, EventProfile.TOOLS, handler);
+
+      await bus.publish(makeEvent("agent.tool.start"));
+      expect(handler).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("subscribeProfiles", () => {
+    it("deduplicates event types across profiles", () => {
+      const handler = vi.fn();
+      const types = subscribeProfiles(bus, [EventProfile.TOOLS, EventProfile.STREAMING], handler);
+
+      // TOOLS has 4 types, STREAMING has 1, no overlap
+      expect(types).toHaveLength(5);
+    });
+
+    it("subscribes to UX and OBS without duplicates", async () => {
+      const handler = vi.fn();
+      subscribeProfiles(bus, [EventProfile.UX, EventProfile.OBSERVABILITY], handler);
+
+      // Both profiles share many types, but deduplication means
+      // publishing one event should call handler once
+      await bus.publish(makeEvent("agent.error"));
+      expect(handler).toHaveBeenCalledOnce();
+    });
+  });
+});

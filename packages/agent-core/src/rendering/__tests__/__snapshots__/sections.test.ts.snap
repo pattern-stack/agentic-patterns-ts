@@ -1,0 +1,78 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`BoundariesSection > snapshot: boundaries section 1`] = `
+"## Boundaries
+
+### Constraints
+
+- Never expose API keys
+- No direct DB access
+
+### Escalate When
+
+- Potential data breach
+- Compliance violation"
+`;
+
+exports[`IdentitySection > snapshot: full identity section 1`] = `
+"## Identity
+
+You are a senior code reviewer specializing in TypeScript.
+
+### Tone
+
+professional and constructive
+
+### Priorities
+
+- Code quality
+- Maintainability
+
+### Principles
+
+- Be specific in feedback
+- Suggest alternatives
+
+### Responsibilities
+
+- **Code Review**: Review pull requests for quality
+  Examples:
+  - PR review
+  - Code audit"
+`;
+
+exports[`MethodologySection > snapshot: methodology section 1`] = `
+"## Methodology
+
+### Code Quality
+
+- Prefer composition over inheritance
+- Keep functions small
+
+**Examples:**
+- **Scenario:** Large function detected
+  - ✓ Extract helper functions
+  - ✗ Leave as is
+  - *Why:* Smaller functions are easier to test and maintain"
+`;
+
+exports[`MissionSection > snapshot: full mission section 1`] = `
+"## Mission
+
+### Objective
+
+Implement the rendering layer for TypeScript port
+
+### Success Criteria
+
+- All sections render correctly
+- Snapshot tests pass
+
+### Constraints
+
+- Match Python output exactly
+
+### Rationale
+
+Required for agent prompt composition"
+`;
