@@ -1,6 +1,6 @@
 # @agentic-patterns/runtime
 
-Execution runtime for agentic-patterns agents. Provides the runner loop (Vercel AI SDK), typed event bus, gate chain, multi-agent transport and runtime, conversation persistence, observability exporters, and pre-built role presets.
+Execution runtime for agentic-patterns agents. Provides the runner loop (Vercel AI SDK), typed event bus, gate chain, workflow compositions and loops, multi-agent transport and runtime, conversation persistence, observability exporters, and pre-built role presets.
 
 ## Installation
 
@@ -37,6 +37,56 @@ Key types:
 - `CanonicalMessage` / `CanonicalMessagePart` -- normalized message format
 - `convertHistory()` -- convert CanonicalMessage[] to CoreMessage[] for the AI SDK
 
+#### MockRunner
+
+Deterministic runner for testing agents without LLM calls. Pattern-based response routing with tool call simulation.
+
+```typescript
+import { MockRunner } from "@agentic-patterns/runtime";
+
+const mock = new MockRunner()
+  .addResponse("analyze", { content: "Revenue up 15%", inputTokens: 10, outputTokens: 20 })
+  .addResponse("summarize", {
+    content: "Summary complete",
+    toolCalls: [{ name: "write_file", arguments: { path: "out.md" }, result: "ok" }],
+  })
+  .addResponse("*", { content: "Default fallback" }); // wildcard
+
+const result = await mock.run(agent, "analyze Q4");
+
+// Verify calls
+mock.callHistory; // [{ message, agentName, model, timestamp }]
+
+// Streaming mode
+for await (const event of mock.stream(agent, "analyze")) {
+  // yields full event lifecycle: message.start -> tool events -> message.complete
+}
+
+// Reset
+mock.clear();
+```
+
+Features:
+- Substring trigger matching, `*` wildcard, auto-fallback
+- Tool call simulation with results
+- Delay and error simulation (`delayMs`, `error` fields)
+- Full event lifecycle emission in `stream()` mode
+- Fluent API and call history recording
+
+#### ClaudeCodeRunner
+
+Runner backed by the Claude Agent SDK. Delegates to Claude Code's subprocess architecture.
+
+```typescript
+import { ClaudeCodeRunner } from "@agentic-patterns/runtime";
+
+const runner = new ClaudeCodeRunner({
+  defaults: { model: "sonnet" },
+});
+
+const result = await runner.run(agent, "Fix the bug in auth.ts");
+```
+
 ### Events (`src/events/`)
 
 Typed pub/sub event system with discriminated union events.
@@ -54,20 +104,16 @@ import { EventBus, AgentEventBus, EventProfile, subscribeProfile } from "@agenti
 
 const bus = new AgentEventBus();
 
-// Subscribe to individual events
 bus.subscribe("agent.message.complete", (event) => {
   console.log(event.response);
 });
 
-// Subscribe to curated event profiles
 subscribeProfile(bus, EventProfile.UX, (event) => {
   // Receives message.start, message.chunk, message.complete, tool events, errors
 });
 ```
 
 **Event Profiles:** `UX`, `OBSERVABILITY`, `DEBUG`, `TOOLS`, `STREAMING`
-
-**SandboxEventBus** extends EventBus for multi-agent environments with serialization/deserialization of sandbox events.
 
 ### Gates (`src/gates/`)
 
@@ -83,16 +129,176 @@ bus.addGate(new SafetyGate(["rm", "drop_table"]));
 bus.addGate(new HumanApprovalGate(async (event) => {
   return confirm(`Allow ${event.toolName}?`);
 }));
-bus.addGate(new AuditGate((event) => {
-  auditLog.append(event);
-}));
+bus.addGate(new AuditGate((event) => auditLog.append(event)));
 ```
 
-Gate types:
-- `SafetyGate` -- blocks dangerous tool patterns
-- `HumanApprovalGate` -- requires human confirmation
-- `RateLimitGate` -- token-bucket rate limiting
-- `AuditGate` -- logs all tool intents
+Gate types: `SafetyGate`, `HumanApprovalGate`, `RateLimitGate`, `AuditGate`
+
+### Workflows (`src/workflows/`)
+
+Composable workflow patterns for multi-step and iterative agent execution. All patterns implement `PatternProtocol` and share common types.
+
+#### Base Types
+
+- `PatternContext` -- shared context (`Record<string, unknown>`) threaded through steps
+- `MessageTemplate` -- static string or `(context) => string` function
+- `Step` -- agent + message template + optional output key + context extractor
+- `StepResult` -- execution result with `.content` accessor
+- `PatternResult` -- interface: totalInputTokens, totalOutputTokens, succeeded, finalContent
+- `PatternEvent` -- discriminated union: start, step.start, step.complete, step.error, iteration.start, iteration.complete, complete
+- `PatternHooks` -- callbacks for pattern lifecycle events
+- `GoalEvaluatorProtocol` -- `evaluate()` returning `[achieved, reason, confident]`
+
+Helpers: `resolveMessage()`, `makeStepName()`, `executeStep()`
+
+#### Sequential
+
+Chain agents in sequence, threading context through the pipeline.
+
+```typescript
+import { Sequential } from "@agentic-patterns/runtime";
+
+const pipeline = new Sequential([
+  { agent: researcher, messageTemplate: "Research the topic", outputKey: "research" },
+  { agent: writer, messageTemplate: (ctx) => `Write about: ${ctx.research}` },
+], { continueOnError: false });
+
+const result = await pipeline.run({ topic: "AI" }, { runner });
+result.steps;        // StepResult[]
+result.finalContext;  // accumulated context
+```
+
+Supports nested patterns (Sequential/Parallel as steps) and `continueOnError`.
+
+#### Parallel
+
+Fan-out agents in parallel with optional concurrency limiting and result consolidation.
+
+```typescript
+import { Parallel, collectByName, collectContents } from "@agentic-patterns/runtime";
+
+const fanout = new Parallel(
+  [
+    { agent: analystA, messageTemplate: "Analyze market", name: "market" },
+    { agent: analystB, messageTemplate: "Analyze tech", name: "tech" },
+  ],
+  { maxConcurrency: 2, consolidator: collectByName },
+);
+
+const result = await fanout.run({}, { runner });
+result.successful;          // StepResult[]
+result.failed;              // [index, Error][]
+result.allSucceeded;        // boolean
+result.consolidatedOutput;  // { market: "...", tech: "..." }
+```
+
+Built-in consolidators: `collectContents` (string[]), `collectByName` (Record). Custom consolidators accepted.
+
+#### Goal Evaluators
+
+Four implementations of `GoalEvaluatorProtocol`, ranked cheapest to most expensive:
+
+| Evaluator | Strategy | LLM? |
+|-----------|----------|------|
+| `SimpleGoalEvaluator` | Pattern matching against output | No |
+| `SelfEvalGoalEvaluator` | Parses `GOAL_STATUS`/`PROGRESS` markers | No |
+| `LLMGoalEvaluator` | Sends goal + result to evaluator agent | Yes |
+| `EvaluatorChain` | Tries in order, stops on first confident result | Mixed |
+
+All return `[achieved: boolean, reason: string, confident: boolean]`.
+
+```typescript
+import { EvaluatorChain, SimpleGoalEvaluator, LLMGoalEvaluator } from "@agentic-patterns/runtime";
+
+const chain = new EvaluatorChain([
+  new SimpleGoalEvaluator({ successPatterns: ["TASK_COMPLETE"] }),
+  new LLMGoalEvaluator({ agent: evaluatorAgent, runner }),
+]);
+```
+
+#### TaskLoop
+
+Goal-driven iteration: run agent, evaluate progress, repeat.
+
+```typescript
+import { TaskLoop, SimpleGoalEvaluator } from "@agentic-patterns/runtime";
+
+const loop = new TaskLoop(agent, new SimpleGoalEvaluator({
+  successPatterns: ["TASK_COMPLETE"],
+  failurePatterns: ["CANNOT_PROCEED"],
+}), { maxIterations: 5 });
+
+const result = await loop.run("Fix all failing tests", {}, { runner });
+result.exitReason;  // "goal_achieved" | "max_iterations" | "explicit_stop" | "error"
+result.iterations;  // number of iterations executed
+```
+
+Features: history summarization in prompts, configurable stop phrases, goal evaluation per iteration.
+
+#### EvaluatorLoop
+
+Producer-evaluator refinement: producer generates, evaluator scores + critiques, producer refines.
+
+```typescript
+import { EvaluatorLoop, RubricEvaluator, CompositeRefinementEvaluator } from "@agentic-patterns/runtime";
+
+const rubric = new RubricEvaluator([
+  { name: "clarity", description: "Clear and concise", weight: 0.4 },
+  { name: "accuracy", description: "Factually correct", weight: 0.6 },
+], { runner });
+
+const loop = new EvaluatorLoop(producer, rubric, {
+  maxRefinements: 3,
+  qualityThreshold: 0.8,
+});
+
+const result = await loop.run("Write a blog post about RAG");
+result.exitReason;  // "quality_met" | "max_refinements" | "no_improvement" | "error"
+result.bestOutput;  // highest-scoring version across all refinements
+```
+
+Evaluator implementations: `LLMRefinementEvaluator`, `RubricEvaluator`, `CompositeRefinementEvaluator` (weighted average).
+
+#### RetryLoop
+
+Generic async retry wrapper. Not agent-specific -- wraps any `() => Promise<T>`.
+
+```typescript
+import { RetryLoop, ExponentialBackoff, JitteredBackoff, FixedBackoff } from "@agentic-patterns/runtime";
+
+const retry = new RetryLoop({
+  maxAttempts: 5,
+  backoff: new ExponentialBackoff({ initialMs: 100, maxMs: 5000 }),
+  retryableErrors: [RateLimitError],
+  timeoutMs: 30_000,
+  onRetry: (attempt, error) => console.log(`Retry ${attempt}: ${error.message}`),
+});
+
+const result = await retry.run(() => callExternalAPI());
+```
+
+Backoff strategies: `FixedBackoff`, `ExponentialBackoff`, `JitteredBackoff`.
+
+#### ConversationLoop
+
+Multi-turn conversation orchestration with external input/output callbacks.
+
+```typescript
+import { ConversationLoop } from "@agentic-patterns/runtime";
+
+const loop = new ConversationLoop(agent, {
+  maxExchanges: 10,
+  exitPhrases: ["goodbye", "exit"],
+  inputFn: async () => getUserInput(),
+  outputFn: async (response) => displayToUser(response),
+});
+
+const result = await loop.run({ runner });
+result.exitReason;     // "exit_phrase" | "max_exchanges" | "error"
+result.exchangeCount;  // number of exchanges completed
+```
+
+Integrates with `ConversationStoreProtocol` for persistence via `MemoryStore`.
 
 ### Transport (`src/transport/`)
 
@@ -101,16 +307,10 @@ Message transport for multi-agent communication.
 ```typescript
 import { InProcessTransport, MessagingToolbox } from "@agentic-patterns/runtime";
 
-// In-process transport with subject-based pub/sub
 const transport = new InProcessTransport();
-
-// Subscribe with wildcard patterns
-transport.subscribe("agency.*.messages", (msg) => { ... });
-
-// Publish messages
+transport.subscribe("agency.*.messages", (msg) => { /* ... */ });
 await transport.publish("agency.worker.messages", payload);
 
-// MessagingToolbox provides send_message/broadcast tools for agents
 const toolbox = new MessagingToolbox(transport, senderAddress, agency);
 ```
 
@@ -124,22 +324,10 @@ Multi-agent execution runtime.
 import { Agency } from "@agentic-patterns/core";
 import { AgencyRuntime, AgentNode } from "@agentic-patterns/runtime";
 
-const agency = new Agency({
-  name: "team",
-  description: "Multi-agent team",
-  agents: [
-    { role: "coordinator", is_coordinator: true, model: "claude-sonnet-4-20250514" },
-    { role: "worker", is_coordinator: false, model: "claude-sonnet-4-20250514" },
-  ],
-});
-
 const runtime = new AgencyRuntime(agency, runner, "run-123");
 await runtime.start();
 await runtime.injectCoordinator("Begin processing");
-
-// Check status
 const status = runtime.status(); // { coordinator: "running", worker: "running" }
-
 await runtime.stop();
 ```
 
@@ -147,13 +335,15 @@ await runtime.stop();
 
 ### Conversation (`src/conversation/`)
 
-Conversation state management with exchange tracking.
+Conversation state management with structured persistence.
 
 ```typescript
-import { Conversation } from "@agentic-patterns/runtime";
+import { Conversation, MemoryStore } from "@agentic-patterns/runtime";
 
-const convo = new Conversation("conv-123", "agent-name");
+// In-memory persistence
+const store = new MemoryStore();
 
+const convo = new Conversation("conv-123", "agent-name", { store });
 convo.addExchange({
   userMessage: "Hello",
   assistantMessage: "Hi there!",
@@ -162,9 +352,13 @@ convo.addExchange({
   toolCalls: [],
   timestamp: new Date().toISOString(),
 });
-
-// ConversationStore interface for persistence backends
 ```
+
+`ConversationStoreProtocol` provides full CRUD for conversations, messages, and message parts:
+- `createConversation()`, `getConversation()`, `updateConversation()`
+- `addMessage()`, `getMessages()`, `getMessageParts()`
+
+`MemoryStore` is the built-in in-memory implementation. Implement `ConversationStoreProtocol` for database-backed persistence.
 
 ### Exporters (`src/exporters/`)
 
@@ -179,7 +373,6 @@ Observability exporters that subscribe to EventBus events.
 ```typescript
 import { ConsoleExporter, createConsoleExporter } from "@agentic-patterns/runtime";
 
-// Quick setup
 const exporter = createConsoleExporter(bus);
 exporter.start();
 // ... run agent ...
@@ -206,5 +399,4 @@ Pre-built roles, judgments, and responsibilities for common agent patterns.
 import { coordinatorRole, ROUTING, ORCHESTRATION } from "@agentic-patterns/runtime";
 
 const role = coordinatorRole("lead", persona);
-// Pre-configured with orchestration judgments and responsibilities
 ```

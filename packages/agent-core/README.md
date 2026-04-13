@@ -75,7 +75,8 @@ Composable building blocks that combine atoms into functional units.
 | `Toolbox` | Named collection of tools with `toPrompt()` |
 | `Manual` | Instructional content (text, scoped, simple variants) |
 | `ManualToolbox` | Manual that also provides tools |
-| `Capability` | Toolbox + Manual pair describing what an agent can do |
+| `Playbook` | Abstract class for named plays with Zod schemas and error-envelope semantics |
+| `Capability` | Toolbox + Manual + optional Playbook describing what an agent can do |
 
 ```typescript
 import { z } from "zod";
@@ -92,6 +93,31 @@ const manual = new Manual("docs-manual", [
   { title: "Search", content: "Use search_docs to find relevant documentation." },
 ]);
 const capability = new Capability("documentation", toolbox, manual);
+```
+
+#### Playbook
+
+Playbooks define named "plays" with Zod-validated parameters and error-envelope semantics. Errors in `PlayDefinition.execute` are caught and returned as `{ error: message }`.
+
+```typescript
+import { z } from "zod";
+import { Playbook, type PlayDefinition } from "@agentic-patterns/core";
+
+class AnalysisPlaybook extends Playbook {
+  readonly name = "analysis";
+  readonly description = "Data analysis plays";
+  readonly plays: Record<string, PlayDefinition> = {
+    summarize: {
+      description: "Summarize a dataset",
+      parameters: z.object({ data: z.string() }),
+      execute: async (args) => ({ summary: `Analyzed: ${args.data}` }),
+    },
+  };
+}
+
+// Integrate into a Capability
+const capability = new Capability("analysis", toolbox, manual, new AnalysisPlaybook());
+capability.getTools(); // includes both toolbox tools and playbook play schemas
 ```
 
 Definitions module provides Zod schemas for workflow configuration: `WorkflowStep`, `RuleDefinition`, `TemplateDefinition`, `EscalationTrigger`, `StateDefinition`, `PriorityDefinition`, `IssueTypeDefinition`, `HealthSignal`.
