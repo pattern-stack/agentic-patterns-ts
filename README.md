@@ -1,6 +1,6 @@
-# agentic-patterns (TypeScript)
+# agentic-patterns-ts
 
-TypeScript port of the agentic-patterns compositional agent framework. Agents are built by composing frozen, immutable primitives upward through layers -- from atoms to organisms -- then executed by a runtime with events, gates, and exporters.
+Composable primitives for building LLM agents in TypeScript. Agents are built by composing frozen, immutable primitives upward through layers -- from atoms to organisms -- then executed by a runtime with events, gates, and exporters.
 
 ## Packages
 
@@ -11,13 +11,13 @@ TypeScript port of the agentic-patterns compositional agent framework. Agents ar
 
 Runtime depends on core. Core never imports runtime.
 
-## Quick Start
+## Install
 
 ```bash
-pnpm install
-pnpm build
-pnpm test
+npm install @agentic-patterns/core @agentic-patterns/runtime ai zod
 ```
+
+## Quick Start
 
 ### Build a single agent
 
@@ -139,35 +139,37 @@ pnpm test        # vitest run all tests
 ### Project Structure
 
 ```
-typescript/
-  package.json              # Workspace root
-  pnpm-workspace.yaml
-  tsconfig.base.json        # Shared strict TS config
-  vitest.workspace.ts
-  packages/
-    agent-core/             # @agentic-patterns/core
-      src/
-        atoms/              # Persona, Mission, Judgment, ...
-        protocols/          # Task, Project, Tag, User, ...
-        molecules/          # Toolbox, Manual, Capability
-        rendering/          # PromptRenderer, sections
-        organisms/          # Role, Agent, builders
-    agent-runtime/          # @agentic-patterns/runtime
-      src/
-        events/             # EventBus, event types, profiles
-        gates/              # Safety, Approval, RateLimit, Audit
-        runner/             # AgentRunner, types
-        transport/          # InProcessTransport, MessagingToolbox
-        runtime/            # AgentNode, AgencyRuntime
-        conversation/       # Conversation store
-        exporters/          # Console, Langfuse, OTel
-        presets/            # Pre-built roles and judgments
+packages/
+  agent-core/               # @agentic-patterns/core
+    src/
+      atoms/                # Persona, Mission, Judgment, ...
+      protocols/            # Task, Project, Tag, User, ...
+      molecules/            # Toolbox, Manual, Capability
+      rendering/            # PromptRenderer, sections
+      organisms/            # Role, Agent, builders
+  agent-runtime/            # @agentic-patterns/runtime
+    src/
+      events/               # EventBus, event types, profiles
+      gates/                # Safety, Approval, RateLimit, Audit
+      runner/               # AgentRunner, types
+      transport/            # InProcessTransport, MessagingToolbox
+      runtime/              # AgentNode, AgencyRuntime
+      conversation/         # Conversation store
+      exporters/            # Console, Langfuse, OTel
+      presets/              # Pre-built roles and judgments
 ```
 
-## Dependencies
+## Contributing
 
-- **zod** -- schema validation and type inference
-- **ai** (Vercel AI SDK) -- LLM provider abstraction for AgentRunner
-- **tsup** -- bundler (ESM + CJS)
-- **vitest** -- test runner
-- **TypeScript 5.7+** -- strict mode compilation
+```bash
+git clone https://github.com/pattern-stack/agentic-patterns-ts.git
+cd agentic-patterns-ts
+pnpm install
+pnpm check          # build + typecheck + lint + test
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+[MIT](LICENSE)
