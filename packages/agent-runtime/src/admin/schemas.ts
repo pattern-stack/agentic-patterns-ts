@@ -63,6 +63,7 @@ export const DashboardStatsSchema = z.object({
   totalTokensUsed: z.number().int().nonnegative(),
   totalToolCalls: z.number().int().nonnegative(),
   totalErrors: z.number().int().nonnegative(),
+  activeConversationCount: z.number().int().nonnegative(),
   uptimeMs: z.number().nonnegative(),
 });
 export type DashboardStats = z.infer<typeof DashboardStatsSchema>;
@@ -135,3 +136,45 @@ export const TraceSummarySchema = z.object({
   totalTokens: z.number().int().nonnegative(),
 });
 export type TraceSummary = z.infer<typeof TraceSummarySchema>;
+
+// ---------------------------------------------------------------------------
+// Date filters
+// ---------------------------------------------------------------------------
+
+export const DateFiltersSchema = z.object({
+  from: z.date().optional(),
+  to: z.date().optional(),
+});
+export type DateFilters = z.infer<typeof DateFiltersSchema>;
+
+// ---------------------------------------------------------------------------
+// Tool analytics (cross-agent aggregation)
+// ---------------------------------------------------------------------------
+
+export const ToolAnalyticsSchema = z.object({
+  toolName: z.string(),
+  totalCalls: z.number().int().nonnegative(),
+  totalErrors: z.number().int().nonnegative(),
+  totalDurationMs: z.number().nonnegative(),
+  avgDurationMs: z.number().nonnegative(),
+  agentBreakdown: z.array(
+    z.object({
+      agentName: z.string(),
+      callCount: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ToolAnalytics = z.infer<typeof ToolAnalyticsSchema>;
+
+// ---------------------------------------------------------------------------
+// Token usage group (for groupBy queries)
+// ---------------------------------------------------------------------------
+
+export const TokenUsageGroupSchema = z.object({
+  key: z.string(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  totalTokens: z.number().int().nonnegative(),
+  conversationCount: z.number().int().nonnegative(),
+});
+export type TokenUsageGroup = z.infer<typeof TokenUsageGroupSchema>;
