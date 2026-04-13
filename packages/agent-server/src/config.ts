@@ -100,11 +100,29 @@ export interface TokenUsageResponse {
 }
 
 /**
+ * SSE exporter interface — structural typing for SSEExporter from runtime.
+ */
+export interface SSEExporterLike {
+  connect(): ReadableStream<Uint8Array>;
+  disconnect(stream: ReadableStream<Uint8Array>): void;
+}
+
+/**
+ * Conversation store interface — structural typing for ConversationStoreProtocol.
+ */
+export interface ConversationStoreLike {
+  get(id: string): Promise<unknown>;
+  list(): Promise<unknown[]>;
+}
+
+/**
  * Server configuration.
  */
 export interface ServerConfig {
   readonly agents: AgentRegistration[];
-  readonly adminService?: AdminServiceProtocol;
-  readonly eventBus?: EventBus;
+  readonly adminService: AdminServiceProtocol;
+  readonly eventBus: EventBus;
+  readonly sseExporter: SSEExporterLike;
+  readonly store?: ConversationStoreLike;
   readonly staticDir?: string;
 }

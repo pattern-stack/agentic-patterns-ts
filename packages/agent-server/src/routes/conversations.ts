@@ -48,14 +48,8 @@ export function conversationRoutes(agents: AgentRegistration[]): Hono {
 
     const { conversation } = entry;
 
-    // Check if runner supports streaming
     if (!conversation.runner.stream) {
-      const exchange = await conversation.send(content);
-      return c.json({
-        content: exchange.assistant,
-        input_tokens: exchange.inputTokens,
-        output_tokens: exchange.outputTokens,
-      });
+      return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
     // SSE streaming response

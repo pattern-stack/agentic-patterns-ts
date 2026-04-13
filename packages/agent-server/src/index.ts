@@ -1,9 +1,11 @@
 // @agentic-patterns/server — barrel export
-export { createApp } from "./app.js";
+export { createServer } from "./app.js";
 export type {
   ServerConfig,
   AgentRegistration,
   AdminServiceProtocol,
+  SSEExporterLike,
+  ConversationStoreLike,
   DashboardResponse,
   AgentStatsResponse,
   ToolStatsResponse,
