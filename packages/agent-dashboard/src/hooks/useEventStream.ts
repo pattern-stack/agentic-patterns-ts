@@ -8,6 +8,8 @@ export interface StreamEvent {
 }
 
 const MAX_EVENTS = 500;
+const INITIAL_RETRY_MS = 1000;
+const MAX_RETRY_MS = 30_000;
 
 interface UseEventStreamResult {
   events: StreamEvent[];
@@ -21,41 +23,66 @@ export function useEventStream(path: string): UseEventStreamResult {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const counterRef = useRef(0);
+  const retryDelayRef = useRef(INITIAL_RETRY_MS);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
-    const source = new EventSource(path);
+    let cancelled = false;
+    let source: EventSource | null = null;
 
-    source.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
+    function connect() {
+      if (cancelled) return;
 
-    source.onmessage = (event) => {
-      try {
-        const parsed = JSON.parse(event.data);
-        const streamEvent: StreamEvent = {
-          id: String(counterRef.current++),
-          type: parsed.type ?? "unknown",
-          data: parsed,
-          timestamp: parsed.timestamp ?? new Date().toISOString(),
-        };
-        setEvents((prev) => {
-          const next = [...prev, streamEvent];
-          return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
-        });
-      } catch {
-        // ignore malformed events
-      }
-    };
+      source = new EventSource(path);
 
-    source.onerror = () => {
-      setConnected(false);
-      setError("Connection lost. Reconnecting...");
-    };
+      source.onopen = () => {
+        setConnected(true);
+        setError(null);
+        retryDelayRef.current = INITIAL_RETRY_MS;
+      };
+
+      source.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data);
+          const streamEvent: StreamEvent = {
+            id: String(counterRef.current++),
+            type: parsed.type ?? "unknown",
+            data: parsed,
+            timestamp: parsed.timestamp ?? new Date().toISOString(),
+          };
+          setEvents((prev) => {
+            const next = [...prev, streamEvent];
+            return next.length > MAX_EVENTS ? next.slice(-MAX_EVENTS) : next;
+          });
+        } catch {
+          // ignore malformed events
+        }
+      };
+
+      source.onerror = () => {
+        setConnected(false);
+        setError("Connection lost. Reconnecting...");
+        source?.close();
+        source = null;
+
+        if (!cancelled) {
+          const delay = retryDelayRef.current;
+          retryDelayRef.current = Math.min(delay * 2, MAX_RETRY_MS);
+          retryTimerRef.current = setTimeout(connect, delay);
+        }
+      };
+    }
+
+    connect();
 
     return () => {
-      source.close();
+      cancelled = true;
+      source?.close();
+      source = null;
       setConnected(false);
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+      }
     };
   }, [path]);
 
