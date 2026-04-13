@@ -32,35 +32,98 @@ const testRegistration: AgentRegistration = {
 };
 
 const mockAdminService = {
-  async getDashboard() {
+  async getDashboardStats() {
     return {
-      activeConversations: 1,
-      totalConversations: 5,
-      totalExchanges: 10,
-      totalInputTokens: 1000,
-      totalOutputTokens: 500,
-      errorCount: 0,
-      agentCount: 2,
+      agents: [
+        {
+          agentName: "Agent1",
+          status: "idle" as const,
+          totalIterations: 5,
+          totalToolCalls: 10,
+          totalInputTokens: 1000,
+          totalOutputTokens: 500,
+          totalErrors: 0,
+          toolStats: [],
+        },
+        {
+          agentName: "Agent2",
+          status: "idle" as const,
+          totalIterations: 3,
+          totalToolCalls: 4,
+          totalInputTokens: 200,
+          totalOutputTokens: 100,
+          totalErrors: 1,
+          toolStats: [],
+        },
+      ],
+      activeAgentCount: 2,
+      totalTokensUsed: 1800,
+      totalToolCalls: 14,
+      totalErrors: 1,
+      activeConversationCount: 1,
+      uptimeMs: 60000,
     };
   },
-  async listAgentStats() {
+  async getAgentStats(agentName: string) {
+    if (agentName === "Agent1") {
+      return {
+        agentName: "Agent1",
+        status: "idle" as const,
+        totalIterations: 5,
+        totalToolCalls: 10,
+        totalInputTokens: 1000,
+        totalOutputTokens: 500,
+        totalErrors: 0,
+        toolStats: [],
+      };
+    }
+    return undefined;
+  },
+  async getAllAgentStats() {
     return [
-      { name: "Agent1", conversationCount: 3, totalInputTokens: 600, totalOutputTokens: 300 },
+      {
+        agentName: "Agent1",
+        status: "idle" as const,
+        totalIterations: 5,
+        totalToolCalls: 10,
+        totalInputTokens: 1000,
+        totalOutputTokens: 500,
+        totalErrors: 0,
+        toolStats: [],
+      },
     ];
+  },
+  async getRecentEvents() {
+    return [];
+  },
+  async getTraceSummaries() {
+    return [];
+  },
+  async getConversations() {
+    return [];
   },
   async getToolAnalytics() {
     return [
       {
         toolName: "read_file",
-        callCount: 5,
-        successCount: 4,
-        failureCount: 1,
+        totalCalls: 5,
+        totalErrors: 1,
+        totalDurationMs: 125,
         avgDurationMs: 25,
+        agentBreakdown: [{ agentName: "Agent1", callCount: 5 }],
       },
     ];
   },
   async getTokenUsage() {
-    return [{ group: "Agent1", inputTokens: 600, outputTokens: 300, conversations: 3 }];
+    return [
+      {
+        key: "Agent1",
+        inputTokens: 600,
+        outputTokens: 300,
+        totalTokens: 900,
+        conversationCount: 3,
+      },
+    ];
   },
 };
 
@@ -192,17 +255,17 @@ describe("admin routes", () => {
     const app = createServer(makeConfig());
     const res = await app.request("/admin/dashboard");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { agentCount: number };
-    expect(body.agentCount).toBe(2);
+    const body = (await res.json()) as { activeAgentCount: number };
+    expect(body.activeAgentCount).toBe(2);
   });
 
   it("returns agent stats", async () => {
     const app = createServer(makeConfig());
     const res = await app.request("/admin/agents");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { name: string }[];
+    const body = (await res.json()) as { agentName: string }[];
     expect(body).toHaveLength(1);
-    expect(body[0]!.name).toBe("Agent1");
+    expect(body[0]!.agentName).toBe("Agent1");
   });
 
   it("returns tool analytics", async () => {
@@ -217,8 +280,8 @@ describe("admin routes", () => {
     const app = createServer(makeConfig());
     const res = await app.request("/admin/tokens?group_by=agent");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { group: string }[];
-    expect(body[0]!.group).toBe("Agent1");
+    const body = (await res.json()) as { key: string }[];
+    expect(body[0]!.key).toBe("Agent1");
   });
 
   it("returns SSE stream from sseExporter", async () => {

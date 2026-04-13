@@ -2,7 +2,7 @@
  * Server configuration types.
  */
 
-import type { EventBus } from "@agentic-patterns/runtime";
+import type { AdminServiceProtocol, EventBus } from "@agentic-patterns/runtime";
 
 /**
  * Agent registration — what the server knows about each agent.
@@ -53,51 +53,8 @@ export interface AgentRegistration {
   };
 }
 
-/**
- * Admin service protocol — what the server needs for admin routes.
- */
-export interface AdminServiceProtocol {
-  getDashboard(): Promise<DashboardResponse>;
-  listAgentStats(): Promise<AgentStatsResponse[]>;
-  getToolAnalytics(): Promise<ToolStatsResponse[]>;
-  getTokenUsage(params: TokenUsageParams): Promise<TokenUsageResponse[]>;
-}
-
-export interface DashboardResponse {
-  activeConversations: number;
-  totalConversations: number;
-  totalExchanges: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  errorCount: number;
-  agentCount: number;
-}
-
-export interface AgentStatsResponse {
-  name: string;
-  conversationCount: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-}
-
-export interface ToolStatsResponse {
-  toolName: string;
-  callCount: number;
-  successCount: number;
-  failureCount: number;
-  avgDurationMs: number;
-}
-
-export interface TokenUsageParams {
-  groupBy: "agent" | "model";
-}
-
-export interface TokenUsageResponse {
-  group: string;
-  inputTokens: number;
-  outputTokens: number;
-  conversations: number;
-}
+// AdminServiceProtocol is imported from @agentic-patterns/runtime
+export type { AdminServiceProtocol };
 
 /**
  * SSE exporter interface — structural typing for SSEExporter from runtime.

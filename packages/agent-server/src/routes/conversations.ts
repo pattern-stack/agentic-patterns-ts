@@ -8,10 +8,16 @@ import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
 import { agentEventToSSE } from "../sse.js";
 
-/** In-memory conversation store. */
-const conversations = new Map<string, { conversation: Conversation; agentId: string }>();
+/** Entry in the per-server conversation registry. */
+export interface ConversationEntry {
+  conversation: Conversation;
+  agentId: string;
+}
 
-export function conversationRoutes(agents: AgentRegistration[]): Hono {
+export function conversationRoutes(
+  agents: AgentRegistration[],
+  conversations: Map<string, ConversationEntry>,
+): Hono {
   const app = new Hono();
 
   // POST /conversations — create a new conversation

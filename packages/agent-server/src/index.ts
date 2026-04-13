@@ -6,10 +6,5 @@ export type {
   AdminServiceProtocol,
   SSEExporterLike,
   ConversationStoreLike,
-  DashboardResponse,
-  AgentStatsResponse,
-  ToolStatsResponse,
-  TokenUsageParams,
-  TokenUsageResponse,
 } from "./config.js";
 export { agentEventToSSE, type SSEMessage } from "./sse.js";

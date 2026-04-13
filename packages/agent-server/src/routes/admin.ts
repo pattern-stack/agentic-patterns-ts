@@ -9,12 +9,12 @@ export function adminRoutes(config: ServerConfig): Hono {
   const app = new Hono();
 
   app.get("/admin/dashboard", async (c) => {
-    const stats = await config.adminService.getDashboard();
+    const stats = await config.adminService.getDashboardStats();
     return c.json(stats);
   });
 
   app.get("/admin/agents", async (c) => {
-    const agents = await config.adminService.listAgentStats();
+    const agents = await config.adminService.getAllAgentStats();
     return c.json(agents);
   });
 
