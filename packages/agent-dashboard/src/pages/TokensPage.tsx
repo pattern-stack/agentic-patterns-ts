@@ -1,18 +1,18 @@
 import { useState } from "react";
-import type { TokenUsageRow } from "../api/types";
+import type { TokenUsageGroup } from "../api/types";
 import { DataTable } from "../components/DataTable";
 import { useAdminData } from "../hooks/useAdminData";
 
-function getField(row: TokenUsageRow, key: string): string {
+function getField(row: TokenUsageGroup, key: string): string {
   return String((row as unknown as Record<string, unknown>)[key] ?? "");
 }
 
 export function TokensPage() {
   const [groupBy, setGroupBy] = useState<"agent" | "model">("agent");
-  const { data, loading, error } = useAdminData<TokenUsageRow[]>(
+  const { data, loading, error } = useAdminData<TokenUsageGroup[]>(
     `/admin/tokens?group_by=${groupBy}`,
   );
-  const [sortKey, setSortKey] = useState("agentName");
+  const [sortKey, setSortKey] = useState("key");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const handleSort = (key: string) => {
@@ -71,26 +71,31 @@ export function TokensPage() {
           </button>
         </div>
       </div>
-      <DataTable<TokenUsageRow>
+      <DataTable<TokenUsageGroup>
         columns={[
-          { key: "agentName", header: groupBy === "agent" ? "Agent" : "Model" },
+          { key: "key", header: groupBy === "agent" ? "Agent" : "Model" },
           {
-            key: "promptTokens",
-            header: "Prompt Tokens",
+            key: "inputTokens",
+            header: "Input Tokens",
             align: "right",
-            render: (row) => row.promptTokens.toLocaleString(),
+            render: (row) => row.inputTokens.toLocaleString(),
           },
           {
-            key: "completionTokens",
-            header: "Completion Tokens",
+            key: "outputTokens",
+            header: "Output Tokens",
             align: "right",
-            render: (row) => row.completionTokens.toLocaleString(),
+            render: (row) => row.outputTokens.toLocaleString(),
           },
           {
             key: "totalTokens",
             header: "Total",
             align: "right",
             render: (row) => row.totalTokens.toLocaleString(),
+          },
+          {
+            key: "conversationCount",
+            header: "Conversations",
+            align: "right",
           },
         ]}
         data={sorted}

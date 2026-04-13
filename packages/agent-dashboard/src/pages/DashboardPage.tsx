@@ -9,6 +9,9 @@ export function DashboardPage() {
   if (error) return <div style={{ color: "var(--accent-red)" }}>Error: {error}</div>;
   if (!data) return null;
 
+  const totalInputTokens = data.agents.reduce((sum, a) => sum + a.totalInputTokens, 0);
+  const totalOutputTokens = data.agents.reduce((sum, a) => sum + a.totalOutputTokens, 0);
+
   return (
     <div>
       <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20 }}>Dashboard</h1>
@@ -20,29 +23,20 @@ export function DashboardPage() {
           marginBottom: 32,
         }}
       >
-        <StatCard label="Agents" value={data.agentCount} color="var(--accent-blue)" />
-        <StatCard label="Conversations" value={data.conversationCount} color="var(--accent-blue)" />
-        <StatCard label="Tokens In" value={data.totalPromptTokens.toLocaleString()} />
-        <StatCard label="Tokens Out" value={data.totalCompletionTokens.toLocaleString()} />
+        <StatCard label="Active Agents" value={data.activeAgentCount} color="var(--accent-blue)" />
         <StatCard
-          label="Error Rate"
-          value={`${(data.errorRate * 100).toFixed(1)}%`}
-          color={data.errorRate > 0.05 ? "var(--accent-red)" : "var(--accent-green)"}
-          subtitle={`${data.errorCount} total errors`}
+          label="Conversations"
+          value={data.activeConversationCount}
+          color="var(--accent-blue)"
         />
-      </div>
-
-      <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Conversations by State</h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: 12,
-        }}
-      >
-        {Object.entries(data.conversationsByState).map(([state, count]) => (
-          <StatCard key={state} label={state} value={count} />
-        ))}
+        <StatCard label="Tokens In" value={totalInputTokens.toLocaleString()} />
+        <StatCard label="Tokens Out" value={totalOutputTokens.toLocaleString()} />
+        <StatCard label="Tool Calls" value={data.totalToolCalls} />
+        <StatCard
+          label="Errors"
+          value={data.totalErrors}
+          color={data.totalErrors > 0 ? "var(--accent-red)" : "var(--accent-green)"}
+        />
       </div>
     </div>
   );

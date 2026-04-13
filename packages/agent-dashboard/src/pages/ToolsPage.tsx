@@ -1,21 +1,23 @@
 import { useState } from "react";
-import type { ToolStats } from "../api/types";
+import type { ToolAnalytics } from "../api/types";
 import { DataTable } from "../components/DataTable";
 import { useAdminData } from "../hooks/useAdminData";
 
-function rateColor(rate: number): string {
+function errorRateColor(totalCalls: number, totalErrors: number): string {
+  if (totalCalls === 0) return "var(--text-secondary)";
+  const rate = 1 - totalErrors / totalCalls;
   if (rate >= 0.95) return "var(--accent-green)";
   if (rate >= 0.8) return "var(--accent-yellow)";
   return "var(--accent-red)";
 }
 
-function getField(row: ToolStats, key: string): string {
+function getField(row: ToolAnalytics, key: string): string {
   return String((row as unknown as Record<string, unknown>)[key] ?? "");
 }
 
 export function ToolsPage() {
-  const { data, loading, error } = useAdminData<ToolStats[]>("/admin/tools");
-  const [sortKey, setSortKey] = useState("name");
+  const { data, loading, error } = useAdminData<ToolAnalytics[]>("/admin/tools");
+  const [sortKey, setSortKey] = useState("toolName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const handleSort = (key: string) => {
@@ -40,17 +42,17 @@ export function ToolsPage() {
   return (
     <div>
       <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 20 }}>Tools</h1>
-      <DataTable<ToolStats>
+      <DataTable<ToolAnalytics>
         columns={[
-          { key: "name", header: "Name" },
-          { key: "calls", header: "Calls", align: "right" },
+          { key: "toolName", header: "Name" },
+          { key: "totalCalls", header: "Calls", align: "right" },
           {
-            key: "successRate",
-            header: "Success Rate",
+            key: "totalErrors",
+            header: "Errors",
             align: "right",
             render: (row) => (
-              <span style={{ color: rateColor(row.successRate) }}>
-                {(row.successRate * 100).toFixed(1)}%
+              <span style={{ color: errorRateColor(row.totalCalls, row.totalErrors) }}>
+                {row.totalErrors}
               </span>
             ),
           },

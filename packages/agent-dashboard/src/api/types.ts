@@ -1,43 +1,56 @@
-export interface TokenUsageRow {
-  agentId: string;
-  agentName: string;
-  model: string;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
+/**
+ * Dashboard API types — aligned with @agentic-patterns/runtime admin schemas.
+ *
+ * These mirror the Zod-inferred types from the runtime's admin/schemas.ts,
+ * representing the JSON shapes returned by the server's admin routes.
+ * Dates are serialized as ISO strings over the wire.
+ */
+
+export interface ToolStats {
+  toolName: string;
+  callCount: number;
+  errorCount: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  lastUsed?: string;
 }
 
 export interface AgentStats {
-  id: string;
-  name: string;
-  model: string;
-  conversations: number;
-  promptTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  errors: number;
-  lastActive: string | null;
-}
-
-export interface ToolStats {
-  name: string;
-  calls: number;
-  successes: number;
-  failures: number;
-  successRate: number;
-  avgDurationMs: number;
+  agentName: string;
+  status: "idle" | "running" | "error" | "completed";
+  totalIterations: number;
+  totalToolCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalErrors: number;
+  startedAt?: string;
+  lastEventAt?: string;
+  toolStats: ToolStats[];
 }
 
 export interface DashboardStats {
-  agentCount: number;
-  conversationCount: number;
-  conversationsByState: Record<string, number>;
-  totalPromptTokens: number;
-  totalCompletionTokens: number;
-  totalTokens: number;
-  errorCount: number;
-  errorRate: number;
   agents: AgentStats[];
-  tools: ToolStats[];
-  tokenUsage: TokenUsageRow[];
+  activeAgentCount: number;
+  totalTokensUsed: number;
+  totalToolCalls: number;
+  totalErrors: number;
+  activeConversationCount: number;
+  uptimeMs: number;
+}
+
+export interface ToolAnalytics {
+  toolName: string;
+  totalCalls: number;
+  totalErrors: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  agentBreakdown: Array<{ agentName: string; callCount: number }>;
+}
+
+export interface TokenUsageGroup {
+  key: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  conversationCount: number;
 }
