@@ -44,11 +44,12 @@ describe("Event Profiles", () => {
 
     it("TOOLS profile includes only tool events", () => {
       const types = PROFILE_EVENT_TYPES[EventProfile.TOOLS];
-      expect(types).toHaveLength(4);
+      expect(types).toHaveLength(5);
       expect(types).toContain("agent.tool.intent");
       expect(types).toContain("agent.tool.rejected");
       expect(types).toContain("agent.tool.start");
       expect(types).toContain("agent.tool.end");
+      expect(types).toContain("agent.tool.progress");
     });
 
     it("STREAMING profile includes only chunks", () => {
@@ -63,7 +64,7 @@ describe("Event Profiles", () => {
       const handler = vi.fn();
       const types = subscribeProfile(bus, EventProfile.TOOLS, handler);
 
-      expect(types).toHaveLength(4);
+      expect(types).toHaveLength(5);
 
       await bus.publish(makeEvent("agent.tool.start"));
       expect(handler).toHaveBeenCalledOnce();
@@ -96,8 +97,8 @@ describe("Event Profiles", () => {
       const handler = vi.fn();
       const types = subscribeProfiles(bus, [EventProfile.TOOLS, EventProfile.STREAMING], handler);
 
-      // TOOLS has 4 types, STREAMING has 1, no overlap
-      expect(types).toHaveLength(5);
+      // TOOLS has 5 types, STREAMING has 1, no overlap
+      expect(types).toHaveLength(6);
     });
 
     it("subscribes to UX and OBS without duplicates", async () => {
