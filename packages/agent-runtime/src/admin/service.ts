@@ -10,6 +10,9 @@ import type {
   AgentStats,
   ConversationSummary,
   DashboardStats,
+  DateFilters,
+  TokenUsageGroup,
+  ToolAnalytics,
   TraceEvent,
   TraceSummary,
 } from "./schemas.js";
@@ -26,6 +29,8 @@ export interface AdminServiceProtocol {
   getRecentEvents(limit?: number): Promise<TraceEvent[]>;
   getTraceSummaries(): Promise<TraceSummary[]>;
   getConversations(): Promise<ConversationSummary[]>;
+  getToolAnalytics(filters?: DateFilters): Promise<ToolAnalytics[]>;
+  getTokenUsage(params: { groupBy: "agent" | "model" }): Promise<TokenUsageGroup[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,5 +72,13 @@ export class InMemoryAdminService implements AdminServiceProtocol {
 
   async getConversations(): Promise<ConversationSummary[]> {
     return this._collector.getConversations();
+  }
+
+  async getToolAnalytics(filters?: DateFilters): Promise<ToolAnalytics[]> {
+    return this._collector.getToolAnalytics(filters);
+  }
+
+  async getTokenUsage(params: { groupBy: "agent" | "model" }): Promise<TokenUsageGroup[]> {
+    return this._collector.getTokenUsage(params);
   }
 }

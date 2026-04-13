@@ -8,10 +8,13 @@
 import { EventProfile } from "../events/event-profiles.js";
 import type {
   BaseEvent,
+  ConversationEndEvent,
+  ConversationStartEvent,
   ErrorEvent,
   IterationEndEvent,
   IterationStartEvent,
   LLMCallEndEvent,
+  MessageCancelEvent,
   MessageCompleteEvent,
   MessageStartEvent,
   ToolCallEndEvent,
@@ -22,6 +25,9 @@ import type {
   AgentStats,
   ConversationSummary,
   DashboardStats,
+  DateFilters,
+  TokenUsageGroup,
+  ToolAnalytics,
   ToolStats,
   TraceEvent,
   TraceSummary,
@@ -92,6 +98,8 @@ interface MutableToolStats {
  * - Per-tool statistics (call count, duration, errors)
  * - Ring buffer of recent trace events (capped at 1000)
  * - Trace summaries by traceId
+ * - Token usage by model
+ * - Active conversation tracking
  */
 export class InMemoryEventCollector extends BaseExporter {
   override profile = EventProfile.UX;
@@ -109,6 +117,11 @@ export class InMemoryEventCollector extends BaseExporter {
       status: "running" | "completed" | "error";
     }
   >();
+  private _tokensByModel = new Map<
+    string,
+    { input: number; output: number; conversations: Set<string> }
+  >();
+  private _activeConversations = new Set<string>();
 
   // ---------------------------------------------------------------------------
   // Query methods
@@ -120,6 +133,7 @@ export class InMemoryEventCollector extends BaseExporter {
     return {
       agents,
       activeAgentCount: agents.filter((a) => a.status === "running").length,
+      activeConversationCount: this._activeConversations.size,
       totalTokensUsed: agents.reduce((sum, a) => sum + a.totalInputTokens + a.totalOutputTokens, 0),
       totalToolCalls: agents.reduce((sum, a) => sum + a.totalToolCalls, 0),
       totalErrors: agents.reduce((sum, a) => sum + a.totalErrors, 0),
@@ -181,9 +195,103 @@ export class InMemoryEventCollector extends BaseExporter {
     return conversations;
   }
 
+  /** Get cross-agent tool analytics. */
+  getToolAnalytics(_filters?: DateFilters): ToolAnalytics[] {
+    const toolMap = new Map<
+      string,
+      {
+        totalCalls: number;
+        totalErrors: number;
+        totalDurationMs: number;
+        agentBreakdown: Map<string, number>;
+      }
+    >();
+
+    for (const agent of this._agents.values()) {
+      for (const ts of agent.toolStats.values()) {
+        let entry = toolMap.get(ts.toolName);
+        if (!entry) {
+          entry = {
+            totalCalls: 0,
+            totalErrors: 0,
+            totalDurationMs: 0,
+            agentBreakdown: new Map(),
+          };
+          toolMap.set(ts.toolName, entry);
+        }
+        entry.totalCalls += ts.callCount;
+        entry.totalErrors += ts.errorCount;
+        entry.totalDurationMs += ts.totalDurationMs;
+        entry.agentBreakdown.set(
+          agent.agentName,
+          (entry.agentBreakdown.get(agent.agentName) ?? 0) + ts.callCount,
+        );
+      }
+    }
+
+    const result: ToolAnalytics[] = [];
+    for (const [toolName, entry] of toolMap) {
+      const agentBreakdown = Array.from(entry.agentBreakdown.entries()).map(
+        ([agentName, callCount]) => ({ agentName, callCount }),
+      );
+      result.push({
+        toolName,
+        totalCalls: entry.totalCalls,
+        totalErrors: entry.totalErrors,
+        totalDurationMs: entry.totalDurationMs,
+        avgDurationMs: entry.totalCalls > 0 ? entry.totalDurationMs / entry.totalCalls : 0,
+        agentBreakdown,
+      });
+    }
+    return result;
+  }
+
+  /** Get token usage grouped by agent or model. */
+  getTokenUsage(params: { groupBy: "agent" | "model" }): TokenUsageGroup[] {
+    if (params.groupBy === "agent") {
+      return this._getAgentStatsList().map((a) => ({
+        key: a.agentName,
+        inputTokens: a.totalInputTokens,
+        outputTokens: a.totalOutputTokens,
+        totalTokens: a.totalInputTokens + a.totalOutputTokens,
+        conversationCount: 0,
+      }));
+    }
+
+    // groupBy model
+    const result: TokenUsageGroup[] = [];
+    for (const [model, entry] of this._tokensByModel) {
+      result.push({
+        key: model,
+        inputTokens: entry.input,
+        outputTokens: entry.output,
+        totalTokens: entry.input + entry.output,
+        conversationCount: entry.conversations.size,
+      });
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------------------------
   // Event handlers
   // ---------------------------------------------------------------------------
+
+  /** @internal */
+  async _onConversationStart(event: ConversationStartEvent): Promise<void> {
+    this._recordEvent(event);
+    this._activeConversations.add(event.conversationId);
+  }
+
+  /** @internal */
+  async _onConversationEnd(event: ConversationEndEvent): Promise<void> {
+    this._recordEvent(event);
+    this._activeConversations.delete(event.conversationId);
+    // Update trace status if we can find it
+    const trace = this._traces.get(event.traceId);
+    if (trace) {
+      trace.status = event.reason === "error" ? "error" : "completed";
+    }
+  }
 
   /** @internal */
   async _onMessageStart(event: MessageStartEvent): Promise<void> {
@@ -220,6 +328,19 @@ export class InMemoryEventCollector extends BaseExporter {
         agent.lastEventAt = event.timestamp;
       }
       trace.totalTokens += event.inputTokens + event.outputTokens;
+    }
+  }
+
+  /** @internal */
+  async _onMessageCancel(event: MessageCancelEvent): Promise<void> {
+    this._recordEvent(event);
+    const trace = this._traces.get(event.traceId);
+    if (trace) {
+      trace.status = "completed";
+      const agent = this._agents.get(trace.agentName);
+      if (agent) {
+        agent.lastEventAt = event.timestamp;
+      }
     }
   }
 
@@ -295,6 +416,19 @@ export class InMemoryEventCollector extends BaseExporter {
   /** @internal */
   async _onLlmEnd(event: LLMCallEndEvent): Promise<void> {
     this._recordEvent(event);
+
+    // Track tokens by model
+    let entry = this._tokensByModel.get(event.model);
+    if (!entry) {
+      entry = { input: 0, output: 0, conversations: new Set() };
+      this._tokensByModel.set(event.model, entry);
+    }
+    entry.input += event.inputTokens;
+    entry.output += event.outputTokens;
+    const trace = this._traces.get(event.traceId);
+    if (trace) {
+      entry.conversations.add(event.traceId);
+    }
   }
 
   /** @internal */

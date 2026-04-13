@@ -127,6 +127,7 @@ describe("DashboardStatsSchema", () => {
     const data = {
       agents: [],
       activeAgentCount: 0,
+      activeConversationCount: 0,
       totalTokensUsed: 0,
       totalToolCalls: 0,
       totalErrors: 0,
@@ -140,6 +141,7 @@ describe("DashboardStatsSchema", () => {
       DashboardStatsSchema.parse({
         agents: [],
         activeAgentCount: 0,
+        activeConversationCount: 0,
         totalTokensUsed: 0,
         totalToolCalls: 0,
         totalErrors: 0,
