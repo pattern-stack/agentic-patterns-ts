@@ -1,13 +1,16 @@
 # agentic-patterns (TypeScript)
 
-TypeScript port of the agentic-patterns compositional agent framework. Agents are built by composing frozen, immutable primitives upward through layers -- from atoms to organisms -- then executed by a runtime with events, gates, and exporters.
+A compositional agent framework for TypeScript. Agents are built by
+composing frozen, immutable primitives upward through layers -- from
+atoms to organisms -- then executed by a runtime with events, gates,
+and exporters.
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
 | `@agentic-patterns/core` | Atoms, protocols, molecules, rendering, organisms |
-| `@agentic-patterns/runtime` | Runner, events, gates, transport, multi-agent runtime, conversation, exporters, presets |
+| `@agentic-patterns/runtime` | Runner, events, gates, transport, multi-agent, exporters |
 
 Runtime depends on core. Core never imports runtime.
 
@@ -19,59 +22,135 @@ pnpm build
 pnpm test
 ```
 
-### Build a single agent
+## Building an Agent
+
+Agents are composed from small, frozen primitives. Each primitive
+answers one question about the agent's behavior.
+
+### Persona -- WHO the agent is
+
+A Persona defines identity and communication style.
 
 ```typescript
-import {
-  Persona, Mission, Responsibility, Judgment,
-  RoleBuilder, AgentBuilder,
-} from "@agentic-patterns/core";
+import { Persona } from "@agentic-patterns/core";
 
-import { AgentRunner, AgentEventBus, ConsoleExporter } from "@agentic-patterns/runtime";
-
-// 1. Define atoms
 const persona = new Persona({
   identity: "a research assistant specializing in data analysis",
   tone: "professional and precise",
+  priorities: ["accuracy over speed"],
 });
+```
+
+### Mission -- WHAT the agent is doing
+
+A Mission defines the current objective and constraints.
+
+```typescript
+import { Mission } from "@agentic-patterns/core";
 
 const mission = new Mission({
-  objective: "Analyze the provided dataset and produce a summary report.",
+  objective: "Analyze the provided dataset and produce a summary.",
+  success_criteria: [
+    "Identify top 3 trends",
+    "Include statistical backing",
+  ],
+  constraints: ["Only use provided data, no external sources"],
 });
+```
 
-// 2. Build a Role (reusable template)
+### Judgment -- HOW the agent decides
+
+A Judgment defines decision-making heuristics for a specific domain.
+
+```typescript
+import { Judgment } from "@agentic-patterns/core";
+
+const sourceQuality = new Judgment({
+  domain: "source-quality",
+  heuristics: [
+    "Prefer peer-reviewed sources",
+    "Cross-reference statistics across multiple sources",
+  ],
+  escalation_triggers: [
+    "Contradictory data from equally credible sources",
+  ],
+});
+```
+
+### Responsibility -- WHAT the agent handles
+
+A Responsibility declares a category of work the agent owns.
+
+```typescript
+import { Responsibility } from "@agentic-patterns/core";
+
+const analysis = new Responsibility({
+  key: "analysis",
+  name: "Data Analysis",
+  description: "Produce accurate, well-sourced quantitative analysis",
+  examples: ["Revenue trend reports", "Cohort comparisons"],
+});
+```
+
+### Role -- reusable agent template
+
+A Role composes primitives into a reusable template. Build one with
+the fluent `RoleBuilder`.
+
+```typescript
+import { RoleBuilder } from "@agentic-patterns/core";
+
 const role = new RoleBuilder("research-assistant")
   .withPersona(persona)
-  .withJudgment(new Judgment({
-    domain: "source-quality",
-    heuristics: ["Prefer peer-reviewed sources", "Cross-reference statistics"],
-  }))
-  .withResponsibility(new Responsibility({
-    key: "analysis",
-    name: "Analysis",
-    description: "Produce accurate, well-sourced analysis",
-  }))
+  .withJudgment(sourceQuality)
+  .withResponsibility(analysis)
   .build();
+```
 
-// 3. Build an Agent (role + context)
+### Agent -- role + runtime context
+
+An Agent is a Role instantiated with a Mission and optional context.
+Create a new Agent for each task.
+
+```typescript
+import { AgentBuilder } from "@agentic-patterns/core";
+
 const agent = new AgentBuilder(role)
   .withMission(mission)
   .withModel("claude-sonnet-4-20250514")
   .build();
+```
 
-// 4. Run with events
+## Running an Agent
+
+The runtime package provides `AgentRunner`, an event bus, and
+exporters for observability.
+
+```typescript
+import {
+  AgentRunner,
+  AgentEventBus,
+  ConsoleExporter,
+} from "@agentic-patterns/runtime";
+
 const bus = new AgentEventBus();
 const exporter = new ConsoleExporter(bus);
 exporter.start();
 
 const runner = new AgentRunner(model, bus);
-const result = await runner.run(agent, "Analyze Q4 revenue trends.");
+const result = await runner.run(
+  agent,
+  "Analyze Q4 revenue trends.",
+);
 
 console.log(result.response);
 exporter.stop();
 ```
 
-### Multi-agent agency
+## Multi-Agent Teams
+
+For coordination across multiple agents, define an Agency and run it
+with the `AgencyRuntime`.
 
 ```typescript
 import { Agency } from "@agentic-patterns/core";
@@ -81,15 +160,22 @@ const agency = new Agency({
   name: "sales-team",
   description: "Coordinates lead research and outreach",
   agents: [
-    { role: "coordinator", is_coordinator: true, model: "claude-sonnet-4-20250514" },
-    { role: "researcher", is_coordinator: false, model: "claude-sonnet-4-20250514" },
+    {
+      role: "coordinator",
+      is_coordinator: true,
+      model: "claude-sonnet-4-20250514",
+    },
+    {
+      role: "researcher",
+      is_coordinator: false,
+      model: "claude-sonnet-4-20250514",
+    },
   ],
 });
 
 const runtime = new AgencyRuntime(agency, runner);
 await runtime.start();
 await runtime.injectCoordinator("Research Acme Corp");
-// ... agents communicate via in-process transport
 await runtime.stop();
 ```
 
@@ -104,27 +190,27 @@ Capability = Toolbox + Manual
 
 ### Layer Hierarchy
 
-| Layer | Location | Purpose |
-|-------|----------|---------|
-| 0 - Atoms | `core/src/atoms/` | Frozen Zod-validated models with `toPrompt()` |
-| 1 - Protocols | `core/src/protocols/` | Vendor-agnostic domain interfaces (Task, Project, Tag, ...) |
-| 2 - Molecules | `core/src/molecules/` | Toolbox, Manual, Capability, ToolSchema, definitions |
-| 3 - Rendering | `core/src/rendering/` | PromptRenderer with composable sections |
-| 4 - Organisms | `core/src/organisms/` | RoleBuilder, AgentBuilder |
-| 5 - Events | `runtime/src/events/` | Typed EventBus, AgentEventBus, sandbox events |
-| 6 - Gates | `runtime/src/gates/` | Safety, approval, rate-limit, audit gate chain |
-| 7 - Runner | `runtime/src/runner/` | AgentRunner on Vercel AI SDK |
-| 8 - Transport | `runtime/src/transport/` | InProcessTransport, MessagingToolbox |
-| 9 - Runtime | `runtime/src/runtime/` | AgentNode, AgencyRuntime for multi-agent |
-| 10 - Exporters | `runtime/src/exporters/` | Console, Langfuse, OpenTelemetry |
-| 11 - Presets | `runtime/src/presets/` | Pre-built roles, judgments, responsibilities |
+| Layer | Package | Location | Purpose |
+|-------|---------|----------|---------|
+| 0 | core | `src/atoms/` | Frozen Zod-validated models with `toPrompt()` |
+| 1 | core | `src/protocols/` | Vendor-agnostic domain interfaces |
+| 2 | core | `src/molecules/` | Toolbox, Manual, Capability, ToolSchema |
+| 3 | core | `src/rendering/` | PromptRenderer with composable sections |
+| 4 | core | `src/organisms/` | RoleBuilder, AgentBuilder, Role, Agent |
+| 5 | runtime | `src/events/` | Typed EventBus, AgentEventBus |
+| 6 | runtime | `src/gates/` | Safety, approval, rate-limit, audit |
+| 7 | runtime | `src/runner/` | AgentRunner (Vercel AI SDK) |
+| 8 | runtime | `src/transport/` | InProcessTransport, MessagingToolbox |
+| 9 | runtime | `src/runtime/` | AgentNode, AgencyRuntime |
+| 10 | runtime | `src/exporters/` | Console, Langfuse, OpenTelemetry |
+| 11 | runtime | `src/presets/` | Pre-built roles and judgments |
 
 ### Key Conventions
 
-- **Zod schemas** for all data models -- define schema, then `z.infer<>` for types
-- **Immutability** -- `Object.freeze()` + `Readonly<>` types on atom data
+- **Zod schemas** for all data models -- define schema, `z.infer<>` for types
+- **Immutability** -- `Object.freeze()` + `Readonly<>` on atom data
 - **ESM-first** -- tsup produces both ESM and CJS outputs
-- **Strict TypeScript** -- `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
+- **Strict TypeScript** -- `noUncheckedIndexedAccess`, `noUnusedLocals`
 - **Async throughout** -- all protocol methods return `Promise<T>`
 - **Fluent builders** -- `.with*()` methods return `this` for chaining
 
@@ -134,40 +220,19 @@ Capability = Toolbox + Manual
 pnpm build       # tsup compile both packages
 pnpm typecheck   # tsc --noEmit strict mode
 pnpm test        # vitest run all tests
-```
-
-### Project Structure
-
-```
-typescript/
-  package.json              # Workspace root
-  pnpm-workspace.yaml
-  tsconfig.base.json        # Shared strict TS config
-  vitest.workspace.ts
-  packages/
-    agent-core/             # @agentic-patterns/core
-      src/
-        atoms/              # Persona, Mission, Judgment, ...
-        protocols/          # Task, Project, Tag, User, ...
-        molecules/          # Toolbox, Manual, Capability
-        rendering/          # PromptRenderer, sections
-        organisms/          # Role, Agent, builders
-    agent-runtime/          # @agentic-patterns/runtime
-      src/
-        events/             # EventBus, event types, profiles
-        gates/              # Safety, Approval, RateLimit, Audit
-        runner/             # AgentRunner, types
-        transport/          # InProcessTransport, MessagingToolbox
-        runtime/            # AgentNode, AgencyRuntime
-        conversation/       # Conversation store
-        exporters/          # Console, Langfuse, OTel
-        presets/            # Pre-built roles and judgments
+pnpm lint        # biome check
+pnpm check       # all of the above
 ```
 
 ## Dependencies
 
 - **zod** -- schema validation and type inference
-- **ai** (Vercel AI SDK) -- LLM provider abstraction for AgentRunner
+- **ai** (Vercel AI SDK) -- LLM provider abstraction
 - **tsup** -- bundler (ESM + CJS)
 - **vitest** -- test runner
+- **biome** -- formatter and linter
 - **TypeScript 5.7+** -- strict mode compilation
+
+## License
+
+MIT

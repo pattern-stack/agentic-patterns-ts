@@ -1,0 +1,8 @@
+language: typescript
+runtime: node              # Node.js >= 20, pnpm monorepo
+bundler: tsup              # ESM + CJS dual output
+test_runner: vitest
+linter: biome              # Format + lint in one tool
+schema_lib: zod            # Schema validation and type inference
+quality_profile: strict
+commit_style: conventional
