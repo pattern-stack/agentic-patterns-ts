@@ -14,7 +14,7 @@ import { healthRoutes } from "./routes/health.js";
 /**
  * Create a configured Hono app with all routes.
  */
-export function createApp(config: ServerConfig): Hono {
+export function createServer(config: ServerConfig): Hono {
   const app = new Hono();
 
   // Middleware
