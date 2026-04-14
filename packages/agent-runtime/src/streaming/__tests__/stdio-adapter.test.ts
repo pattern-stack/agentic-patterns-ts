@@ -1,20 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStore } from "../../conversation/store.js";
 import { MockRunner } from "../../runner/mock-runner.js";
-import type { RunnerProtocol } from "../../runner/types.js";
+import type { AgentLike, RunnerProtocol } from "../../runner/types.js";
 import { StdioAdapter } from "../stdio-adapter.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-interface AgentLike {
-  role: { name: string };
-  getModel(): string;
-  getTools(): unknown[];
-  getSystemPrompt(): string;
-  renderInitialPrompt(): string;
-}
 
 function makeAgent(name: string): AgentLike {
   return {

@@ -13,20 +13,12 @@ import {
   type StoredConversation,
 } from "../conversation/store.js";
 import type { AgentEvent } from "../events/types.js";
-import type { RunnerProtocol } from "../runner/types.js";
+import type { AgentLike, RunnerProtocol } from "../runner/types.js";
 import { SSEFormatter } from "../transport/sse-formatter.js";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface AgentLike {
-  role: { name: string };
-  getModel(): string;
-  getTools(): unknown[];
-  getSystemPrompt(): string;
-  renderInitialPrompt(): string;
-}
 
 interface JSONRPCRequest {
   jsonrpc: "2.0";
