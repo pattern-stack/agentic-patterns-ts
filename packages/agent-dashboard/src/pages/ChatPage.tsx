@@ -2,12 +2,16 @@
  * ChatPage — pick a registered agent, converse with it over SSE.
  *
  * Fetches the agent registry from /agents, lets the operator pick one,
- * and renders ChatPanel wired to useChat.
+ * and renders ChatPanel wired to useChat. Header mirrors the status
+ * line from pattern-stack/chat-patterns — agent badge, exchange count,
+ * streaming spinner, short conversation id.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { type AgentSummary, listAgents } from "../api/chat-client";
+import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
+import { Spinner } from "../components/atoms/Spinner";
 import { ChatPanel } from "../components/organisms/ChatPanel";
 import { useChat } from "../hooks/useChat";
 
@@ -58,6 +62,8 @@ export function ChatPage() {
         }}
         onNewChat={chat.reset}
         conversationId={chat.conversationId}
+        exchangeCount={chat.exchangeCount}
+        streaming={chat.streaming}
         loadError={loadError}
         description={selected?.description}
       />
@@ -67,6 +73,7 @@ export function ChatPage() {
           streaming={chat.streaming}
           error={chat.error}
           onSend={chat.send}
+          onAbort={chat.abort}
           disabled={!selected}
           placeholder={
             selected ? `Message ${selected.name}…` : "Select an agent to start chatting."
@@ -83,6 +90,8 @@ interface HeaderProps {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   conversationId: string | null;
+  exchangeCount: number;
+  streaming: boolean;
   loadError: string | null;
   description?: string;
 }
@@ -93,9 +102,12 @@ function Header({
   onSelect,
   onNewChat,
   conversationId,
+  exchangeCount,
+  streaming,
   loadError,
   description,
 }: HeaderProps) {
+  const selected = agents.find((a) => a.id === selectedId);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div
@@ -132,6 +144,22 @@ function Header({
         <Button variant="ghost" size="sm" onClick={onNewChat} disabled={!conversationId}>
           New Chat
         </Button>
+        <div style={{ flex: 1 }} />
+        {selected && (
+          <Badge tone="emerald" variant="outline">
+            agent: {selected.name}
+          </Badge>
+        )}
+        {exchangeCount > 0 && (
+          <Badge tone="muted" variant="outline">
+            {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
+          </Badge>
+        )}
+        {streaming && (
+          <Badge tone="emerald" variant="outline">
+            <Spinner size={9} color="var(--accent-emerald)" /> streaming
+          </Badge>
+        )}
         {conversationId && (
           <span
             style={{
@@ -140,7 +168,7 @@ function Header({
               color: "var(--fg-subtle)",
             }}
           >
-            conversation {conversationId.slice(0, 8)}
+            {conversationId.slice(0, 8)}
           </span>
         )}
       </div>

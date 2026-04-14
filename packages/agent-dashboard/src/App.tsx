@@ -1,5 +1,5 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { Layout } from "./components/Layout";
+import { AppShell } from "./components/templates/AppShell";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
@@ -12,7 +12,7 @@ import { TracePage } from "./pages/TracePage";
 export function App() {
   return (
     <BrowserRouter>
-      <Layout>
+      <AppShell>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/chat" element={<ChatPage />} />
@@ -23,7 +23,7 @@ export function App() {
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/conversations/:id/trace" element={<TracePage />} />
         </Routes>
-      </Layout>
+      </AppShell>
     </BrowserRouter>
   );
 }

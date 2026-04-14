@@ -11,7 +11,7 @@ const navItems = [
   { to: "/conversations", label: "Conversations" },
 ];
 
-export function Layout({ children }: { children: ReactNode }) {
+export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
       <nav
