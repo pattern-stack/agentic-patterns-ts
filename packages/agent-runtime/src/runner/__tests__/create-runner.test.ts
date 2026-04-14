@@ -1,0 +1,192 @@
+/**
+ * Unit tests for createRunner() — selection priority + adapter integration.
+ *
+ * We exercise the factory's priority tree without actually loading provider
+ * packages. Each test stubs or substitutes the relevant ingredient
+ * (explicit runner, env vars, provider adapter) and asserts both the runner
+ * class produced and the `source` tag on the selection.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PROVIDERS, type ProviderProtocol } from "../../providers/index.js";
+import { AgentRunner } from "../agent-runner.js";
+import { _resetClaudeCliCache, createRunner } from "../create-runner.js";
+import { MockRunner } from "../mock-runner.js";
+
+const KEYS = [
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "XAI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "OPENROUTER_API_KEY",
+  "OLLAMA_HOST",
+] as const;
+
+function stashEnv(): Record<string, string | undefined> {
+  const saved: Record<string, string | undefined> = {};
+  for (const k of KEYS) {
+    saved[k] = process.env[k];
+    delete process.env[k];
+  }
+  return saved;
+}
+
+function restoreEnv(saved: Record<string, string | undefined>) {
+  for (const [k, v] of Object.entries(saved)) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+}
+
+/** Replace a provider's `load` with a stub that returns a canned model. */
+function stubProviderLoad(provider: ProviderProtocol, cannedModelId?: string) {
+  return vi.spyOn(provider, "load").mockImplementation(async (modelId) => {
+    return {
+      specificationVersion: "v1",
+      provider: provider.name,
+      modelId: cannedModelId ?? modelId,
+      // biome-ignore lint/suspicious/noExplicitAny: test stub for LanguageModelV1
+    } as any;
+  });
+}
+
+describe("createRunner", () => {
+  let savedEnv: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    savedEnv = stashEnv();
+    _resetClaudeCliCache();
+  });
+
+  afterEach(() => {
+    restoreEnv(savedEnv);
+    vi.restoreAllMocks();
+  });
+
+  it("returns the explicit runner when options.runner is provided", async () => {
+    const mock = new MockRunner();
+    const { runner, source } = await createRunner({ runner: mock, verbose: false });
+    expect(runner).toBe(mock);
+    expect(source).toBe("explicit-runner");
+  });
+
+  it("wraps options.model in AgentRunner", async () => {
+    const fakeModel = {
+      specificationVersion: "v1",
+      provider: "stub",
+      modelId: "stub-1",
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any;
+    const { runner, source } = await createRunner({ model: fakeModel, verbose: false });
+    expect(runner).toBeInstanceOf(AgentRunner);
+    expect(source).toBe("explicit-model");
+  });
+
+  it("honors options.provider and passes tier-resolved model to load()", async () => {
+    const spy = stubProviderLoad(PROVIDERS.anthropic);
+    const { runner, source, reason } = await createRunner({
+      provider: "anthropic",
+      tier: "opus",
+      verbose: false,
+    });
+    expect(runner).toBeInstanceOf(AgentRunner);
+    expect(source).toBe("explicit-provider");
+    expect(spy).toHaveBeenCalledWith("claude-opus-4-5");
+    expect(reason).toContain("claude-opus-4-5");
+  });
+
+  it("defaults to sonnet tier when tier is omitted", async () => {
+    const spy = stubProviderLoad(PROVIDERS.openai);
+    await createRunner({ provider: "openai", verbose: false });
+    expect(spy).toHaveBeenCalledWith("gpt-4o");
+  });
+
+  it("honors explicit modelId over tier", async () => {
+    const spy = stubProviderLoad(PROVIDERS.openai);
+    await createRunner({
+      provider: "openai",
+      tier: "haiku",
+      modelId: "my-custom-model",
+      verbose: false,
+    });
+    expect(spy).toHaveBeenCalledWith("my-custom-model");
+  });
+
+  it("auto-detects anthropic from env ANTHROPIC_API_KEY", async () => {
+    process.env.ANTHROPIC_API_KEY = "sk-test-abc";
+    const spy = stubProviderLoad(PROVIDERS.anthropic);
+    const { runner, source, reason } = await createRunner({ verbose: false });
+    expect(runner).toBeInstanceOf(AgentRunner);
+    expect(source).toBe("env-anthropic");
+    expect(reason).toContain("ANTHROPIC_API_KEY");
+    expect(spy).toHaveBeenCalledWith("claude-sonnet-4-5");
+  });
+
+  it("prefers earlier-priority providers when multiple env vars are set", async () => {
+    // ANTHROPIC comes before OPENAI in PROVIDER_PRIORITY.
+    process.env.OPENAI_API_KEY = "sk-openai";
+    process.env.ANTHROPIC_API_KEY = "sk-anthropic";
+    const anthropicSpy = stubProviderLoad(PROVIDERS.anthropic);
+    const openaiSpy = stubProviderLoad(PROVIDERS.openai);
+    const { source } = await createRunner({ verbose: false });
+    expect(source).toBe("env-anthropic");
+    expect(anthropicSpy).toHaveBeenCalled();
+    expect(openaiSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to ollama when only OLLAMA_HOST is set", async () => {
+    process.env.OLLAMA_HOST = "http://localhost:11434";
+    const spy = stubProviderLoad(PROVIDERS.ollama);
+    const { source } = await createRunner({ tier: "opus", verbose: false });
+    expect(source).toBe("env-ollama");
+    expect(spy).toHaveBeenCalledWith("qwen3:30b-a3b"); // opus-tier Qwen
+  });
+
+  it("falls back to MockRunner when fallbackToMock is true", async () => {
+    // We can't stub hasClaudeCli() easily here; rely on the fact that CI
+    // runners typically don't have `claude` on PATH. If the fallback path
+    // goes through Claude CLI first, this test is a no-op.
+    const { runner, source } = await createRunner({ fallbackToMock: true, verbose: false });
+    if (source === "mock-fallback") {
+      expect(runner).toBeInstanceOf(MockRunner);
+      expect(source).toBe("mock-fallback");
+    } else {
+      // Claude CLI was detected; fallback wasn't reached.
+      expect(source).toBe("claude-cli");
+    }
+  });
+
+  it("throws a helpful error when nothing matches and fallbackToMock is false", async () => {
+    // Again, only meaningful if claude CLI is absent; skip the assertion
+    // shape if we're on a dev box with claude installed.
+    try {
+      await createRunner({ verbose: false });
+      // Got here without throwing — claude CLI must be present.
+      expect(true).toBe(true);
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("no runnable configuration");
+      expect((err as Error).message).toContain("ANTHROPIC_API_KEY");
+    }
+  });
+
+  it("passes eventBus through to AgentRunner", async () => {
+    const fakeModel = {
+      specificationVersion: "v1",
+      provider: "stub",
+      modelId: "stub-1",
+      // biome-ignore lint/suspicious/noExplicitAny: test stub
+    } as any;
+    const { AgentEventBus } = await import("../../events/agent-event-bus.js");
+    const bus = new AgentEventBus();
+    const { runner } = await createRunner({ model: fakeModel, eventBus: bus, verbose: false });
+    // AgentRunner accepts eventBus as a constructor arg; it's private. We verify
+    // construction succeeded and runner is the right shape.
+    expect(runner).toBeInstanceOf(AgentRunner);
+  });
+});

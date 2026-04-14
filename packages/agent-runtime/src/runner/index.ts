@@ -16,3 +16,9 @@ export { buildAgentServers, buildCapabilityServer } from "./sdk-bridge.js";
 export type { AgentLikeForBridge } from "./sdk-bridge.js";
 export { MockRunner } from "./mock-runner.js";
 export type { MockResponse, MockCall } from "./mock-runner.js";
+export { createRunner } from "./create-runner.js";
+export type {
+  CreateRunnerOptions,
+  RunnerSelection,
+  RunnerSource,
+} from "./create-runner.js";

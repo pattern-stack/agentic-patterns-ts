@@ -15,7 +15,15 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["agents", "llm", "ai", "runtime", "vercel-ai-sdk", "events", "multi-agent"],
+  "keywords": [
+    "agents",
+    "llm",
+    "ai",
+    "runtime",
+    "vercel-ai-sdk",
+    "events",
+    "multi-agent"
+  ],
   "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
   "bugs": "https://github.com/pattern-stack/agentic-patterns-ts/issues",
   "main": "./dist/index.cjs",
@@ -33,7 +41,9 @@
       }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -41,11 +51,11 @@
     "lint": "biome check src/"
   },
   "peerDependencies": {
-    "ai": "^4.0.0",
-    "zod": "^3.23.0",
     "@anthropic-ai/claude-agent-sdk": "^0.2.0",
+    "@opentelemetry/api": "^1.0.0",
+    "ai": "^4.0.0",
     "langfuse": "^3.0.0",
-    "@opentelemetry/api": "^1.0.0"
+    "zod": "^3.23.0"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
@@ -59,7 +69,8 @@
     }
   },
   "dependencies": {
-    "@agentic-patterns/core": "workspace:*"
+    "@agentic-patterns/core": "workspace:*",
+    "ollama-ai-provider": "^1.2.0"
   },
   "devDependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
