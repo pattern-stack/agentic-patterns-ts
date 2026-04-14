@@ -3,7 +3,7 @@
  */
 
 import type { AgentEventBus } from "@agentic-patterns/runtime";
-import { Conversation } from "@agentic-patterns/runtime";
+import { Conversation, createToolboxExecutor } from "@agentic-patterns/runtime";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
@@ -32,7 +32,12 @@ export function conversationRoutes(
       return c.json({ error: "Agent not found" }, 404);
     }
 
-    const conversation = new Conversation(reg.agent, reg.runner);
+    // Wire a ToolExecutor so AgentRunner can actually execute tool calls
+    // from the agent's Capability toolboxes (not just format them for the LLM).
+    const toolExecutor = createToolboxExecutor(
+      reg.agent as unknown as Parameters<typeof createToolboxExecutor>[0],
+    );
+    const conversation = new Conversation(reg.agent, reg.runner, { toolExecutor });
     conversations.set(conversation.id, { conversation, agentId });
 
     return c.json({ id: conversation.id, agent_id: agentId }, 201);
