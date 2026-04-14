@@ -16,7 +16,7 @@
  * Run:  pnpm dev  (from repo root — see root package.json)
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execSync, spawn } from "node:child_process";
 
 interface AppSpec {
   readonly name: string;
@@ -64,6 +64,12 @@ class Orchestrator {
 
   start(apps: readonly AppSpec[]): void {
     this.installSignalHandlers();
+
+    // Build workspace packages so dist/ is current before tsx resolves
+    // @agentic-patterns/* imports. Fast if nothing changed (tsup caches).
+    process.stdout.write("\x1b[2mbuilding packages...\x1b[0m\n");
+    execSync("pnpm --silent build", { stdio: "inherit" });
+
     for (const app of apps) {
       this.processes.push(this.spawnApp(app));
     }

@@ -10,15 +10,15 @@ default:
 
 # Start server + dashboard
 dev:
-    pnpm dev
+    tsx tools/dev.ts
 
 # Start with opus tier
 dev-opus:
-    AGENT_TIER=opus pnpm dev
+    AGENT_TIER=opus tsx tools/dev.ts
 
 # Start with haiku tier
 dev-haiku:
-    AGENT_TIER=haiku pnpm dev
+    AGENT_TIER=haiku tsx tools/dev.ts
 
 # ── Checks ───────────────────────────────────
 
