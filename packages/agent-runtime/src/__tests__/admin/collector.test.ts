@@ -267,4 +267,71 @@ describe("InMemoryEventCollector", () => {
     );
     expect(collector.getDashboardStats().agents).toHaveLength(0);
   });
+
+  // ---------------------------------------------------------------------------
+  // getToolAnalytics — date filters
+  // ---------------------------------------------------------------------------
+
+  describe("getToolAnalytics date filters", () => {
+    async function seedThreeToolCalls(collector: InMemoryEventCollector, bus: AgentEventBus) {
+      // Register the agent via message.start so tool.end has a trace context.
+      await bus.publish(
+        createEvent("agent.message.start", { ...baseFields, agentName: "agent-1" }),
+      );
+      const at = (iso: string) => new Date(iso);
+      for (const [ts, durationMs] of [
+        ["2026-01-01T00:00:00Z", 10],
+        ["2026-02-01T00:00:00Z", 20],
+        ["2026-03-01T00:00:00Z", 30],
+      ] as const) {
+        const event = {
+          ...createEvent("agent.tool.end", {
+            ...baseFields,
+            toolCallId: `tc-${ts}`,
+            toolName: "read_file",
+            arguments: {},
+            result: "ok",
+            durationMs,
+            resultTokens: 0,
+          }),
+          timestamp: at(ts),
+        };
+        await bus.publish(event);
+      }
+      // Silence unused variable warning
+      void collector;
+    }
+
+    it("returns all calls when no filters provided", async () => {
+      const { collector, bus } = makeCollector();
+      await seedThreeToolCalls(collector, bus);
+      const [tool] = collector.getToolAnalytics();
+      expect(tool?.totalCalls).toBe(3);
+    });
+
+    it("filters out calls before `from`", async () => {
+      const { collector, bus } = makeCollector();
+      await seedThreeToolCalls(collector, bus);
+      const [tool] = collector.getToolAnalytics({ from: new Date("2026-01-15T00:00:00Z") });
+      expect(tool?.totalCalls).toBe(2);
+    });
+
+    it("filters out calls after `to`", async () => {
+      const { collector, bus } = makeCollector();
+      await seedThreeToolCalls(collector, bus);
+      const [tool] = collector.getToolAnalytics({ to: new Date("2026-02-15T00:00:00Z") });
+      expect(tool?.totalCalls).toBe(2);
+    });
+
+    it("applies both `from` and `to` bounds", async () => {
+      const { collector, bus } = makeCollector();
+      await seedThreeToolCalls(collector, bus);
+      const [tool] = collector.getToolAnalytics({
+        from: new Date("2026-01-15T00:00:00Z"),
+        to: new Date("2026-02-15T00:00:00Z"),
+      });
+      expect(tool?.totalCalls).toBe(1);
+      expect(tool?.totalDurationMs).toBe(20);
+    });
+  });
 });
