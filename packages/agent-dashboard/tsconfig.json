@@ -5,9 +5,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "composite": false,
     "declaration": false,
-    "declarationMap": false,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "declarationMap": false
   },
   "include": ["src"]
 }

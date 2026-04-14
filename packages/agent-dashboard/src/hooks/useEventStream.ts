@@ -24,7 +24,7 @@ export function useEventStream(path: string): UseEventStreamResult {
   const [error, setError] = useState<string | null>(null);
   const counterRef = useRef(0);
   const retryDelayRef = useRef(INITIAL_RETRY_MS);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     let cancelled = false;
