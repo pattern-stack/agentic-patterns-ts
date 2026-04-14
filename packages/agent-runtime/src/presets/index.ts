@@ -21,3 +21,7 @@ export {
   INFORMATION_RETRIEVAL,
   ANALYSIS,
 } from "./responsibilities.js";
+
+export { buildCalculatorAgent, CalculatorToolbox } from "./agents/calculator.js";
+export { buildTodoAgent, TodoToolbox } from "./agents/todo-manager.js";
+export { buildWritingCoachAgent } from "./agents/writing-coach.js";

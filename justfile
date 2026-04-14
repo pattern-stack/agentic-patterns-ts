@@ -6,29 +6,21 @@ set dotenv-load
 default:
     @just --list
 
-# ── Dev ──────────────────────────────────────────
+# ── Dev ──────────────────────────────────────
 
 # Start server + dashboard
 dev:
     pnpm dev
 
-# Start with Ollama sonnet tier
-dev-ollama:
-    pnpm dev
-
-# Start with Ollama opus tier
+# Start with opus tier
 dev-opus:
     AGENT_TIER=opus pnpm dev
 
-# Start with Ollama haiku tier
+# Start with haiku tier
 dev-haiku:
     AGENT_TIER=haiku pnpm dev
 
-# Start with a custom demo file
-dev-custom file:
-    DEMO_FILE={{file}} pnpm dev
-
-# ── Checks ───────────────────────────────────────
+# ── Checks ───────────────────────────────────
 
 # Build + typecheck + lint + test
 check:
@@ -43,9 +35,6 @@ typecheck:
 lint:
     pnpm lint
 
-lint-fix:
-    pnpm lint:fix
-
 test:
     pnpm test
 
@@ -58,17 +47,17 @@ test-server:
 test-dashboard:
     pnpm --filter @agentic-patterns/dashboard test
 
-# ── Live tests ───────────────────────────────────
+# ── Live tests ───────────────────────────────
 
 # Ollama live test (needs OLLAMA_HOST in .env)
-test-ollama:
+test-live:
     pnpm --filter @agentic-patterns/runtime test
 
 # Claude live test (needs claude CLI)
 test-claude:
     RUN_LIVE_CLAUDE=1 pnpm --filter @agentic-patterns/runtime test
 
-# ── Stack ────────────────────────────────────────
+# ── Stack ────────────────────────────────────
 
 stack:
     st status

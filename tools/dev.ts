@@ -44,13 +44,13 @@ const APPS: readonly AppSpec[] = [
     name: "server",
     color: "36", // cyan
     command: "pnpm",
-    args: ["--filter", "@agentic-patterns/server", "dev"],
+    args: ["--silent", "--filter", "@agentic-patterns/server", "dev"],
   },
   {
     name: "dashboard",
     color: "35", // magenta
     command: "pnpm",
-    args: ["--filter", "@agentic-patterns/dashboard", "dev"],
+    args: ["--silent", "--filter", "@agentic-patterns/dashboard", "dev"],
   },
 ];
 
