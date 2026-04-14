@@ -4,8 +4,8 @@
 
 import type {
   AdminServiceProtocol,
+  AgentEventBus,
   AgentLike,
-  EventBus,
   RunResult,
   RunnerProtocol,
 } from "@agentic-patterns/runtime";
@@ -67,7 +67,7 @@ export interface CORSConfig {
 export interface ServerConfig {
   readonly agents: AgentRegistration[];
   readonly adminService: AdminServiceProtocol;
-  readonly eventBus: EventBus;
+  readonly eventBus: AgentEventBus;
   readonly sseExporter: SSEExporterLike;
   readonly store?: ConversationStoreLike;
   readonly staticDir?: string;

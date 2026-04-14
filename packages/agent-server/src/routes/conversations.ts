@@ -2,7 +2,8 @@
  * Conversation routes — create conversations and stream messages via SSE.
  */
 
-import { AgentEventBus, Conversation } from "@agentic-patterns/runtime";
+import type { AgentEventBus } from "@agentic-patterns/runtime";
+import { Conversation } from "@agentic-patterns/runtime";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
@@ -17,6 +18,7 @@ export interface ConversationEntry {
 export function conversationRoutes(
   agents: AgentRegistration[],
   conversations: Map<string, ConversationEntry>,
+  eventBus: AgentEventBus,
 ): Hono {
   const app = new Hono();
 
@@ -58,10 +60,11 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
-    // SSE streaming response
+    // SSE streaming response. We pass the server's shared eventBus so
+    // emitted events reach every attached exporter (collector, SSE
+    // broadcast, etc.) in addition to flowing through the generator for
+    // this client stream.
     return streamSSE(c, async (stream) => {
-      const eventBus = new AgentEventBus();
-
       for await (const event of conversation.stream(content, { eventBus })) {
         const msg = agentEventToSSE(event);
         if (msg) {

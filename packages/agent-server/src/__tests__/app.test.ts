@@ -1,3 +1,4 @@
+import { AgentEventBus, createEvent } from "@agentic-patterns/runtime";
 import { describe, expect, it } from "vitest";
 import { createServer } from "../app.js";
 import type { AgentRegistration, ServerConfig } from "../config.js";
@@ -247,6 +248,69 @@ describe("POST /conversations/:id/messages", () => {
     expect(res.status).toBe(501);
     const body = (await res.json()) as { error: string };
     expect(body.error).toBe("Streaming not supported by this runner");
+  });
+
+  // Regression — events emitted while streaming a conversation must reach
+  // the EventBus in ServerConfig so attached exporters (collector, SSE
+  // broadcaster) observe them. Previously the route instantiated a fresh
+  // AgentEventBus per request and admin stats stayed empty forever.
+  it("forwards streaming events to the config eventBus", async () => {
+    const eventBus = new AgentEventBus();
+    const seen: string[] = [];
+    eventBus.subscribe("agent.message.chunk", (e) => {
+      seen.push(e.type);
+    });
+
+    // Runner whose stream() emits a chunk event through the bus it was
+    // handed, then returns. Mirrors how the real AgentRunner behaves.
+    const streamingRunner = {
+      async run() {
+        return {
+          response: "ok",
+          inputTokens: 0,
+          outputTokens: 0,
+          toolCallsCount: 0,
+          iterations: 0,
+          finishReason: "stop",
+        };
+      },
+      async *stream(_agent: unknown, _message: string, options?: { eventBus?: AgentEventBus }) {
+        const chunk = createEvent("agent.message.chunk", {
+          traceId: "t",
+          runId: "r",
+          delta: "hello",
+          chunkIndex: 0,
+        });
+        await options?.eventBus?.publish(chunk);
+        yield chunk;
+      },
+    };
+
+    const reg: AgentRegistration = {
+      id: "streamer",
+      name: "Streamer",
+      agent: mockAgent,
+      runner: streamingRunner,
+    };
+
+    const app = createServer(makeConfig({ agents: [reg], eventBus }));
+
+    const createRes = await app.request("/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: "streamer" }),
+    });
+    const { id } = (await createRes.json()) as { id: string };
+
+    // Drain the SSE response fully so the generator runs to completion.
+    const res = await app.request(`/conversations/${id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "hi" }),
+    });
+    await res.text();
+
+    expect(seen).toContain("agent.message.chunk");
   });
 });
 
