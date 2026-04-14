@@ -22,7 +22,7 @@ export function createServer(config: ServerConfig): Hono {
   const conversations = new Map<string, ConversationEntry>();
 
   // Middleware
-  app.use("*", corsMiddleware());
+  app.use("*", corsMiddleware(config.cors));
   app.onError(errorHandler);
 
   // Routes

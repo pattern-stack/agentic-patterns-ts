@@ -2,54 +2,28 @@
  * Server configuration types.
  */
 
-import type { AdminServiceProtocol, EventBus } from "@agentic-patterns/runtime";
+import type {
+  AdminServiceProtocol,
+  AgentLike,
+  EventBus,
+  RunResult,
+  RunnerProtocol,
+} from "@agentic-patterns/runtime";
 
 /**
  * Agent registration — what the server knows about each agent.
+ *
+ * `agent` and `runner.run/stream` use the canonical protocol shapes
+ * (`AgentLike`, `RunnerProtocol`, `RunResult`) from the runtime so the
+ * server and runtime share a single contract end-to-end.
  */
 export interface AgentRegistration {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
-  /** The agent object (minimal shape needed by Conversation). */
-  readonly agent: {
-    getModel(): string;
-    getTools(): unknown[];
-    getSystemPrompt(): string;
-    renderInitialPrompt(): string;
-    role: { name: string };
-  };
-  /** The runner for this agent. */
-  readonly runner: {
-    run(
-      agent: {
-        getModel(): string;
-        getTools(): unknown[];
-        getSystemPrompt(): string;
-        renderInitialPrompt(): string;
-        role: { name: string };
-      },
-      message: string,
-      options?: Record<string, unknown>,
-    ): Promise<{
-      response: string;
-      inputTokens: number;
-      outputTokens: number;
-      toolCallsCount: number;
-      iterations: number;
-      finishReason: string;
-    }>;
-    stream?(
-      agent: {
-        getModel(): string;
-        getTools(): unknown[];
-        getSystemPrompt(): string;
-        renderInitialPrompt(): string;
-        role: { name: string };
-      },
-      message: string,
-      options?: Record<string, unknown>,
-    ): AsyncGenerator<import("@agentic-patterns/runtime").AgentEvent>;
+  readonly agent: AgentLike;
+  readonly runner: Pick<RunnerProtocol, "run" | "stream"> & {
+    run(agent: AgentLike, message: string, options?: Record<string, unknown>): Promise<RunResult>;
   };
 }
 
@@ -73,6 +47,21 @@ export interface ConversationStoreLike {
 }
 
 /**
+ * CORS configuration passed to the Hono cors middleware.
+ *
+ * Default is `origin: "*"` for local development. Production deployments
+ * should pin to known origins.
+ */
+export interface CORSConfig {
+  readonly origin?: string | string[];
+  readonly allowMethods?: string[];
+  readonly allowHeaders?: string[];
+  readonly maxAge?: number;
+  readonly credentials?: boolean;
+  readonly exposeHeaders?: string[];
+}
+
+/**
  * Server configuration.
  */
 export interface ServerConfig {
@@ -82,4 +71,6 @@ export interface ServerConfig {
   readonly sseExporter: SSEExporterLike;
   readonly store?: ConversationStoreLike;
   readonly staticDir?: string;
+  /** CORS options forwarded to Hono's cors middleware. Defaults to `origin: "*"`. */
+  readonly cors?: CORSConfig;
 }

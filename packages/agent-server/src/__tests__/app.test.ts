@@ -291,3 +291,26 @@ describe("admin routes", () => {
     expect(res.headers.get("content-type")).toBe("text/event-stream");
   });
 });
+
+describe("CORS configuration", () => {
+  it("defaults to wildcard origin", async () => {
+    const app = createServer(makeConfig());
+    const res = await app.request("/health", {
+      method: "OPTIONS",
+      headers: { Origin: "https://example.com", "Access-Control-Request-Method": "GET" },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("honors a custom pinned origin", async () => {
+    const app = createServer(makeConfig({ cors: { origin: "https://dashboard.example.com" } }));
+    const res = await app.request("/health", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://dashboard.example.com",
+        "Access-Control-Request-Method": "GET",
+      },
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://dashboard.example.com");
+  });
+});
