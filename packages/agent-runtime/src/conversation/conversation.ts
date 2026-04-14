@@ -9,6 +9,7 @@ import { getAgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
 import { createEvent } from "../events/types.js";
 import type {
+  AgentLike,
   CanonicalMessage,
   CanonicalMessagePart,
   RunResult,
@@ -45,19 +46,6 @@ export interface Exchange {
  */
 export function exchangeTotalTokens(exchange: Exchange): number {
   return exchange.inputTokens + exchange.outputTokens;
-}
-
-// ---------------------------------------------------------------------------
-// Agent interface (minimal shape for Conversation)
-// ---------------------------------------------------------------------------
-
-/** Minimal agent shape needed by Conversation. */
-interface AgentLike {
-  getModel(): string;
-  getTools(): unknown[];
-  getSystemPrompt(): string;
-  renderInitialPrompt(): string;
-  role: { name: string };
 }
 
 // ---------------------------------------------------------------------------
