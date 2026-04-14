@@ -33,10 +33,10 @@ import {
 } from "@agentic-patterns/core";
 import {
   AgentEventBus,
-  ClaudeCodeAPIRunner,
   InMemoryAdminService,
   InMemoryEventCollector,
   SSEExporter,
+  createRunner,
 } from "@agentic-patterns/runtime";
 import { serve } from "@hono/node-server";
 import { z } from "zod";
@@ -127,9 +127,12 @@ const adminService = new InMemoryAdminService(collector);
 const sseExporter = new SSEExporter();
 sseExporter.attach(eventBus);
 
-const runner = new ClaudeCodeAPIRunner({
+// Pick a runner automatically: explicit env (ANTHROPIC_API_KEY / OPENAI_API_KEY
+// / OLLAMA_HOST / …) → Claude CLI → error. Set `AGENT_TIER=opus|sonnet|haiku`
+// to move up/down the ladder without editing this file.
+const { runner } = await createRunner({
   eventBus,
-  defaults: { tools: [] },
+  tier: (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet",
 });
 
 const mathAgent = buildMathAgent();
