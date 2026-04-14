@@ -7,6 +7,7 @@
     "url": "https://github.com/pattern-stack/agentic-patterns-ts.git"
   },
   "scripts": {
+    "dev": "tsx tools/dev.ts",
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",

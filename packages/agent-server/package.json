@@ -39,7 +39,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "biome check src/",
-    "demo": "tsx examples/live-demo.ts"
+    "demo": "tsx examples/live-demo.ts",
+    "dev": "tsx --watch ${DEMO_FILE:-examples/live-demo.ts}"
   },
   "dependencies": {
     "hono": "^4.0.0",
