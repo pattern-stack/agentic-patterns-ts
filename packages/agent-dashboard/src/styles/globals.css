@@ -71,3 +71,15 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+/* Cursor used in ChatPanel while a response is streaming. */
+@keyframes apdash-blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
+}
