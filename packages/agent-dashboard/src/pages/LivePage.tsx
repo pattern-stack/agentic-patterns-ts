@@ -1,3 +1,8 @@
+import { Badge } from "../components/atoms/Badge";
+import { Button } from "../components/atoms/Button";
+import { Card } from "../components/atoms/Card";
+import { Spinner } from "../components/atoms/Spinner";
+import { AlertIcon } from "../components/atoms/icons";
 import { EventStream } from "../components/organisms/EventStream";
 import { useEventStream } from "../hooks/useEventStream";
 
@@ -14,38 +19,58 @@ export function LivePage() {
           marginBottom: 20,
         }}
       >
-        <h1 style={{ fontSize: 20, fontWeight: 600 }}>Live Events</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>{events.length} events</span>
-          <button
-            type="button"
-            onClick={clear}
-            style={{
-              padding: "4px 12px",
-              fontSize: 13,
-              background: "var(--bg-surface-hover)",
-              color: "var(--fg-default)",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              cursor: "pointer",
-            }}
-          >
+          <h1 style={{ fontSize: 20, fontWeight: 600 }}>Live Events</h1>
+          {connected ? (
+            <Badge tone="green" variant="outline">
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--green)",
+                }}
+              />
+              connected
+            </Badge>
+          ) : (
+            <Badge tone="yellow" variant="outline">
+              <Spinner size={10} color="var(--yellow)" thickness={1.5} />
+              reconnecting…
+            </Badge>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Badge tone="muted" variant="outline">
+            {events.length} events
+          </Badge>
+          <Button variant="ghost" size="sm" onClick={clear}>
             Clear
-          </button>
+          </Button>
         </div>
       </div>
       {error && (
-        <div
+        <Card
           style={{
-            color: "var(--yellow)",
-            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
             marginBottom: 12,
+            padding: "10px 14px",
+            color: "var(--red)",
+            borderColor: "var(--red)",
+            fontSize: 13,
           }}
+          padded={false}
         >
-          {error}
-        </div>
+          <AlertIcon size={14} />
+          <span>{error}</span>
+        </Card>
       )}
-      <EventStream events={events} connected={connected} />
+      <Card padded={false}>
+        <EventStream events={events} connected={connected} />
+      </Card>
     </div>
   );
 }
