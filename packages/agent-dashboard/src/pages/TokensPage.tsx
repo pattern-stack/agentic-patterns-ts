@@ -31,8 +31,8 @@ export function TokensPage() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  if (loading) return <div style={{ color: "var(--text-secondary)" }}>Loading...</div>;
-  if (error) return <div style={{ color: "var(--accent-red)" }}>Error: {error}</div>;
+  if (loading) return <div style={{ color: "var(--fg-muted)" }}>Loading...</div>;
+  if (error) return <div style={{ color: "var(--red)" }}>Error: {error}</div>;
 
   return (
     <div>
@@ -47,8 +47,8 @@ export function TokensPage() {
               fontSize: 13,
               border: "1px solid var(--border)",
               borderRadius: 4,
-              background: groupBy === "agent" ? "var(--accent-blue)" : "var(--bg-secondary)",
-              color: groupBy === "agent" ? "#fff" : "var(--text-secondary)",
+              background: groupBy === "agent" ? "var(--accent)" : "var(--bg-surface)",
+              color: groupBy === "agent" ? "#fff" : "var(--fg-muted)",
               cursor: "pointer",
             }}
           >
@@ -62,8 +62,8 @@ export function TokensPage() {
               fontSize: 13,
               border: "1px solid var(--border)",
               borderRadius: 4,
-              background: groupBy === "model" ? "var(--accent-blue)" : "var(--bg-secondary)",
-              color: groupBy === "model" ? "#fff" : "var(--text-secondary)",
+              background: groupBy === "model" ? "var(--accent)" : "var(--bg-surface)",
+              color: groupBy === "model" ? "#fff" : "var(--fg-muted)",
               cursor: "pointer",
             }}
           >

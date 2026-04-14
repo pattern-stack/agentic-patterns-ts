@@ -16,17 +16,15 @@ export function LivePage() {
       >
         <h1 style={{ fontSize: 20, fontWeight: 600 }}>Live Events</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {events.length} events
-          </span>
+          <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>{events.length} events</span>
           <button
             type="button"
             onClick={clear}
             style={{
               padding: "4px 12px",
               fontSize: 13,
-              background: "var(--bg-tertiary)",
-              color: "var(--text-primary)",
+              background: "var(--bg-surface-hover)",
+              color: "var(--fg-default)",
               border: "1px solid var(--border)",
               borderRadius: 6,
               cursor: "pointer",
@@ -39,7 +37,7 @@ export function LivePage() {
       {error && (
         <div
           style={{
-            color: "var(--accent-yellow)",
+            color: "var(--yellow)",
             fontSize: 13,
             marginBottom: 12,
           }}

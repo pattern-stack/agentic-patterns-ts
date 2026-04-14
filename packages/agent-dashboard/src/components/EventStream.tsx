@@ -2,17 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import type { StreamEvent } from "../hooks/useEventStream";
 
 const typeBadgeColors: Record<string, string> = {
-  "tool.start": "var(--accent-blue)",
-  "tool.end": "var(--accent-blue)",
-  "llm.start": "var(--accent-yellow)",
-  "llm.end": "var(--accent-yellow)",
-  "agent.start": "var(--accent-green)",
-  "agent.end": "var(--accent-green)",
-  error: "var(--accent-red)",
+  "tool.start": "var(--accent)",
+  "tool.end": "var(--accent)",
+  "llm.start": "var(--yellow)",
+  "llm.end": "var(--yellow)",
+  "agent.start": "var(--green)",
+  "agent.end": "var(--green)",
+  error: "var(--red)",
 };
 
 function badgeColor(type: string): string {
-  return typeBadgeColors[type] ?? "var(--text-secondary)";
+  return typeBadgeColors[type] ?? "var(--fg-muted)";
 }
 
 function formatTime(timestamp: string): string {
@@ -61,10 +61,10 @@ export function EventStream({ events, connected }: EventStreamProps) {
             width: 8,
             height: 8,
             borderRadius: "50%",
-            background: connected ? "var(--accent-green)" : "var(--accent-red)",
+            background: connected ? "var(--green)" : "var(--red)",
           }}
         />
-        <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+        <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>
           {connected ? "Connected" : "Disconnected"}
         </span>
         <button
@@ -74,8 +74,8 @@ export function EventStream({ events, connected }: EventStreamProps) {
             marginLeft: "auto",
             padding: "4px 12px",
             fontSize: 13,
-            background: paused ? "var(--accent-yellow)" : "var(--bg-tertiary)",
-            color: paused ? "var(--bg-primary)" : "var(--text-primary)",
+            background: paused ? "var(--yellow)" : "var(--bg-surface-hover)",
+            color: paused ? "var(--bg-canvas)" : "var(--fg-default)",
             border: "1px solid var(--border)",
             borderRadius: 6,
             cursor: "pointer",
@@ -87,7 +87,7 @@ export function EventStream({ events, connected }: EventStreamProps) {
       <div
         ref={containerRef}
         style={{
-          background: "var(--bg-secondary)",
+          background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: 8,
           height: "calc(100vh - 200px)",
@@ -99,7 +99,7 @@ export function EventStream({ events, connected }: EventStreamProps) {
             style={{
               padding: 32,
               textAlign: "center",
-              color: "var(--text-secondary)",
+              color: "var(--fg-muted)",
               fontSize: 14,
             }}
           >
@@ -120,7 +120,7 @@ export function EventStream({ events, connected }: EventStreamProps) {
           >
             <span
               style={{
-                color: "var(--text-secondary)",
+                color: "var(--fg-muted)",
                 fontSize: 12,
                 fontFamily: "monospace",
                 flexShrink: 0,
@@ -131,7 +131,7 @@ export function EventStream({ events, connected }: EventStreamProps) {
             <span
               style={{
                 background: badgeColor(event.type),
-                color: "var(--bg-primary)",
+                color: "var(--bg-canvas)",
                 padding: "1px 8px",
                 borderRadius: 4,
                 fontSize: 11,
@@ -141,7 +141,7 @@ export function EventStream({ events, connected }: EventStreamProps) {
             >
               {event.type}
             </span>
-            <span style={{ color: "var(--text-primary)" }}>{summarize(event)}</span>
+            <span style={{ color: "var(--fg-default)" }}>{summarize(event)}</span>
           </div>
         ))}
       </div>

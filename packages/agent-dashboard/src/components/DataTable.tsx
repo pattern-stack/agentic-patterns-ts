@@ -25,7 +25,7 @@ const cellStyle = (align = "left") =>
 const headerStyle = (align = "left") =>
   ({
     ...cellStyle(align),
-    color: "var(--text-secondary)",
+    color: "var(--fg-muted)",
     fontWeight: 500,
     fontSize: 12,
     textTransform: "uppercase" as const,
@@ -45,7 +45,7 @@ export function DataTable<T>({
   return (
     <div
       style={{
-        background: "var(--bg-secondary)",
+        background: "var(--bg-surface)",
         border: "1px solid var(--border)",
         borderRadius: 8,
         overflow: "hidden",
@@ -81,7 +81,7 @@ export function DataTable<T>({
                 cursor: onRowClick ? "pointer" : "default",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-tertiary)";
+                e.currentTarget.style.background = "var(--bg-surface-hover)";
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = "transparent";
@@ -102,7 +102,7 @@ export function DataTable<T>({
                 colSpan={columns.length}
                 style={{
                   ...cellStyle("center"),
-                  color: "var(--text-secondary)",
+                  color: "var(--fg-muted)",
                   padding: 32,
                 }}
               >

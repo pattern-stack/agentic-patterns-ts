@@ -5,11 +5,11 @@ interface StatCardProps {
   color?: string;
 }
 
-export function StatCard({ label, value, subtitle, color = "var(--text-primary)" }: StatCardProps) {
+export function StatCard({ label, value, subtitle, color = "var(--fg-default)" }: StatCardProps) {
   return (
     <div
       style={{
-        background: "var(--bg-secondary)",
+        background: "var(--bg-surface)",
         border: "1px solid var(--border)",
         borderRadius: 8,
         padding: 20,
@@ -18,7 +18,7 @@ export function StatCard({ label, value, subtitle, color = "var(--text-primary)"
       <div
         style={{
           fontSize: 13,
-          color: "var(--text-secondary)",
+          color: "var(--fg-muted)",
           marginBottom: 4,
         }}
       >
@@ -29,7 +29,7 @@ export function StatCard({ label, value, subtitle, color = "var(--text-primary)"
         <div
           style={{
             fontSize: 12,
-            color: "var(--text-secondary)",
+            color: "var(--fg-muted)",
             marginTop: 4,
           }}
         >

@@ -4,11 +4,11 @@ import { DataTable } from "../components/DataTable";
 import { useAdminData } from "../hooks/useAdminData";
 
 function errorRateColor(totalCalls: number, totalErrors: number): string {
-  if (totalCalls === 0) return "var(--text-secondary)";
+  if (totalCalls === 0) return "var(--fg-muted)";
   const rate = 1 - totalErrors / totalCalls;
-  if (rate >= 0.95) return "var(--accent-green)";
-  if (rate >= 0.8) return "var(--accent-yellow)";
-  return "var(--accent-red)";
+  if (rate >= 0.95) return "var(--green)";
+  if (rate >= 0.8) return "var(--yellow)";
+  return "var(--red)";
 }
 
 function getField(row: ToolAnalytics, key: string): string {
@@ -36,8 +36,8 @@ export function ToolsPage() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  if (loading) return <div style={{ color: "var(--text-secondary)" }}>Loading...</div>;
-  if (error) return <div style={{ color: "var(--accent-red)" }}>Error: {error}</div>;
+  if (loading) return <div style={{ color: "var(--fg-muted)" }}>Loading...</div>;
+  if (error) return <div style={{ color: "var(--red)" }}>Error: {error}</div>;
 
   return (
     <div>

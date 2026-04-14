@@ -37,8 +37,8 @@ export function AgentsPage() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  if (loading) return <div style={{ color: "var(--text-secondary)" }}>Loading...</div>;
-  if (error) return <div style={{ color: "var(--accent-red)" }}>Error: {error}</div>;
+  if (loading) return <div style={{ color: "var(--fg-muted)" }}>Loading...</div>;
+  if (error) return <div style={{ color: "var(--red)" }}>Error: {error}</div>;
 
   return (
     <div>
@@ -68,7 +68,7 @@ export function AgentsPage() {
             render: (row) => (
               <span
                 style={{
-                  color: row.totalErrors > 0 ? "var(--accent-red)" : "var(--text-secondary)",
+                  color: row.totalErrors > 0 ? "var(--red)" : "var(--fg-muted)",
                 }}
               >
                 {row.totalErrors}

@@ -5,8 +5,8 @@ import { useAdminData } from "../hooks/useAdminData";
 export function DashboardPage() {
   const { data, loading, error } = useAdminData<DashboardStats>("/admin/dashboard");
 
-  if (loading) return <div style={{ color: "var(--text-secondary)" }}>Loading...</div>;
-  if (error) return <div style={{ color: "var(--accent-red)" }}>Error: {error}</div>;
+  if (loading) return <div style={{ color: "var(--fg-muted)" }}>Loading...</div>;
+  if (error) return <div style={{ color: "var(--red)" }}>Error: {error}</div>;
   if (!data) return null;
 
   const totalInputTokens = data.agents.reduce((sum, a) => sum + a.totalInputTokens, 0);
@@ -23,11 +23,11 @@ export function DashboardPage() {
           marginBottom: 32,
         }}
       >
-        <StatCard label="Active Agents" value={data.activeAgentCount} color="var(--accent-blue)" />
+        <StatCard label="Active Agents" value={data.activeAgentCount} color="var(--accent)" />
         <StatCard
           label="Conversations"
           value={data.activeConversationCount}
-          color="var(--accent-blue)"
+          color="var(--accent)"
         />
         <StatCard label="Tokens In" value={totalInputTokens.toLocaleString()} />
         <StatCard label="Tokens Out" value={totalOutputTokens.toLocaleString()} />
@@ -35,7 +35,7 @@ export function DashboardPage() {
         <StatCard
           label="Errors"
           value={data.totalErrors}
-          color={data.totalErrors > 0 ? "var(--accent-red)" : "var(--accent-green)"}
+          color={data.totalErrors > 0 ? "var(--red)" : "var(--green)"}
         />
       </div>
     </div>

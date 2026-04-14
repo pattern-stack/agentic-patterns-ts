@@ -16,7 +16,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <nav
         style={{
           width: 220,
-          background: "var(--bg-secondary)",
+          background: "var(--bg-surface)",
           borderRight: "1px solid var(--border)",
           padding: "20px 0",
           flexShrink: 0,
@@ -27,7 +27,7 @@ export function Layout({ children }: { children: ReactNode }) {
             padding: "0 20px 24px",
             fontSize: 15,
             fontWeight: 600,
-            color: "var(--text-primary)",
+            color: "var(--fg-default)",
             letterSpacing: "-0.01em",
           }}
         >
@@ -42,9 +42,9 @@ export function Layout({ children }: { children: ReactNode }) {
               display: "block",
               padding: "8px 20px",
               fontSize: 14,
-              color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
-              background: isActive ? "var(--bg-tertiary)" : "transparent",
-              borderLeft: isActive ? "2px solid var(--accent-blue)" : "2px solid transparent",
+              color: isActive ? "var(--fg-default)" : "var(--fg-muted)",
+              background: isActive ? "var(--bg-surface-hover)" : "transparent",
+              borderLeft: isActive ? "2px solid var(--accent)" : "2px solid transparent",
               textDecoration: "none",
             })}
           >

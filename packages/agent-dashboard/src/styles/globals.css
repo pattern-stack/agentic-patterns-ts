@@ -1,15 +1,50 @@
-:root {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --border: #30363d;
-  --text-primary: #e6edf3;
-  --text-secondary: #7d8590;
+/**
+ * Design tokens — mirrors the pattern-stack/stack-bench palette so sibling
+ * apps share the same visual language and future theming work (light mode,
+ * brand palettes) lands in one place.
+ *
+ * Token groups:
+ *   bg.*      — surfaces (canvas, surface, inset for inputs, hover)
+ *   border.*  — borders (default + muted)
+ *   fg.*      — text (default, muted, subtle)
+ *   accent    — primary accent (links, CTAs)
+ *   green / red / yellow / purple — semantic colors
+ *   accent-emerald[-dim] — agent-UI accent (chat, tool calls)
+ *   font-sans / font-mono — type stack
+ */
 
-  --accent-blue: #58a6ff;
-  --accent-green: #3fb950;
-  --accent-red: #f85149;
-  --accent-yellow: #d29922;
+:root {
+  /* Backgrounds */
+  --bg-canvas: #0d1117;
+  --bg-surface: #161b22;
+  --bg-surface-hover: #1c2128;
+  --bg-inset: #0d1117;
+
+  /* Borders */
+  --border: #30363d;
+  --border-muted: #21262d;
+
+  /* Foreground / text */
+  --fg-default: #e6edf3;
+  --fg-muted: #7d8590;
+  --fg-subtle: #484f58;
+
+  /* Semantic accents */
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --purple: #bc8cff;
+
+  /* Agent-UI accent (chat bubbles, tool cards) */
+  --accent-emerald: #6ee7b7;
+  --accent-emerald-dim: #065f46;
+
+  /* Typography */
+  --font-sans: "IBM Plex Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
 }
 
 *,
@@ -21,16 +56,15 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial,
-    sans-serif;
-  background: var(--bg-primary);
-  color: var(--text-primary);
+  font-family: var(--font-sans);
+  background: var(--bg-canvas);
+  color: var(--fg-default);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
 a {
-  color: var(--accent-blue);
+  color: var(--accent);
   text-decoration: none;
 }
 
