@@ -28,11 +28,15 @@ export const ollamaProvider: ProviderProtocol = {
     // explicitly so remote GPU boxes (e.g. behind a VPN) work out of
     // the box when the user sets the env var.
     const host = process.env.OLLAMA_HOST;
+    // simulateStreaming: use the reliable non-streaming API (which
+    // correctly returns tool_calls) wrapped in a stream interface.
+    // Real streaming silently drops tool calls for many models.
+    const settings = { simulateStreaming: true };
     if (host) {
       const baseURL = `${host.replace(/\/$/, "")}/api`;
       const provider = mod.createOllama({ baseURL });
-      return provider(modelId);
+      return provider(modelId, settings);
     }
-    return mod.ollama(modelId);
+    return mod.ollama(modelId, settings);
   },
 };
