@@ -237,6 +237,29 @@ export class AgentRunner implements RunnerProtocol {
       const resultToolCalls = result.toolCalls ?? [];
       const hasToolCalls = resultToolCalls.length > 0;
 
+      // If the model produced reasoning (extended-thinking, o-series, etc.),
+      // emit a single thinking.start + completed agent.reasoning pair. The
+      // non-streaming path can't expose per-delta events, so one summary is
+      // the faithful best-effort mapping.
+      const reasoningContent = (result as { reasoning?: string | undefined }).reasoning;
+      if (reasoningContent && reasoningContent.length > 0) {
+        await this.emit(
+          createEvent("agent.thinking.start", {
+            traceId: effectiveTraceId,
+            runId,
+            parentSpanId: llmSpanId,
+          }),
+        );
+        await this.emit(
+          createEvent("agent.reasoning", {
+            traceId: effectiveTraceId,
+            runId,
+            content: reasoningContent,
+            isComplete: true,
+          }),
+        );
+      }
+
       // Emit LLM call end
       await this.emit(
         createEvent("agent.llm.end", {
@@ -525,9 +548,32 @@ export class AgentRunner implements RunnerProtocol {
       let stepFinishReason = "stop";
       let hadError = false;
 
+      // Reasoning-block tracking. Some models (Claude extended thinking,
+      // o-series, Gemini 2.5 thinking, DeepSeek Reasoner) emit one or more
+      // reasoning deltas before switching back to text/tool-calls. We emit
+      // exactly one `agent.thinking.start` per block, stream per-delta
+      // `agent.reasoning` events with `isComplete: false`, then one final
+      // `agent.reasoning` with `isComplete: true` carrying the full
+      // accumulated text when the block ends.
+      let reasoningActive = false;
+      let reasoningText = "";
+
       for await (const part of streamResult.fullStream) {
         switch (part.type) {
           case "text-delta": {
+            // Transition reasoning -> text: close the reasoning block first.
+            if (reasoningActive) {
+              const reasoningCompleteEvent = createEvent("agent.reasoning", {
+                traceId: effectiveTraceId,
+                runId,
+                content: reasoningText,
+                isComplete: true,
+              });
+              await this.emit(reasoningCompleteEvent);
+              yield reasoningCompleteEvent;
+              reasoningActive = false;
+              reasoningText = "";
+            }
             iterText += part.textDelta;
             const chunkEvent = createEvent("agent.message.chunk", {
               traceId: effectiveTraceId,
@@ -539,7 +585,43 @@ export class AgentRunner implements RunnerProtocol {
             yield chunkEvent;
             break;
           }
+          case "reasoning": {
+            if (!reasoningActive) {
+              reasoningActive = true;
+              reasoningText = "";
+              const startEvent = createEvent("agent.thinking.start", {
+                traceId: effectiveTraceId,
+                runId,
+                parentSpanId: llmSpanId,
+              });
+              await this.emit(startEvent);
+              yield startEvent;
+            }
+            reasoningText += part.textDelta;
+            const deltaEvent = createEvent("agent.reasoning", {
+              traceId: effectiveTraceId,
+              runId,
+              content: part.textDelta,
+              isComplete: false,
+            });
+            await this.emit(deltaEvent);
+            yield deltaEvent;
+            break;
+          }
           case "tool-call": {
+            // Transition reasoning -> tool-call: close the reasoning block.
+            if (reasoningActive) {
+              const reasoningCompleteEvent = createEvent("agent.reasoning", {
+                traceId: effectiveTraceId,
+                runId,
+                content: reasoningText,
+                isComplete: true,
+              });
+              await this.emit(reasoningCompleteEvent);
+              yield reasoningCompleteEvent;
+              reasoningActive = false;
+              reasoningText = "";
+            }
             pendingToolCalls.push({
               toolCallId: part.toolCallId,
               toolName: part.toolName,
@@ -585,9 +667,23 @@ export class AgentRunner implements RunnerProtocol {
             break;
           }
           default:
-            // step-start, finish, etc. — skip
+            // step-start, finish, reasoning-signature, redacted-reasoning, etc. — skip
             break;
         }
+      }
+
+      // Stream ended while a reasoning block is still open — close it out.
+      if (reasoningActive) {
+        const reasoningCompleteEvent = createEvent("agent.reasoning", {
+          traceId: effectiveTraceId,
+          runId,
+          content: reasoningText,
+          isComplete: true,
+        });
+        await this.emit(reasoningCompleteEvent);
+        yield reasoningCompleteEvent;
+        reasoningActive = false;
+        reasoningText = "";
       }
 
       if (hadError) {

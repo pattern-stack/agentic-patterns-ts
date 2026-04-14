@@ -225,6 +225,157 @@ describe("AgentRunner.stream()", () => {
     expect(busEvents).toContain("agent.message.complete");
   });
 
+  it("emits thinking.start + reasoning deltas + reasoning complete around text", async () => {
+    const model = new MockLanguageModelV1({
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "reasoning", textDelta: "Let me think" });
+            controller.enqueue({ type: "reasoning", textDelta: " about this" });
+            controller.enqueue({ type: "text-delta", textDelta: "The answer" });
+            controller.enqueue({ type: "text-delta", textDelta: " is 42" });
+            controller.enqueue({
+              type: "finish",
+              finishReason: "stop",
+              usage: { promptTokens: 10, completionTokens: 5 },
+            });
+            controller.close();
+          },
+        }),
+        rawCall: { rawPrompt: null, rawSettings: {} },
+      }),
+    });
+
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent();
+
+    const events = await collectStream(runner.stream(agent, "Hi"));
+
+    // Exactly one thinking.start
+    const thinkingStarts = events.filter((e) => e.type === "agent.thinking.start");
+    expect(thinkingStarts.length).toBe(1);
+
+    // Reasoning events: 2 deltas + 1 complete
+    const reasoningEvents = events.filter(
+      (e): e is Extract<AgentEvent, { type: "agent.reasoning" }> => e.type === "agent.reasoning",
+    );
+    expect(reasoningEvents.length).toBe(3);
+    expect(reasoningEvents[0]?.isComplete).toBe(false);
+    expect(reasoningEvents[0]?.content).toBe("Let me think");
+    expect(reasoningEvents[1]?.isComplete).toBe(false);
+    expect(reasoningEvents[1]?.content).toBe(" about this");
+    expect(reasoningEvents[2]?.isComplete).toBe(true);
+    expect(reasoningEvents[2]?.content).toBe("Let me think about this");
+
+    // Text chunks still flow
+    const chunks = events.filter((e) => e.type === "agent.message.chunk");
+    expect(chunks.length).toBe(2);
+
+    // Ordering: thinking.start -> first reasoning delta ->
+    //           reasoning (isComplete=true) -> first message.chunk -> message.complete
+    const thinkingStartIdx = events.findIndex((e) => e.type === "agent.thinking.start");
+    const firstReasoningDeltaIdx = events.findIndex(
+      (e) => e.type === "agent.reasoning" && !e.isComplete,
+    );
+    const reasoningCompleteIdx = events.findIndex(
+      (e) => e.type === "agent.reasoning" && e.isComplete,
+    );
+    const firstChunkIdx = events.findIndex((e) => e.type === "agent.message.chunk");
+    const messageCompleteIdx = events.findIndex((e) => e.type === "agent.message.complete");
+    expect(thinkingStartIdx).toBeGreaterThan(-1);
+    expect(firstReasoningDeltaIdx).toBeGreaterThan(thinkingStartIdx);
+    expect(reasoningCompleteIdx).toBeGreaterThan(firstReasoningDeltaIdx);
+    expect(firstChunkIdx).toBeGreaterThan(reasoningCompleteIdx);
+    expect(messageCompleteIdx).toBeGreaterThan(firstChunkIdx);
+
+    // message.complete content is just the text, not the reasoning
+    const complete = events.find((e) => e.type === "agent.message.complete");
+    expect((complete as { content: string }).content).toBe("The answer is 42");
+  });
+
+  it("closes reasoning block before tool call, then opens a new block after", async () => {
+    let callCount = 0;
+    const model = new MockLanguageModelV1({
+      doStream: async () => {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            stream: new ReadableStream({
+              start(controller) {
+                controller.enqueue({ type: "reasoning", textDelta: "First I need" });
+                controller.enqueue({ type: "reasoning", textDelta: " the weather" });
+                controller.enqueue({
+                  type: "tool-call",
+                  toolCallType: "function",
+                  toolCallId: "tc-1",
+                  toolName: "weather",
+                  args: '{"city": "SF"}',
+                });
+                controller.enqueue({
+                  type: "finish",
+                  finishReason: "tool-calls",
+                  usage: { promptTokens: 10, completionTokens: 5 },
+                });
+                controller.close();
+              },
+            }),
+            rawCall: { rawPrompt: null, rawSettings: {} },
+          };
+        }
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: "reasoning", textDelta: "Now I can answer" });
+              controller.enqueue({ type: "text-delta", textDelta: "Sunny" });
+              controller.enqueue({
+                type: "finish",
+                finishReason: "stop",
+                usage: { promptTokens: 20, completionTokens: 10 },
+              });
+              controller.close();
+            },
+          }),
+          rawCall: { rawPrompt: null, rawSettings: {} },
+        };
+      },
+    });
+
+    const weatherSchema = z.object({ city: z.string() });
+    const tools = [ToolSchema.fromZod("weather", "Get weather", weatherSchema)];
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent({ getTools: () => tools });
+
+    const events = await collectStream(
+      runner.stream(agent, "weather?", {
+        toolExecutor: { execute: async () => ({ forecast: "sunny" }) },
+      }),
+    );
+
+    // Two distinct thinking.start events — one per reasoning block.
+    const thinkingStarts = events.filter((e) => e.type === "agent.thinking.start");
+    expect(thinkingStarts.length).toBe(2);
+
+    // The first reasoning-complete must come before the first tool.intent.
+    const firstReasoningCompleteIdx = events.findIndex(
+      (e) => e.type === "agent.reasoning" && e.isComplete,
+    );
+    const firstToolIntentIdx = events.findIndex((e) => e.type === "agent.tool.intent");
+    expect(firstReasoningCompleteIdx).toBeGreaterThan(-1);
+    expect(firstToolIntentIdx).toBeGreaterThan(firstReasoningCompleteIdx);
+
+    // Both reasoning blocks close — 2 completed reasoning events with the
+    // correct accumulated content per block.
+    const completedReasoning = events.filter(
+      (e): e is Extract<AgentEvent, { type: "agent.reasoning" }> =>
+        e.type === "agent.reasoning" && e.isComplete,
+    );
+    expect(completedReasoning.length).toBe(2);
+    expect(completedReasoning[0]?.content).toBe("First I need the weather");
+    expect(completedReasoning[1]?.content).toBe("Now I can answer");
+  });
+
   it("respects max iterations", async () => {
     const calcSchema = z.object({ x: z.number() });
     const tools = [ToolSchema.fromZod("loopy", "Loop tool", calcSchema)];
