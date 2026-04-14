@@ -1,42 +1,36 @@
-# agentic-patterns-ts — task recipes
-# Usage: just <recipe>    (install: brew install just)
+# agentic-patterns-ts
+# Usage: just <recipe>
 
-# Default recipe — show available commands
+set dotenv-load
+
 default:
     @just --list
 
-# ---------------------------------------------------------------------------
-# Dev environment
-# ---------------------------------------------------------------------------
+# ── Dev ──────────────────────────────────────────
 
-# Launch server + dashboard (auto-detects provider from env)
+# Start server + dashboard
 dev:
     pnpm dev
 
-# Launch with Ollama (sonnet tier by default)
-dev-ollama host="http://10.88.111.52:11434":
-    OLLAMA_HOST={{host}} pnpm dev
-
-# Launch with Ollama at a specific tier
-dev-ollama-opus host="http://10.88.111.52:11434":
-    OLLAMA_HOST={{host}} AGENT_TIER=opus pnpm dev
-
-dev-ollama-haiku host="http://10.88.111.52:11434":
-    OLLAMA_HOST={{host}} AGENT_TIER=haiku pnpm dev
-
-# Launch with Anthropic API key
-dev-claude:
+# Start with Ollama sonnet tier
+dev-ollama:
     pnpm dev
 
-# Launch with a custom agent demo file
+# Start with Ollama opus tier
+dev-opus:
+    AGENT_TIER=opus pnpm dev
+
+# Start with Ollama haiku tier
+dev-haiku:
+    AGENT_TIER=haiku pnpm dev
+
+# Start with a custom demo file
 dev-custom file:
     DEMO_FILE={{file}} pnpm dev
 
-# ---------------------------------------------------------------------------
-# Quality gates
-# ---------------------------------------------------------------------------
+# ── Checks ───────────────────────────────────────
 
-# Run all checks (build + typecheck + lint + test)
+# Build + typecheck + lint + test
 check:
     pnpm check
 
@@ -55,7 +49,6 @@ lint-fix:
 test:
     pnpm test
 
-# Run tests for a specific package
 test-runtime:
     pnpm --filter @agentic-patterns/runtime test
 
@@ -65,38 +58,29 @@ test-server:
 test-dashboard:
     pnpm --filter @agentic-patterns/dashboard test
 
-# ---------------------------------------------------------------------------
-# Live integration tests (require real infrastructure)
-# ---------------------------------------------------------------------------
+# ── Live tests ───────────────────────────────────
 
-# Run Ollama live test against your GPU
-test-ollama host="http://10.88.111.52:11434":
-    OLLAMA_HOST={{host}} pnpm --filter @agentic-patterns/runtime test
+# Ollama live test (needs OLLAMA_HOST in .env)
+test-ollama:
+    pnpm --filter @agentic-patterns/runtime test
 
-# Run Claude live test (requires claude CLI + auth)
+# Claude live test (needs claude CLI)
 test-claude:
     RUN_LIVE_CLAUDE=1 pnpm --filter @agentic-patterns/runtime test
 
-# ---------------------------------------------------------------------------
-# Stack management (uses `st` CLI from pattern-stack)
-# ---------------------------------------------------------------------------
+# ── Stack ────────────────────────────────────────
 
-# Show current stack status
 stack:
     st status
 
-# Push + create/update PRs
 submit:
     st submit
 
-# Push + mark ready for review
 ship:
     st submit --ready
 
-# Merge entire stack bottom-up
 merge:
     st merge --all
 
-# Clean up after merges
 sync:
     st sync

@@ -3,3 +3,5 @@ dist/
 *.tsbuildinfo
 .turbo/
 .claude/worktrees/
+.env
+.env.local
