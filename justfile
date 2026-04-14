@@ -8,8 +8,9 @@ default:
 
 # ── Dev ──────────────────────────────────────
 
-# Start server + dashboard
+# Start server + dashboard (kills stale port holders first)
 dev:
+    -kill $(lsof -ti :3000) 2>/dev/null
     pnpm exec tsx tools/dev.ts
 
 # Start with opus tier
