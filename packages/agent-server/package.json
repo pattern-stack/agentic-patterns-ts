@@ -1,0 +1,61 @@
+{
+  "name": "@agentic-patterns/server",
+  "version": "0.1.0",
+  "description": "Hono HTTP server for agentic-patterns agents — routes, SSE streaming, admin API",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pattern-stack/agentic-patterns-ts.git",
+    "directory": "packages/agent-server"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": ["agents", "llm", "ai", "server", "hono", "sse"],
+  "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
+  "bugs": "https://github.com/pattern-stack/agentic-patterns-ts/issues",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome check src/",
+    "demo": "tsx examples/live-demo.ts"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "@agentic-patterns/core": "workspace:*",
+    "@agentic-patterns/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.13.0",
+    "@types/node": "^25.6.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "zod": "^3.23.0"
+  },
+  "peerDependencies": {
+    "zod": "^3.23.0"
+  }
+}
