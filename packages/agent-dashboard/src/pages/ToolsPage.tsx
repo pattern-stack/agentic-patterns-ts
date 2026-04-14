@@ -25,6 +25,7 @@ export function ToolsPage() {
   const { data, loading, error } = useAdminData<ToolAnalytics[]>("/admin/tools");
   const [sortKey, setSortKey] = useState("toolName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedKey, setExpandedKey] = useState<string | undefined>();
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -165,8 +166,77 @@ export function ToolsPage() {
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={handleSort}
+          rowKey={(row) => row.toolName}
+          expandedKey={expandedKey}
+          onToggleExpand={(k) => setExpandedKey((cur) => (cur === k ? undefined : k))}
+          renderExpanded={(row) => <ToolAgentBreakdown tool={row} />}
         />
       </Card>
+    </div>
+  );
+}
+
+function ToolAgentBreakdown({ tool }: { tool: ToolRow }) {
+  if (!tool.agentBreakdown.length) {
+    return (
+      <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>
+        No per-agent breakdown available.
+      </div>
+    );
+  }
+  const total = tool.agentBreakdown.reduce((n, a) => n + a.callCount, 0) || 1;
+  const sorted = [...tool.agentBreakdown].sort((a, b) => b.callCount - a.callCount);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--fg-subtle)",
+        }}
+      >
+        {tool.toolName} usage by agent
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {sorted.map((a) => {
+          const pct = Math.round((a.callCount / total) * 100);
+          return (
+            <div
+              key={a.agentName}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--fg-muted)",
+              }}
+            >
+              <Badge tone="emerald">{a.agentName}</Badge>
+              <span style={{ color: "var(--fg-default)" }}>{a.callCount} calls</span>
+              <span style={{ color: "var(--fg-subtle)" }}>{pct}%</span>
+              <div
+                style={{
+                  flex: 1,
+                  height: 4,
+                  background: "var(--bg-surface-hover)",
+                  borderRadius: 2,
+                  overflow: "hidden",
+                }}
+              >
+                <div
+                  style={{
+                    width: `${pct}%`,
+                    height: "100%",
+                    background: "var(--accent-emerald)",
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

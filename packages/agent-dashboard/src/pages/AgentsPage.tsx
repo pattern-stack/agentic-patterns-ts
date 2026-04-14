@@ -38,6 +38,7 @@ export function AgentsPage() {
   const { data, loading, error } = useAdminData<AgentStats[]>("/admin/agents");
   const [sortKey, setSortKey] = useState("agentName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [expandedKey, setExpandedKey] = useState<string | undefined>();
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -167,9 +168,66 @@ export function AgentsPage() {
             sortKey={sortKey}
             sortDir={sortDir}
             onSort={handleSort}
+            rowKey={(row) => row.agentName}
+            expandedKey={expandedKey}
+            onToggleExpand={(k) => setExpandedKey((cur) => (cur === k ? undefined : k))}
+            renderExpanded={(row) => <AgentToolBreakdown agent={row} />}
           />
         </Card>
       )}
+    </div>
+  );
+}
+
+function AgentToolBreakdown({ agent }: { agent: AgentStats }) {
+  if (!agent.toolStats.length) {
+    return (
+      <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>
+        No tool usage recorded for this agent.
+      </div>
+    );
+  }
+  const sorted = [...agent.toolStats].sort((a, b) => b.callCount - a.callCount);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div
+        style={{
+          fontSize: 11,
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "var(--fg-subtle)",
+        }}
+      >
+        Tools used by {agent.agentName}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {sorted.map((t) => {
+          const avg = t.avgDurationMs ? `${Math.round(t.avgDurationMs)}ms avg` : null;
+          return (
+            <div
+              key={t.toolName}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12,
+                color: "var(--fg-muted)",
+              }}
+            >
+              <span style={{ color: "var(--fg-default)", minWidth: 160 }}>{t.toolName}</span>
+              <Badge tone="muted">{t.callCount} calls</Badge>
+              {t.errorCount > 0 && <Badge tone="red">{t.errorCount} err</Badge>}
+              {avg && <span style={{ color: "var(--fg-subtle)" }}>{avg}</span>}
+              {t.lastUsed && (
+                <span style={{ color: "var(--fg-subtle)", marginLeft: "auto" }}>
+                  last {formatDate(t.lastUsed)}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

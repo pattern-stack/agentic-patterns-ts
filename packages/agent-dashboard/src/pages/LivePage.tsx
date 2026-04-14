@@ -69,7 +69,7 @@ export function LivePage() {
         </Card>
       )}
       <Card padded={false}>
-        <EventStream events={events} connected={connected} />
+        <EventStream events={events} />
       </Card>
     </div>
   );
