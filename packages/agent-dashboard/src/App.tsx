@@ -2,12 +2,12 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/templates/AppShell";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
+import { ConversationDetailPage } from "./pages/ConversationDetailPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LivePage } from "./pages/LivePage";
 import { TokensPage } from "./pages/TokensPage";
 import { ToolsPage } from "./pages/ToolsPage";
-import { TracePage } from "./pages/TracePage";
 
 export function App() {
   return (
@@ -21,7 +21,7 @@ export function App() {
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
-          <Route path="/conversations/:id/trace" element={<TracePage />} />
+          <Route path="/conversations/:id" element={<ConversationDetailPage />} />
         </Routes>
       </AppShell>
     </BrowserRouter>
