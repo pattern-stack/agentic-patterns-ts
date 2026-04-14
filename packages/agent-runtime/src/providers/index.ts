@@ -23,6 +23,12 @@ export { deepseekProvider } from "./deepseek.js";
 export { openrouterProvider } from "./openrouter.js";
 export { ollamaProvider } from "./ollama.js";
 
+// Claude Code LanguageModelV1 adapter — wraps the Claude Agent SDK so
+// Max subscription users can feed Claude through AgentRunner like any
+// other @ai-sdk/* provider with full event vocabulary.
+export { claudeCode, ClaudeCodeLanguageModel } from "./claude-code.js";
+export type { ClaudeCodeProviderOptions } from "./claude-code.js";
+
 import { anthropicProvider } from "./anthropic.js";
 import { deepseekProvider } from "./deepseek.js";
 import { googleProvider } from "./google.js";
