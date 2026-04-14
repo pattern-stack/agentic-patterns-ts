@@ -9,7 +9,7 @@ import { generateId } from "ai";
 
 import type { AgentEvent } from "../events/types.js";
 import { createEvent } from "../events/types.js";
-import type { RunOptions, RunResult, RunnerProtocol } from "./types.js";
+import type { AgentLike, RunOptions, RunResult, RunnerProtocol } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,18 +35,6 @@ export interface MockCall {
   agentName: string;
   model: string;
   timestamp: Date;
-}
-
-// ---------------------------------------------------------------------------
-// Agent shape (matches RunnerProtocol's agent parameter)
-// ---------------------------------------------------------------------------
-
-interface AgentLike {
-  getModel(): string;
-  getTools(): unknown[];
-  getSystemPrompt(): string;
-  renderInitialPrompt(): string;
-  role: { name: string };
 }
 
 // ---------------------------------------------------------------------------

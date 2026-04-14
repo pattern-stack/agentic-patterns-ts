@@ -1,11 +1,33 @@
 /**
- * Runner types — RunResult, ToolExecutor, RunnerProtocol, RunOptions.
+ * Runner types — AgentLike, RunResult, ToolExecutor, RunnerProtocol, RunOptions.
  *
  * Ported from Python: systems/runners/base.py
  */
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
+
+// ---------------------------------------------------------------------------
+// AgentLike — canonical minimal agent shape at the runner protocol boundary
+// ---------------------------------------------------------------------------
+
+/**
+ * The minimal agent shape consumed by runners, workflows, conversations,
+ * and transport adapters.
+ *
+ * This is a projection of the full `Agent` class (from @agentic-patterns/core)
+ * containing only the methods and properties needed to execute a tool loop.
+ * `getTools()` returns `unknown[]` so protocol consumers don't need to import
+ * `ToolSchema` from core — only `AgentRunner` itself narrows the type when
+ * converting tools for the LLM.
+ */
+export interface AgentLike {
+  readonly role: { readonly name: string };
+  getModel(): string;
+  getTools(): unknown[];
+  getSystemPrompt(): string;
+  renderInitialPrompt(): string;
+}
 
 // ---------------------------------------------------------------------------
 // RunResult
@@ -98,31 +120,11 @@ export interface RunnerProtocol {
   /**
    * Execute an agent and return the final result.
    */
-  run(
-    agent: {
-      getModel(): string;
-      getTools(): unknown[];
-      getSystemPrompt(): string;
-      renderInitialPrompt(): string;
-      role: { name: string };
-    },
-    message: string,
-    options?: RunOptions,
-  ): Promise<RunResult>;
+  run(agent: AgentLike, message: string, options?: RunOptions): Promise<RunResult>;
 
   /**
    * Execute an agent with streaming response.
    * Optional — not all runners support streaming.
    */
-  stream?(
-    agent: {
-      getModel(): string;
-      getTools(): unknown[];
-      getSystemPrompt(): string;
-      renderInitialPrompt(): string;
-      role: { name: string };
-    },
-    message: string,
-    options?: RunOptions,
-  ): AsyncGenerator<AgentEvent>;
+  stream?(agent: AgentLike, message: string, options?: RunOptions): AsyncGenerator<AgentEvent>;
 }

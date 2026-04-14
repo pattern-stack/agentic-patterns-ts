@@ -7,6 +7,7 @@
 
 import { EventProfile } from "../events/event-profiles.js";
 import type {
+  AgentEvent,
   BaseEvent,
   ConversationEndEvent,
   ConversationStartEvent,
@@ -37,27 +38,44 @@ import type {
 // Ring buffer
 // ---------------------------------------------------------------------------
 
+/**
+ * Fixed-capacity circular buffer with O(1) push and O(n) materialization.
+ *
+ * Uses a pre-allocated array with head index + length instead of Array.shift()
+ * to avoid O(n) reindexing on every push at capacity.
+ */
 class RingBuffer<T> {
-  private _items: T[] = [];
-  private _capacity: number;
+  private readonly _items: (T | undefined)[];
+  private readonly _capacity: number;
+  private _start = 0;
+  private _length = 0;
 
   constructor(capacity: number) {
     this._capacity = capacity;
+    this._items = new Array(capacity);
   }
 
   push(item: T): void {
-    if (this._items.length >= this._capacity) {
-      this._items.shift();
+    const end = (this._start + this._length) % this._capacity;
+    this._items[end] = item;
+    if (this._length < this._capacity) {
+      this._length += 1;
+    } else {
+      this._start = (this._start + 1) % this._capacity;
     }
-    this._items.push(item);
   }
 
   toArray(): T[] {
-    return [...this._items];
+    const result: T[] = [];
+    for (let i = 0; i < this._length; i++) {
+      const item = this._items[(this._start + i) % this._capacity];
+      if (item !== undefined) result.push(item);
+    }
+    return result;
   }
 
   get length(): number {
-    return this._items.length;
+    return this._length;
   }
 }
 
@@ -86,6 +104,15 @@ interface MutableToolStats {
   lastUsed?: Date;
 }
 
+/** Per-call log entry retained in a ring buffer for date-filtered queries. */
+interface ToolCallLogEntry {
+  readonly toolName: string;
+  readonly agentName: string;
+  readonly durationMs: number;
+  readonly isError: boolean;
+  readonly timestamp: Date;
+}
+
 // ---------------------------------------------------------------------------
 // InMemoryEventCollector
 // ---------------------------------------------------------------------------
@@ -107,6 +134,8 @@ export class InMemoryEventCollector extends BaseExporter {
   private _startedAt = new Date();
   private _agents = new Map<string, MutableAgentStats>();
   private _recentEvents = new RingBuffer<TraceEvent>(1000);
+  /** Bounded log of individual tool calls, used for date-filtered analytics. */
+  private _toolCallLog = new RingBuffer<ToolCallLogEntry>(10_000);
   private _traces = new Map<
     string,
     {
@@ -195,8 +224,18 @@ export class InMemoryEventCollector extends BaseExporter {
     return conversations;
   }
 
-  /** Get cross-agent tool analytics. */
-  getToolAnalytics(_filters?: DateFilters): ToolAnalytics[] {
+  /**
+   * Get cross-agent tool analytics.
+   *
+   * When `filters` specify a date range, aggregation runs over the
+   * per-call log (bounded to the most recent 10,000 calls). Without
+   * filters, uses the lifetime aggregates on each agent.
+   */
+  getToolAnalytics(filters?: DateFilters): ToolAnalytics[] {
+    if (filters && (filters.from || filters.to)) {
+      return this._getToolAnalyticsFromLog(filters);
+    }
+
     const toolMap = new Map<
       string,
       {
@@ -270,6 +309,69 @@ export class InMemoryEventCollector extends BaseExporter {
       });
     }
     return result;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Event dispatch (overrides BaseExporter's dynamic _on* dispatch with an
+  // explicit switch so the compiler catches new event types in AgentEvent
+  // that do not yet have a handler.)
+  // ---------------------------------------------------------------------------
+
+  override async handleEvent(event: BaseEvent): Promise<void> {
+    const typed = event as AgentEvent;
+    switch (typed.type) {
+      case "agent.conversation.start":
+        await this._onConversationStart(typed);
+        return;
+      case "agent.conversation.end":
+        await this._onConversationEnd(typed);
+        return;
+      case "agent.message.start":
+        await this._onMessageStart(typed);
+        return;
+      case "agent.message.complete":
+        await this._onMessageComplete(typed);
+        return;
+      case "agent.message.cancel":
+        await this._onMessageCancel(typed);
+        return;
+      case "agent.iteration.start":
+        await this._onIterationStart(typed);
+        return;
+      case "agent.iteration.end":
+        await this._onIterationEnd(typed);
+        return;
+      case "agent.tool.start":
+        await this._onToolStart(typed);
+        return;
+      case "agent.tool.end":
+        await this._onToolEnd(typed);
+        return;
+      case "agent.llm.end":
+        await this._onLlmEnd(typed);
+        return;
+      case "agent.error":
+        await this._onError(typed);
+        return;
+      // Events on the UX profile we observe but do not aggregate. Recorded
+      // into the ring buffer only. Listed explicitly so adding a new event
+      // type to the profile forces a choice here.
+      case "agent.message.chunk":
+      case "agent.reasoning":
+      case "agent.thinking.start":
+      case "agent.tool.intent":
+      case "agent.tool.rejected":
+      case "agent.tool.progress":
+      case "agent.llm.start":
+        this._recordEvent(typed);
+        return;
+      default: {
+        // Exhaustiveness check — adding a new case to AgentEvent will cause
+        // this line to fail typechecking until a branch is added above.
+        const _exhaustive: never = typed;
+        void _exhaustive;
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -409,6 +511,15 @@ export class InMemoryEventCollector extends BaseExporter {
         if (event.error) {
           toolStats.errorCount += 1;
         }
+
+        // Append to per-call log so getToolAnalytics can apply date filters.
+        this._toolCallLog.push({
+          toolName: event.toolName,
+          agentName: trace.agentName,
+          durationMs: event.durationMs,
+          isError: Boolean(event.error),
+          timestamp: event.timestamp,
+        });
       }
     }
   }
@@ -508,6 +619,57 @@ export class InMemoryEventCollector extends BaseExporter {
     const result: AgentStats[] = [];
     for (const internal of this._agents.values()) {
       result.push(this._toAgentStats(internal));
+    }
+    return result;
+  }
+
+  private _getToolAnalyticsFromLog(filters: DateFilters): ToolAnalytics[] {
+    const from = filters.from?.getTime();
+    const to = filters.to?.getTime();
+    const toolMap = new Map<
+      string,
+      {
+        totalCalls: number;
+        totalErrors: number;
+        totalDurationMs: number;
+        agentBreakdown: Map<string, number>;
+      }
+    >();
+
+    for (const entry of this._toolCallLog.toArray()) {
+      const ts = entry.timestamp.getTime();
+      if (from !== undefined && ts < from) continue;
+      if (to !== undefined && ts > to) continue;
+
+      let agg = toolMap.get(entry.toolName);
+      if (!agg) {
+        agg = {
+          totalCalls: 0,
+          totalErrors: 0,
+          totalDurationMs: 0,
+          agentBreakdown: new Map(),
+        };
+        toolMap.set(entry.toolName, agg);
+      }
+      agg.totalCalls += 1;
+      if (entry.isError) agg.totalErrors += 1;
+      agg.totalDurationMs += entry.durationMs;
+      agg.agentBreakdown.set(entry.agentName, (agg.agentBreakdown.get(entry.agentName) ?? 0) + 1);
+    }
+
+    const result: ToolAnalytics[] = [];
+    for (const [toolName, agg] of toolMap) {
+      const agentBreakdown = Array.from(agg.agentBreakdown.entries()).map(
+        ([agentName, callCount]) => ({ agentName, callCount }),
+      );
+      result.push({
+        toolName,
+        totalCalls: agg.totalCalls,
+        totalErrors: agg.totalErrors,
+        totalDurationMs: agg.totalDurationMs,
+        avgDurationMs: agg.totalCalls > 0 ? agg.totalDurationMs / agg.totalCalls : 0,
+        agentBreakdown,
+      });
     }
     return result;
   }

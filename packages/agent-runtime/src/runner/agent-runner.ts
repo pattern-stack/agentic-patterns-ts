@@ -23,20 +23,11 @@ import {
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
 import { type AgentEvent, createEvent } from "../events/types.js";
 import { convertHistory } from "./message-utils.js";
-import type { RunOptions, RunResult, RunnerProtocol, ToolExecutor } from "./types.js";
+import type { AgentLike, RunOptions, RunResult, RunnerProtocol, ToolExecutor } from "./types.js";
 
-// ---------------------------------------------------------------------------
-// Agent interface (minimal shape needed by the runner)
-// ---------------------------------------------------------------------------
-
-/** Minimal agent interface consumed by the runner. */
-export interface AgentLike {
-  readonly role: { readonly name: string };
-  getModel(): string;
-  getTools(): ToolSchema[];
-  getSystemPrompt(): string;
-  renderInitialPrompt(): string;
-}
+// Re-export AgentLike here so existing consumers importing from "./agent-runner"
+// (including the public barrel and workflow modules) continue to work.
+export type { AgentLike };
 
 // ---------------------------------------------------------------------------
 // ToolCallBlocked error
@@ -110,7 +101,9 @@ export class AgentRunner implements RunnerProtocol {
     agent: AgentLike,
     _executor?: ToolExecutor,
   ): Record<string, { description: string; parameters: unknown }> {
-    const agentTools = agent.getTools();
+    // AgentLike.getTools() returns unknown[] at the protocol boundary;
+    // AgentRunner knows real agents produce ToolSchema[] and narrows here.
+    const agentTools = agent.getTools() as ToolSchema[];
     if (agentTools.length === 0) return {};
 
     const tools: Record<string, { description: string; parameters: unknown }> = {};
@@ -137,7 +130,7 @@ export class AgentRunner implements RunnerProtocol {
 
     // Resolve model name and tools
     const modelName = agent.getModel();
-    const agentTools = agent.getTools();
+    const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
 
