@@ -14,3 +14,4 @@ export {
   type OTelSpan,
   type OTelTracer,
 } from "./otel.js";
+export { SSEExporter } from "./sse.js";
