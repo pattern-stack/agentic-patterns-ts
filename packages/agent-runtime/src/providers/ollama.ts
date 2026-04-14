@@ -24,6 +24,15 @@ export const ollamaProvider: ProviderProtocol = {
   envVars: ["OLLAMA_HOST"],
   async load(modelId) {
     const mod = await importProvider("ollama-ai-provider", "ollama");
+    // ollama-ai-provider doesn't read OLLAMA_HOST from env — pass it
+    // explicitly so remote GPU boxes (e.g. behind a VPN) work out of
+    // the box when the user sets the env var.
+    const host = process.env.OLLAMA_HOST;
+    if (host) {
+      const baseURL = `${host.replace(/\/$/, "")}/api`;
+      const provider = mod.createOllama({ baseURL });
+      return provider(modelId);
+    }
     return mod.ollama(modelId);
   },
 };
