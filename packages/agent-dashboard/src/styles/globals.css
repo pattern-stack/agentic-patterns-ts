@@ -83,3 +83,10 @@ a:hover {
     opacity: 0;
   }
 }
+
+/* Spinner atom — used for streaming / loading indicators. */
+@keyframes apdash-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

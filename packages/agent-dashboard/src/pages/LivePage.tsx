@@ -1,4 +1,4 @@
-import { EventStream } from "../components/EventStream";
+import { EventStream } from "../components/organisms/EventStream";
 import { useEventStream } from "../hooks/useEventStream";
 
 export function LivePage() {

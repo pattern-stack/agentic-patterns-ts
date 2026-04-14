@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { TokenUsageGroup } from "../api/types";
-import { DataTable } from "../components/DataTable";
+import { DataTable } from "../components/organisms/DataTable";
 import { useAdminData } from "../hooks/useAdminData";
 
 function getField(row: TokenUsageGroup, key: string): string {

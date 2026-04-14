@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { StreamEvent } from "../hooks/useEventStream";
+import type { StreamEvent } from "../../hooks/useEventStream";
 
 const typeBadgeColors: Record<string, string> = {
   "tool.start": "var(--accent)",

@@ -1,5 +1,5 @@
 import type { DashboardStats } from "../api/types";
-import { StatCard } from "../components/StatCard";
+import { StatCard } from "../components/molecules/StatCard";
 import { useAdminData } from "../hooks/useAdminData";
 
 export function DashboardPage() {
