@@ -38,6 +38,7 @@ export type SSEEventName =
   | "llm.start"
   | "llm.end"
   | "error"
+  | "claude_code.hook"
   | "done";
 
 /** Result of mapping an AgentEvent to its canonical SSE shape. */
@@ -187,6 +188,22 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
           recoverable: event.recoverable,
         },
       };
+    case "claude_code.hook":
+      return {
+        name: "claude_code.hook",
+        payload: {
+          hook_name: event.hookName,
+          session_id: event.sessionId,
+          cwd: event.cwd,
+          tool_name: event.toolName,
+          tool_input: event.toolInput,
+          tool_response: event.toolResponse,
+          tool_use_id: event.toolUseId,
+          permission_mode: event.permissionMode,
+          transcript_path: event.transcriptPath,
+          payload: event.payload,
+        },
+      };
     default: {
       // Exhaustiveness check — a new AgentEvent variant without a branch here
       // is a compile-time error.
@@ -227,6 +244,7 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.llm.start": "llm.start",
   "agent.llm.end": "llm.end",
   "agent.error": "error",
+  "claude_code.hook": "claude_code.hook",
 } as const;
 
 // ---------------------------------------------------------------------------

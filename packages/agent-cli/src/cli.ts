@@ -10,6 +10,7 @@
 import { parseArgs } from "node:util";
 import { runAgentsCommand } from "./commands/agents.js";
 import { runConfigSetCommand, runConfigStatusCommand } from "./commands/config.js";
+import { type Provider, runInitCommand } from "./commands/init.js";
 import { runPlaygroundCommand } from "./commands/playground.js";
 import { runRunCommand } from "./commands/run.js";
 import { runStatusCommand } from "./commands/status.js";
@@ -27,6 +28,7 @@ Commands:
   agents                          list discovered agents
   run <agent> [message]           chat in terminal — interactive or one-shot
   playground                      launch UI environment (server + dashboard)
+  init [<dir>]                    scaffold a new agent project
   config                          show env detection status
   config set                      interactive .env editor
 
@@ -36,6 +38,8 @@ Options:
   --no-dashboard                  playground without dashboard (API only)
   --no-open                       don't auto-open the browser
   --agents <glob>                 override agent discovery glob
+  --with-plugin                   (init) drop the Claude Code plugin too
+  --provider <p>                  (init) anthropic | openai | ollama
 `;
 
 async function main(): Promise<void> {
@@ -47,6 +51,8 @@ async function main(): Promise<void> {
       "no-dashboard": { type: "boolean" },
       "no-open": { type: "boolean" },
       agents: { type: "string" },
+      "with-plugin": { type: "boolean" },
+      provider: { type: "string" },
     },
     allowPositionals: true,
     strict: false,
@@ -59,7 +65,20 @@ async function main(): Promise<void> {
 
   const command = positionals[0];
 
-  // Project context — every command except --help needs it.
+  // `init` scaffolds a NEW project — it must NOT require an existing
+  // package.json upward of CWD, so dispatch it before project context.
+  if (command === "init") {
+    const targetDir = positionals[1];
+    const providerRaw = values.provider ? String(values.provider) : undefined;
+    await runInitCommand({
+      targetDir,
+      withPlugin: Boolean(values["with-plugin"]),
+      provider: providerRaw as Provider | undefined,
+    });
+    return;
+  }
+
+  // Project context — every other command needs it.
   const config = resolveProjectConfig();
   const globs = values.agents ? [String(values.agents)] : config.agents;
   const { agents, errors } = await discoverAgents(config.root, globs);

@@ -363,6 +363,7 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.tool.rejected":
       case "agent.tool.progress":
       case "agent.llm.start":
+      case "claude_code.hook":
         this._recordEvent(typed);
         return;
       default: {

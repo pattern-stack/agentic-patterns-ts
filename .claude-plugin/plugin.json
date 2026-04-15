@@ -1,0 +1,13 @@
+{
+  "name": "agentic-patterns",
+  "version": "0.1.0",
+  "description": "Streams Claude Code lifecycle events into the @agentic-patterns/server dashboard for live observability. Pair with `ap playground` or `ap serve`.",
+  "author": {
+    "name": "pattern-stack",
+    "url": "https://github.com/pattern-stack"
+  },
+  "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
+  "repository": "https://github.com/pattern-stack/agentic-patterns-ts",
+  "license": "MIT",
+  "keywords": ["agents", "observability", "llm", "ai"]
+}

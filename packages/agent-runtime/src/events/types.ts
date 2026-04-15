@@ -5,6 +5,8 @@
  * Trace fields (traceId, runId, spanId, parentSpanId, timestamp) on every event.
  */
 
+import type { ClaudeCodeHookEvent } from "./claude-code.js";
+
 /**
  * Generate a unique ID string.
  *
@@ -224,7 +226,8 @@ export type AgentEvent =
   | IterationEndEvent
   | LLMCallStartEvent
   | LLMCallEndEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | ClaudeCodeHookEvent;
 
 /** All possible agent event type strings. */
 export type AgentEventType = AgentEvent["type"];

@@ -26,6 +26,10 @@ export type {
 
 export { createEvent } from "./types.js";
 
+export type { ClaudeCodeHookEvent, ClaudeCodeHookName } from "./claude-code.js";
+export { CLAUDE_CODE_HOOK_EVENTS, isClaudeCodeHookName } from "./claude-code.js";
+export { mapClaudeCodeHookToAgentEvents } from "./claude-code-mapper.js";
+
 export type {
   AgentAddress,
   BaseSandboxEvent,

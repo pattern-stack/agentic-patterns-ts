@@ -45,6 +45,7 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     "agent.tool.end",
     "agent.tool.progress",
     "agent.error",
+    "claude_code.hook",
   ],
   [EventProfile.OBSERVABILITY]: [
     "agent.conversation.start",

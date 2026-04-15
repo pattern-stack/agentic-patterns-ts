@@ -1,0 +1,438 @@
+/**
+ * `ap init [--with-plugin] [--provider=anthropic|openai|ollama] [<project-name>]`
+ *
+ * Scaffolds a consumer project: package.json, .env.example, tsconfig.json, and
+ * a working `agents/demo/agent.ts`. Optionally also drops a Claude Code plugin
+ * (`.claude-plugin/` + `hooks/`) by copying from the monorepo root when the CLI
+ * is being run from source.
+ *
+ * Project layout produced:
+ *
+ *   <target>/
+ *   ├── package.json
+ *   ├── .env.example
+ *   ├── tsconfig.json
+ *   ├── agents/
+ *   │   └── demo/
+ *   │       └── agent.ts
+ *   └── [if --with-plugin]
+ *       ├── .claude-plugin/plugin.json
+ *       └── hooks/{hooks.json,emit.mjs}
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { isCancel, select, text } from "@clack/prompts";
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+export type Provider = "anthropic" | "openai" | "ollama";
+
+export interface InitOptions {
+  /**
+   * Where to scaffold. If absent, prompt for a project name and create
+   * `<cwd>/<name>/`. If present and equal to `"."`, scaffold into cwd directly.
+   */
+  targetDir?: string;
+  /** Drop `.claude-plugin/` + `hooks/` next to the project. */
+  withPlugin?: boolean;
+  /** Which AI SDK provider to wire into the demo agent. */
+  provider?: Provider;
+}
+
+const DIM = "\x1b[2m";
+const BOLD = "\x1b[1m";
+const GREEN = "\x1b[32m";
+const YELLOW = "\x1b[33m";
+const RESET = "\x1b[0m";
+
+const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "ollama"] as const;
+
+/**
+ * Entry point. Resolves missing options interactively, writes files, then
+ * prints next-steps banner.
+ */
+export async function runInitCommand(opts: InitOptions): Promise<void> {
+  // -------------------------------------------------------------------------
+  // 1. Resolve target directory
+  // -------------------------------------------------------------------------
+  let targetDir: string;
+  let projectName: string;
+
+  if (opts.targetDir === undefined) {
+    const answer = await text({
+      message: "project name",
+      placeholder: "my-agents",
+      validate: (v) => (v.trim().length === 0 ? "name is required" : undefined),
+    });
+    if (isCancel(answer)) {
+      process.stdout.write(`${DIM}cancelled.${RESET}\n`);
+      return;
+    }
+    projectName = String(answer).trim();
+    targetDir = path.resolve(process.cwd(), projectName);
+  } else if (opts.targetDir === ".") {
+    targetDir = process.cwd();
+    projectName = path.basename(targetDir);
+  } else {
+    targetDir = path.resolve(process.cwd(), opts.targetDir);
+    projectName = path.basename(targetDir);
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Resolve provider
+  // -------------------------------------------------------------------------
+  let provider: Provider;
+  if (opts.provider !== undefined) {
+    if (!VALID_PROVIDERS.includes(opts.provider)) {
+      process.stderr.write(
+        `error: invalid --provider "${opts.provider}" (expected anthropic | openai | ollama)\n`,
+      );
+      process.exit(1);
+    }
+    provider = opts.provider;
+  } else {
+    const answer = await select({
+      message: "provider",
+      options: [
+        { value: "anthropic" as const, label: "Anthropic (Claude)" },
+        { value: "openai" as const, label: "OpenAI (GPT)" },
+        { value: "ollama" as const, label: "Ollama (local)" },
+      ],
+      initialValue: "anthropic" as const,
+    });
+    if (isCancel(answer)) {
+      process.stdout.write(`${DIM}cancelled.${RESET}\n`);
+      return;
+    }
+    provider = answer as Provider;
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. Pre-flight: target dir must be empty (or not exist)
+  // -------------------------------------------------------------------------
+  if (fs.existsSync(targetDir)) {
+    const stat = fs.statSync(targetDir);
+    if (!stat.isDirectory()) {
+      process.stderr.write(`error: target ${targetDir} exists and is not a directory\n`);
+      process.exit(1);
+    }
+    const conflicts = ["package.json", "agents", "tsconfig.json"].filter((n) =>
+      fs.existsSync(path.join(targetDir, n)),
+    );
+    if (conflicts.length > 0) {
+      process.stderr.write(
+        `error: target ${targetDir} already contains: ${conflicts.join(", ")}\n`,
+      );
+      process.exit(1);
+    }
+  } else {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. Write project files
+  // -------------------------------------------------------------------------
+  const created: string[] = [];
+
+  writeFile(targetDir, "package.json", renderPackageJson(projectName, provider), created);
+  writeFile(targetDir, ".env.example", renderEnvExample(provider), created);
+  writeFile(targetDir, "tsconfig.json", renderTsConfig(), created);
+  writeFile(targetDir, path.join("agents", "demo", "agent.ts"), renderAgent(provider), created);
+
+  // -------------------------------------------------------------------------
+  // 5. Optional plugin
+  // -------------------------------------------------------------------------
+  let pluginNote: string | null = null;
+  if (opts.withPlugin) {
+    const pluginSrc = resolvePluginSource();
+    if (pluginSrc) {
+      copyDir(pluginSrc.pluginDir, path.join(targetDir, ".claude-plugin"));
+      copyDir(pluginSrc.hooksDir, path.join(targetDir, "hooks"));
+      created.push(".claude-plugin/", "hooks/");
+    } else {
+      // TODO(phase-2): package the plugin template inside
+      // packages/agent-cli/assets/plugin-template/ during build so this works
+      // when the CLI is installed via npm.
+      pluginNote = `${YELLOW}warning${RESET}: --with-plugin requested but plugin source not found.\n   ${DIM}Run from the agentic-patterns-ts source tree, or wait for plugin packaging (Phase 2).${RESET}`;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 6. Banner
+  // -------------------------------------------------------------------------
+  const rel = path.relative(process.cwd(), targetDir) || ".";
+  process.stdout.write(`\n  ${GREEN}created${RESET} ${BOLD}${rel}${RESET}\n\n`);
+  for (const f of created) {
+    process.stdout.write(`    ${DIM}+ ${f}${RESET}\n`);
+  }
+  if (pluginNote) {
+    process.stdout.write(`\n  ${pluginNote}\n`);
+  }
+  process.stdout.write(`\n  ${BOLD}next${RESET}\n`);
+  if (rel !== ".") {
+    process.stdout.write(`    cd ${rel}\n`);
+  }
+  process.stdout.write(
+    `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
+  );
+  process.stdout.write(`    pnpm install\n`);
+  process.stdout.write(`    pnpm dev                   ${DIM}# launch playground${RESET}\n\n`);
+}
+
+// ---------------------------------------------------------------------------
+// File templates
+// ---------------------------------------------------------------------------
+
+function renderPackageJson(name: string, provider: Provider): string {
+  const providerDep = providerSdkPackage(provider);
+  const pkg = {
+    name,
+    private: true,
+    version: "0.0.1",
+    type: "module",
+    scripts: {
+      dev: "ap playground",
+      start: "ap playground",
+      agents: "ap agents",
+    },
+    dependencies: {
+      "@agentic-patterns/core": "^0.1.0",
+      "@agentic-patterns/runtime": "^0.1.0",
+      "@agentic-patterns/cli": "^0.1.0",
+      ai: "^4.0.0",
+      [providerDep]: "^1.0.0",
+      zod: "^3.23.0",
+    },
+    devDependencies: {
+      "@types/node": "^22.0.0",
+      typescript: "^5.7.0",
+    },
+  };
+  return `${JSON.stringify(pkg, null, 2)}\n`;
+}
+
+function renderEnvExample(provider: Provider): string {
+  const lines = [
+    "# Dashboard URL — used by the Claude Code plugin to ship lifecycle events",
+    "AP_DASHBOARD_URL=http://localhost:3000",
+    "",
+    "# Default model tier — opus | sonnet | haiku (used by the agent runner)",
+    "AGENT_TIER=sonnet",
+    "",
+  ];
+  if (provider === "anthropic") {
+    lines.push("# Anthropic API key (https://console.anthropic.com/)");
+    lines.push("ANTHROPIC_API_KEY=sk-ant-...");
+  } else if (provider === "openai") {
+    lines.push("# OpenAI API key (https://platform.openai.com/api-keys)");
+    lines.push("OPENAI_API_KEY=sk-...");
+  } else {
+    lines.push("# Ollama host (default http://localhost:11434)");
+    lines.push("OLLAMA_HOST=http://localhost:11434");
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function renderTsConfig(): string {
+  const cfg = {
+    compilerOptions: {
+      target: "es2022",
+      module: "nodenext",
+      moduleResolution: "nodenext",
+      lib: ["es2022"],
+      outDir: "dist",
+      rootDir: "src",
+      strict: true,
+      noUncheckedIndexedAccess: true,
+      noUnusedLocals: true,
+      noUnusedParameters: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+      resolveJsonModule: true,
+      declaration: true,
+      sourceMap: true,
+    },
+    include: ["agents/**/*.ts", "src/**/*.ts"],
+    exclude: ["node_modules", "dist"],
+  };
+  return `${JSON.stringify(cfg, null, 2)}\n`;
+}
+
+function renderAgent(provider: Provider): string {
+  // The agent file conforms to the discovery contract: default-export an
+  // AgentRegistration `{ id, name, description, agent }`. The CLI's playground
+  // injects the runner — we don't need to construct one here, but we leave the
+  // provider import wired up so users can graduate to a custom runner easily.
+  return `/**
+ * Demo agent — generated by \`ap init\`.
+ *
+ * The default export is an AgentRegistration. The \`ap\` CLI discovers this
+ * file (via \`agents/**\\/agent.ts\`), builds a runner from your environment
+ * (using ${provider}), and wires it into the playground dashboard.
+ *
+ *   pnpm dev          # launch the dashboard at http://localhost:3000
+ *   ap run demo       # chat with this agent in the terminal
+ */
+
+import {
+  AgentBuilder,
+  Capability,
+  Judgment,
+  Mission,
+  Persona,
+  Responsibility,
+  RoleBuilder,
+  type ToolDefinition,
+  Toolbox,
+} from "@agentic-patterns/core";
+import { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// A tiny toolbox so the agent has something concrete to do.
+// ---------------------------------------------------------------------------
+
+class GreetingToolbox extends Toolbox {
+  readonly name = "greeting_tools";
+  readonly description = "Friendly greeting helpers";
+
+  readonly tools: Record<string, ToolDefinition> = {
+    greet: {
+      description: "Produce a friendly greeting for a person",
+      parameters: z.object({
+        name: z.string().describe("Person's name"),
+      }),
+      execute: async (args) => {
+        const { name } = args as { name: string };
+        return { greeting: \`Hello, \${name}! Welcome to agentic-patterns.\` };
+      },
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Build the agent.
+// ---------------------------------------------------------------------------
+
+const role = new RoleBuilder("demo-assistant")
+  .withPersona(
+    new Persona({
+      identity: "A friendly demo assistant that greets people warmly",
+      tone: "warm and concise",
+      priorities: ["being helpful", "showing the framework off"],
+      principles: ["Always use the greet tool when greeting someone"],
+    }),
+  )
+  .withJudgment(
+    new Judgment({
+      domain: "greetings and small talk",
+      heuristics: ["Use the greet tool for any name-based greeting"],
+      constraints: ["Stay friendly and concise"],
+    }),
+  )
+  .withCapability(
+    new Capability("greeting_tools", "Friendly greeting helpers", new GreetingToolbox()),
+  )
+  .withResponsibility(
+    new Responsibility({
+      key: "greet",
+      name: "Greet People",
+      description: "Greet people warmly using the greet tool",
+    }),
+  )
+  .withDefaultModel("sonnet")
+  .build();
+
+const mission = new Mission({
+  objective: "Demonstrate the @agentic-patterns/core building blocks end-to-end",
+  success_criteria: ["Greets users by name", "Uses the greet tool for every greeting"],
+});
+
+const agent = new AgentBuilder(role).withMission(mission).build();
+
+// ---------------------------------------------------------------------------
+// Default export — discovered by \`ap\`. The runner is injected by the CLI.
+// ---------------------------------------------------------------------------
+
+export default {
+  id: "demo",
+  name: "Demo",
+  description: "A friendly demo assistant generated by \`ap init\`",
+  agent,
+};
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function envKeyFor(provider: Provider): string {
+  switch (provider) {
+    case "anthropic":
+      return "ANTHROPIC_API_KEY";
+    case "openai":
+      return "OPENAI_API_KEY";
+    case "ollama":
+      return "OLLAMA_HOST";
+  }
+}
+
+function providerSdkPackage(provider: Provider): string {
+  switch (provider) {
+    case "anthropic":
+      return "@ai-sdk/anthropic";
+    case "openai":
+      return "@ai-sdk/openai";
+    case "ollama":
+      return "ollama-ai-provider";
+  }
+}
+
+function writeFile(root: string, rel: string, contents: string, log: string[]): void {
+  const dest = path.join(root, rel);
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, contents, "utf8");
+  log.push(rel);
+}
+
+function copyDir(src: string, dest: string): void {
+  fs.cpSync(src, dest, { recursive: true });
+}
+
+/**
+ * Try to find the monorepo's `.claude-plugin/` and `hooks/` directories.
+ *
+ * When running from source, the layout is:
+ *   packages/agent-cli/src/commands/init.ts        ← this file
+ *   packages/agent-cli/dist/cli.js                 ← built entry
+ *   .claude-plugin/, hooks/                        ← four levels up
+ *
+ * TODO(phase-2): once the plugin template ships inside
+ * `packages/agent-cli/assets/plugin-template/`, prefer that path so this
+ * works for users installing the CLI from npm.
+ */
+function resolvePluginSource(): { pluginDir: string; hooksDir: string } | null {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    // Try multiple candidate roots (covers both source/tsx run and dist/cli.js run).
+    const candidates = [
+      path.resolve(here, "../../../../"), // packages/agent-cli/src/commands → repo root
+      path.resolve(here, "../../../"), // packages/agent-cli/dist → repo root
+      path.resolve(here, "../assets/plugin-template"), // future packaged location
+    ];
+    for (const root of candidates) {
+      const pluginDir = path.join(root, ".claude-plugin");
+      const hooksDir = path.join(root, "hooks");
+      if (fs.existsSync(pluginDir) && fs.existsSync(hooksDir)) {
+        return { pluginDir, hooksDir };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
