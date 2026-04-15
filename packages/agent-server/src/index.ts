@@ -1,4 +1,4 @@
-// @agentic-patterns/server — barrel export
+// @pattern-stack/agent-server — barrel export
 export { createServer } from "./app.js";
 export type {
   ServerConfig,

@@ -1,11 +1,11 @@
-# @agentic-patterns/runtime
+# @pattern-stack/agent-runtime
 
 Execution runtime for agentic-patterns agents. Provides the runner loop (Vercel AI SDK), typed event bus, gate chain, workflow compositions and loops, multi-agent transport and runtime, conversation persistence, observability exporters, and pre-built role presets.
 
 ## Installation
 
 ```bash
-pnpm add @agentic-patterns/runtime @agentic-patterns/core ai zod
+pnpm add @pattern-stack/agent-runtime @pattern-stack/agent-core ai zod
 ```
 
 ## API Overview
@@ -15,7 +15,7 @@ pnpm add @agentic-patterns/runtime @agentic-patterns/core ai zod
 The `AgentRunner` executes agents using a tool loop on the Vercel AI SDK.
 
 ```typescript
-import { AgentRunner } from "@agentic-patterns/runtime";
+import { AgentRunner } from "@pattern-stack/agent-runtime";
 
 const runner = new AgentRunner(model, eventBus);
 
@@ -42,7 +42,7 @@ Key types:
 Deterministic runner for testing agents without LLM calls. Pattern-based response routing with tool call simulation.
 
 ```typescript
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agent-runtime";
 
 const mock = new MockRunner()
   .addResponse("analyze", { content: "Revenue up 15%", inputTokens: 10, outputTokens: 20 })
@@ -78,7 +78,7 @@ Features:
 Runner backed by the Claude Agent SDK. Delegates to Claude Code's subprocess architecture.
 
 ```typescript
-import { ClaudeCodeRunner } from "@agentic-patterns/runtime";
+import { ClaudeCodeRunner } from "@pattern-stack/agent-runtime";
 
 const runner = new ClaudeCodeRunner({
   defaults: { model: "sonnet" },
@@ -100,7 +100,7 @@ All events carry trace fields: `traceId`, `runId`, `spanId`, `parentSpanId`, `ti
 `AgentMessageEvent`, `AgentBroadcastEvent`, `AgentJoinEvent`, `AgentLeaveEvent`, `TaskCreateEvent`, `TaskUpdateEvent`, `TaskAssignEvent`, `HealthPingEvent`, `HealthPongEvent`, `NodeLifecycleEvent`
 
 ```typescript
-import { EventBus, AgentEventBus, EventProfile, subscribeProfile } from "@agentic-patterns/runtime";
+import { EventBus, AgentEventBus, EventProfile, subscribeProfile } from "@pattern-stack/agent-runtime";
 
 const bus = new AgentEventBus();
 
@@ -120,7 +120,7 @@ subscribeProfile(bus, EventProfile.UX, (event) => {
 Gate chain intercepts tool call intents for safety, approval, rate limiting, and auditing.
 
 ```typescript
-import { AgentEventBus, SafetyGate, HumanApprovalGate, AuditGate } from "@agentic-patterns/runtime";
+import { AgentEventBus, SafetyGate, HumanApprovalGate, AuditGate } from "@pattern-stack/agent-runtime";
 
 const bus = new AgentEventBus();
 
@@ -156,7 +156,7 @@ Helpers: `resolveMessage()`, `makeStepName()`, `executeStep()`
 Chain agents in sequence, threading context through the pipeline.
 
 ```typescript
-import { Sequential } from "@agentic-patterns/runtime";
+import { Sequential } from "@pattern-stack/agent-runtime";
 
 const pipeline = new Sequential([
   { agent: researcher, messageTemplate: "Research the topic", outputKey: "research" },
@@ -175,7 +175,7 @@ Supports nested patterns (Sequential/Parallel as steps) and `continueOnError`.
 Fan-out agents in parallel with optional concurrency limiting and result consolidation.
 
 ```typescript
-import { Parallel, collectByName, collectContents } from "@agentic-patterns/runtime";
+import { Parallel, collectByName, collectContents } from "@pattern-stack/agent-runtime";
 
 const fanout = new Parallel(
   [
@@ -208,7 +208,7 @@ Four implementations of `GoalEvaluatorProtocol`, ranked cheapest to most expensi
 All return `[achieved: boolean, reason: string, confident: boolean]`.
 
 ```typescript
-import { EvaluatorChain, SimpleGoalEvaluator, LLMGoalEvaluator } from "@agentic-patterns/runtime";
+import { EvaluatorChain, SimpleGoalEvaluator, LLMGoalEvaluator } from "@pattern-stack/agent-runtime";
 
 const chain = new EvaluatorChain([
   new SimpleGoalEvaluator({ successPatterns: ["TASK_COMPLETE"] }),
@@ -221,7 +221,7 @@ const chain = new EvaluatorChain([
 Goal-driven iteration: run agent, evaluate progress, repeat.
 
 ```typescript
-import { TaskLoop, SimpleGoalEvaluator } from "@agentic-patterns/runtime";
+import { TaskLoop, SimpleGoalEvaluator } from "@pattern-stack/agent-runtime";
 
 const loop = new TaskLoop(agent, new SimpleGoalEvaluator({
   successPatterns: ["TASK_COMPLETE"],
@@ -240,7 +240,7 @@ Features: history summarization in prompts, configurable stop phrases, goal eval
 Producer-evaluator refinement: producer generates, evaluator scores + critiques, producer refines.
 
 ```typescript
-import { EvaluatorLoop, RubricEvaluator, CompositeRefinementEvaluator } from "@agentic-patterns/runtime";
+import { EvaluatorLoop, RubricEvaluator, CompositeRefinementEvaluator } from "@pattern-stack/agent-runtime";
 
 const rubric = new RubricEvaluator([
   { name: "clarity", description: "Clear and concise", weight: 0.4 },
@@ -264,7 +264,7 @@ Evaluator implementations: `LLMRefinementEvaluator`, `RubricEvaluator`, `Composi
 Generic async retry wrapper. Not agent-specific -- wraps any `() => Promise<T>`.
 
 ```typescript
-import { RetryLoop, ExponentialBackoff, JitteredBackoff, FixedBackoff } from "@agentic-patterns/runtime";
+import { RetryLoop, ExponentialBackoff, JitteredBackoff, FixedBackoff } from "@pattern-stack/agent-runtime";
 
 const retry = new RetryLoop({
   maxAttempts: 5,
@@ -284,7 +284,7 @@ Backoff strategies: `FixedBackoff`, `ExponentialBackoff`, `JitteredBackoff`.
 Multi-turn conversation orchestration with external input/output callbacks.
 
 ```typescript
-import { ConversationLoop } from "@agentic-patterns/runtime";
+import { ConversationLoop } from "@pattern-stack/agent-runtime";
 
 const loop = new ConversationLoop(agent, {
   maxExchanges: 10,
@@ -305,7 +305,7 @@ Integrates with `ConversationStoreProtocol` for persistence via `MemoryStore`.
 Message transport for multi-agent communication.
 
 ```typescript
-import { InProcessTransport, MessagingToolbox } from "@agentic-patterns/runtime";
+import { InProcessTransport, MessagingToolbox } from "@pattern-stack/agent-runtime";
 
 const transport = new InProcessTransport();
 transport.subscribe("agency.*.messages", (msg) => { /* ... */ });
@@ -321,8 +321,8 @@ const toolbox = new MessagingToolbox(transport, senderAddress, agency);
 Multi-agent execution runtime.
 
 ```typescript
-import { Agency } from "@agentic-patterns/core";
-import { AgencyRuntime, AgentNode } from "@agentic-patterns/runtime";
+import { Agency } from "@pattern-stack/agent-core";
+import { AgencyRuntime, AgentNode } from "@pattern-stack/agent-runtime";
 
 const runtime = new AgencyRuntime(agency, runner, "run-123");
 await runtime.start();
@@ -338,7 +338,7 @@ await runtime.stop();
 Conversation state management with structured persistence.
 
 ```typescript
-import { Conversation, MemoryStore } from "@agentic-patterns/runtime";
+import { Conversation, MemoryStore } from "@pattern-stack/agent-runtime";
 
 // In-memory persistence
 const store = new MemoryStore();
@@ -371,7 +371,7 @@ Observability exporters that subscribe to EventBus events.
 | `OTelExporter` | OpenTelemetry trace spans |
 
 ```typescript
-import { ConsoleExporter, createConsoleExporter } from "@agentic-patterns/runtime";
+import { ConsoleExporter, createConsoleExporter } from "@pattern-stack/agent-runtime";
 
 const exporter = createConsoleExporter(bus);
 exporter.start();
@@ -396,7 +396,7 @@ Pre-built roles, judgments, and responsibilities for common agent patterns.
 **Responsibilities:** `ORCHESTRATION`, `QUALITY_GATE`, `INTENT_ROUTING`, `RESPONSE_SYNTHESIS`, `INFORMATION_RETRIEVAL`, `ANALYSIS`
 
 ```typescript
-import { coordinatorRole, ROUTING, ORCHESTRATION } from "@agentic-patterns/runtime";
+import { coordinatorRole, ROUTING, ORCHESTRATION } from "@pattern-stack/agent-runtime";
 
 const role = coordinatorRole("lead", persona);
 ```

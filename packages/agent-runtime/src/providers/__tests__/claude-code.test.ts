@@ -8,7 +8,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { ToolSchema } from "@agentic-patterns/core";
+import { ToolSchema } from "@pattern-stack/agent-core";
 import type { LanguageModelV1CallOptions, LanguageModelV1Prompt } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -309,7 +309,7 @@ const runOllama = Boolean(process.env.OLLAMA_HOST) && !process.env.CI;
 
 async function buildMathHarness() {
   const { AgentBuilder, Capability, Persona, RoleBuilder, Toolbox } = await import(
-    "@agentic-patterns/core"
+    "@pattern-stack/agent-core"
   );
   const { AgentEventBus, AgentRunner } = await import("../../index.js");
 
@@ -341,7 +341,7 @@ async function buildMathHarness() {
     .withDefaultModel("sonnet")
     .build();
 
-  const { Mission } = await import("@agentic-patterns/core");
+  const { Mission } = await import("@pattern-stack/agent-core");
   const agent = new AgentBuilder(role)
     .withMission(
       new Mission({
@@ -412,7 +412,7 @@ describe.skipIf(!runLive)("claudeCode provider — live integration", () => {
 // ---------------------------------------------------------------------------
 // Live integration: Ollama local provider (OLLAMA_HOST required)
 //
-// Run with: OLLAMA_HOST=http://10.88.111.52:11434 pnpm --filter @agentic-patterns/runtime test
+// Run with: OLLAMA_HOST=http://10.88.111.52:11434 pnpm --filter @pattern-stack/agent-runtime test
 // ---------------------------------------------------------------------------
 
 describe.skipIf(!runOllama)("ollama provider — live integration", () => {

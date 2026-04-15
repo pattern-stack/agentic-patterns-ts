@@ -1,5 +1,5 @@
 /**
- * Dashboard API types — aligned with @agentic-patterns/runtime admin schemas.
+ * Dashboard API types — aligned with @pattern-stack/agent-runtime admin schemas.
  *
  * These mirror the Zod-inferred types from the runtime's admin/schemas.ts,
  * representing the JSON shapes returned by the server's admin routes.

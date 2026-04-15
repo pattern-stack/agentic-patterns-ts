@@ -1,7 +1,7 @@
 # Runner & Provider Strategy — ADR
 
 Status: accepted — implementation follows in a separate PR
-Target package: `@agentic-patterns/runtime`
+Target package: `@pattern-stack/agent-runtime`
 Scope: a `createRunner()` factory + documentation clarifying when to use each of the four existing runners.
 
 **Decisions ratified before drafting:**
@@ -114,7 +114,7 @@ The subtle type issue: `RunnerProtocol.run` declares `agent: AgentLike`. `Claude
    * An active `claude` login in `~/.claude/` (Max subscription OAuth token) — `claude login` previously.
    * `ANTHROPIC_API_KEY` exported in the environment.
    * `CLAUDE_CODE_OAUTH_TOKEN` (programmatic OAuth) — rarely used.
-3. `@anthropic-ai/claude-agent-sdk` must be installed (it is a peer dep of `@agentic-patterns/runtime`, marked optional).
+3. `@anthropic-ai/claude-agent-sdk` must be installed (it is a peer dep of `@pattern-stack/agent-runtime`, marked optional).
 
 If `claude` is not on PATH the SDK throws a spawn error the first time the async iterator is consumed — not when `new ClaudeCodeAPIRunner()` is constructed, and not when `query()` returns. From the consumer's perspective, `runner.run(...)` rejects with something like `Error: spawn claude ENOENT`. That's recoverable — the factory can probe `claude --version` up-front and fall through to the next choice rather than constructing a doomed runner. Without probing, the error surfaces at first use, which is acceptable but worse DX.
 
@@ -511,7 +511,7 @@ export type {
 | Sync wrapper? | Not in v1. If someone needs it we can ship `createRunnerSync(options)` that skips the CLI probe and requires an explicit provider/model/runner. | Keeps the surface small. |
 | Pass `eventBus` through? | **Yes**, via `options.eventBus`. | Server needs it for SSE; live-demo.ts already wires one explicitly. |
 | `modelId`? | Yes, optional, with per-provider defaults. | Most callers want "sonnet, whatever that means this month." Per-provider defaults are updatable in one place. |
-| Dynamic imports? | **Yes**, for every `@ai-sdk/*` provider and for `ClaudeCodeAPIRunner`. | `@agentic-patterns/runtime` must stay light; we should not force users who want `@ai-sdk/openai` to also install `@ai-sdk/anthropic`. The `peerDependencies` in package.json already marks `@anthropic-ai/claude-agent-sdk` optional — providers should follow the same pattern (added as `optionalPeerDependencies` in the package.json update that ships with this factory). |
+| Dynamic imports? | **Yes**, for every `@ai-sdk/*` provider and for `ClaudeCodeAPIRunner`. | `@pattern-stack/agent-runtime` must stay light; we should not force users who want `@ai-sdk/openai` to also install `@ai-sdk/anthropic`. The `peerDependencies` in package.json already marks `@anthropic-ai/claude-agent-sdk` optional — providers should follow the same pattern (added as `optionalPeerDependencies` in the package.json update that ships with this factory). |
 | Rich return type (`{runner, reason, source}`) vs just `RunnerProtocol`? | **Rich.** Callers that just want the runner destructure `{ runner } = await createRunner()`. | `source` is useful for metrics / admin dashboard ("currently running on: env-anthropic"). Adds negligible complexity. |
 | Throw vs MockRunner fallback when nothing found? | **Throw by default, MockRunner opt-in.** | Silent mock is a footgun in production. Tests opt in explicitly. |
 
@@ -554,7 +554,7 @@ createRunner(options)
 
 ### Runners
 
-`@agentic-patterns/runtime` ships four runners. They all implement `RunnerProtocol` — any agent runs under any runner. Pick based on what you care about: multi-provider support, Claude Code's native tools, your Claude Max subscription, or deterministic tests.
+`@pattern-stack/agent-runtime` ships four runners. They all implement `RunnerProtocol` — any agent runs under any runner. Pick based on what you care about: multi-provider support, Claude Code's native tools, your Claude Max subscription, or deterministic tests.
 
 #### Choice matrix
 
@@ -569,7 +569,7 @@ createRunner(options)
 #### `createRunner()` — the easy path
 
 ```ts
-import { createRunner } from "@agentic-patterns/runtime";
+import { createRunner } from "@pattern-stack/agent-runtime";
 
 // Zero-config: picks up ANTHROPIC_API_KEY, OPENAI_API_KEY, etc., or falls back to Claude CLI.
 const { runner, reason } = await createRunner();
@@ -588,7 +588,7 @@ const { runner } = await createRunner({
 });
 
 // In tests
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agent-runtime";
 const { runner } = await createRunner({
   runner: new MockRunner().addResponse("*", { content: "ok" }),
 });
@@ -597,7 +597,7 @@ const { runner } = await createRunner({
 #### `AgentRunner` — multi-provider via Vercel AI SDK
 
 ```ts
-import { AgentRunner } from "@agentic-patterns/runtime";
+import { AgentRunner } from "@pattern-stack/agent-runtime";
 import { openai } from "@ai-sdk/openai";
 
 const runner = new AgentRunner(openai("gpt-4o"));
@@ -614,7 +614,7 @@ Emits the full event vocabulary including `agent.iteration.*` and per-call `agen
 #### `ClaudeCodeAPIRunner` — zero-config Claude Max
 
 ```ts
-import { ClaudeCodeAPIRunner } from "@agentic-patterns/runtime";
+import { ClaudeCodeAPIRunner } from "@pattern-stack/agent-runtime";
 
 const runner = new ClaudeCodeAPIRunner();
 const result = await runner.run(agent, "What is 2 + 2?");
@@ -627,7 +627,7 @@ Uses the Claude Agent SDK subprocess but blocks Claude Code's native tools (`Rea
 #### `ClaudeCodeRunner` — Claude Code's native tools
 
 ```ts
-import { ClaudeCodeRunner } from "@agentic-patterns/runtime";
+import { ClaudeCodeRunner } from "@pattern-stack/agent-runtime";
 
 const runner = new ClaudeCodeRunner();
 await runner.run(agent, "Review the last commit and fix the typo in README.md");
@@ -638,7 +638,7 @@ Same as the API runner but leaves Claude Code's native tools (`Read`, `Write`, `
 #### `MockRunner` — deterministic tests
 
 ```ts
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agent-runtime";
 
 const runner = new MockRunner()
   .addResponse("add", {

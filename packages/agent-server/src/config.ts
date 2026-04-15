@@ -8,7 +8,7 @@ import type {
   AgentLike,
   RunResult,
   RunnerProtocol,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agent-runtime";
 
 /**
  * Agent registration — what the server knows about each agent.
@@ -27,7 +27,7 @@ export interface AgentRegistration {
   };
 }
 
-// AdminServiceProtocol is imported from @agentic-patterns/runtime
+// AdminServiceProtocol is imported from @pattern-stack/agent-runtime
 export type { AdminServiceProtocol };
 
 /**

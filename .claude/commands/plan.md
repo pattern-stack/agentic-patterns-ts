@@ -23,7 +23,7 @@ Write the spec to `.claude/specs/<date>-<kebab-case-name>.md`:
 ## Plan
 
 ### Step 1: <Description>
-- Package: `@agentic-patterns/core` or `@agentic-patterns/runtime`
+- Package: `@pattern-stack/agent-core` or `@pattern-stack/agent-runtime`
 - Files: `path/to/file`
 - Changes: <What to add/modify/remove>
 - Why: <Reasoning>

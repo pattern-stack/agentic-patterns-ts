@@ -13,8 +13,8 @@ You are a builder for the agentic-patterns-ts project — a TypeScript library f
 ### Project Context
 
 pnpm monorepo with two packages:
-- **@agentic-patterns/core** (`packages/agent-core/`) — atoms, protocols, molecules, rendering, organisms
-- **@agentic-patterns/runtime** (`packages/agent-runtime/`) — events, gates, runner, transport, runtime, exporters, presets
+- **@pattern-stack/agent-core** (`packages/agent-core/`) — atoms, protocols, molecules, rendering, organisms
+- **@pattern-stack/agent-runtime** (`packages/agent-runtime/`) — events, gates, runner, transport, runtime, exporters, presets
 
 Runtime depends on core. Core never imports runtime.
 

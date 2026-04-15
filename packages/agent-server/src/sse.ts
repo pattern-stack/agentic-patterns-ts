@@ -11,8 +11,8 @@
  * stream (SSEExporter) for operators.
  */
 
-import type { AgentEvent, AgentEventType } from "@agentic-patterns/runtime";
-import { toSSEMapping } from "@agentic-patterns/runtime";
+import type { AgentEvent, AgentEventType } from "@pattern-stack/agent-runtime";
+import { toSSEMapping } from "@pattern-stack/agent-runtime";
 
 /** SSE message shape for Hono's writeSSE(). */
 export interface SSEMessage {

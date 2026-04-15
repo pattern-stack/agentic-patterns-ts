@@ -14,7 +14,7 @@ import {
   buildTodoAgent,
   buildWritingCoachAgent,
   createRunner,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agent-runtime";
 import { serve } from "@hono/node-server";
 import { createServer } from "../src/app.js";
 import type { ServerConfig } from "../src/config.js";

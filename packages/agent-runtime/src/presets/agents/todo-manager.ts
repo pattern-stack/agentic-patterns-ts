@@ -15,7 +15,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agent-core";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import {
   Persona,
   Responsibility,
   RoleBuilder,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agent-core";
 
 export function buildWritingCoachAgent() {
   const role = new RoleBuilder("writing-coach")

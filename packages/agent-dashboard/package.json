@@ -1,5 +1,5 @@
 {
-  "name": "@agentic-patterns/dashboard",
+  "name": "@pattern-stack/agent-dashboard",
   "version": "0.1.0",
   "private": true,
   "type": "module",

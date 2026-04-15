@@ -35,15 +35,15 @@ wiring verbatim.
 
 Three packages, three layers:
 
-1. **`@agentic-patterns/core`** — describe the agent declaratively.
+1. **`@pattern-stack/agent-core`** — describe the agent declaratively.
    `Role = Persona + Judgment + Capabilities + Responsibilities`.
    `Agent = Role × Background × Awareness × Mission`.
 
-2. **`@agentic-patterns/runtime`** — execute it and emit events.
+2. **`@pattern-stack/agent-runtime`** — execute it and emit events.
    `AgentEventBus` · `InMemoryEventCollector` · `SSEExporter` ·
    `AgentRunner` (Vercel AI SDK) / `ClaudeCodeAPIRunner` / `MockRunner`.
 
-3. **`@agentic-patterns/server` + `@agentic-patterns/dashboard`** —
+3. **`@pattern-stack/agent-server` + `@pattern-stack/agent-dashboard`** —
    interact with it. Hono routes + React admin UI.
 
 See `CLAUDE.md` for the layer hierarchy and import rules.

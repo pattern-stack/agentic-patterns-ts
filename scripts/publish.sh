@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# scripts/publish.sh — publish @agentic-patterns/* to npm.
+# scripts/publish.sh — publish @pattern-stack/agent-* to npm.
 #
 # Usage:
 #   bash scripts/publish.sh check       # pre-flight only (default) — no publish
@@ -64,7 +64,7 @@ ok "typecheck"
 bold "dry-run publish (what would ship)"
 echo
 pnpm -r publish --tag="$TAG" --access=public --dry-run --no-git-checks 2>&1 | \
-  grep -E "^(Publishing|\+ @agentic-patterns|  [a-z])" || true
+  grep -E "^(Publishing|\+ @pattern-stack/agent-|  [a-z])" || true
 echo
 
 # -- Summary ------------------------------------------------------------------
@@ -89,7 +89,7 @@ case "$MODE" in
     echo
     pnpm -r publish --tag="$TAG" --access=public --no-git-checks
     echo
-    ok "done — verify at https://www.npmjs.com/~agentic-patterns"
+    ok "done — verify at https://www.npmjs.com/~pattern-stack"
     ;;
   *)
     fail "unknown mode: $MODE (expected: check | publish)"

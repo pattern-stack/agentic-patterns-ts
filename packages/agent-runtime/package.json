@@ -1,5 +1,5 @@
 {
-  "name": "@agentic-patterns/runtime",
+  "name": "@pattern-stack/agent-runtime",
   "version": "0.1.0",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
@@ -69,7 +69,7 @@
     }
   },
   "dependencies": {
-    "@agentic-patterns/core": "workspace:*",
+    "@pattern-stack/agent-core": "workspace:*",
     "ollama-ai-provider": "^1.2.0"
   },
   "devDependencies": {

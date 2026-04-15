@@ -9,8 +9,8 @@ workflows, and exporters.
 
 | Package | Description |
 |---------|-------------|
-| `@agentic-patterns/core` | Atoms, protocols, molecules, rendering, organisms |
-| `@agentic-patterns/runtime` | Runner, events, gates, workflows, transport, multi-agent, exporters |
+| `@pattern-stack/agent-core` | Atoms, protocols, molecules, rendering, organisms |
+| `@pattern-stack/agent-runtime` | Runner, events, gates, workflows, transport, multi-agent, exporters |
 
 Runtime depends on core. Core never imports runtime.
 
@@ -30,7 +30,7 @@ answers one question about the agent's behavior.
 ### Persona -- WHO the agent is
 
 ```typescript
-import { Persona } from "@agentic-patterns/core";
+import { Persona } from "@pattern-stack/agent-core";
 
 const persona = new Persona({
   identity: "a research assistant specializing in data analysis",
@@ -42,7 +42,7 @@ const persona = new Persona({
 ### Mission -- WHAT the agent is doing
 
 ```typescript
-import { Mission } from "@agentic-patterns/core";
+import { Mission } from "@pattern-stack/agent-core";
 
 const mission = new Mission({
   objective: "Analyze the provided dataset and produce a summary.",
@@ -57,7 +57,7 @@ const mission = new Mission({
 ### Judgment -- HOW the agent decides
 
 ```typescript
-import { Judgment } from "@agentic-patterns/core";
+import { Judgment } from "@pattern-stack/agent-core";
 
 const sourceQuality = new Judgment({
   domain: "source-quality",
@@ -77,7 +77,7 @@ A Role composes primitives into a reusable template. Build one with
 the fluent `RoleBuilder`.
 
 ```typescript
-import { RoleBuilder, Responsibility } from "@agentic-patterns/core";
+import { RoleBuilder, Responsibility } from "@pattern-stack/agent-core";
 
 const role = new RoleBuilder("research-assistant")
   .withPersona(persona)
@@ -95,7 +95,7 @@ const role = new RoleBuilder("research-assistant")
 An Agent is a Role instantiated with a Mission and optional context.
 
 ```typescript
-import { AgentBuilder } from "@agentic-patterns/core";
+import { AgentBuilder } from "@pattern-stack/agent-core";
 
 const agent = new AgentBuilder(role)
   .withMission(mission)
@@ -113,7 +113,7 @@ import {
   AgentRunner,
   AgentEventBus,
   ConsoleExporter,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agent-runtime";
 
 const bus = new AgentEventBus();
 const exporter = new ConsoleExporter(bus);
@@ -134,7 +134,7 @@ iterative agent execution.
 ### Sequential -- chain agents in order
 
 ```typescript
-import { Sequential } from "@agentic-patterns/runtime";
+import { Sequential } from "@pattern-stack/agent-runtime";
 
 const pipeline = new Sequential([
   { agent: researcher, messageTemplate: "Research: {{topic}}" },
@@ -148,7 +148,7 @@ const result = await pipeline.run({ topic: "AI trends" }, { runner });
 ### Parallel -- fan-out with concurrency control
 
 ```typescript
-import { Parallel, collectByName } from "@agentic-patterns/runtime";
+import { Parallel, collectByName } from "@pattern-stack/agent-runtime";
 
 const fanout = new Parallel(
   [
@@ -168,7 +168,7 @@ const result = await fanout.run({}, { runner });
 Run an agent iteratively toward a goal, evaluating progress each turn.
 
 ```typescript
-import { TaskLoop, SimpleGoalEvaluator } from "@agentic-patterns/runtime";
+import { TaskLoop, SimpleGoalEvaluator } from "@pattern-stack/agent-runtime";
 
 const evaluator = new SimpleGoalEvaluator({
   successPatterns: ["TASK_COMPLETE"],
@@ -186,7 +186,7 @@ Self-critique loop: a producer generates, an evaluator scores and
 critiques, and the producer refines.
 
 ```typescript
-import { EvaluatorLoop, RubricEvaluator } from "@agentic-patterns/runtime";
+import { EvaluatorLoop, RubricEvaluator } from "@pattern-stack/agent-runtime";
 
 const evaluator = new RubricEvaluator([
   { name: "clarity", description: "Writing is clear and concise", weight: 0.4 },
@@ -206,7 +206,7 @@ const result = await loop.run("Write a technical blog post about RAG");
 Generic retry wrapper for any async operation. Not agent-specific.
 
 ```typescript
-import { RetryLoop, ExponentialBackoff } from "@agentic-patterns/runtime";
+import { RetryLoop, ExponentialBackoff } from "@pattern-stack/agent-runtime";
 
 const retry = new RetryLoop({
   maxAttempts: 5,
@@ -223,7 +223,7 @@ const result = await retry.run(() => callExternalAPI());
 Multi-turn conversation with external input/output callbacks.
 
 ```typescript
-import { ConversationLoop } from "@agentic-patterns/runtime";
+import { ConversationLoop } from "@pattern-stack/agent-runtime";
 
 const loop = new ConversationLoop(agent, {
   maxExchanges: 10,
@@ -241,7 +241,7 @@ const result = await loop.run({ runner });
 `MockRunner` enables deterministic testing without LLM calls.
 
 ```typescript
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agent-runtime";
 
 const mock = new MockRunner()
   .addResponse("analyze", { content: "Analysis: revenue up 15%" })
@@ -260,8 +260,8 @@ For coordination across multiple agents, define an Agency and run it
 with the `AgencyRuntime`.
 
 ```typescript
-import { Agency } from "@agentic-patterns/core";
-import { AgencyRuntime } from "@agentic-patterns/runtime";
+import { Agency } from "@pattern-stack/agent-core";
+import { AgencyRuntime } from "@pattern-stack/agent-runtime";
 
 const agency = new Agency({
   name: "sales-team",

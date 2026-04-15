@@ -9,7 +9,7 @@ import {
   InMemoryAdminService,
   InMemoryEventCollector,
   SSEExporter,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agent-runtime";
 
 export interface ObservabilityStack {
   eventBus: AgentEventBus;

@@ -2,7 +2,7 @@
  * Tests for AgentRunner using MockLanguageModelV1.
  */
 
-import { ToolSchema } from "@agentic-patterns/core";
+import { ToolSchema } from "@pattern-stack/agent-core";
 import { MockLanguageModelV1 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

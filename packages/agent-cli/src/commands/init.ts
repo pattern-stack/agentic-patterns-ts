@@ -43,7 +43,7 @@ export interface InitOptions {
   provider?: Provider;
   /**
    * Scaffold INTO the local monorepo's `examples/<name>/` with `workspace:*`
-   * deps. Required for dogfooding until the `@agentic-patterns/*` packages
+   * deps. Required for dogfooding until the `@pattern-stack/agent-*` packages
    * are published. Overrides `targetDir`.
    */
   link?: boolean;
@@ -203,7 +203,7 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
 
   if (opts.link && monorepoRoot) {
     // Install runs at the monorepo root so workspace:* resolves for every
-    // transitive @agentic-patterns/* dep.
+    // transitive @pattern-stack/agent-* dep.
     const rootRel = path.relative(process.cwd(), monorepoRoot) || ".";
     const projRel = path.relative(monorepoRoot, targetDir);
     if (rootRel !== ".") {
@@ -256,9 +256,9 @@ function renderPackageJson(name: string, provider: Provider, link: boolean): str
       agents: "ap agents",
     },
     dependencies: {
-      "@agentic-patterns/core": apVersion,
-      "@agentic-patterns/runtime": apVersion,
-      "@agentic-patterns/cli": apVersion,
+      "@pattern-stack/agent-core": apVersion,
+      "@pattern-stack/agent-runtime": apVersion,
+      "@pattern-stack/agent-cli": apVersion,
       ai: "^4.0.0",
       [providerDep]: "^1.0.0",
       zod: "^3.23.0",
@@ -344,7 +344,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agent-core";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -403,7 +403,7 @@ const role = new RoleBuilder("demo-assistant")
   .build();
 
 const mission = new Mission({
-  objective: "Demonstrate the @agentic-patterns/core building blocks end-to-end",
+  objective: "Demonstrate the @pattern-stack/agent-core building blocks end-to-end",
   success_criteria: ["Greets users by name", "Uses the greet tool for every greeting"],
 });
 

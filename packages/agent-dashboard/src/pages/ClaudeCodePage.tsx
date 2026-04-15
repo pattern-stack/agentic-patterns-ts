@@ -6,7 +6,7 @@
  *
  * NOTE on dev-mode proxy: the default vite proxy for `/admin` points at
  * :3100 (the NestJS agentic-backend). Claude Code hooks are emitted by the
- * Hono `@agentic-patterns/server` on :3000. When running the dashboard via
+ * Hono `@pattern-stack/agent-server` on :3000. When running the dashboard via
  * `ap playground` (production mode, SPA served from Hono), this page works
  * out of the box. When running `pnpm dev` directly against the default
  * proxy target, you will not see CC events — repoint the proxy at :3000
