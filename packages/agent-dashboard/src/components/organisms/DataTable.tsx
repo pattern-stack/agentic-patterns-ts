@@ -7,7 +7,7 @@
  * wired up.
  */
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 interface Column<T> {
   key: string;
@@ -111,9 +111,8 @@ export function DataTable<T>({
               else onRowClick?.(row);
             };
             return (
-              <>
+              <Fragment key={key}>
                 <tr
-                  key={`row-${key}`}
                   onClick={interactive ? handleActivate : undefined}
                   onKeyDown={
                     interactive
@@ -170,7 +169,7 @@ export function DataTable<T>({
                   ))}
                 </tr>
                 {isExpanded && renderExpanded && (
-                  <tr key={`detail-${key}`}>
+                  <tr>
                     <td
                       colSpan={totalColSpan}
                       style={{
@@ -183,7 +182,7 @@ export function DataTable<T>({
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             );
           })}
           {data.length === 0 && (
