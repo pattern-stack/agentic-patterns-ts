@@ -59,6 +59,13 @@ importers:
         version: 5.9.3
 
   packages/agent-core:
+    dependencies:
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
+      zod-to-json-schema:
+        specifier: ^3.24.0
+        version: 3.25.2(zod@3.25.76)
     devDependencies:
       tsup:
         specifier: ^8.3.0
@@ -69,12 +76,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.6.0)(jsdom@25.0.1)(tsx@4.21.0)
-      zod:
-        specifier: ^3.23.0
-        version: 3.25.76
-      zod-to-json-schema:
-        specifier: ^3.24.0
-        version: 3.25.2(zod@3.25.76)
 
   packages/agent-dashboard:
     dependencies:
@@ -130,12 +131,18 @@ importers:
       '@opentelemetry/api':
         specifier: ^1.0.0
         version: 1.9.0
+      ai:
+        specifier: ^4.0.0
+        version: 4.3.19(react@19.2.5)(zod@3.25.76)
       langfuse:
         specifier: ^3.0.0
         version: 3.38.20
       ollama-ai-provider:
         specifier: ^1.2.0
         version: 1.2.0(zod@3.25.76)
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
       '@ai-sdk/anthropic':
         specifier: ^1.0.0
@@ -146,9 +153,6 @@ importers:
       '@types/node':
         specifier: ^25.6.0
         version: 25.6.0
-      ai:
-        specifier: ^4.0.0
-        version: 4.3.19(react@19.2.5)(zod@3.25.76)
       tsup:
         specifier: ^8.3.0
         version: 8.5.1(postcss@8.5.9)(tsx@4.21.0)(typescript@5.9.3)
@@ -158,9 +162,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.6.0)(jsdom@25.0.1)(tsx@4.21.0)
-      zod:
-        specifier: ^3.23.0
-        version: 3.25.76
 
   packages/agent-server:
     dependencies:
@@ -173,6 +174,9 @@ importers:
       hono:
         specifier: ^4.0.0
         version: 4.12.12
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
     devDependencies:
       '@hono/node-server':
         specifier: ^1.13.0
@@ -192,9 +196,6 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.13)(@types/node@25.6.0)(jsdom@25.0.1)(tsx@4.21.0)
-      zod:
-        specifier: ^3.23.0
-        version: 3.25.76
 
 packages:
 
