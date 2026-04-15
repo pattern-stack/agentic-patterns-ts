@@ -1,6 +1,6 @@
 {
   "name": "@pattern-stack/agent-runtime",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
   "type": "module",
