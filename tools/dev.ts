@@ -44,13 +44,13 @@ const APPS: readonly AppSpec[] = [
     name: "server",
     color: "36", // cyan
     command: "pnpm",
-    args: ["--silent", "--filter", "@pattern-stack/agent-server", "dev"],
+    args: ["--silent", "--filter", "@agentic-patterns/server", "dev"],
   },
   {
     name: "dashboard",
     color: "35", // magenta
     command: "pnpm",
-    args: ["--silent", "--filter", "@pattern-stack/agent-dashboard", "dev"],
+    args: ["--silent", "--filter", "@agentic-patterns/dashboard", "dev"],
   },
 ];
 
@@ -66,7 +66,7 @@ class Orchestrator {
     this.installSignalHandlers();
 
     // Build workspace packages so dist/ is current before tsx resolves
-    // @pattern-stack/agent-* imports. Fast if nothing changed (tsup caches).
+    // @agentic-patterns/* imports. Fast if nothing changed (tsup caches).
     process.stdout.write("\x1b[2mbuilding packages...\x1b[0m\n");
     execSync("pnpm --silent build", { stdio: "inherit" });
 

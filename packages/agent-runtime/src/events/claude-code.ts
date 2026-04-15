@@ -4,7 +4,7 @@
  *
  * The Claude Code CLI emits hook callbacks (PreToolUse, PostToolUse,
  * SessionStart, etc.) as JSON payloads to a configured command. The hook
- * bridge in `@pattern-stack/agent-server` receives those payloads via HTTP
+ * bridge in `@agentic-patterns/server` receives those payloads via HTTP
  * and republishes each one as a `ClaudeCodeHookEvent`.
  *
  * The full raw hook payload is preserved on `payload` so downstream

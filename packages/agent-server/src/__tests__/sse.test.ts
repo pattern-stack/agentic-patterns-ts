@@ -198,7 +198,7 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
       reason: "Not in allowlist",
       gateName: "safety",
       gateCategory: "SAFETY",
-      originalIntent: {} as unknown as import("@pattern-stack/agent-runtime").ToolCallIntent,
+      originalIntent: {} as unknown as import("@agentic-patterns/runtime").ToolCallIntent,
       ...base,
     });
     expect(result?.event).toBe("tool.rejected");

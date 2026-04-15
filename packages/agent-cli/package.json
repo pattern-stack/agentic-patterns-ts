@@ -1,6 +1,6 @@
 {
-  "name": "@pattern-stack/agent-cli",
-  "version": "0.1.1",
+  "name": "@agentic-patterns/cli",
+  "version": "0.1.0",
   "description": "agentic — CLI for running agent projects. Crawls ./agents/, wires observability, serves chat + admin dashboard.",
   "license": "MIT",
   "type": "module",
@@ -30,14 +30,14 @@
   ],
   "scripts": {
     "build": "pnpm build:dashboard && tsup",
-    "build:dashboard": "pnpm --filter @pattern-stack/agent-dashboard build && rm -rf assets/dashboard && mkdir -p assets && cp -r ../agent-dashboard/dist assets/dashboard",
+    "build:dashboard": "pnpm --filter @agentic-patterns/dashboard build && rm -rf assets/dashboard && mkdir -p assets && cp -r ../agent-dashboard/dist assets/dashboard",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@pattern-stack/agent-core": "workspace:*",
-    "@pattern-stack/agent-runtime": "workspace:*",
-    "@pattern-stack/agent-server": "workspace:*",
+    "@agentic-patterns/core": "workspace:*",
+    "@agentic-patterns/runtime": "workspace:*",
+    "@agentic-patterns/server": "workspace:*",
     "@hono/node-server": "^1.13.0",
     "@clack/prompts": "^0.8.0",
     "hono": "^4.0.0",
@@ -45,7 +45,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "@pattern-stack/agent-dashboard": "workspace:*",
+    "@agentic-patterns/dashboard": "workspace:*",
     "@types/node": "^25.6.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0"

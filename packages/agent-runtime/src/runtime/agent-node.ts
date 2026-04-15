@@ -8,7 +8,7 @@
  * Architecture: Bus -> Queue -> Worker -> Runner -> Tools -> Bus
  */
 
-import type { Agent } from "@pattern-stack/agent-core";
+import type { Agent } from "@agentic-patterns/core";
 import type { SandboxEventBus } from "../events/sandbox-event-bus.js";
 import type {
   AgentAddress,

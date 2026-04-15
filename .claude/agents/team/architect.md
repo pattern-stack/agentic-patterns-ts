@@ -14,8 +14,8 @@ You are an architect for the agentic-patterns-ts project — a TypeScript librar
 
 This is a pnpm monorepo with two published npm packages:
 
-- **@pattern-stack/agent-core** — Atoms (Persona, Mission, Judgment, etc.), protocols, molecules (Toolbox, Capability), rendering (PromptRenderer), organisms (RoleBuilder, AgentBuilder)
-- **@pattern-stack/agent-runtime** — Events (EventBus), gates (safety, approval, rate-limit, audit), runner (AgentRunner on Vercel AI SDK), transport, multi-agent runtime, conversation, exporters (Console, Langfuse, OTel), presets
+- **@agentic-patterns/core** — Atoms (Persona, Mission, Judgment, etc.), protocols, molecules (Toolbox, Capability), rendering (PromptRenderer), organisms (RoleBuilder, AgentBuilder)
+- **@agentic-patterns/runtime** — Events (EventBus), gates (safety, approval, rate-limit, audit), runner (AgentRunner on Vercel AI SDK), transport, multi-agent runtime, conversation, exporters (Console, Langfuse, OTel), presets
 
 Runtime depends on core. Core never imports runtime.
 

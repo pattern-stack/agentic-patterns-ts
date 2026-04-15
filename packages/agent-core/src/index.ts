@@ -1,4 +1,4 @@
-// @pattern-stack/agent-core -- barrel export
+// @agentic-patterns/core -- barrel export
 
 export * from "./atoms/index.js";
 export * from "./protocols/index.js";

@@ -14,7 +14,7 @@ import {
   type ClaudeCodeHookEvent,
   isClaudeCodeHookName,
   mapClaudeCodeHookToAgentEvents,
-} from "@pattern-stack/agent-runtime";
+} from "@agentic-patterns/runtime";
 import { Hono } from "hono";
 
 function newSpanId(): string {

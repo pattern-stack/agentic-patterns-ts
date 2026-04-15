@@ -9,7 +9,7 @@
  * `mcp__{server}__{tool}`.
  */
 
-import type { Capability, ToolSchema, Toolbox } from "@pattern-stack/agent-core";
+import type { Capability, ToolSchema, Toolbox } from "@agentic-patterns/core";
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import type { ZodObject, ZodRawShape } from "zod";
 

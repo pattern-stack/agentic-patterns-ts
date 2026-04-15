@@ -14,8 +14,8 @@ import {
   createRunner,
   createToolboxExecutor,
   getAgentEventBus,
-} from "@pattern-stack/agent-runtime";
-import type { AgentEvent } from "@pattern-stack/agent-runtime";
+} from "@agentic-patterns/runtime";
+import type { AgentEvent } from "@agentic-patterns/runtime";
 import { isCancel, text } from "@clack/prompts";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 

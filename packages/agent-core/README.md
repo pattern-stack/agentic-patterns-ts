@@ -1,11 +1,11 @@
-# @pattern-stack/agent-core
+# @agentic-patterns/core
 
 Core primitives for building compositional agents. This package provides the atom-to-organism hierarchy: frozen data models, protocol interfaces, molecules (toolbox/manual/capability), section-based prompt rendering, and builders for roles and agents.
 
 ## Installation
 
 ```bash
-pnpm add @pattern-stack/agent-core zod
+pnpm add @agentic-patterns/core zod
 ```
 
 ## API Overview
@@ -31,7 +31,7 @@ Frozen, immutable data models validated by Zod schemas. Every atom implements `t
 | `Roster` | Agent deployment roster |
 
 ```typescript
-import { Persona, Mission, Judgment } from "@pattern-stack/agent-core";
+import { Persona, Mission, Judgment } from "@agentic-patterns/core";
 
 const persona = new Persona({
   identity: "a data analyst who analyzes datasets with precision",
@@ -80,7 +80,7 @@ Composable building blocks that combine atoms into functional units.
 
 ```typescript
 import { z } from "zod";
-import { ToolSchema, Toolbox, Manual, Capability } from "@pattern-stack/agent-core";
+import { ToolSchema, Toolbox, Manual, Capability } from "@agentic-patterns/core";
 
 const searchTool = ToolSchema.fromZod(
   "search_docs",
@@ -101,7 +101,7 @@ Playbooks define named "plays" with Zod-validated parameters and error-envelope 
 
 ```typescript
 import { z } from "zod";
-import { Playbook, type PlayDefinition } from "@pattern-stack/agent-core";
+import { Playbook, type PlayDefinition } from "@agentic-patterns/core";
 
 class AnalysisPlaybook extends Playbook {
   readonly name = "analysis";
@@ -145,7 +145,7 @@ import {
   ContextSection,
   MissionSection,
   MethodologySection,
-} from "@pattern-stack/agent-core";
+} from "@agentic-patterns/core";
 
 const renderer = new PromptRenderer(
   new IdentitySection(persona, responsibilities),
@@ -166,7 +166,7 @@ High-level builders that compose atoms and molecules into complete agent definit
 **RoleBuilder** -- fluent API for reusable agent templates:
 
 ```typescript
-import { RoleBuilder } from "@pattern-stack/agent-core";
+import { RoleBuilder } from "@agentic-patterns/core";
 
 const role = new RoleBuilder("analyst")
   .withPersona(persona)
@@ -180,7 +180,7 @@ const role = new RoleBuilder("analyst")
 **AgentBuilder** -- instantiate a role with runtime context:
 
 ```typescript
-import { AgentBuilder } from "@pattern-stack/agent-core";
+import { AgentBuilder } from "@agentic-patterns/core";
 
 const agent = new AgentBuilder(role)
   .withBackground(background)

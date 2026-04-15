@@ -1,4 +1,4 @@
-import { Judgment, Role } from "@pattern-stack/agent-core";
+import { Judgment, Role } from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
 import { analystRole } from "../analyst.js";
 import { coordinatorRole } from "../coordinator.js";

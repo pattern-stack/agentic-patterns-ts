@@ -4,7 +4,7 @@
  * Ported from Python: library/orchestration/judgments.py
  */
 
-import { Judgment } from "@pattern-stack/agent-core";
+import { Judgment } from "@agentic-patterns/core";
 
 export const ROUTING = new Judgment({
   domain: "work_routing",

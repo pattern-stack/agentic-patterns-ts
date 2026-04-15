@@ -1,6 +1,6 @@
 /**
  * Typed client-side view of the canonical SSE vocabulary emitted by
- * `@pattern-stack/agent-server` on `POST /conversations/:id/messages`.
+ * `@agentic-patterns/server` on `POST /conversations/:id/messages`.
  *
  * Mirrors the runtime's `SSEEventName` + `toSSEMapping` so the dashboard
  * can stay standalone (no workspace dep on runtime/server) while still

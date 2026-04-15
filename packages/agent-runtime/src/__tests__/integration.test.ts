@@ -23,7 +23,7 @@ import {
   Responsibility,
   RoleBuilder,
   ToolSchema,
-} from "@pattern-stack/agent-core";
+} from "@agentic-patterns/core";
 
 import { AgentEventBus } from "../events/agent-event-bus.js";
 import type { BaseEvent } from "../events/types.js";

@@ -19,7 +19,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
-} from "@pattern-stack/agent-core";
+} from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 

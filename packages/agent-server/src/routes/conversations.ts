@@ -2,8 +2,8 @@
  * Conversation routes — create conversations and stream messages via SSE.
  */
 
-import type { AgentEventBus } from "@pattern-stack/agent-runtime";
-import { Conversation, createToolboxExecutor } from "@pattern-stack/agent-runtime";
+import type { AgentEventBus } from "@agentic-patterns/runtime";
+import { Conversation, createToolboxExecutor } from "@agentic-patterns/runtime";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";

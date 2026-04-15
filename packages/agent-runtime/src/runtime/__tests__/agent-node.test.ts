@@ -1,6 +1,6 @@
 declare function setTimeout(callback: () => void, ms: number): number;
 
-import { AgentBuilder, Mission, Persona, RoleBuilder } from "@pattern-stack/agent-core";
+import { AgentBuilder, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { SandboxEventBus } from "../../events/sandbox-event-bus.js";
 import type {

@@ -5,7 +5,7 @@
  * SandboxEvents to the bus, enabling fully event-driven agent conversations.
  */
 
-import { type ToolDefinition, Toolbox } from "@pattern-stack/agent-core";
+import { type ToolDefinition, Toolbox } from "@agentic-patterns/core";
 import { z } from "zod";
 import type { SandboxEventBus } from "../events/sandbox-event-bus.js";
 import type {

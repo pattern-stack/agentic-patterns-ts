@@ -6,10 +6,10 @@ TypeScript library for building composable LLM agents. Agents are built by compo
 
 | Package | Path | Description |
 |---------|------|-------------|
-| `@pattern-stack/agent-core` | `packages/agent-core/` | Atoms, protocols, molecules, rendering, organisms |
-| `@pattern-stack/agent-runtime` | `packages/agent-runtime/` | Runner, events, gates, transport, multi-agent, exporters, presets |
-| `@pattern-stack/agent-server` | `packages/agent-server/` | Hono HTTP server — routes, SSE streaming, admin API |
-| `@pattern-stack/agent-dashboard` | `packages/agent-dashboard/` | React SPA admin dashboard |
+| `@agentic-patterns/core` | `packages/agent-core/` | Atoms, protocols, molecules, rendering, organisms |
+| `@agentic-patterns/runtime` | `packages/agent-runtime/` | Runner, events, gates, transport, multi-agent, exporters, presets |
+| `@agentic-patterns/server` | `packages/agent-server/` | Hono HTTP server — routes, SSE streaming, admin API |
+| `@agentic-patterns/dashboard` | `packages/agent-dashboard/` | React SPA admin dashboard |
 
 **Runtime depends on core. Server depends on runtime + core. Dashboard is standalone. Core never imports runtime.**
 
@@ -63,8 +63,8 @@ pnpm check            # All of the above (build + typecheck + lint + test)
 ### Per-Package Commands
 
 ```bash
-pnpm --filter @pattern-stack/agent-core test
-pnpm --filter @pattern-stack/agent-runtime typecheck
+pnpm --filter @agentic-patterns/core test
+pnpm --filter @agentic-patterns/runtime typecheck
 ```
 
 ## Tech Stack
@@ -80,6 +80,6 @@ pnpm --filter @pattern-stack/agent-runtime typecheck
 ## Import Rules
 
 - Layers can only import from lower-numbered layers within the same package
-- `@pattern-stack/agent-runtime` can import from `@pattern-stack/agent-core`
-- `@pattern-stack/agent-core` never imports from `@pattern-stack/agent-runtime`
+- `@agentic-patterns/runtime` can import from `@agentic-patterns/core`
+- `@agentic-patterns/core` never imports from `@agentic-patterns/runtime`
 - No circular dependencies between modules within a layer

@@ -16,7 +16,7 @@
  * - SDKPartialAssistantMessage → MessageChunk (streaming)
  */
 
-import type { ToolSchema } from "@pattern-stack/agent-core";
+import type { ToolSchema } from "@agentic-patterns/core";
 import {
   type HookCallback,
   type HookCallbackMatcher,

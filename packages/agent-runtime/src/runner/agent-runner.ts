@@ -10,7 +10,7 @@
  * - MockLanguageModelV1 for testing (replaces Python's MockRunner)
  */
 
-import type { ToolSchema } from "@pattern-stack/agent-core";
+import type { ToolSchema } from "@agentic-patterns/core";
 import {
   type CoreMessage,
   type LanguageModelV1,

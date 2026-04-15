@@ -553,8 +553,8 @@ function deriveFinishReason(args: {
  *
  * @example
  * ```ts
- * import { claudeCode } from "@pattern-stack/agent-runtime/providers";
- * import { AgentRunner } from "@pattern-stack/agent-runtime";
+ * import { claudeCode } from "@agentic-patterns/runtime/providers";
+ * import { AgentRunner } from "@agentic-patterns/runtime";
  *
  * const runner = new AgentRunner(claudeCode("sonnet"));
  * const result = await runner.run(agent, "What is 17 + 28?");

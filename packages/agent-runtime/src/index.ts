@@ -1,4 +1,4 @@
-// @pattern-stack/agent-runtime — barrel export
+// @agentic-patterns/runtime — barrel export
 export * from "./events/index.js";
 export * from "./gates/index.js";
 export * from "./runner/index.js";
