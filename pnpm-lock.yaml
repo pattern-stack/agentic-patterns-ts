@@ -18,6 +18,46 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  packages/agent-cli:
+    dependencies:
+      '@agentic-patterns/core':
+        specifier: workspace:*
+        version: link:../agent-core
+      '@agentic-patterns/runtime':
+        specifier: workspace:*
+        version: link:../agent-runtime
+      '@agentic-patterns/server':
+        specifier: workspace:*
+        version: link:../agent-server
+      '@clack/prompts':
+        specifier: ^0.8.0
+        version: 0.8.2
+      '@hono/node-server':
+        specifier: ^1.13.0
+        version: 1.19.13(hono@4.12.12)
+      hono:
+        specifier: ^4.0.0
+        version: 4.12.12
+      tinyglobby:
+        specifier: ^0.2.0
+        version: 0.2.16
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
+    devDependencies:
+      '@agentic-patterns/dashboard':
+        specifier: workspace:*
+        version: link:../agent-dashboard
+      '@types/node':
+        specifier: ^25.6.0
+        version: 25.6.0
+      tsup:
+        specifier: ^8.3.0
+        version: 8.5.1(postcss@8.5.9)(tsx@4.21.0)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/agent-core:
     devDependencies:
       tsup:
@@ -350,6 +390,12 @@ packages:
     engines: {node: '>=14.21.3'}
     cpu: [x64]
     os: [win32]
+
+  '@clack/core@0.3.5':
+    resolution: {integrity: sha512-5cfhQNH+1VQ2xLQlmzXMqUoiaH0lRBq9/CLW9lTyMbuKLC3+xEK01tHVvyut++mLOn5urSHmkm6I0Lg9MaJSTQ==}
+
+  '@clack/prompts@0.8.2':
+    resolution: {integrity: sha512-6b9Ab2UiZwJYA9iMyboYyW9yJvAO9V753ZhS+DHKEjZRKAxPPOb7MXXu84lsPFG+vZt6FRFniZ8rXi+zCIw4yQ==}
 
   '@csstools/color-helpers@5.1.0':
     resolution: {integrity: sha512-S11EXWJyy0Mz5SYvRmY8nJYTFFd1LCNV+7cXyAgQtOOuzb4EsgfqDufL+9esx72/eLhsRdGZwaldu/h+E4t4BA==}
@@ -2089,6 +2135,9 @@ packages:
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
+  sisteransi@1.0.5:
+    resolution: {integrity: sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==}
+
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
@@ -2648,6 +2697,17 @@ snapshots:
 
   '@biomejs/cli-win32-x64@1.9.4':
     optional: true
+
+  '@clack/core@0.3.5':
+    dependencies:
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
+
+  '@clack/prompts@0.8.2':
+    dependencies:
+      '@clack/core': 0.3.5
+      picocolors: 1.1.1
+      sisteransi: 1.0.5
 
   '@csstools/color-helpers@5.1.0': {}
 
@@ -4473,6 +4533,8 @@ snapshots:
       side-channel-weakmap: 1.0.2
 
   siginfo@2.0.0: {}
+
+  sisteransi@1.0.5: {}
 
   source-map-js@1.2.1: {}
 

@@ -5,3 +5,4 @@ dist/
 .claude/worktrees/
 .env
 .env.local
+packages/agent-cli/assets/dashboard/
