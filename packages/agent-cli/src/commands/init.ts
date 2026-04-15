@@ -41,6 +41,12 @@ export interface InitOptions {
   withPlugin?: boolean;
   /** Which AI SDK provider to wire into the demo agent. */
   provider?: Provider;
+  /**
+   * Scaffold INTO the local monorepo's `examples/<name>/` with `workspace:*`
+   * deps. Required for dogfooding until the `@agentic-patterns/*` packages
+   * are published. Overrides `targetDir`.
+   */
+  link?: boolean;
 }
 
 const DIM = "\x1b[2m";
@@ -58,21 +64,37 @@ const VALID_PROVIDERS: readonly Provider[] = ["anthropic", "openai", "ollama"] a
 export async function runInitCommand(opts: InitOptions): Promise<void> {
   // -------------------------------------------------------------------------
   // 1. Resolve target directory
+  //
+  // `--link` scaffolds into `<monorepoRoot>/examples/<name>/` so `workspace:*`
+  // deps resolve — the only pre-publish path that actually produces a working
+  // `pnpm install`. Otherwise, target is `<cwd>/<name>/` (or `.` for in-place).
   // -------------------------------------------------------------------------
   let targetDir: string;
   let projectName: string;
+  let monorepoRoot: string | null = null;
 
-  if (opts.targetDir === undefined) {
-    const answer = await text({
-      message: "project name",
-      placeholder: "my-agents",
-      validate: (v) => (v.trim().length === 0 ? "name is required" : undefined),
-    });
-    if (isCancel(answer)) {
+  if (opts.link) {
+    monorepoRoot = resolveMonorepoRoot();
+    if (!monorepoRoot) {
+      process.stderr.write(
+        `error: --link requires the CLI to be run from the agentic-patterns-ts source tree\n`,
+      );
+      process.exit(1);
+    }
+    const name = opts.targetDir ?? (await promptName());
+    if (name === null) {
       process.stdout.write(`${DIM}cancelled.${RESET}\n`);
       return;
     }
-    projectName = String(answer).trim();
+    projectName = name;
+    targetDir = path.join(monorepoRoot, "examples", projectName);
+  } else if (opts.targetDir === undefined) {
+    const name = await promptName();
+    if (name === null) {
+      process.stdout.write(`${DIM}cancelled.${RESET}\n`);
+      return;
+    }
+    projectName = name;
     targetDir = path.resolve(process.cwd(), projectName);
   } else if (opts.targetDir === ".") {
     targetDir = process.cwd();
@@ -138,7 +160,12 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
   // -------------------------------------------------------------------------
   const created: string[] = [];
 
-  writeFile(targetDir, "package.json", renderPackageJson(projectName, provider), created);
+  writeFile(
+    targetDir,
+    "package.json",
+    renderPackageJson(projectName, provider, opts.link === true),
+    created,
+  );
   writeFile(targetDir, ".env.example", renderEnvExample(provider), created);
   writeFile(targetDir, "tsconfig.json", renderTsConfig(), created);
   writeFile(targetDir, path.join("agents", "demo", "agent.ts"), renderAgent(provider), created);
@@ -173,22 +200,51 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     process.stdout.write(`\n  ${pluginNote}\n`);
   }
   process.stdout.write(`\n  ${BOLD}next${RESET}\n`);
-  if (rel !== ".") {
-    process.stdout.write(`    cd ${rel}\n`);
+
+  if (opts.link && monorepoRoot) {
+    // Install runs at the monorepo root so workspace:* resolves for every
+    // transitive @agentic-patterns/* dep.
+    const rootRel = path.relative(process.cwd(), monorepoRoot) || ".";
+    const projRel = path.relative(monorepoRoot, targetDir);
+    if (rootRel !== ".") {
+      process.stdout.write(`    cd ${rootRel}\n`);
+    }
+    process.stdout.write(`    pnpm install               ${DIM}# picks up the new example${RESET}\n`);
+    process.stdout.write(`    cd ${projRel}\n`);
+    process.stdout.write(
+      `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
+    );
+    process.stdout.write(`    pnpm dev                   ${DIM}# launch playground${RESET}\n\n`);
+  } else {
+    if (rel !== ".") {
+      process.stdout.write(`    cd ${rel}\n`);
+    }
+    process.stdout.write(
+      `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
+    );
+    process.stdout.write(`    pnpm install\n`);
+    process.stdout.write(`    pnpm dev                   ${DIM}# launch playground${RESET}\n\n`);
   }
-  process.stdout.write(
-    `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
-  );
-  process.stdout.write(`    pnpm install\n`);
-  process.stdout.write(`    pnpm dev                   ${DIM}# launch playground${RESET}\n\n`);
+}
+
+async function promptName(): Promise<string | null> {
+  const answer = await text({
+    message: "project name",
+    placeholder: "my-agents",
+    validate: (v) => (v.trim().length === 0 ? "name is required" : undefined),
+  });
+  if (isCancel(answer)) return null;
+  return String(answer).trim();
 }
 
 // ---------------------------------------------------------------------------
 // File templates
 // ---------------------------------------------------------------------------
 
-function renderPackageJson(name: string, provider: Provider): string {
+function renderPackageJson(name: string, provider: Provider, link: boolean): string {
   const providerDep = providerSdkPackage(provider);
+  const apVersion = link ? "workspace:*" : "^0.1.0";
+
   const pkg = {
     name,
     private: true,
@@ -200,9 +256,9 @@ function renderPackageJson(name: string, provider: Provider): string {
       agents: "ap agents",
     },
     dependencies: {
-      "@agentic-patterns/core": "^0.1.0",
-      "@agentic-patterns/runtime": "^0.1.0",
-      "@agentic-patterns/cli": "^0.1.0",
+      "@agentic-patterns/core": apVersion,
+      "@agentic-patterns/runtime": apVersion,
+      "@agentic-patterns/cli": apVersion,
       ai: "^4.0.0",
       [providerDep]: "^1.0.0",
       zod: "^3.23.0",
@@ -416,20 +472,33 @@ function copyDir(src: string, dest: string): void {
  * works for users installing the CLI from npm.
  */
 function resolvePluginSource(): { pluginDir: string; hooksDir: string } | null {
+  const root = resolveMonorepoRoot();
+  if (!root) return null;
+  return { pluginDir: path.join(root, ".claude-plugin"), hooksDir: path.join(root, "hooks") };
+}
+
+/**
+ * Locate the monorepo root by walking up from this file. The root is
+ * identified by having both `pnpm-workspace.yaml` and `packages/agent-core/`.
+ *
+ * Handles both `src/commands/init.ts` (tsx) and `dist/cli.js` (built) run
+ * locations, plus any future packaged location.
+ */
+function resolveMonorepoRoot(): string | null {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    // Try multiple candidate roots (covers both source/tsx run and dist/cli.js run).
-    const candidates = [
-      path.resolve(here, "../../../../"), // packages/agent-cli/src/commands → repo root
-      path.resolve(here, "../../../"), // packages/agent-cli/dist → repo root
-      path.resolve(here, "../assets/plugin-template"), // future packaged location
-    ];
-    for (const root of candidates) {
-      const pluginDir = path.join(root, ".claude-plugin");
-      const hooksDir = path.join(root, "hooks");
-      if (fs.existsSync(pluginDir) && fs.existsSync(hooksDir)) {
-        return { pluginDir, hooksDir };
+    // Walk up to eight levels — generous cushion for pnpm store layouts.
+    let cur = here;
+    for (let i = 0; i < 8; i++) {
+      if (
+        fs.existsSync(path.join(cur, "pnpm-workspace.yaml")) &&
+        fs.existsSync(path.join(cur, "packages", "agent-core"))
+      ) {
+        return cur;
       }
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
     }
     return null;
   } catch {

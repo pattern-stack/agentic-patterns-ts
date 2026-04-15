@@ -40,6 +40,8 @@ Options:
   --agents <glob>                 override agent discovery glob
   --with-plugin                   (init) drop the Claude Code plugin too
   --provider <p>                  (init) anthropic | openai | ollama
+  --link                          (init) use file: deps against the local
+                                    monorepo (dogfooding before publish)
 `;
 
 async function main(): Promise<void> {
@@ -53,6 +55,7 @@ async function main(): Promise<void> {
       agents: { type: "string" },
       "with-plugin": { type: "boolean" },
       provider: { type: "string" },
+      link: { type: "boolean" },
     },
     allowPositionals: true,
     strict: false,
@@ -74,6 +77,7 @@ async function main(): Promise<void> {
       targetDir,
       withPlugin: Boolean(values["with-plugin"]),
       provider: providerRaw as Provider | undefined,
+      link: Boolean(values.link),
     });
     return;
   }
