@@ -201,6 +201,7 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
           tool_use_id: event.toolUseId,
           permission_mode: event.permissionMode,
           transcript_path: event.transcriptPath,
+          runner_correlation_id: event.runnerCorrelationId,
           payload: event.payload,
         },
       };

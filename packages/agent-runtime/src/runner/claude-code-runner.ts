@@ -49,6 +49,54 @@ function mapModel(modelName: string): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Correlation id plumbing
+//
+// When the runner invokes the Claude Agent SDK, the SDK spawns a Claude Code
+// CLI subprocess whose hooks POST back to our server. We tag those hooks
+// with a correlation id via the `AP_RUNNER_CORRELATION_ID` env var so the
+// server knows the runner is already observing the session — the raw
+// `claude_code.hook` event is still kept (PreCompact, PermissionRequest,
+// etc. give value the runner doesn't emit) but the derived
+// `agent.tool.start`/`agent.tool.end` events are SUPPRESSED to avoid
+// double-counting alongside the runner's own tool events.
+// ---------------------------------------------------------------------------
+
+export const AP_RUNNER_CORRELATION_ENV = "AP_RUNNER_CORRELATION_ID";
+
+function newCorrelationId(): string {
+  if (typeof globalThis !== "undefined" && "crypto" in globalThis) {
+    return (globalThis as unknown as { crypto: { randomUUID(): string } }).crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Set `AP_RUNNER_CORRELATION_ID` on `process.env` for the duration of an
+ * SDK invocation. Returns a restore function that puts the previous value
+ * back (or deletes the key if it wasn't set). Safe to call in environments
+ * without `process` — becomes a no-op.
+ *
+ * Child processes spawned transitively by the SDK inherit this env var,
+ * which is what `hooks/emit.mjs` reads to tag its POSTs.
+ */
+function setCorrelationEnv(id: string): () => void {
+  if (typeof process === "undefined" || !process.env) {
+    return () => {
+      /* no-op */
+    };
+  }
+  const prior = process.env[AP_RUNNER_CORRELATION_ENV];
+  process.env[AP_RUNNER_CORRELATION_ENV] = id;
+  return () => {
+    if (prior === undefined) {
+      delete process.env[AP_RUNNER_CORRELATION_ENV];
+    } else {
+      process.env[AP_RUNNER_CORRELATION_ENV] = prior;
+    }
+  };
+}
+
+// ---------------------------------------------------------------------------
 // ClaudeCodeRunner
 // ---------------------------------------------------------------------------
 
@@ -118,6 +166,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
 
     const runId = generateId();
     const traceId = options?.traceId ?? runId;
+    const correlationId = newCorrelationId();
 
     // Build SDK options with hooks for gate enforcement
     const sdkOptions = this._buildOptions(agent, options, {
@@ -136,6 +185,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
         role: agent.role.name,
         model: agent.getModel(),
         tools: agent.getTools().map((t: ToolSchema) => t.name),
+        runnerCorrelationId: correlationId,
       },
     });
     await this.emit(startEvent);
@@ -145,6 +195,8 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     let inputTokens = 0;
     let outputTokens = 0;
     const model = agent.getModel();
+
+    const restoreCorrelation = setCorrelationEnv(correlationId);
 
     try {
       for await (const msg of query({ prompt: message, options: sdkOptions })) {
@@ -195,6 +247,8 @@ export class ClaudeCodeRunner implements RunnerProtocol {
         }),
       );
       throw err;
+    } finally {
+      restoreCorrelation();
     }
 
     const content = contentParts.join("");
@@ -237,6 +291,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
 
     const runId = generateId();
     const traceId = options?.traceId ?? runId;
+    const correlationId = newCorrelationId();
 
     const sdkOptions = this._buildOptions(agent, options, {
       runId,
@@ -255,6 +310,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
         role: agent.role.name,
         model: agent.getModel(),
         tools: agent.getTools().map((t: ToolSchema) => t.name),
+        runnerCorrelationId: correlationId,
       },
     });
     await this.emit(startEvent);
@@ -267,6 +323,8 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     let inputTokens = 0;
     let outputTokens = 0;
     const model = agent.getModel();
+
+    const restoreCorrelation = setCorrelationEnv(correlationId);
 
     try {
       for await (const msg of query({ prompt: message, options: sdkOptions })) {
@@ -338,6 +396,8 @@ export class ClaudeCodeRunner implements RunnerProtocol {
       });
       await this.emit(errorEvent);
       throw err;
+    } finally {
+      restoreCorrelation();
     }
 
     const finalContent = contentParts.join("");

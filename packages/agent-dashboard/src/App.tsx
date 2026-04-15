@@ -2,6 +2,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/templates/AppShell";
 import { AgentsPage } from "./pages/AgentsPage";
 import { ChatPage } from "./pages/ChatPage";
+import { ClaudeCodePage } from "./pages/ClaudeCodePage";
 import { ConversationDetailPage } from "./pages/ConversationDetailPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/live" element={<LivePage />} />
+          <Route path="/claude-code" element={<ClaudeCodePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/conversations/:id" element={<ConversationDetailPage />} />
         </Routes>

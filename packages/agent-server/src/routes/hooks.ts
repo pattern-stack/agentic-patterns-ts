@@ -36,6 +36,14 @@ export function hookRoutes(eventBus: AgentEventBus): Hono {
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
     const sessionId = typeof body.session_id === "string" ? body.session_id : "unknown";
 
+    // Runner correlation: when a ClaudeCodeRunner spawned this CC session it
+    // tags every hook POST with `x-ap-runner-correlation-id`. We preserve the
+    // raw hook (PreCompact, PermissionRequest, etc. give value the runner
+    // doesn't emit) but SKIP deriving `agent.tool.start`/`agent.tool.end`
+    // events to avoid double-counting alongside the runner's own tool events.
+    const runnerCorrelationId =
+      c.req.header("x-ap-runner-correlation-id") ?? undefined;
+
     const hookEvent: ClaudeCodeHookEvent = {
       type: "claude_code.hook",
       traceId: sessionId,
@@ -54,13 +62,16 @@ export function hookRoutes(eventBus: AgentEventBus): Hono {
       toolResponse: body.tool_response,
       toolUseId: typeof body.tool_use_id === "string" ? body.tool_use_id : undefined,
       payload: body,
+      ...(runnerCorrelationId ? { runnerCorrelationId } : {}),
     };
 
     await eventBus.publish(hookEvent);
 
-    const derived = mapClaudeCodeHookToAgentEvents(hookEvent);
-    for (const e of derived) {
-      await eventBus.publish(e);
+    if (!runnerCorrelationId) {
+      const derived = mapClaudeCodeHookToAgentEvents(hookEvent);
+      for (const e of derived) {
+        await eventBus.publish(e);
+      }
     }
 
     return c.json({ ok: true });

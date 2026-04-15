@@ -12,9 +12,15 @@ try {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 500);
 
+  const headers = { "content-type": "application/json" };
+  const correlationId = process.env.AP_RUNNER_CORRELATION_ID;
+  if (correlationId) {
+    headers["x-ap-runner-correlation-id"] = correlationId;
+  }
+
   await fetch(`${base}/hooks/${eventName}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body,
     signal: controller.signal,
   }).catch((err) => {

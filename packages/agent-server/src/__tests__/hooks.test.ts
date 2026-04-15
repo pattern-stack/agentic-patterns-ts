@@ -51,6 +51,52 @@ describe("POST /hooks/:eventType", () => {
     }
   });
 
+  it("skips derived events but stamps runnerCorrelationId when header is present", async () => {
+    const bus = new AgentEventBus();
+    const seen: AgentEvent[] = [];
+    bus.subscribe("claude_code.hook", (e) => {
+      seen.push(e as AgentEvent);
+    });
+    bus.subscribe("agent.tool.start", (e) => {
+      seen.push(e as AgentEvent);
+    });
+    bus.subscribe("agent.tool.end", (e) => {
+      seen.push(e as AgentEvent);
+    });
+
+    const app = hookRoutes(bus);
+
+    const res = await app.request("/hooks/PreToolUse", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-ap-runner-correlation-id": "corr-xyz-123",
+      },
+      body: JSON.stringify({
+        session_id: "sess-rid",
+        cwd: "/tmp/proj",
+        tool_name: "Bash",
+        tool_input: { command: "ls" },
+        tool_use_id: "call-2",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const types = seen.map((e) => e.type);
+    expect(types).toContain("claude_code.hook");
+    // Derived events MUST be suppressed when runner correlation header is set.
+    expect(types).not.toContain("agent.tool.start");
+    expect(types).not.toContain("agent.tool.end");
+
+    const hook = seen.find((e) => e.type === "claude_code.hook");
+    expect(hook).toBeDefined();
+    if (hook && hook.type === "claude_code.hook") {
+      expect(hook.runnerCorrelationId).toBe("corr-xyz-123");
+      expect(hook.sessionId).toBe("sess-rid");
+    }
+  });
+
   it("returns 400 for an unknown hook event name", async () => {
     const bus = new AgentEventBus();
     const app = hookRoutes(bus);

@@ -72,6 +72,14 @@ export interface ClaudeCodeHookEvent extends BaseEvent {
   readonly toolUseId?: string;
   /** Full raw hook payload, preserved verbatim. */
   readonly payload: Record<string, unknown>;
+  /**
+   * Correlation id propagated from a runner (e.g. `ClaudeCodeRunner`) that
+   * is already observing this session. When present, the hook route SKIPS
+   * deriving `agent.tool.start`/`agent.tool.end` events — the runner
+   * already emits them — while still preserving the raw hook event for
+   * full fidelity (PreCompact, PermissionRequest, etc.).
+   */
+  readonly runnerCorrelationId?: string;
 }
 
 export function isClaudeCodeHookName(s: unknown): s is ClaudeCodeHookName {

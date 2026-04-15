@@ -8,6 +8,7 @@ const navItems = [
   { to: "/tools", label: "Tools" },
   { to: "/tokens", label: "Tokens" },
   { to: "/live", label: "Live" },
+  { to: "/claude-code", label: "Claude Code" },
   { to: "/conversations", label: "Conversations" },
 ];
 
