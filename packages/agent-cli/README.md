@@ -110,6 +110,12 @@ When scaffolded with `--with-plugin`, the plugin wires all 26 Claude Code lifecy
 
 This means any Claude Code session in a project with the plugin enabled becomes live-observable in your dashboard — tool calls, permission prompts, subagent spawns, compaction, everything.
 
+### Activation caveat (0.1.4)
+
+0.1.4 drops `.claude-plugin/` + `hooks/` into your project, but those alone do **not** auto-activate in Claude Code — the hooks only fire when either (a) the plugin is installed via marketplace / `/plugin add`, or (b) you mirror the hooks into your project's `.claude/settings.json`.
+
+See [docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md](../../docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md) for the workaround and the planned 0.1.5 fix that drops `.claude/settings.json` alongside the plugin directory.
+
 See the [plugin docs](../../.claude-plugin/plugin.json) for details.
 
 ## License
