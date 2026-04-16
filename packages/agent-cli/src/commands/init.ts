@@ -209,12 +209,12 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     if (rootRel !== ".") {
       process.stdout.write(`    cd ${rootRel}\n`);
     }
-    process.stdout.write(`    pnpm install               ${DIM}# picks up the new example${RESET}\n`);
+    process.stdout.write(`    bun install                ${DIM}# picks up the new example${RESET}\n`);
     process.stdout.write(`    cd ${projRel}\n`);
     process.stdout.write(
       `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
     );
-    process.stdout.write(`    pnpm dev                   ${DIM}# launch playground${RESET}\n\n`);
+    process.stdout.write(`    bun run dev                ${DIM}# launch playground${RESET}\n\n`);
   } else {
     if (rel !== ".") {
       process.stdout.write(`    cd ${rel}\n`);
@@ -222,8 +222,8 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     process.stdout.write(
       `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
     );
-    process.stdout.write(`    pnpm install\n`);
-    process.stdout.write(`    pnpm dev                   ${DIM}# launch playground${RESET}\n\n`);
+    process.stdout.write(`    bun install\n`);
+    process.stdout.write(`    bun run dev                ${DIM}# launch playground${RESET}\n\n`);
   }
 }
 
@@ -460,41 +460,62 @@ function copyDir(src: string, dest: string): void {
 }
 
 /**
- * Try to find the monorepo's `.claude-plugin/` and `hooks/` directories.
+ * Try to find `.claude-plugin/` and `hooks/`.
  *
- * When running from source, the layout is:
- *   packages/agent-cli/src/commands/init.ts        ← this file
- *   packages/agent-cli/dist/cli.js                 ← built entry
- *   .claude-plugin/, hooks/                        ← four levels up
- *
- * TODO(phase-2): once the plugin template ships inside
- * `packages/agent-cli/assets/plugin-template/`, prefer that path so this
- * works for users installing the CLI from npm.
+ * Two possible locations:
+ *   1. Bundled inside the published CLI tarball at
+ *      `packages/agent-cli/assets/plugin-template/` (checked first — works
+ *      when the CLI is installed via `npm install -g @agentic-patterns/cli`)
+ *   2. The monorepo root (dogfood path — walks up from the running script)
  */
 function resolvePluginSource(): { pluginDir: string; hooksDir: string } | null {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+
+  // Candidate 1 (priority): bundled plugin-template inside the CLI package.
+  // Source run:  src/commands/init.ts  → ../../assets/plugin-template/
+  // Dist run:    dist/cli.js           → ../assets/plugin-template/
+  const bundledCandidates = [
+    path.resolve(here, "../assets/plugin-template"),
+    path.resolve(here, "../../assets/plugin-template"),
+  ];
+  for (const base of bundledCandidates) {
+    const pluginDir = path.join(base, ".claude-plugin");
+    const hooksDir = path.join(base, "hooks");
+    if (fs.existsSync(pluginDir) && fs.existsSync(hooksDir)) {
+      return { pluginDir, hooksDir };
+    }
+  }
+
+  // Candidate 2: monorepo root (for local `bun --filter` / tsx runs).
   const root = resolveMonorepoRoot();
-  if (!root) return null;
-  return { pluginDir: path.join(root, ".claude-plugin"), hooksDir: path.join(root, "hooks") };
+  if (root) {
+    return { pluginDir: path.join(root, ".claude-plugin"), hooksDir: path.join(root, "hooks") };
+  }
+  return null;
 }
 
 /**
  * Locate the monorepo root by walking up from this file. The root is
- * identified by having both `pnpm-workspace.yaml` and `packages/agent-core/`.
- *
- * Handles both `src/commands/init.ts` (tsx) and `dist/cli.js` (built) run
- * locations, plus any future packaged location.
+ * identified by having `packages/agent-core/` and a `workspaces` field in
+ * package.json (bun workspace marker — replaces the old pnpm-workspace.yaml).
  */
 function resolveMonorepoRoot(): string | null {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    // Walk up to eight levels — generous cushion for pnpm store layouts.
     let cur = here;
     for (let i = 0; i < 8; i++) {
-      if (
-        fs.existsSync(path.join(cur, "pnpm-workspace.yaml")) &&
-        fs.existsSync(path.join(cur, "packages", "agent-core"))
-      ) {
-        return cur;
+      const rootPkgPath = path.join(cur, "package.json");
+      if (fs.existsSync(rootPkgPath) && fs.existsSync(path.join(cur, "packages", "agent-core"))) {
+        try {
+          const rootPkg = JSON.parse(fs.readFileSync(rootPkgPath, "utf8")) as {
+            workspaces?: string[];
+          };
+          if (rootPkg.workspaces && rootPkg.workspaces.length > 0) {
+            return cur;
+          }
+        } catch {
+          // malformed json — fall through
+        }
       }
       const parent = path.dirname(cur);
       if (parent === cur) break;

@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "agentic — CLI for running agent projects. Crawls ./agents/, wires observability, serves chat + admin dashboard.",
   "license": "MIT",
   "type": "module",
@@ -29,8 +29,9 @@
     "assets"
   ],
   "scripts": {
-    "build": "pnpm build:dashboard && tsup",
-    "build:dashboard": "pnpm --filter @agentic-patterns/dashboard build && rm -rf assets/dashboard && mkdir -p assets && cp -r ../agent-dashboard/dist assets/dashboard",
+    "build": "bun run build:dashboard && bun run build:plugin-template && tsup",
+    "build:dashboard": "bun run --filter=@agentic-patterns/dashboard build && rm -rf assets/dashboard && mkdir -p assets && cp -r ../agent-dashboard/dist assets/dashboard",
+    "build:plugin-template": "rm -rf assets/plugin-template && mkdir -p assets/plugin-template && cp -r ../../.claude-plugin assets/plugin-template/.claude-plugin && cp -r ../../hooks assets/plugin-template/hooks",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/"
   },
