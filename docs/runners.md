@@ -415,7 +415,7 @@ async function importOrFail(pkg: string, provider: SupportedProvider): Promise<a
   } catch (e) {
     throw new Error(
       `createRunner: provider "${provider}" requires "${pkg}" to be installed. ` +
-        `Run: pnpm add ${pkg}`,
+        `Run: bun add ${pkg}`,
       { cause: e },
     );
   }

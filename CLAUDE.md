@@ -52,25 +52,25 @@ Capability = Toolbox + Manual
 ## Development
 
 ```bash
-pnpm install          # Install all dependencies
-pnpm build            # tsup compile both packages
-pnpm typecheck        # tsc --noEmit strict mode
-pnpm lint             # biome check
-pnpm test             # vitest run all tests
-pnpm check            # All of the above (build + typecheck + lint + test)
+bun install          # Install all dependencies
+bun run build            # tsup compile both packages
+bun run typecheck        # tsc --noEmit strict mode
+bun run lint             # biome check
+bun run test             # vitest run all tests
+bun run check            # All of the above (build + typecheck + lint + test)
 ```
 
 ### Per-Package Commands
 
 ```bash
-pnpm --filter @agentic-patterns/core test
-pnpm --filter @agentic-patterns/runtime typecheck
+bun run --filter=@agentic-patterns/core test
+bun run --filter=@agentic-patterns/runtime typecheck
 ```
 
 ## Tech Stack
 
 - **TypeScript 5.7+** — strict mode compilation
-- **pnpm** — workspace-aware package management
+- **bun** — workspace-aware package management + test runner + script runner
 - **zod** — schema validation and type inference
 - **ai** (Vercel AI SDK) — LLM provider abstraction for AgentRunner
 - **tsup** — bundler (ESM + CJS dual output)

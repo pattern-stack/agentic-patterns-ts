@@ -5,7 +5,7 @@ Practical guide for building and testing agents on top of this monorepo.
 ## Dev loop (one command)
 
 ```bash
-pnpm dev
+bun run dev
 ```
 
 Starts two processes with interleaved colored logs:
@@ -22,7 +22,7 @@ Ctrl+C stops both cleanly. If either process dies, the other is torn down automa
 The server's `dev` script watches `DEMO_FILE` (defaults to `examples/live-demo.ts`). Point it at your own:
 
 ```bash
-DEMO_FILE=examples/my-agent.ts pnpm dev
+DEMO_FILE=examples/my-agent.ts bun run dev
 ```
 
 Copy `packages/agent-server/examples/live-demo.ts` as a template — it wires
@@ -64,10 +64,10 @@ See `CLAUDE.md` for the layer hierarchy and import rules.
 ## Running checks
 
 ```bash
-pnpm check           # build + typecheck + lint + test
-pnpm typecheck       # TypeScript only
-pnpm lint            # biome only
-pnpm test            # vitest across all packages
+bun run check           # build + typecheck + lint + test
+bun run typecheck       # TypeScript only
+bun run lint            # biome only
+bun run test            # vitest across all packages
 ```
 
 ## Repository conventions

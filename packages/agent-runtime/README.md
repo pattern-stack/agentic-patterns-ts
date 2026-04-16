@@ -5,7 +5,7 @@ Execution runtime for agentic-patterns agents. Provides the runner loop (Vercel 
 ## Installation
 
 ```bash
-pnpm add @agentic-patterns/runtime @agentic-patterns/core ai zod
+bun add @agentic-patterns/runtime @agentic-patterns/core ai zod
 ```
 
 ## API Overview

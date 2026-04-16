@@ -7,11 +7,11 @@
 #   bash scripts/publish.sh publish     # real publish, needs npm login + OTP
 #   bash scripts/publish.sh publish --tag=latest   # override tag (default: next)
 #
-# pnpm handles monorepo specifics automatically:
-#   - skips packages with `private: true` (dashboard)
+# bun handles monorepo specifics:
 #   - rewrites `workspace:*` to concrete versions in published tarballs
-#   - publishes in topological order (core → runtime → server/cli)
-#   - skips versions already on registry (safe to rerun)
+#   - skips packages with `private: true` via the loop below
+# Run `bun publish` per-package in topological order since bun 1.3's
+# global --filter for publish is still maturing.
 
 set -euo pipefail
 
@@ -28,6 +28,9 @@ done
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
+# Topological order: core → runtime → server → cli
+PACKAGES=(agent-core agent-runtime agent-server agent-cli)
+
 bold()  { printf "\033[1m%s\033[0m\n" "$*"; }
 dim()   { printf "\033[2m%s\033[0m\n" "$*"; }
 ok()    { printf "  \033[32m✓\033[0m %s\n" "$*"; }
@@ -36,58 +39,54 @@ fail()  { printf "  \033[31m✗\033[0m %s\n" "$*"; exit 1; }
 
 bold "pre-flight"
 
-# -- Git tree -----------------------------------------------------------------
-if [ -n "$(git status --porcelain)" ]; then
-  warn "git tree is dirty — commit or stash before publishing"
-  git status --short
-  [ "$MODE" = "publish" ] && fail "refusing to publish with uncommitted changes"
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  warn "git tree has uncommitted modifications"
+  git status --short --untracked-files=no
+  [ "$MODE" = "publish" ] && fail "refusing to publish with modified tracked files"
 else
-  ok "git tree clean"
+  ok "git tree clean (ignoring untracked)"
 fi
 
-# -- npm auth (only needed for real publish) ----------------------------------
 if [ "$MODE" = "publish" ]; then
-  if ! npm whoami >/dev/null 2>&1; then
-    fail "not logged in to npm — run: npm login"
-  fi
+  npm whoami >/dev/null 2>&1 || fail "not logged in to npm — run: npm login"
   ok "npm user: $(npm whoami)"
 fi
 
-# -- Build + typecheck --------------------------------------------------------
 bold "build + typecheck"
-pnpm -r build >/dev/null
+bun run --filter='*' build >/dev/null
 ok "build"
-pnpm -r typecheck >/dev/null
+bun run --filter='*' typecheck >/dev/null
 ok "typecheck"
 
-# -- Dry-run publish ----------------------------------------------------------
 bold "dry-run publish (what would ship)"
 echo
-pnpm -r publish --tag="$TAG" --access=public --dry-run --no-git-checks 2>&1 | \
-  grep -E "^(Publishing|\+ @agentic-patterns/|  [a-z])" || true
+for pkg in "${PACKAGES[@]}"; do
+  name=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').name)")
+  version=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').version)")
+  echo "  + $name@$version"
+done
 echo
 
-# -- Summary ------------------------------------------------------------------
 bold "versions on disk"
-for dir in packages/*/; do
-  pkg="$dir/package.json"
-  [ -f "$pkg" ] || continue
-  node -e "const p=require('$ROOT/$pkg'); if(!p.private) console.log('  '+p.name.padEnd(32)+p.version);" 2>/dev/null || true
+for pkg in "${PACKAGES[@]}"; do
+  node -e "const p=require('$ROOT/packages/$pkg/package.json'); if(!p.private) console.log('  '+p.name.padEnd(32)+p.version);" 2>/dev/null || true
 done
 
-# -- Either stop here or do the real thing ------------------------------------
 case "$MODE" in
   check)
     echo
     dim "run \`bash scripts/publish.sh publish\` to actually publish with tag=$TAG"
-    dim "(skipped: npm login check in check mode)"
     ;;
   publish)
     echo
     bold "publishing to npm (tag=$TAG)"
-    dim "you may be prompted for an OTP — have your authenticator ready"
     echo
-    pnpm -r publish --tag="$TAG" --access=public --no-git-checks
+    for pkg in "${PACKAGES[@]}"; do
+      pkg_dir="$ROOT/packages/$pkg"
+      private=$(node -e "console.log(require('$pkg_dir/package.json').private || false)")
+      [ "$private" = "true" ] && { dim "skip (private): $pkg"; continue; }
+      (cd "$pkg_dir" && bun publish --tag="$TAG" --access=public) || fail "publish failed for $pkg"
+    done
     echo
     ok "done — verify at https://www.npmjs.com/~agentic-patterns"
     ;;

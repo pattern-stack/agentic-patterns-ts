@@ -5,7 +5,7 @@ Hono HTTP server for agentic-patterns agents. Exposes conversation routes with S
 ## Installation
 
 ```bash
-pnpm add @agentic-patterns/server @agentic-patterns/runtime @agentic-patterns/core hono @hono/node-server
+bun add @agentic-patterns/server @agentic-patterns/runtime @agentic-patterns/core hono @hono/node-server
 ```
 
 Most consumers don't install this directly — `@agentic-patterns/cli` bundles it. Install standalone when you need a custom server (different framework, custom routes, non-default CORS, reverse proxy, etc.).

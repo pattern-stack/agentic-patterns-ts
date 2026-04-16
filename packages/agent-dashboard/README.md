@@ -22,8 +22,8 @@ This package is **private**. Consumers don't install it directly. It ships as a 
 From the monorepo root:
 
 ```bash
-pnpm --filter @agentic-patterns/dashboard dev   # Vite dev server
-pnpm --filter @agentic-patterns/dashboard build # produces dist/
+bun run --filter=@agentic-patterns/dashboard dev   # Vite dev server
+bun run --filter=@agentic-patterns/dashboard build # produces dist/
 ```
 
 The Vite dev server proxies API calls to an external NestJS backend on port 3100 (separate branch/service). For end-to-end testing with the Hono server, use `ap playground` — the CLI bundles the built SPA and serves it directly from the Hono app on port 3000, bypassing the proxy.

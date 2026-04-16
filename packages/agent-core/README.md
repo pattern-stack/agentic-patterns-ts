@@ -5,7 +5,7 @@ Core primitives for building compositional agents. This package provides the ato
 ## Installation
 
 ```bash
-pnpm add @agentic-patterns/core zod
+bun add @agentic-patterns/core zod
 ```
 
 ## API Overview

@@ -23,8 +23,8 @@ npm install -g @agentic-patterns/cli
 ap init my-agents --provider=anthropic --with-plugin
 cd my-agents
 cp .env.example .env   # add ANTHROPIC_API_KEY
-pnpm install
-pnpm dev               # http://localhost:3000
+bun install
+bun run dev               # http://localhost:3000
 ```
 
 `--with-plugin` also drops a Claude Code plugin next to your project — open Claude Code in that directory and every lifecycle event streams live into the dashboard.
@@ -32,7 +32,7 @@ pnpm dev               # http://localhost:3000
 Or, skip the CLI and use the library directly:
 
 ```bash
-pnpm add @agentic-patterns/core @agentic-patterns/runtime ai @ai-sdk/anthropic
+bun add @agentic-patterns/core @agentic-patterns/runtime ai @ai-sdk/anthropic
 ```
 
 ```typescript
@@ -58,9 +58,9 @@ console.log(result.response);
 ```bash
 git clone https://github.com/pattern-stack/agentic-patterns-ts
 cd agentic-patterns-ts
-pnpm install
-pnpm build
-pnpm test
+bun install
+bun run build
+bun run test
 ```
 
 ## Building an Agent
@@ -359,11 +359,11 @@ Capability = Toolbox + Manual + Playbook
 ## Development
 
 ```bash
-pnpm build       # tsup compile both packages
-pnpm typecheck   # tsc --noEmit strict mode
-pnpm test        # vitest run all tests
-pnpm lint        # biome check
-pnpm check       # all of the above
+bun run build       # tsup compile both packages
+bun run typecheck   # tsc --noEmit strict mode
+bun run test        # vitest run all tests
+bun run lint        # biome check
+bun run check       # all of the above
 ```
 
 ## Dependencies

@@ -5,11 +5,9 @@
 ## Installation
 
 ```bash
-npm install -g @agentic-patterns/cli
-# or
-pnpm add -g @agentic-patterns/cli
-# or
 bun add -g @agentic-patterns/cli
+# or
+npm install -g @agentic-patterns/cli
 ```
 
 Or use without installing:
@@ -26,8 +24,8 @@ Scaffold a new project from scratch:
 ap init my-agents --provider=anthropic --with-plugin
 cd my-agents
 cp .env.example .env   # add ANTHROPIC_API_KEY
-pnpm install
-pnpm dev
+bun install
+bun run dev
 # → http://localhost:3000
 ```
 
