@@ -9,14 +9,55 @@ workflows, and exporters.
 
 | Package | Description |
 |---------|-------------|
-| `@agentic-patterns/core` | Atoms, protocols, molecules, rendering, organisms |
-| `@agentic-patterns/runtime` | Runner, events, gates, workflows, transport, multi-agent, exporters |
+| [`@agentic-patterns/core`](./packages/agent-core) | Atoms, protocols, molecules, rendering, organisms |
+| [`@agentic-patterns/runtime`](./packages/agent-runtime) | Runner, events, gates, workflows, transport, multi-agent, exporters |
+| [`@agentic-patterns/server`](./packages/agent-server) | Hono HTTP server — routes, SSE, admin API, Claude Code hook bridge |
+| [`@agentic-patterns/cli`](./packages/agent-cli) | `ap` — discover agents, chat in terminal, launch dashboard |
 
-Runtime depends on core. Core never imports runtime.
+Runtime depends on core. Server depends on runtime + core. Core never imports runtime.
 
 ## Quick Start
 
 ```bash
+npm install -g @agentic-patterns/cli
+ap init my-agents --provider=anthropic --with-plugin
+cd my-agents
+cp .env.example .env   # add ANTHROPIC_API_KEY
+pnpm install
+pnpm dev               # http://localhost:3000
+```
+
+`--with-plugin` also drops a Claude Code plugin next to your project — open Claude Code in that directory and every lifecycle event streams live into the dashboard.
+
+Or, skip the CLI and use the library directly:
+
+```bash
+pnpm add @agentic-patterns/core @agentic-patterns/runtime ai @ai-sdk/anthropic
+```
+
+```typescript
+import { Persona, Mission, RoleBuilder, AgentBuilder } from "@agentic-patterns/core";
+import { AgentRunner, AgentEventBus } from "@agentic-patterns/runtime";
+import { anthropic } from "@ai-sdk/anthropic";
+
+const role = new RoleBuilder("assistant")
+  .withPersona(new Persona({ identity: "a helpful assistant", tone: "concise" }))
+  .build();
+
+const agent = new AgentBuilder(role)
+  .withMission(new Mission({ objective: "Help the user" }))
+  .build();
+
+const runner = new AgentRunner(anthropic("claude-sonnet-4-20250514"), new AgentEventBus());
+const result = await runner.run(agent, "Hello!");
+console.log(result.response);
+```
+
+## Monorepo Development
+
+```bash
+git clone https://github.com/pattern-stack/agentic-patterns-ts
+cd agentic-patterns-ts
 pnpm install
 pnpm build
 pnpm test
