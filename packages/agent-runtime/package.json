@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/runtime",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
   "type": "module",
@@ -51,14 +51,10 @@
     "lint": "biome check src/"
   },
   "peerDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
     "@opentelemetry/api": "^1.0.0",
     "langfuse": "^3.0.0"
   },
   "peerDependenciesMeta": {
-    "@anthropic-ai/claude-agent-sdk": {
-      "optional": true
-    },
     "langfuse": {
       "optional": true
     },
@@ -68,6 +64,7 @@
   },
   "dependencies": {
     "@agentic-patterns/core": "workspace:*",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
     "ai": "^4.0.0",
     "ollama-ai-provider": "^1.2.0",
     "zod": "^3.23.0"
