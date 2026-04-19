@@ -7,12 +7,14 @@
 
 import {
   AgentEventBus,
+  AgentRunner,
   InMemoryAdminService,
   InMemoryEventCollector,
   SSEExporter,
   buildCalculatorAgent,
   buildTodoAgent,
   buildWritingCoachAgent,
+  claudeCode,
   createRunner,
 } from "@agentic-patterns/runtime";
 import { serve } from "@hono/node-server";
@@ -33,13 +35,19 @@ const adminService = new InMemoryAdminService(collector);
 const sseExporter = new SSEExporter();
 sseExporter.attach(eventBus);
 
-// Pick a runner automatically: explicit env (ANTHROPIC_API_KEY / OPENAI_API_KEY
-// / OLLAMA_HOST / …) → Claude CLI → error. Set `AGENT_TIER=opus|sonnet|haiku`
-// to move up/down the ladder without editing this file.
-const { runner } = await createRunner({
-  eventBus,
-  tier: (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet",
-});
+// Default: AgentRunner + claudeCode() provider. Drives Claude via the Agent
+// SDK (Max OAuth from ~/.claude or ANTHROPIC_API_KEY) while the standard
+// AgentRunner loop emits the full canonical event vocabulary —
+// iteration.start/end, llm.start/end, tool.start/end, reasoning deltas.
+//
+// Override with `AGENT_RUNNER=auto` to fall back to env-var provider
+// detection (OpenAI / Ollama / Groq / …) via `createRunner`.
+const tier = (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet";
+
+const runner =
+  process.env.AGENT_RUNNER === "auto"
+    ? (await createRunner({ eventBus, tier })).runner
+    : new AgentRunner(claudeCode(tier), eventBus);
 
 const config: ServerConfig = {
   agents: [
