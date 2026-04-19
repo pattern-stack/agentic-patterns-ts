@@ -47,7 +47,9 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cliPath = args.cli ?? path.join(REPO_ROOT, "packages/agent-cli/dist/cli.js");
   if (!fs.existsSync(cliPath)) {
-    fail(`CLI build not found at ${cliPath} — run \`bun run --filter=@agentic-patterns/cli build\` first.`);
+    fail(
+      `CLI build not found at ${cliPath} — run \`bun run --filter=@agentic-patterns/cli build\` first.`,
+    );
   }
 
   const tmpProject = fs.mkdtempSync(path.join(os.tmpdir(), "ap-verify-hooks-"));
@@ -147,9 +149,7 @@ function sleep(ms) {
 function run(cmd, args, opts) {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, args, { stdio: "inherit", ...opts });
-    p.on("exit", (code) =>
-      code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`)),
-    );
+    p.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`))));
     p.on("error", reject);
   });
 }

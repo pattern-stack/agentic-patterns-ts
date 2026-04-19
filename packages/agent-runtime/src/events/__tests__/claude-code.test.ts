@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ClaudeCodeHookEvent } from "../claude-code.js";
 import { mapClaudeCodeHookToAgentEvents } from "../claude-code-mapper.js";
+import type { ClaudeCodeHookEvent } from "../claude-code.js";
 
 function makeHook(overrides: Partial<ClaudeCodeHookEvent>): ClaudeCodeHookEvent {
   return {

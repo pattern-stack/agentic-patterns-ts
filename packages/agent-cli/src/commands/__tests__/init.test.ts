@@ -77,9 +77,7 @@ describe("runInitCommand --with-plugin", () => {
         UserPromptSubmit: [
           {
             matcher: "",
-            hooks: [
-              { type: "command", command: "echo user-custom-hook" },
-            ],
+            hooks: [{ type: "command", command: "echo user-custom-hook" }],
           },
         ],
       },
@@ -115,7 +113,9 @@ describe("runInitCommand --with-plugin", () => {
 
     // Our emit.mjs hook added alongside it
     expect(
-      allUpsCommands.some((c) => c.includes("${CLAUDE_PROJECT_DIR}/hooks/emit.mjs UserPromptSubmit")),
+      allUpsCommands.some((c) =>
+        c.includes("${CLAUDE_PROJECT_DIR}/hooks/emit.mjs UserPromptSubmit"),
+      ),
     ).toBe(true);
 
     // Events the user didn't touch are present too (e.g. SessionStart)

@@ -16,9 +16,11 @@ import { defineConfig } from "vite";
  * return the request URL to tell Vite to serve it locally (falling through
  * to the SPA index).
  */
-const htmlNavBypass = (req: { headers: Record<string, string | string[] | undefined> } & {
-  url?: string;
-}) => {
+const htmlNavBypass = (
+  req: { headers: Record<string, string | string[] | undefined> } & {
+    url?: string;
+  },
+) => {
   const accept = req.headers.accept;
   const acceptStr = Array.isArray(accept) ? accept.join(",") : (accept ?? "");
   if (acceptStr.includes("text/html")) {

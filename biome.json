@@ -32,6 +32,16 @@
     }
   },
   "files": {
-    "ignore": ["dist/", "node_modules/", "*.d.ts", "*.d.cts", "pnpm-lock.yaml"]
+    "ignore": [
+      "dist/",
+      "node_modules/",
+      "*.d.ts",
+      "*.d.cts",
+      "pnpm-lock.yaml",
+      "bun.lock",
+      "demo/",
+      "packages/agent-cli/assets/dashboard/",
+      "packages/agent-cli/assets/plugin-template/"
+    ]
   }
 }

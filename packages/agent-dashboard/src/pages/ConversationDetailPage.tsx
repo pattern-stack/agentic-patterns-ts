@@ -137,7 +137,9 @@ export function ConversationDetailPage() {
           ← Conversations
         </Link>
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 14 }}>{detail.id.slice(0, 8)}</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 14 }}>
+            {detail.id.slice(0, 8)}
+          </span>
         </h1>
       </div>
 

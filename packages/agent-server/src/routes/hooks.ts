@@ -41,8 +41,7 @@ export function hookRoutes(eventBus: AgentEventBus): Hono {
     // raw hook (PreCompact, PermissionRequest, etc. give value the runner
     // doesn't emit) but SKIP deriving `agent.tool.start`/`agent.tool.end`
     // events to avoid double-counting alongside the runner's own tool events.
-    const runnerCorrelationId =
-      c.req.header("x-ap-runner-correlation-id") ?? undefined;
+    const runnerCorrelationId = c.req.header("x-ap-runner-correlation-id") ?? undefined;
 
     const hookEvent: ClaudeCodeHookEvent = {
       type: "claude_code.hook",
@@ -52,11 +51,9 @@ export function hookRoutes(eventBus: AgentEventBus): Hono {
       timestamp: new Date(),
       hookName: eventType,
       sessionId,
-      transcriptPath:
-        typeof body.transcript_path === "string" ? body.transcript_path : undefined,
+      transcriptPath: typeof body.transcript_path === "string" ? body.transcript_path : undefined,
       cwd: typeof body.cwd === "string" ? body.cwd : undefined,
-      permissionMode:
-        typeof body.permission_mode === "string" ? body.permission_mode : undefined,
+      permissionMode: typeof body.permission_mode === "string" ? body.permission_mode : undefined,
       toolName: typeof body.tool_name === "string" ? body.tool_name : undefined,
       toolInput: body.tool_input,
       toolResponse: body.tool_response,

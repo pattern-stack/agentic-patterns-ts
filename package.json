@@ -6,10 +6,7 @@
     "type": "git",
     "url": "https://github.com/pattern-stack/agentic-patterns-ts.git"
   },
-  "workspaces": [
-    "packages/*",
-    "examples/*"
-  ],
+  "workspaces": ["packages/*", "examples/*"],
   "scripts": {
     "dev": "bun run tools/dev.ts",
     "build": "bun run --filter='*' build",

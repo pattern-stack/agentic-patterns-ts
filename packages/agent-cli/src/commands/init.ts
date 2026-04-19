@@ -78,7 +78,7 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     monorepoRoot = resolveMonorepoRoot();
     if (!monorepoRoot) {
       process.stderr.write(
-        `error: --link requires the CLI to be run from the agentic-patterns-ts source tree\n`,
+        "error: --link requires the CLI to be run from the agentic-patterns-ts source tree\n",
       );
       process.exit(1);
     }
@@ -200,7 +200,9 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
       if (mergeOutcome.kind === "created") {
         created.push(".claude/settings.json");
       } else if (mergeOutcome.kind === "merged") {
-        created.push(`.claude/settings.json ${DIM}(merged ${mergeOutcome.added} hook entries)${RESET}`);
+        created.push(
+          `.claude/settings.json ${DIM}(merged ${mergeOutcome.added} hook entries)${RESET}`,
+        );
       } else {
         created.push(`.claude/settings.json ${DIM}(already up to date)${RESET}`);
       }
@@ -233,7 +235,9 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     if (rootRel !== ".") {
       process.stdout.write(`    cd ${rootRel}\n`);
     }
-    process.stdout.write(`    bun install                ${DIM}# picks up the new example${RESET}\n`);
+    process.stdout.write(
+      `    bun install                ${DIM}# picks up the new example${RESET}\n`,
+    );
     process.stdout.write(`    cd ${projRel}\n`);
     process.stdout.write(
       `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
@@ -246,7 +250,7 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     process.stdout.write(
       `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
     );
-    process.stdout.write(`    bun install\n`);
+    process.stdout.write("    bun install\n");
     process.stdout.write(`    bun run dev                ${DIM}# launch playground${RESET}\n\n`);
   }
 }
