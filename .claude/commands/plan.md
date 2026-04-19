@@ -34,7 +34,7 @@ Write the spec to `.claude/specs/<date>-<kebab-case-name>.md`:
 ## Acceptance Criteria
 - [ ] <Concrete, testable criterion>
 - [ ] <Another criterion>
-- [ ] `pnpm check` passes
+- [ ] `bun run check` passes
 
 ## Open Questions
 - <Anything unresolved>

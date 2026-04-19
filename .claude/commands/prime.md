@@ -7,7 +7,7 @@ Run these commands and internalize the results:
 3. List packages and their structure: `ls packages/*/src/`
 4. Check current branch and recent commits: `git log --oneline -20`
 5. Check for any uncommitted work: `git status`
-6. Check package build status: `pnpm build 2>&1 | tail -5`
+6. Check package build status: `bun run build 2>&1 | tail -5`
 
 ## Skills & Commands Inventory
 

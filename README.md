@@ -24,10 +24,10 @@ ap init my-agents --provider=anthropic --with-plugin
 cd my-agents
 cp .env.example .env   # add ANTHROPIC_API_KEY
 bun install
-bun run dev               # http://localhost:3000
+bun run dev               # http://localhost:3456
 ```
 
-`--with-plugin` also drops a Claude Code plugin next to your project — open Claude Code in that directory and every lifecycle event streams live into the dashboard.
+`--with-plugin` also drops a Claude Code plugin next to your project — open Claude Code in that directory and every one of the 26 lifecycle events (tool calls, permission prompts, subagent spawns, compaction, etc.) streams live into the dashboard's `/claude-code` page, grouped by session.
 
 Or, skip the CLI and use the library directly:
 

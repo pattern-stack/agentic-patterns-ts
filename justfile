@@ -10,16 +10,16 @@ default:
 
 # Start server + dashboard (kills stale port holders first)
 dev:
-    -kill $(lsof -ti :3000) 2>/dev/null
-    pnpm exec tsx tools/dev.ts
+    -kill $(lsof -ti :3456) 2>/dev/null
+    bun x tsx tools/dev.ts
 
 # Start with opus tier
 dev-opus:
-    AGENT_TIER=opus pnpm exec tsx tools/dev.ts
+    AGENT_TIER=opus bun x tsx tools/dev.ts
 
 # Start with haiku tier
 dev-haiku:
-    AGENT_TIER=haiku pnpm exec tsx tools/dev.ts
+    AGENT_TIER=haiku bun x tsx tools/dev.ts
 
 # ── Checks ───────────────────────────────────
 

@@ -26,7 +26,7 @@ cd my-agents
 cp .env.example .env   # add ANTHROPIC_API_KEY
 bun install
 bun run dev
-# → http://localhost:3000
+# → http://localhost:3456
 ```
 
 The `--with-plugin` flag drops a Claude Code plugin (`.claude-plugin/` + `hooks/`) next to your project — any Claude Code session in that directory streams lifecycle events into your dashboard in real time.
@@ -55,7 +55,7 @@ Flags:
 ### `ap playground`
 
 Starts a self-contained server + dashboard:
-- Hono HTTP routes on port 3000 (override with `--port`)
+- Hono HTTP routes on port 3456 (override with `--port`)
 - Dashboard SPA mounted at `/` (skip with `--no-dashboard`)
 - Auto-opens the browser (skip with `--no-open`)
 - Wires `AgentEventBus` + `SSEExporter` so every agent interaction streams to the dashboard's `/admin/events/stream` endpoint
@@ -100,7 +100,7 @@ Override the discovery glob: `ap --agents "src/bots/*/index.ts" playground`
 - `ANTHROPIC_API_KEY` → Anthropic runner
 - `OPENAI_API_KEY` → OpenAI runner
 - `OLLAMA_HOST` → local Ollama
-- `AP_DASHBOARD_URL` → where the Claude Code plugin POSTs hooks (default `http://localhost:3000`)
+- `AP_DASHBOARD_URL` → where the Claude Code plugin POSTs hooks (default `http://localhost:3456`)
 
 Run `ap config` to verify detection. Run `ap config set` for an interactive editor.
 
@@ -110,13 +110,17 @@ When scaffolded with `--with-plugin`, the plugin wires all 26 Claude Code lifecy
 
 This means any Claude Code session in a project with the plugin enabled becomes live-observable in your dashboard — tool calls, permission prompts, subagent spawns, compaction, everything.
 
-### Activation caveat (0.1.4)
+### What gets scaffolded
 
-0.1.4 drops `.claude-plugin/` + `hooks/` into your project, but those alone do **not** auto-activate in Claude Code — the hooks only fire when either (a) the plugin is installed via marketplace / `/plugin add`, or (b) you mirror the hooks into your project's `.claude/settings.json`.
+`ap init --with-plugin` drops three artifacts:
 
-See [docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md](../../docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md) for the workaround and the planned 0.1.5 fix that drops `.claude/settings.json` alongside the plugin directory.
+- `.claude-plugin/plugin.json` — manifest for the marketplace / `/plugin add` install flow
+- `hooks/{emit.mjs,hooks.json}` — the shim + event registry
+- `.claude/settings.json` — activates the hooks immediately, no marketplace step required
 
-See the [plugin docs](../../.claude-plugin/plugin.json) for details.
+If you already have a `.claude/settings.json` (your own permissions, model, or hooks), `ap init` merges non-destructively: preserves every existing key, adds our hook entries only where not already present. Re-running is idempotent. Malformed existing JSON is backed up rather than replaced.
+
+See [docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md](../../docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md) for the full activation model, the list of captured events, and troubleshooting.
 
 ## License
 

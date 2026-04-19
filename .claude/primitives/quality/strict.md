@@ -8,18 +8,18 @@ All gates must pass before PR:
 
 | Gate | Command | Blocking |
 |------|---------|----------|
-| Build | `pnpm build` | Yes |
-| Typecheck | `pnpm typecheck` | Yes |
-| Lint | `pnpm lint` | Yes |
-| Test | `pnpm test` | Yes |
-| All | `pnpm check` | Yes (runs all above) |
+| Build | `bun run build` | Yes |
+| Typecheck | `bun run typecheck` | Yes |
+| Lint | `bun run lint` | Yes |
+| Test | `bun run test` | Yes |
+| All | `bun run check` | Yes (runs all above) |
 
 ## Per-Package Gates
 
 ```bash
 # Run in a specific package
-pnpm --filter @agentic-patterns/core test
-pnpm --filter @agentic-patterns/runtime typecheck
+bun run --filter=@agentic-patterns/core test
+bun run --filter=@agentic-patterns/runtime typecheck
 ```
 
 ## Testing Requirements

@@ -14,15 +14,15 @@ You are a validator for the agentic-patterns-ts project. You verify implementati
 
 #### 1. Run Quality Gates
 ```bash
-pnpm check    # build + typecheck + lint + test
+bun run check    # build + typecheck + lint + test
 ```
 
 Individual gates if needed:
 ```bash
-pnpm build       # tsup compile both packages
-pnpm typecheck   # tsc --noEmit strict mode
-pnpm lint        # biome check
-pnpm test        # vitest run
+bun run build       # tsup compile all packages
+bun run typecheck   # tsc --noEmit strict mode
+bun run lint        # biome check
+bun run test        # vitest run
 ```
 
 #### 2. Architecture Compliance

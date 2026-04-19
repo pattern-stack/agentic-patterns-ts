@@ -1,15 +1,15 @@
-# Claude Code Plugin Activation — Known Gap
+# Claude Code Plugin Activation
 
-**Status as of 0.1.4:** `ap init --with-plugin` drops `.claude-plugin/` and `hooks/` into the consumer's project, but Claude Code does **not** automatically fire those hooks just because the files exist. This doc explains the gap and the 0.1.5 fix.
+**Status as of 0.1.5:** fixed. `ap init --with-plugin` now drops a third artifact — `.claude/settings.json` — that activates hooks immediately for any Claude Code session started in the project directory, without needing a marketplace install. This doc explains the original gap, the fix, and how emission is centrally controlled.
 
 ## Symptom
 
-User runs `ap init --with-plugin demo`, `bun install`, `bun run dev`. Dashboard is up at `http://localhost:3000`. User opens Claude Code in `demo/`, runs a command that uses tools. **Nothing appears on `/claude-code`.**
+User runs `ap init --with-plugin demo`, `bun install`, `bun run dev`. Dashboard is up at `http://localhost:3456`. User opens Claude Code in `demo/`, runs a command that uses tools. **Nothing appears on `/claude-code`.**
 
 Backend verified working — a direct curl proves the pipe:
 
 ```bash
-curl -X POST http://localhost:3000/hooks/UserPromptSubmit \
+curl -X POST http://localhost:3456/hooks/UserPromptSubmit \
   -H "content-type: application/json" \
   -d '{"session_id":"t","hook_event_name":"UserPromptSubmit","prompt":"hi"}'
 # {"ok":true} — and the event shows on /admin/events/stream immediately
@@ -50,66 +50,142 @@ fs.writeFileSync('.claude/settings.json', JSON.stringify(src, null, 2) + '\n');
 
 Then restart Claude Code in the project directory and accept any "allow hooks from .claude/settings.json" prompts.
 
-## 0.1.5 Fix Plan
+## 0.1.5 Fix
 
-`ap init --with-plugin` should drop THREE artifacts, not two:
+`ap init --with-plugin` drops THREE artifacts, not two:
 
 ```
 demo/
-├── .claude-plugin/plugin.json     # for marketplace/plugin-add flow (current)
-├── hooks/                         # emit.mjs + hooks.json (current)
-└── .claude/settings.json          # NEW — hooks wired directly, works immediately
+├── .claude-plugin/plugin.json     # for marketplace/plugin-add flow
+├── hooks/                         # emit.mjs + hooks.json
+└── .claude/settings.json          # hooks wired directly, activates immediately
 ```
 
 The `settings.json` references `${CLAUDE_PROJECT_DIR}/hooks/emit.mjs` so the existing script is reused.
 
-### Implementation sketch
+### Non-destructive merge with existing settings
 
-In `packages/agent-cli/src/commands/init.ts`, the `--with-plugin` branch already calls `copyDir(pluginSrc.pluginDir, ...)` and `copyDir(pluginSrc.hooksDir, ...)`. Add a third step that generates `.claude/settings.json` by reading `hooks.json` + regex-replacing the env var:
+Users often already have a `.claude/settings.json` — their own hooks, permission rules, model overrides. `ap init --with-plugin` never clobbers it:
 
-```ts
-if (opts.withPlugin && pluginSrc) {
-  copyDir(pluginSrc.pluginDir, path.join(targetDir, ".claude-plugin"));
-  copyDir(pluginSrc.hooksDir, path.join(targetDir, "hooks"));
+- **No existing file** → write fresh
+- **Existing file** → preserve all top-level keys (`permissions`, `model`, etc.), merge our hook entries per-event, skip entries that already exist (same `type` + `command`). Banner reports `merged N hook entries` or `already up to date`
+- **Malformed JSON** → move to `.claude/settings.json.ap-backup-<timestamp>`, write fresh, warn
 
-  // NEW: mirror hooks into .claude/settings.json for immediate activation
-  const hooksSource = fs.readFileSync(path.join(pluginSrc.hooksDir, "hooks.json"), "utf8");
-  const settings = hooksSource.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${CLAUDE_PROJECT_DIR}");
-  const settingsDir = path.join(targetDir, ".claude");
-  fs.mkdirSync(settingsDir, { recursive: true });
-  fs.writeFileSync(path.join(settingsDir, "settings.json"), settings);
-  created.push(".claude/settings.json");
-}
-```
+Re-running `ap init --with-plugin` over an already-initialized project is idempotent — identical re-write, no duplication.
 
-Tests needed:
-1. Scaffold a project with `--with-plugin`, assert all three paths exist
-2. Parse the generated `settings.json`, confirm all 26 events present and commands reference `${CLAUDE_PROJECT_DIR}`
+### Tests
+
+`packages/agent-cli/src/commands/__tests__/init.test.ts` covers:
+1. All three artifacts exist after scaffold
+2. `settings.json` events mirror `hooks.json` count + all commands use `${CLAUDE_PROJECT_DIR}`
+3. Without `--with-plugin`, no plugin artifacts created
+4. Existing `settings.json` with user `permissions`, `model`, and a user-defined `UserPromptSubmit` hook is preserved alongside our merged entries
+5. Re-running is idempotent (byte-identical output)
 
 ## Verifying the Fix End-to-End
 
-After 0.1.5 lands:
+### Automated harness
+
+`scripts/verify-hooks.mjs` does the whole dance: scaffold → install → start server → subscribe SSE → spawn `claude -p` → assert `SessionStart` + `UserPromptSubmit` + `SessionEnd` arrive.
 
 ```bash
-# 1. Fresh scaffold
+bun run --filter=@agentic-patterns/cli build
+node scripts/verify-hooks.mjs              # one-shot, tears down on exit
+node scripts/verify-hooks.mjs --keep       # leaves tmp project + server alive
+```
+
+Requires `claude` on PATH and an `ANTHROPIC_API_KEY` in env (any non-empty key — the prompt is trivial).
+
+### Manual probe
+
+```bash
 npx @agentic-patterns/cli@latest init demo --with-plugin --provider=anthropic
 cd demo
 cp .env.example .env && $EDITOR .env   # add ANTHROPIC_API_KEY
 bun install
-bun run dev &   # dashboard on :3000
-
-# 2. Non-interactive Claude Code probe (no UI needed)
+bun run dev &                          # dashboard on :3456
 claude -p --cwd "$(pwd)" "list the files in this directory"
-# Claude Code loads .claude/settings.json, hooks fire, events hit the server
-
-# 3. Check the dashboard
-open http://localhost:3000/claude-code
-# Should show a session card with UserPromptSubmit → PreToolUse → PostToolUse → Stop
+open http://localhost:3456/claude-code # session card should appear
 ```
+
+## Central Emission Control
+
+There is **one source of truth** for what events exist and how they're shipped:
+
+```
+/hooks/hooks.json      # event registry (26 entries)
+/hooks/emit.mjs        # the shim that POSTs to AP_DASHBOARD_URL
+```
+
+The CLI build step (`packages/agent-cli/package.json` → `build:plugin-template`) copies these into `packages/agent-cli/assets/plugin-template/` at bundle time, so published tarballs always ship the latest. `ap init --with-plugin` copies from the bundled template into the consumer project and also derives `.claude/settings.json` from `hooks.json` via a single `${CLAUDE_PLUGIN_ROOT}` → `${CLAUDE_PROJECT_DIR}` substitution.
+
+### Updating the emission surface
+
+- **Adding an event:** edit `/hooks/hooks.json`, add the matching route handler in `packages/agent-server/src/routes/hooks.ts` if the payload shape needs special handling. Rebuild the CLI. Done — next scaffold picks it up.
+- **Changing how events are shipped:** edit `/hooks/emit.mjs`. Keep it tiny and dumb — any real logic (auth, batching, filtering, reshaping) should live server-side at `/hooks/:eventType`, because a copy of `emit.mjs` is frozen into every scaffolded project at init time and will not retroactively update.
+
+### Constraint: emit.mjs is sticky
+
+Once a user runs `ap init --with-plugin`, their `hooks/emit.mjs` is a static copy that won't update until they re-scaffold or manually pull. Treat its public contract (stdin JSON → POST to `${AP_DASHBOARD_URL}/hooks/<EventName>`) as a stable interface. All evolving behavior belongs behind that line on the server.
+
+## Supported Events
+
+All 26 Claude Code lifecycle events are captured. `hooks/hooks.json` is the canonical registry — if it's there, the plugin ships it.
+
+| Category | Events |
+|---|---|
+| Session (3) | `SessionStart`, `InstructionsLoaded`, `SessionEnd` |
+| Prompt (1) | `UserPromptSubmit` |
+| Tools (3) | `PreToolUse`, `PostToolUse`, `PostToolUseFailure` |
+| Permissions (2) | `PermissionRequest`, `PermissionDenied` |
+| Subagents & tasks (5) | `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle` |
+| Stop (2) | `Stop`, `StopFailure` |
+| Workspace (5) | `ConfigChange`, `CwdChanged`, `FileChanged`, `WorktreeCreate`, `WorktreeRemove` |
+| Compaction (2) | `PreCompact`, `PostCompact` |
+| Elicitation (2) | `Elicitation`, `ElicitationResult` |
+| Notification (1) | `Notification` |
+
+Server-side, `PreToolUse` / `PostToolUse` are **additionally** materialized as `agent.tool.start` / `agent.tool.end` events so the standard agent dashboards (Tools, Live) light up automatically without Claude-Code-specific wiring.
+
+## Failure Modes
+
+### Server is down
+
+`emit.mjs` uses a 500ms abort on `fetch()` and always `process.exit(0)`. If the dashboard isn't running:
+
+- Hook fires → emit.mjs attempts POST → connection refused or timeout
+- Error logged to `~/.claude/logs/` (Claude Code's stderr capture)
+- Hook exits 0 → Claude Code session is unaffected
+- **Events are NOT queued** — they're lost. This is deliberate: guaranteeing observability at the cost of blocking the user's session is the wrong trade.
+
+### Server is slow
+
+Same story — 500ms abort. If the server occasionally exceeds 500ms on a hook intake you'll see intermittent dropped events with no other user-visible effect. Fix by speeding up the server intake (the hook route is synchronous on the event-bus publish path, so don't do heavy work in-line).
+
+### AP_DASHBOARD_URL is wrong or unset
+
+`emit.mjs` defaults to `http://localhost:3456`. If your server is on another port, set `AP_DASHBOARD_URL` in `.env`. Hooks inherit the process env via Claude Code's hook runner.
+
+## Troubleshooting: Events Not Arriving
+
+Work the pipe from output to input:
+
+1. **Can the server receive at all?** — `curl -X POST http://localhost:3456/hooks/UserPromptSubmit -H "content-type: application/json" -d '{"session_id":"t","hook_event_name":"UserPromptSubmit"}'` should return `{"ok":true}`. If not, server isn't running or is on a different port.
+
+2. **Does the event reach the bus?** — `curl -N http://localhost:3456/admin/events/stream` in another terminal, then redo the curl above. You should see an SSE frame for `claude_code.hook`. If curl (1) works but stream (2) doesn't show it, check server logs — the event bus may have an exporter exception.
+
+3. **Is `.claude/settings.json` present and correct?** — `cat demo/.claude/settings.json | jq '.hooks | keys | length'` should print `26`. Commands must reference `${CLAUDE_PROJECT_DIR}/hooks/emit.mjs`, not `${CLAUDE_PLUGIN_ROOT}`.
+
+4. **Did Claude Code load the settings file?** — First session in a new project prompts "allow hooks from .claude/settings.json?". If you declined, hooks are disabled. Check `~/.claude/settings.json` for blocklist entries or re-accept by deleting the project's entry under `enabledHooks`.
+
+5. **Is emit.mjs reachable?** — `node demo/hooks/emit.mjs UserPromptSubmit < /dev/null` should exit 0. If Node isn't on PATH in Claude Code's hook runner environment, the hook silently fails. Fix: ensure Node is in the login shell PATH (not just the interactive shell PATH).
+
+6. **Tail Claude Code's own logs** — `tail -f ~/.claude/logs/*.log` during a session. Hook failures are captured there.
 
 ## Where to look while debugging
 
 - `~/.claude/logs/` — Claude Code's own hook execution logs
-- `demo/.claude/settings.json` after `ap init` — must exist with 26 entries, commands must reference `${CLAUDE_PROJECT_DIR}/hooks/emit.mjs`
+- `demo/.claude/settings.json` after `ap init` — must exist, commands must reference `${CLAUDE_PROJECT_DIR}/hooks/emit.mjs`
 - Server stdout — every POST to `/hooks/:eventType` logs at debug level
-- `curl -N http://localhost:3000/admin/events/stream` — tail what actually reaches the bus
+- `curl -N http://localhost:3456/admin/events/stream` — tail what actually reaches the bus
+- `scripts/verify-hooks.mjs` — automated end-to-end harness that checks the whole pipe

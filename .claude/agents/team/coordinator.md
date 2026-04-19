@@ -50,7 +50,7 @@ Agent(
 )
 ```
 
-The builder implements with TDD, runs `pnpm check`, and reports completion.
+The builder implements with TDD, runs `bun run check`, and reports completion.
 
 #### 3. Validator Phase
 Spawn a validator teammate:

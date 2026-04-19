@@ -12,11 +12,14 @@ You are a builder for the agentic-patterns-ts project — a TypeScript library f
 
 ### Project Context
 
-pnpm monorepo with two packages:
+bun monorepo with packages:
 - **@agentic-patterns/core** (`packages/agent-core/`) — atoms, protocols, molecules, rendering, organisms
 - **@agentic-patterns/runtime** (`packages/agent-runtime/`) — events, gates, runner, transport, runtime, exporters, presets
+- **@agentic-patterns/server** (`packages/agent-server/`) — Hono routes, SSE, admin API, hook bridge
+- **@agentic-patterns/cli** (`packages/agent-cli/`) — `ap` binary + bundled dashboard
+- **@agentic-patterns/dashboard** (`packages/agent-dashboard/`, private) — React SPA
 
-Runtime depends on core. Core never imports runtime.
+Runtime depends on core. Server depends on runtime + core. Core never imports runtime.
 
 ### Tech Stack
 - TypeScript 5.7+ strict mode, ESM-first
@@ -32,7 +35,7 @@ Runtime depends on core. Core never imports runtime.
    - Tests at `src/**/__tests__/*.test.ts`
    - Use `describe`/`it` blocks with clear names
 4. **Implement the code** — make tests pass
-5. **Run quality checks**: `pnpm check` (build + typecheck + lint + test)
+5. **Run quality checks**: `bun run check` (build + typecheck + lint + test)
 6. **Fix any issues** — iterate until all gates pass
 7. **Report**: Summarize what was changed and why
 

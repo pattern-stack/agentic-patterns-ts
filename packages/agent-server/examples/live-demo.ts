@@ -76,7 +76,7 @@ const app = createServer(config);
 // Serve
 // ---------------------------------------------------------------------------
 
-const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+const port = Number.parseInt(process.env.PORT ?? "3456", 10);
 
 serve({ fetch: app.fetch, port }, (info) => {
   const agents = config.agents.map((a) => a.name).join(", ");

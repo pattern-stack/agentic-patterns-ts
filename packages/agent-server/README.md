@@ -37,7 +37,7 @@ const app = createServer({
   sseExporter: sse,
 });
 
-serve({ fetch: app.fetch, port: 3000 });
+serve({ fetch: app.fetch, port: 3456 });
 ```
 
 ## Routes
@@ -76,12 +76,38 @@ Consumers subscribe via `EventSource("/admin/events/stream")`.
 
 `POST /hooks/:eventType` accepts raw Claude Code lifecycle payloads and:
 
-1. Validates the event name against the 26 known lifecycle events (`SessionStart`, `PreToolUse`, `PreCompact`, etc.)
+1. Validates the event name against the 26 known lifecycle events
 2. Publishes a `ClaudeCodeHookEvent` to the bus, preserving the full raw payload
 3. Derives matching `agent.tool.start` / `agent.tool.end` events for `PreToolUse` / `PostToolUse` so standard dashboard views light up automatically
 4. If the request carries an `x-ap-runner-correlation-id` header, skips step 3 (runner already emits tool events natively)
 
 Pair with the `hooks/emit.mjs` script shipped at the repo root — a zero-dependency Node script that reads Claude Code hook stdin and POSTs here, always exiting 0 so hooks never block the user.
+
+### Supported events
+
+| Category | Events |
+|---|---|
+| Session | `SessionStart`, `InstructionsLoaded`, `SessionEnd` |
+| Prompt | `UserPromptSubmit` |
+| Tools | `PreToolUse`, `PostToolUse`, `PostToolUseFailure` |
+| Permissions | `PermissionRequest`, `PermissionDenied` |
+| Subagents & tasks | `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle` |
+| Stop | `Stop`, `StopFailure` |
+| Workspace | `ConfigChange`, `CwdChanged`, `FileChanged`, `WorktreeCreate`, `WorktreeRemove` |
+| Compaction | `PreCompact`, `PostCompact` |
+| Elicitation | `Elicitation`, `ElicitationResult` |
+| Notification | `Notification` |
+
+### Troubleshooting
+
+Events not arriving? Check in this order:
+
+1. `curl -X POST http://localhost:3456/hooks/UserPromptSubmit -H "content-type: application/json" -d '{"session_id":"t","hook_event_name":"UserPromptSubmit"}'` returns `{"ok":true}` → server is up
+2. `curl -N http://localhost:3456/admin/events/stream` shows the event during step 1 → bus wiring is fine
+3. Consumer project has `.claude/settings.json` with 26 entries referencing `${CLAUDE_PROJECT_DIR}/hooks/emit.mjs`
+4. `AP_DASHBOARD_URL` in the project's `.env` matches the server's bind address
+
+Full guide: [CLAUDE-CODE-PLUGIN-ACTIVATION.md](../../docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md) — activation model, failure modes, emit.mjs contract.
 
 ## Configuration
 

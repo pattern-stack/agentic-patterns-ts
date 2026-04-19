@@ -34,7 +34,7 @@ Commands:
 
 Options:
   -h, --help                      show this help
-  --port <port>                   server port for playground (default 3000)
+  --port <port>                   server port for playground (default 3456)
   --no-dashboard                  playground without dashboard (API only)
   --no-open                       don't auto-open the browser
   --agents <glob>                 override agent discovery glob

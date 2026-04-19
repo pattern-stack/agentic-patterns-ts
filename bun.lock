@@ -12,7 +12,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -31,11 +31,12 @@
         "@types/node": "^25.6.0",
         "tsup": "^8.3.0",
         "typescript": "^5.7.0",
+        "vitest": "^3.0.0",
       },
     },
     "packages/agent-core": {
       "name": "@agentic-patterns/core",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "dependencies": {
         "zod": "^3.23.0",
         "zod-to-json-schema": "^3.24.0",
@@ -70,9 +71,10 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "dependencies": {
         "@agentic-patterns/core": "workspace:*",
+        "@anthropic-ai/claude-agent-sdk": "^0.2.0",
         "ai": "^4.0.0",
         "ollama-ai-provider": "^1.2.0",
         "zod": "^3.23.0",
@@ -86,19 +88,17 @@
         "vitest": "^3.0.0",
       },
       "peerDependencies": {
-        "@anthropic-ai/claude-agent-sdk": "^0.2.0",
         "@opentelemetry/api": "^1.0.0",
         "langfuse": "^3.0.0",
       },
       "optionalPeers": [
-        "@anthropic-ai/claude-agent-sdk",
         "@opentelemetry/api",
         "langfuse",
       ],
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.1.2",
+      "version": "0.1.4",
       "dependencies": {
         "@agentic-patterns/core": "workspace:*",
         "@agentic-patterns/runtime": "workspace:*",

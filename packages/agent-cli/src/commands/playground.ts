@@ -28,6 +28,7 @@ import {
 import { createServer } from "@agentic-patterns/server";
 import type { AgentRegistration } from "@agentic-patterns/server";
 import { serve } from "@hono/node-server";
+import { DEFAULT_DASHBOARD_PORT } from "../constants.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 
 // ---------------------------------------------------------------------------
@@ -37,7 +38,7 @@ import type { DiscoveredAgent } from "../helpers/discover.js";
 export interface PlaygroundOptions {
   /** Agents discovered by the caller (without runners — playground attaches one). */
   agents: DiscoveredAgent[];
-  /** Port for the HTTP server. Defaults to 3000. */
+  /** Port for the HTTP server. Defaults to {@link DEFAULT_DASHBOARD_PORT}. */
   port?: number;
   /** Skip the dashboard — API only. */
   noDashboard?: boolean;
@@ -53,7 +54,7 @@ export interface PlaygroundOptions {
  * stays alive holding the HTTP server until the user kills it.
  */
 export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<void> {
-  const port = opts.port ?? 3000;
+  const port = opts.port ?? DEFAULT_DASHBOARD_PORT;
   const shouldOpen = opts.open !== false;
   const serveDashboard = opts.noDashboard !== true;
 

@@ -6,9 +6,9 @@
  *   npx tsx examples/server-demo.ts
  *
  * Then:
- *   curl http://localhost:3000/health
- *   curl http://localhost:3000/agents
- *   curl -X POST http://localhost:3000/conversations \
+ *   curl http://localhost:3456/health
+ *   curl http://localhost:3456/agents
+ *   curl -X POST http://localhost:3456/conversations \
  *     -H "Content-Type: application/json" \
  *     -d '{"agent_id": "echo"}'
  */
@@ -74,7 +74,7 @@ const app = createApp({
 });
 
 // Serve with Node.js (requires @hono/node-server)
-const port = 3000;
+const port = 3456;
 import("@hono/node-server").then(({ serve }) => {
   serve({ fetch: app.fetch, port });
   console.log(`Server running at http://localhost:${port}`);
