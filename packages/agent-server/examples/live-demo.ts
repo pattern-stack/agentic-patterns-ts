@@ -46,7 +46,8 @@ const config: ServerConfig = {
     {
       id: "calculator",
       name: "Calculator",
-      description: "8 math operations — add, subtract, multiply, divide, power, sqrt, percentage, modulo",
+      description:
+        "8 math operations — add, subtract, multiply, divide, power, sqrt, percentage, modulo",
       agent: buildCalculatorAgent(),
       runner,
     },
@@ -60,7 +61,8 @@ const config: ServerConfig = {
     {
       id: "writing-coach",
       name: "Writing Coach",
-      description: "Actionable feedback on clarity, structure, and style — no tools, pure reasoning",
+      description:
+        "Actionable feedback on clarity, structure, and style — no tools, pure reasoning",
       agent: buildWritingCoachAgent(),
       runner,
     },
@@ -76,7 +78,7 @@ const app = createServer(config);
 // Serve
 // ---------------------------------------------------------------------------
 
-const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+const port = Number.parseInt(process.env.PORT ?? "3456", 10);
 
 serve({ fetch: app.fetch, port }, (info) => {
   const agents = config.agents.map((a) => a.name).join(", ");

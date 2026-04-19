@@ -4,7 +4,7 @@ Internal React SPA — admin dashboard for `@agentic-patterns/server`. Published
 
 ## Usage
 
-This package is **private**. Consumers don't install it directly. It ships as a built static bundle inside `@agentic-patterns/cli` at `assets/dashboard/`, mounted by `ap playground` at `http://localhost:3000/`.
+This package is **private**. Consumers don't install it directly. It ships as a built static bundle inside `@agentic-patterns/cli` at `assets/dashboard/`, mounted by `ap playground` at `http://localhost:3456/`.
 
 ## Pages
 
@@ -13,7 +13,7 @@ This package is **private**. Consumers don't install it directly. It ships as a 
 | `/` | Dashboard overview — agent stats, recent activity |
 | `/agents` | Registered agents list |
 | `/live` | Live event stream from `/admin/events/stream` |
-| `/claude-code` | Claude Code sessions grouped by `session_id` with collapsible timelines |
+| `/claude-code` | Claude Code sessions grouped by `session_id` — real-time SSE feed of all 26 lifecycle events per session (tool calls, permission prompts, subagents, compaction), each timeline collapsible with full payloads on expand |
 | `/conversations` | Conversation history |
 | `/conversations/:id` | Conversation detail with message parts |
 
@@ -26,7 +26,7 @@ bun run --filter=@agentic-patterns/dashboard dev   # Vite dev server
 bun run --filter=@agentic-patterns/dashboard build # produces dist/
 ```
 
-The Vite dev server proxies API calls to an external NestJS backend on port 3100 (separate branch/service). For end-to-end testing with the Hono server, use `ap playground` — the CLI bundles the built SPA and serves it directly from the Hono app on port 3000, bypassing the proxy.
+The Vite dev server proxies API calls to an external NestJS backend on port 3100 (separate branch/service). For end-to-end testing with the Hono server, use `ap playground` — the CLI bundles the built SPA and serves it directly from the Hono app on port 3456, bypassing the proxy.
 
 ## Architecture
 

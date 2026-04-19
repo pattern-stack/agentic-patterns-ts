@@ -24,6 +24,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isCancel, select, text } from "@clack/prompts";
+import { DEFAULT_DASHBOARD_URL } from "../constants.js";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -77,7 +78,7 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     monorepoRoot = resolveMonorepoRoot();
     if (!monorepoRoot) {
       process.stderr.write(
-        `error: --link requires the CLI to be run from the agentic-patterns-ts source tree\n`,
+        "error: --link requires the CLI to be run from the agentic-patterns-ts source tree\n",
       );
       process.exit(1);
     }
@@ -180,6 +181,31 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
       copyDir(pluginSrc.pluginDir, path.join(targetDir, ".claude-plugin"));
       copyDir(pluginSrc.hooksDir, path.join(targetDir, "hooks"));
       created.push(".claude-plugin/", "hooks/");
+
+      // Mirror hooks.json into .claude/settings.json so Claude Code activates
+      // them immediately for sessions started in this directory. If the user
+      // already has a settings.json, merge our hooks into it non-destructively
+      // (preserve their other keys; skip events where our hook is already
+      // registered so re-running `ap init` is idempotent).
+      const settingsDir = path.join(targetDir, ".claude");
+      const settingsPath = path.join(settingsDir, "settings.json");
+      const hooksSource = fs.readFileSync(path.join(pluginSrc.hooksDir, "hooks.json"), "utf8");
+      const ourHooks = JSON.parse(
+        hooksSource.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${CLAUDE_PROJECT_DIR}"),
+      ) as HookSettings;
+
+      const mergeOutcome = mergeHookSettings(settingsPath, ourHooks);
+      fs.mkdirSync(settingsDir, { recursive: true });
+      fs.writeFileSync(settingsPath, `${JSON.stringify(mergeOutcome.merged, null, 2)}\n`);
+      if (mergeOutcome.kind === "created") {
+        created.push(".claude/settings.json");
+      } else if (mergeOutcome.kind === "merged") {
+        created.push(
+          `.claude/settings.json ${DIM}(merged ${mergeOutcome.added} hook entries)${RESET}`,
+        );
+      } else {
+        created.push(`.claude/settings.json ${DIM}(already up to date)${RESET}`);
+      }
     } else {
       // TODO(phase-2): package the plugin template inside
       // packages/agent-cli/assets/plugin-template/ during build so this works
@@ -209,7 +235,9 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     if (rootRel !== ".") {
       process.stdout.write(`    cd ${rootRel}\n`);
     }
-    process.stdout.write(`    bun install                ${DIM}# picks up the new example${RESET}\n`);
+    process.stdout.write(
+      `    bun install                ${DIM}# picks up the new example${RESET}\n`,
+    );
     process.stdout.write(`    cd ${projRel}\n`);
     process.stdout.write(
       `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
@@ -222,7 +250,7 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
     process.stdout.write(
       `    cp .env.example .env       ${DIM}# fill in your ${envKeyFor(provider)}${RESET}\n`,
     );
-    process.stdout.write(`    bun install\n`);
+    process.stdout.write("    bun install\n");
     process.stdout.write(`    bun run dev                ${DIM}# launch playground${RESET}\n\n`);
   }
 }
@@ -274,7 +302,7 @@ function renderPackageJson(name: string, provider: Provider, link: boolean): str
 function renderEnvExample(provider: Provider): string {
   const lines = [
     "# Dashboard URL — used by the Claude Code plugin to ship lifecycle events",
-    "AP_DASHBOARD_URL=http://localhost:3000",
+    `AP_DASHBOARD_URL=${DEFAULT_DASHBOARD_URL}`,
     "",
     "# Default model tier — opus | sonnet | haiku (used by the agent runner)",
     "AGENT_TIER=sonnet",
@@ -330,7 +358,7 @@ function renderAgent(provider: Provider): string {
  * file (via \`agents/**\\/agent.ts\`), builds a runner from your environment
  * (using ${provider}), and wires it into the playground dashboard.
  *
- *   pnpm dev          # launch the dashboard at http://localhost:3000
+ *   bun run dev       # launch the dashboard at http://localhost:3456
  *   ap run demo       # chat with this agent in the terminal
  */
 
@@ -457,6 +485,78 @@ function writeFile(root: string, rel: string, contents: string, log: string[]): 
 
 function copyDir(src: string, dest: string): void {
   fs.cpSync(src, dest, { recursive: true });
+}
+
+// ---------------------------------------------------------------------------
+// Hook settings merge
+//
+// Claude Code users frequently already have a `.claude/settings.json` with
+// their own hooks, permissions, or model preferences. We must not clobber it.
+// `mergeHookSettings` preserves existing top-level keys and adds our hook
+// entries only where they don't already exist — same command string under the
+// same event + matcher counts as "already registered", so re-running
+// `ap init --with-plugin` is idempotent.
+// ---------------------------------------------------------------------------
+
+type HookEntry = { type: string; command: string; async?: boolean; timeout?: number };
+type HookMatcher = { matcher: string; hooks: HookEntry[] };
+type HookSettings = { hooks: Record<string, HookMatcher[]>; [key: string]: unknown };
+
+type MergeOutcome =
+  | { kind: "created"; merged: HookSettings }
+  | { kind: "merged"; merged: HookSettings; added: number }
+  | { kind: "unchanged"; merged: HookSettings };
+
+function mergeHookSettings(settingsPath: string, ours: HookSettings): MergeOutcome {
+  if (!fs.existsSync(settingsPath)) {
+    return { kind: "created", merged: ours };
+  }
+
+  let existing: HookSettings;
+  try {
+    existing = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as HookSettings;
+  } catch {
+    // Malformed user file — back up and treat as fresh write, so we never
+    // silently drop their content.
+    const backup = `${settingsPath}.ap-backup-${Date.now()}`;
+    fs.renameSync(settingsPath, backup);
+    process.stdout.write(
+      `${YELLOW}warning${RESET}: existing .claude/settings.json was malformed; moved to ${path.basename(backup)}\n`,
+    );
+    return { kind: "created", merged: ours };
+  }
+
+  const merged: HookSettings = { ...existing, hooks: { ...(existing.hooks ?? {}) } };
+  let added = 0;
+
+  for (const event of Object.keys(ours.hooks)) {
+    const ourMatchers = ours.hooks[event] ?? [];
+    const theirMatchers = merged.hooks[event] ?? [];
+    const result = [...theirMatchers];
+
+    for (const ourMatcher of ourMatchers) {
+      const theirMatcher = result.find((m) => m.matcher === ourMatcher.matcher);
+      if (!theirMatcher) {
+        result.push(ourMatcher);
+        added += ourMatcher.hooks.length;
+        continue;
+      }
+      for (const ourHook of ourMatcher.hooks) {
+        const duplicate = theirMatcher.hooks.some(
+          (h) => h.type === ourHook.type && h.command === ourHook.command,
+        );
+        if (!duplicate) {
+          theirMatcher.hooks.push(ourHook);
+          added += 1;
+        }
+      }
+    }
+
+    merged.hooks[event] = result;
+  }
+
+  if (added === 0) return { kind: "unchanged", merged };
+  return { kind: "merged", merged, added };
 }
 
 /**

@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_DASHBOARD_PORT } from "../constants.js";
 
 export interface ProjectConfig {
   /** Absolute path to the project root (where package.json was found). */
@@ -86,7 +87,10 @@ export function resolveProjectConfig(from: string = process.cwd()): ProjectConfi
   }
 
   const agents = normalizeGlobs(manifest.agentic?.agents) ?? DEFAULT_AGENT_GLOBS;
-  const port = manifest.agentic?.port ?? Number.parseInt(process.env.PORT ?? "3000", 10);
+  const envPort = process.env.PORT;
+  const port =
+    manifest.agentic?.port ??
+    (envPort !== undefined ? Number.parseInt(envPort, 10) : DEFAULT_DASHBOARD_PORT);
 
   return { root, agents, port, hasManifest };
 }

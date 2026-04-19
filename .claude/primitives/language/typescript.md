@@ -13,13 +13,13 @@ Instructions for TypeScript workflows in this project.
 
 | Tool | Command | Purpose |
 |------|---------|---------|
-| Package manager | `pnpm` | Workspace-aware dependency management |
+| Package manager | `bun` | Workspace-aware dependency management + script runner |
 | Format | `biome format` | Code formatting (double quotes, semicolons, 2-space indent) |
 | Lint | `biome check` | Linting + import organization |
 | Typecheck | `tsc --noEmit` | Strict TypeScript checking |
 | Test | `vitest run` | Test runner with workspace support |
 | Build | `tsup` | Bundle ESM + CJS outputs |
-| All gates | `pnpm check` | build + typecheck + lint + test |
+| All gates | `bun run check` | build + typecheck + lint + test |
 
 ## Conventions
 

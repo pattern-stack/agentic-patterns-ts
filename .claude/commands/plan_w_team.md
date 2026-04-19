@@ -14,7 +14,7 @@ Create an implementation plan using the architect+builder+validator team pattern
 3. **Build Phase** (`team/builder`):
    - Builder implements step by step following the finalized spec
    - TDD: tests first, then implementation
-   - Runs `pnpm check` to verify all gates pass
+   - Runs `bun run check` to verify all gates pass
 
 4. **Validate Phase** (`team/validator`):
    - Validator runs quality gates

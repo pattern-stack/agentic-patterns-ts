@@ -58,14 +58,10 @@ export function createToolboxExecutor(agent: AgentWithCapabilities): ToolExecuto
       const tb = lookup.get(name);
       if (tb) {
         // Strip MCP prefix to get the actual tool name the toolbox expects
-        const actualName = name.includes("__")
-          ? name.split("__").pop()!
-          : name;
+        const actualName = name.includes("__") ? name.split("__").pop()! : name;
         return tb.execute(actualName, args);
       }
-      throw new Error(
-        `Tool "${name}" not found. Available: ${[...lookup.keys()].join(", ")}`,
-      );
+      throw new Error(`Tool "${name}" not found. Available: ${[...lookup.keys()].join(", ")}`);
     },
   };
 }

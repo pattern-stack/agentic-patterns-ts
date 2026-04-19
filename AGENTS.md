@@ -12,7 +12,7 @@ Starts two processes with interleaved colored logs:
 
 | Process | Port | What |
 |---|---|---|
-| `[server]` (cyan) | `:3000` | Hono HTTP API — `/agents`, `/conversations`, `/admin/*`, SSE streams. Restarts automatically when your agent code changes (`tsx --watch`). |
+| `[server]` (cyan) | `:3456` | Hono HTTP API — `/agents`, `/conversations`, `/admin/*`, SSE streams. Restarts automatically when your agent code changes (`tsx --watch`). |
 | `[dashboard]` (magenta) | `:5173` | Vite dev server for the React admin UI. Hot-module-reloads on edit. |
 
 Ctrl+C stops both cleanly. If either process dies, the other is torn down automatically — no orphan dev sessions.

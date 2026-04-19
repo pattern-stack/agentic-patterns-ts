@@ -123,7 +123,7 @@ Agent(
 
 **Mission:** Write code following the approved spec.
 - Input: Approved spec file
-- Constraint: Follow spec exactly, TDD, run `pnpm check` before done
+- Constraint: Follow spec exactly, TDD, run `bun run check` before done
 - Output: Working code on feature branch
 
 **No Human Gate:** Implementation is agentic. Validation provides the checkpoint.

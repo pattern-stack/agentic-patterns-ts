@@ -15,24 +15,17 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": [
-    "agents",
-    "llm",
-    "ai",
-    "cli"
-  ],
+  "keywords": ["agents", "llm", "ai", "cli"],
   "bin": {
     "ap": "./dist/cli.js"
   },
-  "files": [
-    "dist",
-    "assets"
-  ],
+  "files": ["dist", "assets"],
   "scripts": {
     "build": "bun run build:dashboard && bun run build:plugin-template && tsup",
     "build:dashboard": "bun run --filter=@agentic-patterns/dashboard build && rm -rf assets/dashboard && mkdir -p assets && cp -r ../agent-dashboard/dist assets/dashboard",
     "build:plugin-template": "rm -rf assets/plugin-template && mkdir -p assets/plugin-template && cp -r ../../.claude-plugin assets/plugin-template/.claude-plugin && cp -r ../../hooks assets/plugin-template/hooks",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "biome check src/"
   },
   "dependencies": {
@@ -49,6 +42,7 @@
     "@agentic-patterns/dashboard": "workspace:*",
     "@types/node": "^25.6.0",
     "tsup": "^8.3.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
   }
 }
