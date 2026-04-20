@@ -41,12 +41,29 @@ export function useEventStream(path: string): UseEventStreamResult {
         retryDelayRef.current = INITIAL_RETRY_MS;
       };
 
-      source.onmessage = (event) => {
+      const NAMED_EVENTS = [
+        "claude_code.hook",
+        "tool.start",
+        "tool.end",
+        "tool.intent",
+        "llm.start",
+        "llm.end",
+        "iteration.start",
+        "iteration.end",
+        "agent.reasoning",
+        "message.start",
+        "message.delta",
+        "message.complete",
+        "conversation.start",
+        "conversation.end",
+      ];
+
+      const ingest = (type: string, data: string) => {
         try {
-          const parsed = JSON.parse(event.data);
+          const parsed = JSON.parse(data);
           const streamEvent: StreamEvent = {
             id: String(counterRef.current++),
-            type: parsed.type ?? "unknown",
+            type,
             data: parsed,
             timestamp: parsed.timestamp ?? new Date().toISOString(),
           };
@@ -58,6 +75,11 @@ export function useEventStream(path: string): UseEventStreamResult {
           // ignore malformed events
         }
       };
+
+      source.onmessage = (e) => ingest(e.type || "message", e.data);
+      for (const name of NAMED_EVENTS) {
+        source.addEventListener(name, (e) => ingest(name, (e as MessageEvent).data));
+      }
 
       source.onerror = () => {
         setConnected(false);
