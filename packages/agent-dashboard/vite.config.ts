@@ -33,12 +33,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/admin": { target: "http://localhost:3100", bypass: htmlNavBypass },
-      "/conversations": { target: "http://localhost:3100", bypass: htmlNavBypass },
-      "/messages": { target: "http://localhost:3100", bypass: htmlNavBypass },
-      "/agents": { target: "http://localhost:3100", bypass: htmlNavBypass },
-      "/hooks": { target: "http://localhost:3100", bypass: htmlNavBypass },
-      "/health": { target: "http://localhost:3100", bypass: htmlNavBypass },
+      "/admin": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/conversations": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/messages": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/agents": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/hooks": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/health": { target: "http://localhost:3456", bypass: htmlNavBypass },
     },
   },
 });
