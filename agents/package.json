@@ -1,0 +1,8 @@
+{
+  "name": "agentic-patterns-ts-demo-agents",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@agentic-patterns/runtime": "workspace:*"
+  }
+}
