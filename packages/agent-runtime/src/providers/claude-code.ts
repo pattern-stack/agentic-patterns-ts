@@ -98,7 +98,16 @@ export interface ClaudeCodeProviderOptions {
   defaults?: Partial<SDKOptions>;
   /** Include Claude Code's built-in tools (Read/Write/Bash/…). Default: false. */
   allowBuiltinTools?: boolean;
-  /** Max turns inside the SDK loop. Default: 1 (one Claude call per model step). */
+  /**
+   * Max turns inside the SDK loop. Default: 10.
+   *
+   * Within one `doGenerate`, Claude may emit prose-only on its first turn
+   * and produce a tool call on a later turn. `canUseTool` aborts on the
+   * first tool call regardless, so this only needs to be generous enough
+   * to allow "plan-then-tool" sequences. A too-low value causes the SDK
+   * to throw `Reached maximum number of turns` before Claude reaches any
+   * tool call.
+   */
   maxTurns?: number;
 }
 
@@ -497,7 +506,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
     const sdkOptions: SDKOptions = {
       ...(this._opts.defaults ?? {}),
       model: mapModel(this.modelId) ?? this._opts.defaults?.model ?? this.modelId,
-      maxTurns: this._opts.maxTurns ?? 1,
+      maxTurns: this._opts.maxTurns ?? 10,
       permissionMode: "default",
       canUseTool,
     };
