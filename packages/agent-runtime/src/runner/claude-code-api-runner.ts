@@ -11,6 +11,15 @@
  * may talk directly to the Claude API without the Code layer.
  *
  * Mirrors Python: agentic_patterns/core/systems/runners/claude_api.py
+ *
+ * Session continuity: when used as a per-conversation instance (see
+ * `RunnerFactory` in @agentic-patterns/server), this runner captures the
+ * SDK `session_id` on turn 1 and passes `resume` on turn 2+. The child
+ * `claude` subprocess's PreToolUse/PostToolUse hooks are forwarded to the
+ * server via the `AP_RUNNER_CORRELATION_ID` env var set by the base
+ * runner; see `packages/agent-server/src/routes/hooks.ts` for how that
+ * correlation id is attached to `claude_code.hook` events so tool calls
+ * appear on the same conversation's SSE stream without extra glue.
  */
 
 import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
@@ -45,6 +54,17 @@ const BLOCKED_TOOLS: readonly string[] = [
  * agent capabilities remain available.
  */
 export class ClaudeCodeAPIRunner extends ClaudeCodeRunner {
+  #sessionId: string | undefined;
+
+  protected override _onSessionId(sessionId: string): void {
+    this.#sessionId = sessionId;
+  }
+
+  /** Currently captured SDK session id, if any. Exposed for tests. */
+  get sessionId(): string | undefined {
+    return this.#sessionId;
+  }
+
   protected override _buildOptions(
     agent: AgentLikeForBridge,
     options: RunOptions | undefined,
@@ -57,6 +77,9 @@ export class ClaudeCodeAPIRunner extends ClaudeCodeRunner {
   ): SDKOptions {
     const sdkOpts = super._buildOptions(agent, options, context);
     sdkOpts.disallowedTools = [...BLOCKED_TOOLS];
+    if (this.#sessionId !== undefined) {
+      sdkOpts.resume = this.#sessionId;
+    }
     return sdkOpts;
   }
 }
