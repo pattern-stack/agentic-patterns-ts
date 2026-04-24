@@ -139,6 +139,16 @@ export class ClaudeCodeRunner implements RunnerProtocol {
   }
 
   /**
+   * Called at most once per run() / stream() invocation with the first
+   * `session_id` seen in SDK messages. Subclasses override to capture the
+   * Claude Code session id (e.g. to resume it on the next turn). No-op in
+   * the base class.
+   */
+  protected _onSessionId(_sessionId: string): void {
+    // no-op in base class
+  }
+
+  /**
    * Publish a ToolCallIntent through the gate chain.
    * Returns true if the intent was allowed, false if blocked.
    */
@@ -197,9 +207,17 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     const model = agent.getModel();
 
     const restoreCorrelation = setCorrelationEnv(correlationId);
+    let capturedSessionId: string | null = null;
 
     try {
       for await (const msg of query({ prompt: message, options: sdkOptions })) {
+        if (
+          capturedSessionId == null &&
+          typeof (msg as { session_id?: unknown }).session_id === "string"
+        ) {
+          capturedSessionId = (msg as { session_id: string }).session_id;
+          this._onSessionId(capturedSessionId);
+        }
         if (msg.type === "assistant" && "message" in msg) {
           const content = msg.message?.content;
           if (Array.isArray(content)) {
@@ -325,9 +343,17 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     const model = agent.getModel();
 
     const restoreCorrelation = setCorrelationEnv(correlationId);
+    let capturedSessionId: string | null = null;
 
     try {
       for await (const msg of query({ prompt: message, options: sdkOptions })) {
+        if (
+          capturedSessionId == null &&
+          typeof (msg as { session_id?: unknown }).session_id === "string"
+        ) {
+          capturedSessionId = (msg as { session_id: string }).session_id;
+          this._onSessionId(capturedSessionId);
+        }
         // Partial/streaming messages → MessageChunk events
         const msgType = msg.type as string;
         if (msgType === "stream_event" && "event" in msg) {

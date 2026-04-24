@@ -92,7 +92,10 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     name: reg.name,
     description: reg.description,
     agent: reg.agent,
-    runner,
+    // Per-agent runner wins over the shared default. The Claude Code agent
+    // uses this to ensure its `ClaudeCodeAPIRunner` factory is always used
+    // regardless of what env-driven `createRunner()` would otherwise pick.
+    runner: reg.runner ?? runner,
   }));
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
   // the conversation route already builds executors per request.

@@ -7,6 +7,7 @@ import { Conversation, createToolboxExecutor } from "@agentic-patterns/runtime";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
+import { isRunnerFactory } from "../config.js";
 import { agentEventToSSE } from "../sse.js";
 
 /** Entry in the per-server conversation registry. */
@@ -21,6 +22,11 @@ export function conversationRoutes(
   eventBus: AgentEventBus,
 ): Hono {
   const app = new Hono();
+
+  // Per-conversation "busy" guard: while a turn is streaming, reject a
+  // second concurrent POST on the same conversation with 409. Entries are
+  // removed in the `finally` block after streaming completes or errors.
+  const inFlight = new Set<string>();
 
   // POST /conversations — create a new conversation
   app.post("/conversations", async (c) => {
@@ -37,7 +43,18 @@ export function conversationRoutes(
     const toolExecutor = createToolboxExecutor(
       reg.agent as unknown as Parameters<typeof createToolboxExecutor>[0],
     );
-    const conversation = new Conversation(reg.agent, reg.runner, { toolExecutor });
+    // Resolve the runner: a registration exports either a concrete
+    // `RunnerLike` (shared) or a `RunnerFactory` (one runner per conversation).
+    // Pre-generate the conversation id so the factory receives the same id
+    // the client will see in the response.
+    const conversationId = crypto.randomUUID();
+    const runner = isRunnerFactory(reg.runner)
+      ? reg.runner.forConversation(conversationId)
+      : reg.runner;
+    const conversation = new Conversation(reg.agent, runner, {
+      id: conversationId,
+      toolExecutor,
+    });
     conversations.set(conversation.id, { conversation, agentId });
 
     return c.json({ id: conversation.id, agent_id: agentId }, 201);
@@ -65,19 +82,32 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
+    // Per-conversation concurrency guard. Dashboard disables the composer
+    // while `streaming` is true; this is defense-in-depth for direct API
+    // clients and for the Claude Code runner, which holds per-conversation
+    // session state that must not be mutated by two concurrent SDK calls.
+    if (inFlight.has(convId)) {
+      return c.json({ error: "busy" }, 409);
+    }
+    inFlight.add(convId);
+
     // SSE streaming response. We pass the server's shared eventBus so
     // emitted events reach every attached exporter (collector, SSE
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
     return streamSSE(c, async (stream) => {
-      for await (const event of conversation.stream(content, { eventBus })) {
-        const msg = agentEventToSSE(event);
-        if (msg) {
-          await stream.writeSSE(msg);
+      try {
+        for await (const event of conversation.stream(content, { eventBus })) {
+          const msg = agentEventToSSE(event);
+          if (msg) {
+            await stream.writeSSE(msg);
+          }
         }
-      }
 
-      await stream.writeSSE({ event: "done", data: "{}" });
+        await stream.writeSSE({ event: "done", data: "{}" });
+      } finally {
+        inFlight.delete(convId);
+      }
     });
   });
 

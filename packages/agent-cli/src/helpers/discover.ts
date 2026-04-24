@@ -9,12 +9,19 @@
  *   • a function that returns one (sync or async):
  *       export default () => ({ id, name, agent })
  *
- * The `runner` field is NOT defined by the user — the CLI injects it
- * after discovery via `createRunner()`.
+ * The `runner` field is OPTIONAL: if the agent file exports one, it
+ * overrides the shared runner the CLI would otherwise inject via
+ * `createRunner()`. The value may be either a concrete `RunnerLike`
+ * (with `run`/`stream`) or a `RunnerFactory` (with `forConversation`) —
+ * see `@agentic-patterns/server` for the type definitions. Useful for
+ * agents that need a non-default runner (e.g. the Claude Code agent
+ * which must run through `ClaudeCodeAPIRunner` regardless of what env
+ * detection picked).
  */
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { RunnerFactory, RunnerLike } from "@agentic-patterns/server";
 import { glob } from "tinyglobby";
 import { register } from "tsx/esm/api";
 
@@ -28,13 +35,18 @@ function ensureTsxRegistered(): void {
   _tsxRegistered = true;
 }
 
-/** What an agent file is expected to export (sans runner). */
+/** What an agent file is expected to export. */
 export interface DiscoveredAgent {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
   // biome-ignore lint/suspicious/noExplicitAny: agent shape comes from agent-core/server, kept loose at the discovery boundary
   readonly agent: any;
+  /**
+   * Optional runner exported from the agent file. If present, the playground
+   * uses it instead of the shared `createRunner()` result.
+   */
+  readonly runner?: RunnerLike | RunnerFactory;
   /** Absolute path to the source file (for `ap agents` rendering). */
   readonly file: string;
 }
@@ -44,6 +56,7 @@ interface AgentExport {
   name?: string;
   description?: string;
   agent?: unknown;
+  runner?: unknown;
 }
 
 /**
@@ -82,7 +95,7 @@ export async function loadAgentFile(file: string): Promise<DiscoveredAgent> {
     );
   }
 
-  const { id, name, description, agent } = exported as AgentExport;
+  const { id, name, description, agent, runner } = exported as AgentExport;
 
   if (!id || typeof id !== "string") {
     throw new Error(`${file}: missing or invalid 'id' (must be a non-empty string)`);
@@ -94,11 +107,31 @@ export async function loadAgentFile(file: string): Promise<DiscoveredAgent> {
     throw new Error(`${file}: missing or invalid 'agent' (must be an Agent object)`);
   }
 
+  // `runner` is optional. Accept anything that looks like a RunnerLike
+  // (has `run`) OR a RunnerFactory (has `forConversation`). Anything else
+  // is a configuration error — fail loudly rather than silently dropping.
+  let discoveredRunner: RunnerLike | RunnerFactory | undefined;
+  if (runner != null) {
+    if (typeof runner !== "object") {
+      throw new Error(`${file}: 'runner' must be a RunnerLike object or RunnerFactory`);
+    }
+    const r = runner as Partial<RunnerLike> & Partial<RunnerFactory>;
+    const looksLikeFactory = typeof r.forConversation === "function";
+    const looksLikeRunner = typeof r.run === "function";
+    if (!looksLikeFactory && !looksLikeRunner) {
+      throw new Error(
+        `${file}: 'runner' must expose 'run' (RunnerLike) or 'forConversation' (RunnerFactory)`,
+      );
+    }
+    discoveredRunner = runner as RunnerLike | RunnerFactory;
+  }
+
   return {
     id,
     name,
     description,
     agent,
+    runner: discoveredRunner,
     file,
   };
 }

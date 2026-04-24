@@ -25,3 +25,4 @@ export {
 export { buildCalculatorAgent, CalculatorToolbox } from "./agents/calculator.js";
 export { buildTodoAgent, TodoToolbox } from "./agents/todo-manager.js";
 export { buildWritingCoachAgent } from "./agents/writing-coach.js";
+export { buildClaudeCodeChatAgent } from "./agents/claude-code-chat.js";

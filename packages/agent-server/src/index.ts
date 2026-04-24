@@ -7,5 +7,8 @@ export type {
   SSEExporterLike,
   ConversationStoreLike,
   CORSConfig,
+  RunnerLike,
+  RunnerFactory,
 } from "./config.js";
+export { isRunnerFactory } from "./config.js";
 export { agentEventToSSE, type SSEMessage } from "./sse.js";
