@@ -146,7 +146,7 @@ describe("createRunner", () => {
     const spy = stubProviderLoad(PROVIDERS.ollama);
     const { source } = await createRunner({ tier: "opus", verbose: false });
     expect(source).toBe("env-ollama");
-    expect(spy).toHaveBeenCalledWith("qwen3:30b-a3b"); // opus-tier Qwen
+    expect(spy).toHaveBeenCalledWith("qwen3.6:35b-a3b"); // opus-tier Qwen
   });
 
   it("env AGENT_MODEL overrides the tier default in env-detect", async () => {
@@ -164,7 +164,7 @@ describe("createRunner", () => {
     process.env.AGENT_TIER = "haiku";
     const spy = stubProviderLoad(PROVIDERS.ollama);
     await createRunner({ verbose: false });
-    expect(spy).toHaveBeenCalledWith("qwen3:4b"); // haiku-tier Qwen
+    expect(spy).toHaveBeenCalledWith("qwen3.5:4b"); // haiku-tier Qwen
   });
 
   it("opts.tier takes precedence over env AGENT_TIER", async () => {
@@ -172,7 +172,7 @@ describe("createRunner", () => {
     process.env.AGENT_TIER = "haiku";
     const spy = stubProviderLoad(PROVIDERS.ollama);
     await createRunner({ tier: "opus", verbose: false });
-    expect(spy).toHaveBeenCalledWith("qwen3:30b-a3b"); // opts.tier wins
+    expect(spy).toHaveBeenCalledWith("qwen3.6:35b-a3b"); // opts.tier wins
   });
 
   it("invalid AGENT_TIER values are silently ignored (default sonnet)", async () => {
@@ -180,7 +180,7 @@ describe("createRunner", () => {
     process.env.AGENT_TIER = "premium"; // not a valid tier
     const spy = stubProviderLoad(PROVIDERS.ollama);
     await createRunner({ verbose: false });
-    expect(spy).toHaveBeenCalledWith("qwen3:14b"); // sonnet default
+    expect(spy).toHaveBeenCalledWith("qwen3.5:9b"); // sonnet default
   });
 
   it("env AGENT_MODEL also applies to explicit-provider path", async () => {

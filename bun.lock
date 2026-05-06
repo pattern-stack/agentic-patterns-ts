@@ -12,7 +12,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -36,7 +36,7 @@
     },
     "packages/agent-core": {
       "name": "@agentic-patterns/core",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "dependencies": {
         "zod": "^3.23.0",
         "zod-to-json-schema": "^3.24.0",
@@ -71,7 +71,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "dependencies": {
         "@agentic-patterns/core": "workspace:*",
         "@anthropic-ai/claude-agent-sdk": "^0.2.0",
@@ -98,7 +98,7 @@
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.1.7",
+      "version": "0.1.8",
       "dependencies": {
         "@agentic-patterns/core": "workspace:*",
         "@agentic-patterns/runtime": "workspace:*",
@@ -530,7 +530,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "electron-to-chromium": ["electron-to-chromium@1.5.350", "", {}, "sha512-/KWD4qK8nMqIoJh35Rpc37fiVyOe80mcUQKpfje0Dp9uot2ROuipsh+EriCdfInxjleD5v1S4OlIn41I0LXP0g=="],
+    "electron-to-chromium": ["electron-to-chromium@1.5.351", "", {}, "sha512-9D7Iqx8RImSvCnOsj86rCH6eQjZFQoM04Jn6HnZVM0Nu/G58/gmKYQ1d12MZTbjQbQSTGI8nwEy07ErsA2slLA=="],
 
     "encodeurl": ["encodeurl@2.0.0", "", {}, "sha512-Q0n9HRi4m6JuGIV1eFlmvJB7ZEVxu93IrMyiMsGC0lrMJMWzRgx6WGquyfQgZVb31vhGgXnfmPNNXmxnOkRBrg=="],
 
