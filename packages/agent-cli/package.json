@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "agentic — CLI for running agent projects. Crawls ./agents/, wires observability, serves chat + admin dashboard.",
   "license": "MIT",
   "type": "module",
@@ -15,11 +15,19 @@
   "publishConfig": {
     "access": "public"
   },
-  "keywords": ["agents", "llm", "ai", "cli"],
+  "keywords": [
+    "agents",
+    "llm",
+    "ai",
+    "cli"
+  ],
   "bin": {
     "ap": "./dist/cli.js"
   },
-  "files": ["dist", "assets"],
+  "files": [
+    "dist",
+    "assets"
+  ],
   "scripts": {
     "build": "bun run build:dashboard && bun run build:plugin-template && tsup",
     "build:dashboard": "bun run --filter=@agentic-patterns/dashboard build && rm -rf assets/dashboard && mkdir -p assets && cp -r ../agent-dashboard/dist assets/dashboard",
