@@ -14,6 +14,7 @@ import { type Provider, runInitCommand } from "./commands/init.js";
 import { runPlaygroundCommand } from "./commands/playground.js";
 import { runRunCommand } from "./commands/run.js";
 import { runStatusCommand } from "./commands/status.js";
+import { runToolsCommand } from "./commands/tools.js";
 import { resolveProjectConfig } from "./helpers/config.js";
 import { discoverAgents } from "./helpers/discover.js";
 
@@ -27,6 +28,8 @@ Usage:
 Commands:
   agents                          list discovered agents
   run <agent> [message]           chat in terminal — interactive or one-shot
+  tools list <agent>              list every tool exposed by an agent
+  tools call <agent> <tool> ...   invoke a tool directly (no LLM in the loop)
   playground                      launch UI environment (server + dashboard)
   init [<dir>]                    scaffold a new agent project
   config                          show env detection status
@@ -106,6 +109,21 @@ async function main(): Promise<void> {
       }
       const message = positionals.slice(2).join(" ") || undefined;
       await runRunCommand({ agents, agentId, message });
+      return;
+    }
+
+    case "tools": {
+      const subcommand = positionals[1];
+      // Everything after `ap tools <sub>` is fair game for the dispatcher;
+      // the per-tool flag set is unbounded and dynamic, so we hand the raw
+      // argv tail to runToolsCommand for arg-shape walking.
+      const toolPositionals = positionals.slice(2);
+      await runToolsCommand({
+        agents,
+        subcommand,
+        positionals: toolPositionals,
+        argv: process.argv.slice(2),
+      });
       return;
     }
 

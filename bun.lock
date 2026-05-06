@@ -12,7 +12,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -32,11 +32,12 @@
         "tsup": "^8.3.0",
         "typescript": "^5.7.0",
         "vitest": "^3.0.0",
+        "zod": "^3.23.0",
       },
     },
     "packages/agent-core": {
       "name": "@agentic-patterns/core",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "dependencies": {
         "zod": "^3.23.0",
         "zod-to-json-schema": "^3.24.0",
@@ -71,7 +72,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "dependencies": {
         "@agentic-patterns/core": "workspace:*",
         "@anthropic-ai/claude-agent-sdk": "^0.2.0",
@@ -98,7 +99,7 @@
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "dependencies": {
         "@agentic-patterns/core": "workspace:*",
         "@agentic-patterns/runtime": "workspace:*",
