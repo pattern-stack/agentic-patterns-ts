@@ -58,6 +58,29 @@ ok "build"
 bun run --filter='*' typecheck >/dev/null
 ok "typecheck"
 
+# Lockfile sanity: bun's `workspace:*` rewrite at publish time pins the
+# version found in bun.lock, NOT the version on disk in package.json. If
+# you bump versions and forget to refresh the lock, published tarballs
+# end up pinning stale workspace deps (the 0.1.6 publish hit this — cli
+# baked in runtime@0.1.4 because the lock predated the bump).
+bold "lockfile sanity"
+for pkg in "${PACKAGES[@]}"; do
+  disk=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').version)")
+  name=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').name)")
+  lock=$(node -e "
+    const fs=require('fs');
+    const txt=fs.readFileSync('$ROOT/bun.lock','utf-8');
+    // bun.lock workspace section: \"name\": \"<pkg>\", \"version\": \"<v>\"
+    const re=new RegExp('\"name\":\\\\s*\"$name\"[^}]*?\"version\":\\\\s*\"([^\"]+)\"');
+    const m=txt.match(re); console.log(m?m[1]:'?');
+  ")
+  if [ "$disk" = "$lock" ]; then
+    ok "$name $disk (lock matches)"
+  else
+    fail "$name disk=$disk vs lock=$lock — run \`rm bun.lock && bun install\` to refresh"
+  fi
+done
+
 bold "dry-run publish (what would ship)"
 echo
 for pkg in "${PACKAGES[@]}"; do
