@@ -25,6 +25,8 @@ const KEYS = [
   "DEEPSEEK_API_KEY",
   "OPENROUTER_API_KEY",
   "OLLAMA_HOST",
+  "AGENT_TIER",
+  "AGENT_MODEL",
 ] as const;
 
 function stashEnv(): Record<string, string | undefined> {
@@ -145,6 +147,47 @@ describe("createRunner", () => {
     const { source } = await createRunner({ tier: "opus", verbose: false });
     expect(source).toBe("env-ollama");
     expect(spy).toHaveBeenCalledWith("qwen3:30b-a3b"); // opus-tier Qwen
+  });
+
+  it("env AGENT_MODEL overrides the tier default in env-detect", async () => {
+    process.env.OLLAMA_HOST = "http://localhost:11434";
+    process.env.AGENT_MODEL = "qwen3.6:27b";
+    const spy = stubProviderLoad(PROVIDERS.ollama);
+    const { source, reason } = await createRunner({ verbose: false });
+    expect(source).toBe("env-ollama");
+    expect(spy).toHaveBeenCalledWith("qwen3.6:27b");
+    expect(reason).toContain("qwen3.6:27b");
+  });
+
+  it("env AGENT_TIER picks the tier when no opts.tier is passed", async () => {
+    process.env.OLLAMA_HOST = "http://localhost:11434";
+    process.env.AGENT_TIER = "haiku";
+    const spy = stubProviderLoad(PROVIDERS.ollama);
+    await createRunner({ verbose: false });
+    expect(spy).toHaveBeenCalledWith("qwen3:4b"); // haiku-tier Qwen
+  });
+
+  it("opts.tier takes precedence over env AGENT_TIER", async () => {
+    process.env.OLLAMA_HOST = "http://localhost:11434";
+    process.env.AGENT_TIER = "haiku";
+    const spy = stubProviderLoad(PROVIDERS.ollama);
+    await createRunner({ tier: "opus", verbose: false });
+    expect(spy).toHaveBeenCalledWith("qwen3:30b-a3b"); // opts.tier wins
+  });
+
+  it("invalid AGENT_TIER values are silently ignored (default sonnet)", async () => {
+    process.env.OLLAMA_HOST = "http://localhost:11434";
+    process.env.AGENT_TIER = "premium"; // not a valid tier
+    const spy = stubProviderLoad(PROVIDERS.ollama);
+    await createRunner({ verbose: false });
+    expect(spy).toHaveBeenCalledWith("qwen3:14b"); // sonnet default
+  });
+
+  it("env AGENT_MODEL also applies to explicit-provider path", async () => {
+    process.env.AGENT_MODEL = "claude-magic-5";
+    const spy = stubProviderLoad(PROVIDERS.anthropic);
+    await createRunner({ provider: "anthropic", verbose: false });
+    expect(spy).toHaveBeenCalledWith("claude-magic-5");
   });
 
   it("falls back to MockRunner when fallbackToMock is true", async () => {

@@ -48,12 +48,20 @@ export interface CreateRunnerOptions {
   /**
    * Explicit model id. Falls through to the provider's tier default.
    * Ignored if `runner` or `model` is set.
+   *
+   * When omitted, `process.env.AGENT_MODEL` is read as a default — this
+   * is the only way to pin an exact model from a `.env` file (e.g.
+   * `AGENT_MODEL=qwen3.6:27b` to use a model the framework's tier map
+   * doesn't list).
    */
   modelId?: string;
   /**
    * Cross-provider tier selector — "opus" | "sonnet" | "haiku". Resolved
    * via each `ProviderProtocol.tiers` map. Default: "sonnet".
    * Ignored if `modelId` is set.
+   *
+   * When omitted, `process.env.AGENT_TIER` is read as a default. Invalid
+   * values are silently ignored (fall through to the "sonnet" default).
    */
   tier?: ProviderTier;
   /**
@@ -95,6 +103,14 @@ export interface RunnerSelection {
 export async function createRunner(opts: CreateRunnerOptions = {}): Promise<RunnerSelection> {
   const verbose = opts.verbose ?? true;
 
+  // Env-driven defaults applied to provider resolution. AGENT_MODEL pins
+  // an exact model id (wins over tier, matching resolveModelId's
+  // explicit-modelId-over-tier rule); AGENT_TIER picks one of the three
+  // cross-provider tier slots. Both are ignored when `runner` / `model`
+  // short-circuit provider resolution.
+  const tier = opts.tier ?? envTier();
+  const modelId = opts.modelId ?? process.env.AGENT_MODEL;
+
   // 1. Explicit runner wins.
   if (opts.runner) {
     return log(verbose, {
@@ -116,11 +132,11 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
   // 3. Explicit provider.
   if (opts.provider) {
     const provider = PROVIDERS[opts.provider];
-    const modelId = resolveModelId(provider, opts.modelId, opts.tier);
-    const model = await provider.load(modelId);
+    const resolved = resolveModelId(provider, modelId, tier);
+    const model = await provider.load(resolved);
     return log(verbose, {
       runner: new AgentRunner(model, opts.eventBus),
-      reason: `using ${opts.provider} (explicit, model=${modelId})`,
+      reason: `using ${opts.provider} (explicit, model=${resolved})`,
       source: "explicit-provider",
     });
   }
@@ -130,11 +146,11 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     const provider = PROVIDERS[name];
     const matchedEnv = provider.envVars.find((v) => process.env[v]);
     if (matchedEnv) {
-      const modelId = resolveModelId(provider, opts.modelId, opts.tier);
-      const model = await provider.load(modelId);
+      const resolved = resolveModelId(provider, modelId, tier);
+      const model = await provider.load(resolved);
       return log(verbose, {
         runner: new AgentRunner(model, opts.eventBus),
-        reason: `using ${name} (env ${matchedEnv}, model=${modelId})`,
+        reason: `using ${name} (env ${matchedEnv}, model=${resolved})`,
         source: `env-${name}` as RunnerSource,
       });
     }
@@ -183,6 +199,16 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Read AGENT_TIER from env and validate. Mistyped values (e.g. "sonnet ")
+ * fall through to undefined so the downstream default kicks in instead
+ * of indexing the tier map with garbage.
+ */
+function envTier(): ProviderTier | undefined {
+  const v = process.env.AGENT_TIER;
+  return v === "opus" || v === "sonnet" || v === "haiku" ? v : undefined;
+}
 
 function log(verbose: boolean, selection: RunnerSelection): RunnerSelection {
   if (verbose) {

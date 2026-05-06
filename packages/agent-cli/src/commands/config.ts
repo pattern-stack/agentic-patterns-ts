@@ -38,6 +38,7 @@ const TRACKED_ENV: readonly EnvVarSpec[] = [
   { key: "OPENROUTER_API_KEY", label: "OpenRouter API key", secret: true },
   { key: "OLLAMA_HOST", label: "Ollama host URL", secret: false },
   { key: "AGENT_TIER", label: "Default tier (opus | sonnet | haiku)", secret: false },
+  { key: "AGENT_MODEL", label: "Pinned model id (overrides tier)", secret: false },
 ];
 
 /** Bare `ap config` — show status. */
