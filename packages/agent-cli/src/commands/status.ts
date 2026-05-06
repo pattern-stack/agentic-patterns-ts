@@ -94,7 +94,8 @@ function detectRunnerFromEnv(): RunnerHint {
       return { provider: "ollama", detail: `env OLLAMA_HOST → ${pinned} (AGENT_MODEL)` };
     }
     const tier = (process.env.AGENT_TIER ?? "sonnet") as "opus" | "sonnet" | "haiku";
-    const model = tier === "opus" ? "qwen3.6:35b-a3b" : tier === "haiku" ? "qwen3.5:4b" : "qwen3.5:9b";
+    const model =
+      tier === "opus" ? "qwen3.6:35b-a3b" : tier === "haiku" ? "qwen3.5:4b" : "qwen3.5:9b";
     return {
       provider: "ollama",
       detail: `env OLLAMA_HOST → ${model} (tier=${tier})`,

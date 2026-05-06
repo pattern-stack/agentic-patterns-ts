@@ -35,10 +35,7 @@ import {
   RoleBuilder,
   Toolbox,
 } from "../packages/agent-core/dist/index.js";
-import {
-  ClaudeCodeAPIRunner,
-  ClaudeCodeRunner,
-} from "../packages/agent-runtime/dist/index.js";
+import { ClaudeCodeAPIRunner, ClaudeCodeRunner } from "../packages/agent-runtime/dist/index.js";
 import { z } from "../packages/agent-runtime/node_modules/zod/index.js";
 
 // ---------------------------------------------------------------------------
@@ -114,7 +111,8 @@ function buildResearchAnalyst() {
   const role = new RoleBuilder("research-analyst")
     .withPersona(
       new Persona({
-        identity: "A pragmatic research analyst who solves problems with whatever tools are available",
+        identity:
+          "A pragmatic research analyst who solves problems with whatever tools are available",
         tone: "direct, factual",
         priorities: ["correctness", "using tools instead of guessing"],
         principles: [

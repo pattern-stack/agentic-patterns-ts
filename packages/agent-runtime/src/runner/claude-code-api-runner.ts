@@ -129,10 +129,7 @@ export class ClaudeCodeAPIRunner extends ClaudeCodeRunner {
     (sdkOpts as SDKOptions & { tools?: string[] }).tools = [];
 
     if (this._extraDisallowed.length > 0) {
-      sdkOpts.disallowedTools = [
-        ...(sdkOpts.disallowedTools ?? []),
-        ...this._extraDisallowed,
-      ];
+      sdkOpts.disallowedTools = [...(sdkOpts.disallowedTools ?? []), ...this._extraDisallowed];
     }
 
     // Sandbox: redirect CLAUDE_CONFIG_DIR + inject OAuth token via env.
@@ -142,7 +139,10 @@ export class ClaudeCodeAPIRunner extends ClaudeCodeRunner {
       const oauth = loadMaxSubOAuth();
       if (oauth) {
         const baseEnv: Record<string, string> = Object.fromEntries(
-          Object.entries(process.env).filter(([, v]) => typeof v === "string") as [string, string][],
+          Object.entries(process.env).filter(([, v]) => typeof v === "string") as [
+            string,
+            string,
+          ][],
         );
         sdkOpts.env = {
           ...baseEnv,
