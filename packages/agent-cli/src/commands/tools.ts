@@ -79,9 +79,7 @@ export async function runToolsCommand(input: ToolsCommandInput): Promise<void> {
   }
 
   process.stderr.write(
-    `${red("error:")} unknown tools subcommand "${subcommand ?? ""}"\n` +
-      `  usage: ap tools list <agent-id>\n` +
-      `         ap tools call <agent-id> <tool-name> [--field=value ...]\n`,
+    `${red("error:")} unknown tools subcommand "${subcommand ?? ""}"\n  usage: ap tools list <agent-id>\n         ap tools call <agent-id> <tool-name> [--field=value ...]\n`,
   );
   process.exit(1);
 }
@@ -102,9 +100,7 @@ function runToolsListCommand(input: ToolsCommandInput): void {
 
   process.stdout.write("\n");
   if (entries.length === 0) {
-    process.stdout.write(
-      `  ${dim(`agent "${agentId}" has no capabilities with tools`)}\n\n`,
-    );
+    process.stdout.write(`  ${dim(`agent "${agentId}" has no capabilities with tools`)}\n\n`);
     return;
   }
 
@@ -133,9 +129,7 @@ async function runToolsCallCommand(input: ToolsCommandInput): Promise<void> {
   const agentId = input.positionals[0];
   const toolName = input.positionals[1];
   if (!agentId || !toolName) {
-    process.stderr.write(
-      `${red("error:")} ap tools call requires <agent-id> <tool-name>\n`,
-    );
+    process.stderr.write(`${red("error:")} ap tools call requires <agent-id> <tool-name>\n`);
     process.exit(1);
   }
 
@@ -174,16 +168,11 @@ interface ToolEntry {
   definition: ToolDefinition;
 }
 
-function findAgentOrExit(
-  agents: DiscoveredAgent[],
-  agentId: string,
-): DiscoveredAgent {
+function findAgentOrExit(agents: DiscoveredAgent[], agentId: string): DiscoveredAgent {
   const reg = agents.find((a) => a.id === agentId);
   if (!reg) {
     const available = agents.map((a) => a.id).join(", ") || "(none)";
-    process.stderr.write(
-      `${red(`agent "${agentId}" not found`)}\n  available: ${available}\n`,
-    );
+    process.stderr.write(`${red(`agent "${agentId}" not found`)}\n  available: ${available}\n`);
     process.exit(1);
     // appease TS — process.exit returns `never`, but the typedef varies
     throw new Error("unreachable");

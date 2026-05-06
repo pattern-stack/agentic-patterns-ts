@@ -119,12 +119,10 @@ function captureStdio(): StdHarness {
       stderr.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
       return true;
     });
-  const exitSpy = vi
-    .spyOn(process, "exit")
-    .mockImplementation(((code?: number): never => {
-      exits.push(code ?? 0);
-      throw new Error(`__exit__:${code ?? 0}`);
-    }) as never);
+  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number): never => {
+    exits.push(code ?? 0);
+    throw new Error(`__exit__:${code ?? 0}`);
+  }) as never);
 
   return {
     stdout,
