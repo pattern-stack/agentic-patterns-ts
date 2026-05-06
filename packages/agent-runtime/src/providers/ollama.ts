@@ -3,23 +3,28 @@ import { type ProviderProtocol, importProvider } from "./types.js";
 /**
  * Ollama — local-only OSS models via HTTP.
  *
- * Default tier map uses the Qwen3 family because Qwen's team explicitly
- * prioritizes tool-calling and keeps the same grammar across sizes — so
- * agents scale between haiku↔sonnet↔opus without prompt changes.
+ * Default tier map uses the qwen3.5/3.6 families because Qwen's team
+ * explicitly prioritizes tool-calling and keeps the same grammar across
+ * sizes — so agents scale between haiku↔sonnet↔opus without prompt
+ * changes. Three sizes selected from a single bench pass on a 4080 Super-
+ * class box:
  *
- * Sized for 16GB-class consumer GPUs (tested on 4080 Super):
- *   opus  (30B MoE, activates 3B/token)  — ~14 GB VRAM, 50–80 tok/s
- *   sonnet (14B dense)                   —  ~9 GB VRAM, 30–50 tok/s
- *   haiku  (4B dense)                    —  ~3 GB VRAM, 100+ tok/s
+ *   opus   (35B MoE, activates 3B/token) — 15.1 GB VRAM + 10.5 GB RAM spill, ~15 tok/s
+ *   sonnet (9B dense)                    —  8.2 GB VRAM, 0 spill,            ~98 tok/s
+ *   haiku  (4B dense)                    —  3.4 GB VRAM, 0 spill,            ~145 tok/s
  *
- * Override with `options.modelId` if you want a different family.
+ * Earlier qwen3:14b is the same speed class as 3.5:9b and worse at most
+ * tool-calling tasks; 3.5:9b is preferred for the sonnet slot.
+ *
+ * Override with `options.modelId` (or `AGENT_MODEL` env) for any other
+ * family — the tier map is just the default when nothing is pinned.
  */
 export const ollamaProvider: ProviderProtocol = {
   name: "ollama",
   tiers: {
-    opus: "qwen3:30b-a3b",
-    sonnet: "qwen3:14b",
-    haiku: "qwen3:4b",
+    opus: "qwen3.6:35b-a3b",
+    sonnet: "qwen3.5:9b",
+    haiku: "qwen3.5:4b",
   },
   envVars: ["OLLAMA_HOST"],
   async load(modelId) {
