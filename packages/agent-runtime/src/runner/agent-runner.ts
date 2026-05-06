@@ -125,8 +125,12 @@ export class AgentRunner implements RunnerProtocol {
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
 
-    // Resolve model name and tools
-    const modelName = agent.getModel();
+    // Resolve model name and tools. Use the bound LanguageModelV1's actual
+    // modelId for event attribution — agent.getModel() is the agent's
+    // *declared* model (often a default) and can lie when the runtime
+    // selected a different provider (e.g. agent declares claude-sonnet but
+    // createRunner picked ollama qwen3:4b via OLLAMA_HOST).
+    const modelName = this._model.modelId;
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -461,7 +465,7 @@ export class AgentRunner implements RunnerProtocol {
     const toolExecutor = options?.toolExecutor;
     const conversationId = generateId();
 
-    const modelName = agent.getModel();
+    const modelName = this._model.modelId;
     const agentTools = agent.getTools();
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
