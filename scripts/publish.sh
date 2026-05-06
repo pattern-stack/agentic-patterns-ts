@@ -4,8 +4,14 @@
 #
 # Usage:
 #   bash scripts/publish.sh check       # pre-flight only (default) — no publish
-#   bash scripts/publish.sh publish     # real publish, needs npm login + OTP
-#   bash scripts/publish.sh publish --tag=latest   # override tag (default: next)
+#   bash scripts/publish.sh publish     # real publish to `latest`, needs npm login + OTP
+#   bash scripts/publish.sh publish --tag=next   # override tag (default: latest)
+#
+# Default tag is `latest` because that's what `npm install` resolves
+# without an explicit tag. Earlier versions defaulted to `next`, which
+# silently published broken pins (0.1.5/0.1.6) without anyone seeing
+# them on `latest` — broke downstream installs that use `^0.1.x`.
+# Use `--tag=next` for genuine pre-releases.
 #
 # bun handles monorepo specifics:
 #   - rewrites `workspace:*` to concrete versions in published tarballs
@@ -17,7 +23,7 @@ set -euo pipefail
 
 MODE="${1:-check}"
 shift || true
-TAG="next"
+TAG="latest"
 for arg in "$@"; do
   case "$arg" in
     --tag=*) TAG="${arg#--tag=}" ;;
