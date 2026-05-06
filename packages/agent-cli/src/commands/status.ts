@@ -69,16 +69,30 @@ function formatConfigRow(config: ProjectConfig): string {
 }
 
 function detectRunnerFromEnv(): RunnerHint {
+  // AGENT_MODEL pins an exact model regardless of provider/tier.
+  const pinned = process.env.AGENT_MODEL;
   if (process.env.ANTHROPIC_API_KEY) {
-    return { provider: "anthropic", detail: "env ANTHROPIC_API_KEY → claude-sonnet-4-5" };
+    return {
+      provider: "anthropic",
+      detail: `env ANTHROPIC_API_KEY → ${pinned ?? "claude-sonnet-4-5"}${pinned ? " (AGENT_MODEL)" : ""}`,
+    };
   }
   if (process.env.OPENAI_API_KEY) {
-    return { provider: "openai", detail: "env OPENAI_API_KEY → gpt-4o" };
+    return {
+      provider: "openai",
+      detail: `env OPENAI_API_KEY → ${pinned ?? "gpt-4o"}${pinned ? " (AGENT_MODEL)" : ""}`,
+    };
   }
   if (process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GOOGLE_API_KEY) {
-    return { provider: "google", detail: "env GOOGLE_*_API_KEY → gemini-2.5-flash" };
+    return {
+      provider: "google",
+      detail: `env GOOGLE_*_API_KEY → ${pinned ?? "gemini-2.5-flash"}${pinned ? " (AGENT_MODEL)" : ""}`,
+    };
   }
   if (process.env.OLLAMA_HOST) {
+    if (pinned) {
+      return { provider: "ollama", detail: `env OLLAMA_HOST → ${pinned} (AGENT_MODEL)` };
+    }
     const tier = (process.env.AGENT_TIER ?? "sonnet") as "opus" | "sonnet" | "haiku";
     const model = tier === "opus" ? "qwen3:30b-a3b" : tier === "haiku" ? "qwen3:4b" : "qwen3:14b";
     return {

@@ -307,6 +307,11 @@ function renderEnvExample(provider: Provider): string {
     "# Default model tier — opus | sonnet | haiku (used by the agent runner)",
     "AGENT_TIER=sonnet",
     "",
+    "# Optional: pin an exact model id; wins over AGENT_TIER. Useful when",
+    "# your provider has a model the framework's tier map doesn't list",
+    "# (e.g. AGENT_MODEL=qwen3.6:27b for an Ollama box).",
+    "# AGENT_MODEL=",
+    "",
   ];
   if (provider === "anthropic") {
     lines.push("# Anthropic API key (https://console.anthropic.com/)");
