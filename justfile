@@ -58,6 +58,20 @@ test-live:
 test-claude:
     RUN_LIVE_CLAUDE=1 pnpm --filter @agentic-patterns/runtime test
 
+# ── Release ──────────────────────────────────
+
+# Bump @agentic-patterns/* versions in lockstep (patch|minor|major|--to=X.Y.Z)
+bump level="patch":
+    bash scripts/bump.sh {{level}}
+
+# Publish pre-flight (build, typecheck, lockfile sanity, dry-run)
+publish-check:
+    bash scripts/publish.sh check
+
+# Real publish to npm `latest` (needs npm login + OTP)
+publish:
+    bash scripts/publish.sh publish
+
 # ── Stack ────────────────────────────────────
 
 stack:
