@@ -14,4 +14,5 @@ export {
   type OTelSpan,
   type OTelTracer,
 } from "./otel.js";
+export { SQLiteExporter } from "./sqlite.js";
 export { SSEExporter } from "./sse.js";

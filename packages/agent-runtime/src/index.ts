@@ -11,3 +11,4 @@ export * from "./workflows/index.js";
 export * from "./admin/index.js";
 export * from "./streaming/index.js";
 export * from "./providers/index.js";
+export * from "./storage/index.js";
