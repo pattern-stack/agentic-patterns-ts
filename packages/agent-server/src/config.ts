@@ -6,6 +6,7 @@ import type {
   AdminServiceProtocol,
   AgentEventBus,
   AgentLike,
+  EventStore,
   RunResult,
   RunnerProtocol,
 } from "@agentic-patterns/runtime";
@@ -70,6 +71,8 @@ export interface ServerConfig {
   readonly eventBus: AgentEventBus;
   readonly sseExporter: SSEExporterLike;
   readonly store?: ConversationStoreLike;
+  /** Optional durable event log; enables historical query routes when present. */
+  readonly eventStore?: EventStore;
   readonly staticDir?: string;
   /** CORS options forwarded to Hono's cors middleware. Defaults to `origin: "*"`. */
   readonly cors?: CORSConfig;

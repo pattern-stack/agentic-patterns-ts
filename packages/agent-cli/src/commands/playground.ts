@@ -13,7 +13,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, statSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,10 +22,13 @@ import {
   AgentEventBus,
   InMemoryAdminService,
   InMemoryEventCollector,
+  SQLiteExporter,
   SSEExporter,
   createRunner,
   createToolboxExecutor,
+  loadEventStore,
 } from "@agentic-patterns/runtime";
+import type { EventStore } from "@agentic-patterns/runtime";
 import { createServer } from "@agentic-patterns/server";
 import type { AgentRegistration } from "@agentic-patterns/server";
 import { serve } from "@hono/node-server";
@@ -72,6 +76,11 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   const sseExporter = new SSEExporter();
   sseExporter.attach(eventBus);
 
+  // Durable event log (SQLite). Optional — degrades to memory-only when
+  // better-sqlite3 isn't installed or AP_PERSISTENCE=0 is set.
+  const persistence = await maybeAttachPersistence(eventBus);
+  const eventStore = persistence.store;
+
   // -------------------------------------------------------------------------
   // 2. Runner — env-driven auto-detection
   // -------------------------------------------------------------------------
@@ -107,6 +116,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     adminService,
     eventBus,
     sseExporter,
+    eventStore,
   });
 
   // -------------------------------------------------------------------------
@@ -150,6 +160,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     dashboardMounted ? `  dashboard  ${baseUrl}` : "  dashboard  (disabled)",
     `  agents     ${agentList}`,
     `  runner     ${selection.source} — ${selection.reason}`,
+    `  storage    ${persistence.banner}`,
     "",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
@@ -324,4 +335,62 @@ function openBrowser(url: string): void {
   } catch {
     /* ignore */
   }
+}
+
+// ---------------------------------------------------------------------------
+// Persistence wiring
+// ---------------------------------------------------------------------------
+
+interface PersistenceAttachment {
+  store: EventStore | undefined;
+  banner: string;
+}
+
+/**
+ * Try to construct an `EventStore` and attach a `SQLiteExporter` to the bus.
+ * Soft-degrades to in-memory when:
+ *   - `AP_PERSISTENCE=0` is set, or
+ *   - `better-sqlite3` cannot be loaded.
+ */
+async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<PersistenceAttachment> {
+  if (process.env.AP_PERSISTENCE === "0") {
+    return { store: undefined, banner: "disabled (AP_PERSISTENCE=0)" };
+  }
+
+  const dbPath = resolveDbPath();
+  ensureParentDir(dbPath);
+
+  const retentionDays = parsePositiveInt(process.env.AP_RETENTION_DAYS) ?? 30;
+  const maxRows = parsePositiveInt(process.env.AP_MAX_ROWS) ?? 1_000_000;
+
+  const result = await loadEventStore({ path: dbPath, retentionDays, maxRows });
+
+  if (result.unavailable || !result.store) {
+    return { store: undefined, banner: `memory-only — ${result.reason}` };
+  }
+
+  const sqliteExporter = new SQLiteExporter({ store: result.store });
+  sqliteExporter.attach(eventBus);
+
+  return { store: result.store, banner: `${dbPath} (${result.store.count()} events)` };
+}
+
+function resolveDbPath(): string {
+  if (process.env.AP_DB_PATH) return process.env.AP_DB_PATH;
+  const base = process.env.XDG_STATE_HOME ?? path.join(homedir(), ".local", "state");
+  return path.join(base, "ap", "events.db");
+}
+
+function ensureParentDir(filePath: string): void {
+  try {
+    mkdirSync(path.dirname(filePath), { recursive: true });
+  } catch {
+    // Best effort — EventStore will surface the real error if open fails.
+  }
+}
+
+function parsePositiveInt(s: string | undefined): number | undefined {
+  if (!s) return undefined;
+  const n = Number.parseInt(s, 10);
+  return Number.isNaN(n) || n <= 0 ? undefined : n;
 }
