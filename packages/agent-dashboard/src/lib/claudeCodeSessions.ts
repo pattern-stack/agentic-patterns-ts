@@ -21,6 +21,7 @@ export interface SessionState {
   firstSeen: string;
   lastSeen: string;
   cwd?: string;
+  source?: string;
   events: SessionEvent[];
   counts: Record<string, number>;
 }
@@ -68,6 +69,10 @@ export function groupClaudeCodeEvents(events: StreamEvent[]): SessionState[] {
     }
 
     if (!session.cwd && cwd) session.cwd = cwd;
+    if (hookName === "SessionStart") {
+      const source = str(data.source);
+      if (source) session.source = source;
+    }
     if (timestamp < session.firstSeen) session.firstSeen = timestamp;
     if (timestamp > session.lastSeen) session.lastSeen = timestamp;
 
@@ -93,14 +98,24 @@ export function groupClaudeCodeEvents(events: StreamEvent[]): SessionState[] {
 /**
  * Coarse category for hook names so the UI can colorize consistently.
  */
-export type HookCategory = "tool" | "permission" | "compact" | "session" | "notification" | "other";
+export type HookCategory =
+  | "tool"
+  | "permission"
+  | "compact"
+  | "session"
+  | "stop"
+  | "notification"
+  | "other";
 
 export function hookCategory(hookName: string): HookCategory {
   const n = hookName.toLowerCase();
+  if (n === "stop" || n === "stopfailure" || n === "posttoolusefailure") {
+    return "stop";
+  }
   if (n.includes("tool")) return "tool";
   if (n.includes("permission")) return "permission";
   if (n.includes("compact")) return "compact";
-  if (n === "sessionstart" || n === "sessionend" || n === "stop" || n === "subagentstop") {
+  if (n === "sessionstart" || n === "sessionend" || n === "subagentstop") {
     return "session";
   }
   if (n.includes("notification") || n.includes("userpromptsubmit")) return "notification";
