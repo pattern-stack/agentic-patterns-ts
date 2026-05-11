@@ -23,6 +23,7 @@ const CATEGORY_TONES: Record<HookCategory, BadgeTone> = {
   permission: "yellow",
   compact: "purple",
   session: "muted",
+  stop: "red",
   notification: "emerald",
   other: "neutral",
 };
@@ -88,6 +89,11 @@ export function SessionCard({ session }: SessionCardProps) {
         <Badge tone="emerald" variant="outline" title={session.sessionId}>
           <span style={{ fontFamily: "var(--font-mono)" }}>{truncateId(session.sessionId)}</span>
         </Badge>
+        {session.source === "resume" && (
+          <Badge tone="purple" variant="outline" title="SessionStart fired with source=resume">
+            resumed
+          </Badge>
+        )}
         {session.cwd && (
           <span
             title={session.cwd}
