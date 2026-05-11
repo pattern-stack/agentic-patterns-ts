@@ -18,8 +18,19 @@ interface UseEventStreamResult {
   clear: () => void;
 }
 
-export function useEventStream(path: string): UseEventStreamResult {
-  const [events, setEvents] = useState<StreamEvent[]>([]);
+export interface UseEventStreamOptions {
+  /**
+   * Events to seed `events` with on first render. Pages that hydrate from
+   * REST history pass these in so the UI doesn't start empty on cold load.
+   */
+  initialEvents?: StreamEvent[];
+}
+
+export function useEventStream(
+  path: string,
+  options: UseEventStreamOptions = {},
+): UseEventStreamResult {
+  const [events, setEvents] = useState<StreamEvent[]>(options.initialEvents ?? []);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const counterRef = useRef(0);
@@ -27,6 +38,11 @@ export function useEventStream(path: string): UseEventStreamResult {
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
+    // Allow callers to defer the connection by passing an empty path. Useful
+    // when the page is still hydrating from REST and the SSE feed shouldn't
+    // start until that's done.
+    if (!path) return;
+
     let cancelled = false;
     let source: EventSource | null = null;
 

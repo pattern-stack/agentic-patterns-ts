@@ -13,18 +13,45 @@
  * to test locally.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Card } from "../components/atoms/Card";
 import { Spinner } from "../components/atoms/Spinner";
 import { AlertIcon } from "../components/atoms/icons";
 import { SessionCard } from "../components/organisms/SessionCard";
-import { useEventStream } from "../hooks/useEventStream";
+import { type StreamEvent, useEventStream } from "../hooks/useEventStream";
 import { type SessionState, groupClaudeCodeEvents } from "../lib/claudeCodeSessions";
+import { fetchRecentEvents } from "../lib/eventApi";
 
 export function ClaudeCodePage() {
-  const { events, connected, error, clear } = useEventStream("/admin/events/stream");
+  const [initial, setInitial] = useState<StreamEvent[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchRecentEvents({ type: "claude_code.hook" })
+      .then((rows) => {
+        if (!cancelled) setInitial(rows);
+      })
+      .catch(() => {
+        // Persistence may be off; show empty state until SSE delivers something.
+        if (!cancelled) setInitial([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (initial === null) {
+    return <HydratingState />;
+  }
+  return <ClaudeCodeLoaded initialEvents={initial} />;
+}
+
+function ClaudeCodeLoaded({ initialEvents }: { initialEvents: StreamEvent[] }) {
+  const { events, connected, error, clear } = useEventStream("/admin/events/stream", {
+    initialEvents,
+  });
 
   const sessions: SessionState[] = useMemo(() => groupClaudeCodeEvents(events), [events]);
 
@@ -131,6 +158,27 @@ function EmptyState() {
           Install the @agentic-patterns plugin in a project and open Claude Code there. Hook events
           will stream in as the session runs.
         </span>
+      </div>
+    </Card>
+  );
+}
+
+function HydratingState() {
+  return (
+    <Card>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 10,
+          padding: "36px 16px",
+          color: "var(--fg-muted)",
+          fontSize: 13,
+        }}
+      >
+        <Spinner size={12} color="var(--fg-muted)" thickness={1.5} />
+        <span>Loading recent sessions…</span>
       </div>
     </Card>
   );
