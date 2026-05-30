@@ -69,3 +69,10 @@ export {
   Roster,
   type RosterData,
 } from "./roster.js";
+export {
+  AgentConfig,
+  AgentConfigSchema,
+  type AgentConfigData,
+  RoleTemplateConfigSchema,
+  type RoleTemplateConfigData,
+} from "./agent-config.js";

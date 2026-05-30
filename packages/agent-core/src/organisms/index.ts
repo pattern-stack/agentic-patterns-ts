@@ -7,3 +7,7 @@ export {
   AgentSchema,
   type AgentData,
 } from "./agent.js";
+export type {
+  CapabilityResolver,
+  CapabilityResolutionContext,
+} from "./capability-resolver.js";
