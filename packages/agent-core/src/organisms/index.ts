@@ -11,3 +11,8 @@ export type {
   CapabilityResolver,
   CapabilityResolutionContext,
 } from "./capability-resolver.js";
+export {
+  buildAgentFromConfig,
+  type BuildAgentOptions,
+  type AgentConfigInput,
+} from "./build-agent-from-config.js";
