@@ -87,12 +87,16 @@ for pkg in "${PACKAGES[@]}"; do
   fi
 done
 
-bold "dry-run publish (what would ship)"
+bold "publish plan (what would actually ship)"
 echo
 for pkg in "${PACKAGES[@]}"; do
   name=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').name)")
   version=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').version)")
-  echo "  + $name@$version"
+  if npm view "$name@$version" version >/dev/null 2>&1; then
+    dim "  · $name@$version (already on npm — will skip)"
+  else
+    ok "$name@$version (NEW — will publish)"
+  fi
 done
 echo
 
@@ -112,9 +116,20 @@ case "$MODE" in
     echo
     for pkg in "${PACKAGES[@]}"; do
       pkg_dir="$ROOT/packages/$pkg"
+      name=$(node -e "console.log(require('$pkg_dir/package.json').name)")
+      version=$(node -e "console.log(require('$pkg_dir/package.json').version)")
       private=$(node -e "console.log(require('$pkg_dir/package.json').private || false)")
-      [ "$private" = "true" ] && { dim "skip (private): $pkg"; continue; }
-      (cd "$pkg_dir" && bun publish --tag="$TAG" --access=public) || fail "publish failed for $pkg"
+      [ "$private" = "true" ] && { dim "skip (private): $name"; continue; }
+      # Idempotent lockstep: `bun publish` refuses to republish an existing
+      # version, which would otherwise abort the whole run on the first
+      # already-published package (the core-only-bump trap). Skip versions
+      # already on npm so `just publish` ships exactly what changed — and is
+      # safe to re-run if it dies partway (e.g. a mistyped OTP).
+      if npm view "$name@$version" version >/dev/null 2>&1; then
+        dim "skip (already on npm): $name@$version"
+        continue
+      fi
+      (cd "$pkg_dir" && bun publish --tag="$TAG" --access=public) || fail "publish failed for $name@$version"
     done
     echo
     ok "done — verify at https://www.npmjs.com/~agentic-patterns"

@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/cli",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "agentic — CLI for running agent projects. Crawls ./agents/, wires observability, serves chat + admin dashboard.",
   "license": "MIT",
   "type": "module",
@@ -29,9 +29,9 @@
     "lint": "biome check src/"
   },
   "dependencies": {
-    "@agentic-patterns/core": "workspace:*",
-    "@agentic-patterns/runtime": "workspace:*",
-    "@agentic-patterns/server": "workspace:*",
+    "@agentic-patterns/core": "workspace:^",
+    "@agentic-patterns/runtime": "workspace:^",
+    "@agentic-patterns/server": "workspace:^",
     "@hono/node-server": "^1.13.0",
     "@clack/prompts": "^0.8.0",
     "better-sqlite3": "^12.0.0",
@@ -40,7 +40,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "@agentic-patterns/dashboard": "workspace:*",
+    "@agentic-patterns/dashboard": "workspace:^",
     "@types/node": "^25.6.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
