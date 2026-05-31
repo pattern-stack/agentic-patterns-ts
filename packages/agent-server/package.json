@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/server",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Hono HTTP server for agentic-patterns agents — routes, SSE streaming, admin API",
   "license": "MIT",
   "type": "module",
@@ -43,8 +43,8 @@
     "dev": "tsx --watch examples/live-demo.ts"
   },
   "dependencies": {
-    "@agentic-patterns/core": "workspace:*",
-    "@agentic-patterns/runtime": "workspace:*",
+    "@agentic-patterns/core": "workspace:^",
+    "@agentic-patterns/runtime": "workspace:^",
     "hono": "^4.0.0",
     "zod": "^3.23.0"
   },
