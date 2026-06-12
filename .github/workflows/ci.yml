@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# PR runs cancel stale siblings; main pushes QUEUE instead — cancelling a main
+# run could kill the publish job mid-upload. The publish job's already-on-npm
+# skip makes queued runs cheap no-ops.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -32,3 +39,39 @@ jobs:
 
       - name: Test
         run: SKIP_SDK_TESTS=true bun run test
+
+  # Publish to npm on every merge to main, gated on a green `check`. Packs each
+  # public package (core/runtime/server/cli) and publishes it IFF its version
+  # isn't already on npm — so merges without a version bump are fast no-ops, and
+  # a bump to any package publishes exactly that package. `dashboard` is
+  # `private: true` and is skipped.
+  #
+  # Auth is npm trusted publishing (OIDC) — no NPM_TOKEN secret. Each package
+  # must list this repo + ci.yml as a trusted publisher on npmjs.com.
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 20
+    permissions:
+      id-token: write # mint the OIDC token npm exchanges for publish credentials
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Update npm (trusted publishing needs >= 11.5.1)
+        run: npm install -g npm@latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Publish bumped packages (OIDC trusted publishing)
+        run: bash scripts/publish.sh ci

@@ -6,6 +6,9 @@
 #   bash scripts/publish.sh check       # pre-flight only (default) — no publish
 #   bash scripts/publish.sh publish     # real publish to `latest`, needs npm login + OTP
 #   bash scripts/publish.sh publish --tag=next   # override tag (default: latest)
+#   bash scripts/publish.sh ci          # non-interactive publish via npm OIDC trusted
+#                                        # publishing (no login/token) — used by ci.yml
+#   bash scripts/publish.sh ci --dry-run # pack + validate every tarball, no upload
 #
 # Default tag is `latest` because that's what `npm install` resolves
 # without an explicit tag. Earlier versions defaulted to `next`, which
@@ -16,17 +19,24 @@
 # bun handles monorepo specifics:
 #   - rewrites `workspace:*` to concrete versions in published tarballs
 #   - skips packages with `private: true` via the loop below
-# Run `bun publish` per-package in topological order since bun 1.3's
-# global --filter for publish is still maturing.
+#
+# `publish` mode runs `bun publish` per-package (interactive: needs npm login
+# + OTP). `ci` mode instead `bun pm pack`s each package — which performs the
+# SAME `workspace:^` → concrete-version rewrite — then `npm publish`es the
+# tarball, because only the npm CLI (>= 11.5.1) speaks OIDC trusted publishing
+# and emits provenance. Both run in topological order since bun 1.3's global
+# --filter for publish is still maturing.
 
 set -euo pipefail
 
 MODE="${1:-check}"
 shift || true
 TAG="latest"
+DRY_RUN=false
 for arg in "$@"; do
   case "$arg" in
     --tag=*) TAG="${arg#--tag=}" ;;
+    --dry-run) DRY_RUN=true ;;
     *) ;;
   esac
 done
@@ -134,7 +144,52 @@ case "$MODE" in
     echo
     ok "done — verify at https://www.npmjs.com/~agentic-patterns"
     ;;
+  ci)
+    echo
+    if [ "$DRY_RUN" = "true" ]; then
+      bold "ci dry-run (pack tarballs via bun, validate, no upload)"
+    else
+      bold "ci publish via npm OIDC trusted publishing (tag=$TAG)"
+    fi
+    echo
+    published=0
+    for pkg in "${PACKAGES[@]}"; do
+      pkg_dir="$ROOT/packages/$pkg"
+      name=$(node -e "console.log(require('$pkg_dir/package.json').name)")
+      version=$(node -e "console.log(require('$pkg_dir/package.json').version)")
+      private=$(node -e "console.log(require('$pkg_dir/package.json').private || false)")
+      [ "$private" = "true" ] && { dim "skip (private): $name"; continue; }
+      # Idempotent: a merge without a version bump is a no-op, and a re-run
+      # after a mid-publish failure skips whatever already reached npm.
+      if npm view "$name@$version" version >/dev/null 2>&1; then
+        dim "skip (already on npm): $name@$version"
+        continue
+      fi
+      # bun packs the tarball, rewriting `workspace:^` deps to concrete caret
+      # pins (npm cannot do that rewrite). npm then uploads the tarball — which
+      # is what speaks OIDC trusted publishing and emits provenance.
+      outdir="$(mktemp -d)"
+      (cd "$pkg_dir" && bun pm pack --destination "$outdir" >/dev/null) || fail "pack failed for $name@$version"
+      tarball="$(ls "$outdir"/*.tgz)"
+      if [ "$DRY_RUN" = "true" ]; then
+        ok "packed $name@$version → $(basename "$tarball") (not uploaded)"
+      else
+        npm publish "$tarball" --access public --tag "$TAG" || fail "publish failed for $name@$version"
+        ok "$name@$version"
+        published=$((published + 1))
+      fi
+      rm -rf "$outdir"
+    done
+    echo
+    if [ "$DRY_RUN" = "true" ]; then
+      ok "dry-run complete — nothing uploaded"
+    elif [ "$published" -eq 0 ]; then
+      ok "nothing to publish — every version already on npm"
+    else
+      ok "published $published package(s) — verify at https://www.npmjs.com/~agentic-patterns"
+    fi
+    ;;
   *)
-    fail "unknown mode: $MODE (expected: check | publish)"
+    fail "unknown mode: $MODE (expected: check | publish | ci)"
     ;;
 esac
