@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/runtime",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
   "type": "module",
