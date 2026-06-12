@@ -366,6 +366,47 @@ bun run lint        # biome check
 bun run check       # all of the above
 ```
 
+## Releasing
+
+The four public packages -- `@agentic-patterns/{core,runtime,server,cli}` -- are
+versioned in lockstep and published to npm automatically. `@agentic-patterns/dashboard`
+is `private: true` and never publishes.
+
+**To cut a release:**
+
+```bash
+bash scripts/bump.sh patch        # 0.1.13 -> 0.1.14 (also: minor | major | --to=X.Y.Z)
+git commit -am "chore(release): vX.Y.Z"
+# open a PR, merge to main
+```
+
+On merge to `main`, CI's `publish` job (`.github/workflows/ci.yml`) publishes -- gated
+on green `check`. It is **idempotent**: each package publishes only if its version
+isn't already on npm, so a merge without a bump is a no-op, and a re-run after a
+mid-publish failure resumes cleanly.
+
+**Auth is npm trusted publishing (OIDC)** -- no `NPM_TOKEN` secret, and provenance
+attestations are generated automatically. Packages pin each other with `workspace:^`,
+so CI `bun pm pack`s each package (rewriting `workspace:^` -> concrete caret pins)
+then `npm publish`es the tarball. Before any upload, a **tarball smoke gate**
+(`test/post-publish/run-tarball-smoke.ts`) installs the tarballs into a throwaway
+project and verifies the ESM/CJS import, type, and CLI-bin contract -- so a broken
+tarball aborts the release instead of reaching npm.
+
+**Dry-run / pre-flight locally:**
+
+```bash
+bash scripts/publish.sh check          # plan: what would publish vs skip
+bash scripts/publish.sh ci --dry-run   # full CI path incl. smoke gate, no upload
+bun test/post-publish/run-tarball-smoke.ts   # smoke only (after `bun run build`)
+```
+
+**Onboarding a new public package:** add it to the `PACKAGES` arrays in
+`scripts/bump.sh` + `scripts/publish.sh`, and register a trusted publisher for it on
+npmjs.com (package → Settings → Trusted Publisher → org/repo
+`pattern-stack/agentic-patterns-ts`, workflow `ci.yml`). Without that, its first CI
+publish fails with an auth error.
+
 ## Dependencies
 
 - **zod** -- schema validation and type inference
