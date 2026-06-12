@@ -174,7 +174,9 @@ describe("EventStore", () => {
         timestamp: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000),
       }),
     );
-    s1.append(mkEvent({ spanId: "fresh" }));
+    // Explicit fresh timestamp — mkEvent's frozen default (2026-05-11) rots out
+    // of the 30-day window over time (date-rot caught 2026-06-12).
+    s1.append(mkEvent({ spanId: "fresh", timestamp: new Date() }));
     s1.close();
 
     const s2 = new EventStore({ path: dbPath, Database, retentionDays: 30 });
