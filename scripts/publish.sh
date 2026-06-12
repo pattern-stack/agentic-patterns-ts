@@ -152,6 +152,12 @@ case "$MODE" in
       bold "ci publish via npm OIDC trusted publishing (tag=$TAG)"
     fi
     echo
+    # Gate: tarball smoke — packs every package, installs the tarballs into a
+    # throwaway consumer, and verifies the import/type/bin contract. A broken
+    # tarball aborts HERE, before anything uploads — so the broken-pin class
+    # (0.1.5/0.1.6) can never reach npm.
+    bun "$ROOT/test/post-publish/run-tarball-smoke.ts" || fail "tarball smoke failed — nothing published"
+    echo
     published=0
     for pkg in "${PACKAGES[@]}"; do
       pkg_dir="$ROOT/packages/$pkg"
