@@ -260,19 +260,6 @@
         ]
       }
     ],
-    "WorktreeCreate": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PROJECT_DIR}/hooks/emit.mjs WorktreeCreate",
-            "async": true,
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "WorktreeRemove": [
       {
         "matcher": "",
