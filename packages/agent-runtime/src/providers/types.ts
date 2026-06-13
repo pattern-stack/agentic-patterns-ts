@@ -6,13 +6,13 @@
  *   • a cross-provider tier map (opus / sonnet / haiku) giving default
  *     model ids at each quality/cost rung
  *   • a `load(modelId)` method that dynamically imports the provider
- *     package and returns a Vercel AI SDK `LanguageModelV1`
+ *     package and returns a Vercel AI SDK `LanguageModelV2`
  *
  * Adding a provider = dropping one file under `providers/`. No conditionals
  * to grow — `createRunner()` reads the registry in `providers/index.ts`.
  */
 
-import type { LanguageModelV1 } from "ai";
+import type { LanguageModelV2 } from "@ai-sdk/provider";
 
 /** Supported provider identifiers. Matches directory / file names below. */
 export type SupportedProvider =
@@ -49,10 +49,10 @@ export interface ProviderProtocol {
   readonly envVars: readonly string[];
   /**
    * Dynamically import the provider's `@ai-sdk/*` (or equivalent) package
-   * and return a `LanguageModelV1` for the given model id. Throws a helpful
+   * and return a `LanguageModelV2` for the given model id. Throws a helpful
    * error if the package isn't installed.
    */
-  load(modelId: string): Promise<LanguageModelV1>;
+  load(modelId: string): Promise<LanguageModelV2>;
 }
 
 // ---------------------------------------------------------------------------

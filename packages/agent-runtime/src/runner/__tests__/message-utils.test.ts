@@ -61,7 +61,7 @@ describe("convertHistory", () => {
     const result = convertHistory(history);
     expect(result).toHaveLength(2);
 
-    // Assistant message with text + tool call
+    // Assistant message with text + tool call (v5: tool-call payload is `input`)
     expect(result[0]).toEqual({
       role: "assistant",
       content: [
@@ -70,12 +70,12 @@ describe("convertHistory", () => {
           type: "tool-call",
           toolCallId: "tc-1",
           toolName: "search",
-          args: { query: "weather" },
+          input: { query: "weather" },
         },
       ],
     });
 
-    // Tool result message
+    // Tool result message (v5: result carried under `output` as a typed union)
     expect(result[1]).toEqual({
       role: "tool",
       content: [
@@ -83,7 +83,7 @@ describe("convertHistory", () => {
           type: "tool-result",
           toolCallId: "tc-1",
           toolName: "",
-          result: "Sunny, 72F",
+          output: { type: "text", value: "Sunny, 72F" },
         },
       ],
     });

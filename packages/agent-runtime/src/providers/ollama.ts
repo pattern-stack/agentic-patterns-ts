@@ -28,20 +28,24 @@ export const ollamaProvider: ProviderProtocol = {
   },
   envVars: ["OLLAMA_HOST"],
   async load(modelId) {
-    const mod = await importProvider("ollama-ai-provider", "ollama");
-    // ollama-ai-provider doesn't read OLLAMA_HOST from env — pass it
-    // explicitly so remote GPU boxes (e.g. behind a VPN) work out of
-    // the box when the user sets the env var.
+    // AI SDK v5: the V1-only `ollama-ai-provider` is rejected by the v5
+    // runtime; we use the V2 fork `ollama-ai-provider-v2`. Its `createOllama`
+    // / default `ollama` factory signature is unchanged at this call site.
+    const mod = await importProvider("ollama-ai-provider-v2", "ollama");
+    // The fork doesn't read OLLAMA_HOST from env — pass it explicitly so
+    // remote GPU boxes (e.g. behind a VPN) work out of the box when the
+    // user sets the env var.
     const host = process.env.OLLAMA_HOST;
-    // simulateStreaming: use the reliable non-streaming API (which
-    // correctly returns tool_calls) wrapped in a stream interface.
-    // Real streaming silently drops tool calls for many models.
-    const settings = { simulateStreaming: true };
+    // Note: the v1 `{ simulateStreaming: true }` model-construction setting is
+    // gone in the V2 fork — its streaming model returns tool calls correctly,
+    // so the non-streaming-wrapper workaround is no longer needed. Per-request
+    // tuning (num_ctx, think, …) now flows through `providerOptions.ollama`
+    // at call time, which the config-driven provider factory (Part B) wires up.
     if (host) {
       const baseURL = `${host.replace(/\/$/, "")}/api`;
       const provider = mod.createOllama({ baseURL });
-      return provider(modelId, settings);
+      return provider(modelId);
     }
-    return mod.ollama(modelId, settings);
+    return mod.ollama(modelId);
   },
 };
