@@ -6,20 +6,22 @@
  * Key differences from Python:
  * - Parallel tool execution via Promise.all (Python is sequential)
  * - Vercel AI SDK handles tool schema conversion (Python manually builds OpenAI JSON)
- * - maxSteps: 1 forces one LLM call per iteration for gate interception control
- * - MockLanguageModelV1 for testing (replaces Python's MockRunner)
+ * - One generateText/streamText call per iteration (v5 single-step default) for
+ *   gate interception control (see GATE-CHAIN INVARIANT below)
+ * - MockLanguageModelV2 for testing (replaces Python's MockRunner)
+ *
+ * GATE-CHAIN INVARIANT (do not break): the SDK must NOT auto-run or loop tools.
+ * We deliberately (a) pass tools WITHOUT an `execute` function and (b) rely on
+ * v5's single-step default (we removed v4's `maxSteps: 1`). Tool dispatch goes
+ * through the gate chain + `toolExecutor` here, NOT the SDK. If you ever give a
+ * tool an `execute`, or add `stopWhen` / `maxSteps`/`stepCountIs(>1)`, the SDK
+ * will run and loop tools itself and the gate interception (and the T0-1
+ * gate-allow regression test in agent-runner.test.ts) will be bypassed.
  */
 
 import type { ToolSchema } from "@agentic-patterns/core";
-import {
-  type CoreMessage,
-  type LanguageModelV1,
-  type ToolCallPart,
-  type ToolResultPart,
-  generateId,
-  generateText,
-  streamText,
-} from "ai";
+import type { JSONValue, LanguageModelV2 } from "@ai-sdk/provider";
+import { type ModelMessage, type ToolSet, generateId, generateText, streamText, tool } from "ai";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
 import { type AgentEvent, createEvent } from "../events/types.js";
@@ -63,9 +65,9 @@ export class ToolCallBlocked extends Error {
  */
 export class AgentRunner implements RunnerProtocol {
   private _eventBus: AgentEventBus | undefined;
-  private readonly _model: LanguageModelV1;
+  private readonly _model: LanguageModelV2;
 
-  constructor(model: LanguageModelV1, eventBus?: AgentEventBus) {
+  constructor(model: LanguageModelV2, eventBus?: AgentEventBus) {
     this._model = model;
     this._eventBus = eventBus;
   }
@@ -109,24 +111,31 @@ export class AgentRunner implements RunnerProtocol {
   }
 
   /**
-   * Convert agent tools to Vercel AI SDK tool format.
+   * Convert agent tools to the Vercel AI SDK v5 tool format.
+   *
+   * v5 renamed the tool's schema field `parameters → inputSchema`. Core's
+   * `ToolSchema.toVercelAI()` still returns `{ description, parameters }`, so we
+   * do the rename here at the runner boundary (core stays `ai`-free).
+   *
+   * NOTE (gate-chain invariant): tools are intentionally `execute`-less — the
+   * SDK never runs them; dispatch goes through the gate chain + `toolExecutor`.
    */
-  private convertTools(
-    agent: AgentLike,
-    _executor?: ToolExecutor,
-  ): Record<string, { description: string; parameters: unknown }> {
+  private convertTools(agent: AgentLike, _executor?: ToolExecutor): ToolSet {
     // AgentLike.getTools() returns unknown[] at the protocol boundary;
     // AgentRunner knows real agents produce ToolSchema[] and narrows here.
     const agentTools = agent.getTools() as ToolSchema[];
     if (agentTools.length === 0) return {};
 
-    const tools: Record<string, { description: string; parameters: unknown }> = {};
+    const tools: ToolSet = {};
     for (const t of agentTools) {
       const vercel = t.toVercelAI();
-      tools[t.name] = {
+      // Build via `tool()` WITHOUT an `execute` (gate-chain invariant): the SDK
+      // exposes the schema to the model but never runs the tool. core's
+      // `toVercelAI().parameters` is a Zod schema → a valid v5 `inputSchema`.
+      tools[t.name] = tool({
         description: vercel.description,
-        parameters: vercel.parameters,
-      };
+        inputSchema: vercel.parameters,
+      });
     }
     return tools;
   }
@@ -142,7 +151,7 @@ export class AgentRunner implements RunnerProtocol {
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
 
-    // Resolve model name and tools. Use the bound LanguageModelV1's actual
+    // Resolve model name and tools. Use the bound LanguageModelV2's actual
     // modelId for event attribution — agent.getModel() is the agent's
     // *declared* model (often a default) and can lie when the runtime
     // selected a different provider (e.g. agent declares claude-sonnet but
@@ -168,7 +177,7 @@ export class AgentRunner implements RunnerProtocol {
     await this.emit(startEvent);
 
     // Build initial messages from history
-    const messages: CoreMessage[] = [];
+    const messages: ModelMessage[] = [];
     if (options?.messageHistory) {
       messages.push(...convertHistory(options.messageHistory));
     }
@@ -209,12 +218,14 @@ export class AgentRunner implements RunnerProtocol {
 
       let result: Awaited<ReturnType<typeof generateText>>;
       try {
+        // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` — v5 single-step is the
+        // default. Tools are `execute`-less so the SDK can't run/loop them; we
+        // dispatch through the gate chain + toolExecutor below.
         result = await generateText({
           model: this._model,
           system,
           messages,
           tools: hasTools ? tools : undefined,
-          maxSteps: 1, // Force single step for gate interception
         });
       } catch (e: unknown) {
         const llmDuration = Date.now() - llmStartTime;
@@ -249,9 +260,13 @@ export class AgentRunner implements RunnerProtocol {
 
       const llmDuration = Date.now() - llmStartTime;
 
-      // Track token usage
-      const iterInputTokens = result.usage?.promptTokens ?? 0;
-      const iterOutputTokens = result.usage?.completionTokens ?? 0;
+      // Track token usage. v5 renamed usage fields (promptTokens→inputTokens,
+      // completionTokens→outputTokens) and each is `number | undefined`. Each
+      // iteration is a single step, so `result.usage` (last-step usage) is this
+      // iteration's usage; the run-level total the events report is the
+      // accumulation below (equivalent to summing result.totalUsage per step).
+      const iterInputTokens = result.usage?.inputTokens ?? 0;
+      const iterOutputTokens = result.usage?.outputTokens ?? 0;
       totalInputTokens += iterInputTokens;
       totalOutputTokens += iterOutputTokens;
 
@@ -261,8 +276,9 @@ export class AgentRunner implements RunnerProtocol {
       // If the model produced reasoning (extended-thinking, o-series, etc.),
       // emit a single thinking.start + completed agent.reasoning pair. The
       // non-streaming path can't expose per-delta events, so one summary is
-      // the faithful best-effort mapping.
-      const reasoningContent = (result as { reasoning?: string | undefined }).reasoning;
+      // the faithful best-effort mapping. v5 exposes the joined reasoning as
+      // `result.reasoningText` (was `result.reasoning`).
+      const reasoningContent = result.reasoningText;
       if (reasoningContent && reasoningContent.length > 0) {
         await this.emit(
           createEvent("agent.thinking.start", {
@@ -338,7 +354,8 @@ export class AgentRunner implements RunnerProtocol {
         };
       }
 
-      // Has tool calls — execute them in parallel
+      // Has tool calls — execute them in parallel. v5's TypedToolCall carries
+      // the call payload under `.input` (was `.args` in v4).
       for (const tc of resultToolCalls) {
         const intent = createEvent("agent.tool.intent", {
           traceId: effectiveTraceId,
@@ -346,7 +363,7 @@ export class AgentRunner implements RunnerProtocol {
           parentSpanId: iterSpanId,
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
-          arguments: tc.args as Record<string, unknown>,
+          arguments: tc.input as Record<string, unknown>,
         });
         const allowed = await this.emitIntent(intent);
         if (!allowed) {
@@ -363,7 +380,7 @@ export class AgentRunner implements RunnerProtocol {
             parentSpanId: iterSpanId,
             toolCallId: tc.toolCallId,
             toolName: tc.toolName,
-            arguments: tc.args as Record<string, unknown>,
+            arguments: tc.input as Record<string, unknown>,
           });
           const tcSpanId = tcStart.spanId;
           await this.emit(tcStart);
@@ -376,7 +393,7 @@ export class AgentRunner implements RunnerProtocol {
             if (toolExecutor) {
               toolResult = await toolExecutor.execute(
                 tc.toolName,
-                tc.args as Record<string, unknown>,
+                tc.input as Record<string, unknown>,
               );
             } else {
               toolResult = { error: "No tool executor configured" };
@@ -399,7 +416,7 @@ export class AgentRunner implements RunnerProtocol {
               parentSpanId: iterSpanId,
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              arguments: tc.args as Record<string, unknown>,
+              arguments: tc.input as Record<string, unknown>,
               result: toolResult,
               error: errorMsg,
               durationMs,
@@ -415,28 +432,28 @@ export class AgentRunner implements RunnerProtocol {
         }),
       );
 
-      // Append messages for next iteration
-      const assistantContent: Array<ToolCallPart | { type: "text"; text: string }> = [];
-      if (result.text) {
-        assistantContent.push({ type: "text" as const, text: result.text });
-      }
-      for (const tc of resultToolCalls) {
-        assistantContent.push({
-          type: "tool-call" as const,
-          toolCallId: tc.toolCallId,
-          toolName: tc.toolName,
-          args: tc.args,
-        });
-      }
-      messages.push({ role: "assistant" as const, content: assistantContent });
+      // Append messages for next iteration.
+      //
+      // ★ THOUGHT-SIGNATURE / REASONING ROUND-TRIP: append the SDK's own
+      // assistant message(s) VERBATIM via `result.response.messages` instead of
+      // hand-rebuilding `{ role: "assistant", content: [...] }`. Those messages
+      // carry `providerOptions`/`providerMetadata` (Gemini's `thoughtSignature`,
+      // Anthropic thinking blocks). Dropping them — as the old hand-rebuild did —
+      // breaks Gemini 3.x multi-turn tool loops with "function call is missing a
+      // thought_signature". This is the whole point of the v5 migration.
+      messages.push(...result.response.messages);
 
-      const toolResultParts: ToolResultPart[] = toolResults.map((tr) => ({
-        type: "tool-result" as const,
-        toolCallId: tr.toolCallId,
-        toolName: tr.toolName,
-        result: tr.result,
-      }));
-      messages.push({ role: "tool" as const, content: toolResultParts });
+      // Our own tool results (we ran the tools, not the SDK). v5's
+      // ToolResultPart carries the result under `output` as a typed union.
+      messages.push({
+        role: "tool" as const,
+        content: toolResults.map((tr) => ({
+          type: "tool-result" as const,
+          toolCallId: tr.toolCallId,
+          toolName: tr.toolName,
+          output: { type: "json" as const, value: tr.result as JSONValue },
+        })),
+      });
 
       // Emit iteration end
       await this.emit(
@@ -488,7 +505,7 @@ export class AgentRunner implements RunnerProtocol {
     const hasTools = agentTools.length > 0;
 
     const system = agent.renderInitialPrompt();
-    const messages: CoreMessage[] = [];
+    const messages: ModelMessage[] = [];
     if (options?.messageHistory) {
       messages.push(...convertHistory(options.messageHistory));
     }
@@ -548,13 +565,14 @@ export class AgentRunner implements RunnerProtocol {
 
       const llmStartTime = Date.now();
 
-      // Use fullStream to get text + tool calls + errors in one pass
+      // Use fullStream to get text + tool calls + errors in one pass.
+      // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` (v5 single-step default),
+      // tools `execute`-less — the SDK won't run/loop tools; we dispatch below.
       const streamResult = streamText({
         model: this._model,
         system,
         messages,
         tools: hasTools ? tools : undefined,
-        maxSteps: 1,
       });
 
       let iterText = "";
@@ -565,7 +583,7 @@ export class AgentRunner implements RunnerProtocol {
         args: Record<string, unknown>;
         result?: unknown;
       }> = [];
-      let stepUsage: { promptTokens: number; completionTokens: number } | undefined;
+      let stepUsage: { inputTokens?: number; outputTokens?: number } | undefined;
       let stepFinishReason = "stop";
       let hadError = false;
 
@@ -595,18 +613,18 @@ export class AgentRunner implements RunnerProtocol {
               reasoningActive = false;
               reasoningText = "";
             }
-            iterText += part.textDelta;
+            iterText += part.text;
             const chunkEvent = createEvent("agent.message.chunk", {
               traceId: effectiveTraceId,
               runId,
-              delta: part.textDelta,
+              delta: part.text,
               chunkIndex: chunkIndex++,
             });
             await this.emit(chunkEvent);
             yield chunkEvent;
             break;
           }
-          case "reasoning": {
+          case "reasoning-delta": {
             if (!reasoningActive) {
               reasoningActive = true;
               reasoningText = "";
@@ -618,11 +636,11 @@ export class AgentRunner implements RunnerProtocol {
               await this.emit(startEvent);
               yield startEvent;
             }
-            reasoningText += part.textDelta;
+            reasoningText += part.text;
             const deltaEvent = createEvent("agent.reasoning", {
               traceId: effectiveTraceId,
               runId,
-              content: part.textDelta,
+              content: part.text,
               isComplete: false,
             });
             await this.emit(deltaEvent);
@@ -646,11 +664,11 @@ export class AgentRunner implements RunnerProtocol {
             pendingToolCalls.push({
               toolCallId: part.toolCallId,
               toolName: part.toolName,
-              args: part.args as Record<string, unknown>,
+              args: part.input as Record<string, unknown>,
             });
             break;
           }
-          case "step-finish": {
+          case "finish-step": {
             stepUsage = part.usage;
             stepFinishReason = part.finishReason;
             break;
@@ -688,7 +706,8 @@ export class AgentRunner implements RunnerProtocol {
             break;
           }
           default:
-            // step-start, finish, reasoning-signature, redacted-reasoning, etc. — skip
+            // start, start-step, text-start/end, reasoning-start/end,
+            // tool-input-start/delta/end, finish, source, file, raw, etc. — skip
             break;
         }
       }
@@ -721,9 +740,9 @@ export class AgentRunner implements RunnerProtocol {
 
       fullText += iterText;
 
-      // Update token tracking
-      const iterInputTokens = stepUsage?.promptTokens ?? 0;
-      const iterOutputTokens = stepUsage?.completionTokens ?? 0;
+      // Update token tracking (v5 usage field names; each is number|undefined).
+      const iterInputTokens = stepUsage?.inputTokens ?? 0;
+      const iterOutputTokens = stepUsage?.outputTokens ?? 0;
       totalInputTokens += iterInputTokens;
       totalOutputTokens += iterOutputTokens;
 
@@ -872,28 +891,28 @@ export class AgentRunner implements RunnerProtocol {
         yield tcEnd;
       }
 
-      // Build messages for next iteration
-      const assistantContent: Array<ToolCallPart | { type: "text"; text: string }> = [];
-      if (iterText) {
-        assistantContent.push({ type: "text" as const, text: iterText });
-      }
-      for (const tc of pendingToolCalls) {
-        assistantContent.push({
-          type: "tool-call" as const,
+      // Build messages for next iteration.
+      //
+      // ★ THOUGHT-SIGNATURE / REASONING ROUND-TRIP: append the SDK's own
+      // assistant message(s) VERBATIM. `streamResult.response` resolves (after
+      // the fullStream drained above) to the response incl. `messages` that
+      // carry `providerOptions`/`providerMetadata` — Gemini's `thoughtSignature`
+      // and Anthropic thinking blocks. Hand-rebuilding the assistant turn drops
+      // them and breaks Gemini 3.x multi-turn tool loops.
+      const streamResponse = await streamResult.response;
+      messages.push(...streamResponse.messages);
+
+      // Our own tool results (we ran the tools, not the SDK). v5's
+      // ToolResultPart carries the result under `output` as a typed union.
+      messages.push({
+        role: "tool" as const,
+        content: pendingToolCalls.map((tc) => ({
+          type: "tool-result" as const,
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
-          args: tc.args,
-        });
-      }
-      messages.push({ role: "assistant" as const, content: assistantContent });
-
-      const toolResultParts: ToolResultPart[] = pendingToolCalls.map((tc) => ({
-        type: "tool-result" as const,
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        result: tc.result,
-      }));
-      messages.push({ role: "tool" as const, content: toolResultParts });
+          output: { type: "json" as const, value: tc.result as JSONValue },
+        })),
+      });
 
       // Iteration end
       const iterEnd = createEvent("agent.iteration.end", {

@@ -1,5 +1,5 @@
 /**
- * Tests for the Claude Code LanguageModelV1 provider.
+ * Tests for the Claude Code LanguageModelV2 provider.
  *
  * Unit tests mock `@anthropic-ai/claude-agent-sdk` so they run offline.
  * The integration test is skipped unless the `claude` CLI is installed
@@ -9,7 +9,11 @@
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ToolSchema } from "@agentic-patterns/core";
-import type { LanguageModelV1CallOptions, LanguageModelV1Prompt } from "ai";
+import type {
+  LanguageModelV2CallOptions,
+  LanguageModelV2Content,
+  LanguageModelV2Prompt,
+} from "@ai-sdk/provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -109,22 +113,36 @@ import { claudeCode } from "../claude-code.js";
 // ---------------------------------------------------------------------------
 
 function makeCallOptions(
-  prompt: LanguageModelV1Prompt,
+  prompt: LanguageModelV2Prompt,
   tools: Array<{ name: string; description?: string }> = [],
-): LanguageModelV1CallOptions {
+): LanguageModelV2CallOptions {
   return {
-    inputFormat: "messages",
-    mode: {
-      type: "regular",
-      tools: tools.map((t) => ({
-        type: "function" as const,
-        name: t.name,
-        description: t.description ?? "",
-        parameters: { type: "object", properties: {}, additionalProperties: true } as const,
-      })),
-    },
+    // v5 lifts tools to a top-level array; the schema field is `inputSchema`.
+    tools: tools.map((t) => ({
+      type: "function" as const,
+      name: t.name,
+      description: t.description ?? "",
+      inputSchema: { type: "object", properties: {}, additionalProperties: true } as const,
+    })),
     prompt,
   };
+}
+
+/** Extract the joined text from a v5 doGenerate `content` array. */
+function contentText(content: LanguageModelV2Content[]): string {
+  return content
+    .filter((c): c is Extract<LanguageModelV2Content, { type: "text" }> => c.type === "text")
+    .map((c) => c.text)
+    .join("");
+}
+
+/** Extract the tool-call parts from a v5 doGenerate `content` array. */
+function contentToolCalls(
+  content: LanguageModelV2Content[],
+): Array<Extract<LanguageModelV2Content, { type: "tool-call" }>> {
+  return content.filter(
+    (c): c is Extract<LanguageModelV2Content, { type: "tool-call" }> => c.type === "tool-call",
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -146,9 +164,9 @@ describe("claudeCode provider", () => {
     vi.clearAllMocks();
   });
 
-  it("factory returns a LanguageModelV1-shaped object", () => {
+  it("factory returns a LanguageModelV2-shaped object", () => {
     const model = claudeCode("sonnet");
-    expect(model.specificationVersion).toBe("v1");
+    expect(model.specificationVersion).toBe("v2");
     expect(model.provider).toBe("claude-code");
     expect(model.modelId).toBe("sonnet");
     expect(typeof model.doGenerate).toBe("function");
@@ -172,10 +190,10 @@ describe("claudeCode provider", () => {
       ]),
     );
 
-    expect(result.text).toBe("The answer is 45.");
-    expect(result.toolCalls).toBeUndefined();
+    expect(contentText(result.content)).toBe("The answer is 45.");
+    expect(contentToolCalls(result.content)).toHaveLength(0);
     expect(result.finishReason).toBe("stop");
-    expect(result.usage).toEqual({ promptTokens: 12, completionTokens: 7 });
+    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 7, totalTokens: 19 });
   });
 
   it("doGenerate surfaces tool calls captured by canUseTool", async () => {
@@ -198,10 +216,11 @@ describe("claudeCode provider", () => {
       ),
     );
 
-    expect(result.toolCalls).toHaveLength(1);
-    const tc = result.toolCalls?.[0];
+    const toolCalls = contentToolCalls(result.content);
+    expect(toolCalls).toHaveLength(1);
+    const tc = toolCalls[0];
     expect(tc?.toolName).toBe("add");
-    expect(JSON.parse(tc?.args ?? "{}")).toEqual({ a: 17, b: 28 });
+    expect(JSON.parse(tc?.input ?? "{}")).toEqual({ a: 17, b: 28 });
     expect(result.finishReason).toBe("tool-calls");
   });
 
@@ -260,7 +279,7 @@ describe("claudeCode provider", () => {
               type: "tool-call",
               toolCallId: "t1",
               toolName: "add",
-              args: { a: 17, b: 28 },
+              input: { a: 17, b: 28 },
             },
           ],
         },
@@ -271,14 +290,14 @@ describe("claudeCode provider", () => {
               type: "tool-result",
               toolCallId: "t1",
               toolName: "add",
-              result: { result: 45 },
+              output: { type: "json", value: { result: 45 } },
             },
           ],
         },
       ]),
     );
 
-    expect(result.text).toBe("45");
+    expect(contentText(result.content)).toBe("45");
     expect(result.finishReason).toBe("stop");
   });
 });

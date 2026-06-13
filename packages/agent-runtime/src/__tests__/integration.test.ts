@@ -8,7 +8,7 @@
 
 declare function setTimeout(callback: () => void, ms: number): number;
 
-import { MockLanguageModelV1 } from "ai/test";
+import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -144,29 +144,31 @@ describe("integration: single-agent end-to-end", () => {
 
     // 4. Run with mock model (tool call then final response)
     let callCount = 0;
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV2({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {
           return {
-            toolCalls: [
+            content: [
               {
-                toolCallType: "function" as const,
+                type: "tool-call" as const,
                 toolCallId: "tc-1",
                 toolName: "search_docs",
-                args: JSON.stringify({ query: "revenue data" }),
+                input: JSON.stringify({ query: "revenue data" }),
               },
             ],
             finishReason: "tool-calls" as const,
-            usage: { promptTokens: 100, completionTokens: 20 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
+            usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+            warnings: [],
           };
         }
         return {
-          text: "Based on the data, Q4 revenue increased by 15%.",
+          content: [
+            { type: "text" as const, text: "Based on the data, Q4 revenue increased by 15%." },
+          ],
           finishReason: "stop" as const,
-          usage: { promptTokens: 150, completionTokens: 30 },
-          rawCall: { rawPrompt: null, rawSettings: {} },
+          usage: { inputTokens: 150, outputTokens: 30, totalTokens: 180 },
+          warnings: [],
         };
       },
     });

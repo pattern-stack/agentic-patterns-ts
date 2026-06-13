@@ -1,8 +1,8 @@
 /**
- * Claude Code LanguageModelV1 provider.
+ * Claude Code LanguageModelV2 provider.
  *
  * Wraps the Claude Agent SDK's `query()` function in a Vercel AI SDK
- * `LanguageModelV1` so agents can be executed through `AgentRunner` using
+ * `LanguageModelV2` so agents can be executed through `AgentRunner` using
  * a Claude Max subscription (OAuth cached in ~/.claude) or an
  * `ANTHROPIC_API_KEY` env var picked up by the SDK itself.
  *
@@ -19,15 +19,25 @@
  *   2. Tool schemas are registered as MCP tools on an in-process server.
  *   3. `canUseTool` intercepts tool invocations, records them, and denies
  *      with `interrupt: true` so the SDK stops immediately. The recorded
- *      tool calls are surfaced in the LanguageModelV1 response as
- *      `toolCalls`.
- *   4. SDK assistant / result messages are translated back to
- *      LanguageModelV1 output shape (`text`, `toolCalls`, `finishReason`,
+ *      tool calls are surfaced in the LanguageModelV2 response as
+ *      `tool-call` content parts.
+ *   4. SDK assistant / result messages are translated back to the
+ *      LanguageModelV2 output shape (`content` parts, `finishReason`,
  *      `usage`).
  *   5. Claude-Code-native tools (Read/Write/Edit/Bash/…) are disallowed so
  *      only framework tools flow.
  */
 
+import type {
+  LanguageModelV2,
+  LanguageModelV2CallOptions,
+  LanguageModelV2Content,
+  LanguageModelV2FinishReason,
+  LanguageModelV2FunctionTool,
+  LanguageModelV2Prompt,
+  LanguageModelV2StreamPart,
+  LanguageModelV2ToolCall,
+} from "@ai-sdk/provider";
 import {
   type McpSdkServerConfigWithInstance,
   type PermissionResult,
@@ -36,21 +46,7 @@ import {
   query,
   tool as sdkTool,
 } from "@anthropic-ai/claude-agent-sdk";
-import type {
-  LanguageModelV1,
-  LanguageModelV1CallOptions,
-  LanguageModelV1Prompt,
-  LanguageModelV1StreamPart,
-} from "ai";
 import type { z } from "zod";
-
-// Types not re-exported from "ai"; derive from the SDK's public shape.
-type DoGenerateResult = Awaited<ReturnType<LanguageModelV1["doGenerate"]>>;
-type LanguageModelV1FinishReason = DoGenerateResult["finishReason"];
-type LanguageModelV1FunctionToolCall = NonNullable<DoGenerateResult["toolCalls"]>[number];
-type RegularMode = Extract<LanguageModelV1CallOptions["mode"], { type: "regular" }>;
-type RegularTool = NonNullable<RegularMode["tools"]>[number];
-type LanguageModelV1FunctionTool = Extract<RegularTool, { type: "function" }>;
 
 // ---------------------------------------------------------------------------
 // Model name mapping
@@ -116,13 +112,13 @@ export interface ClaudeCodeProviderOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the single system prompt from a LanguageModelV1 message array.
+ * Extract the single system prompt from a LanguageModelV2 message array.
  *
- * LanguageModelV1Prompt only ever contains one leading system message (if
+ * LanguageModelV2Prompt only ever contains one leading system message (if
  * any) — the AI SDK normalizes `generateText({ system, messages })` into
  * a prompt that starts with `{ role: 'system' }`.
  */
-function extractSystemPrompt(prompt: LanguageModelV1Prompt): string | undefined {
+function extractSystemPrompt(prompt: LanguageModelV2Prompt): string | undefined {
   const first = prompt[0];
   if (first && first.role === "system") return first.content;
   return undefined;
@@ -145,7 +141,7 @@ function stringifyValue(v: unknown): string {
  * blocks so Claude understands the history without requiring SDK session
  * resume support.
  */
-function renderConversation(prompt: LanguageModelV1Prompt): string {
+function renderConversation(prompt: LanguageModelV2Prompt): string {
   const parts: string[] = [];
 
   for (const msg of prompt) {
@@ -165,7 +161,7 @@ function renderConversation(prompt: LanguageModelV1Prompt): string {
   return parts.join("\n\n");
 }
 
-type PromptMessage = LanguageModelV1Prompt[number];
+type PromptMessage = LanguageModelV2Prompt[number];
 
 function renderUserContent(msg: Extract<PromptMessage, { role: "user" }>): string {
   const chunks: string[] = [];
@@ -183,8 +179,9 @@ function renderAssistantContent(msg: Extract<PromptMessage, { role: "assistant" 
     if (part.type === "text") {
       chunks.push(part.text);
     } else if (part.type === "tool-call") {
+      // v5 ToolCallPart carries the payload under `input` (was `args`).
       chunks.push(
-        `[tool-call name=${part.toolName} id=${part.toolCallId}] ${stringifyValue(part.args)}`,
+        `[tool-call name=${part.toolName} id=${part.toolCallId}] ${stringifyValue(part.input)}`,
       );
     }
   }
@@ -194,11 +191,32 @@ function renderAssistantContent(msg: Extract<PromptMessage, { role: "assistant" 
 function renderToolContent(msg: Extract<PromptMessage, { role: "tool" }>): string {
   const chunks: string[] = [];
   for (const part of msg.content) {
+    // v5 ToolResultPart carries the result under `output` as a typed union.
     chunks.push(
-      `[tool-result name=${part.toolName} id=${part.toolCallId}] ${stringifyValue(part.result)}`,
+      `[tool-result name=${part.toolName} id=${part.toolCallId}] ${renderToolOutput(part.output)}`,
     );
   }
   return chunks.join("\n");
+}
+
+/** Render a v5 tool-result `output` union into a flat string for the prompt. */
+function renderToolOutput(
+  output: Extract<PromptMessage, { role: "tool" }>["content"][number]["output"],
+): string {
+  switch (output.type) {
+    case "text":
+    case "error-text":
+      return output.value;
+    case "json":
+    case "error-json":
+      return stringifyValue(output.value);
+    case "content":
+      return output.value
+        .map((c) => (c.type === "text" ? c.text : `[media ${c.mediaType}]`))
+        .join("\n");
+    default:
+      return "";
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,11 +226,11 @@ function renderToolContent(msg: Extract<PromptMessage, { role: "tool" }>): strin
 const FRAMEWORK_SERVER = "agent_runner_tools";
 
 /**
- * Build an in-process MCP server that exposes each LanguageModelV1 function
+ * Build an in-process MCP server that exposes each LanguageModelV2 function
  * tool. The handlers never actually execute — `canUseTool` intercepts first
  * and aborts. They're still installed so Claude sees real tool schemas.
  */
-function buildToolsServer(tools: ReadonlyArray<LanguageModelV1FunctionTool>):
+function buildToolsServer(tools: ReadonlyArray<LanguageModelV2FunctionTool>):
   | {
       server: McpSdkServerConfigWithInstance;
       allowedTools: string[];
@@ -244,7 +262,7 @@ function buildToolsServer(tools: ReadonlyArray<LanguageModelV1FunctionTool>):
 /**
  * Resolve `mcp__server__tool` back to the original tool name Claude was
  * offered. For framework tools we strip the `mcp__agent_runner_tools__`
- * prefix so `LanguageModelV1` consumers see the original tool names.
+ * prefix so `LanguageModelV2` consumers see the original tool names.
  */
 function normalizeToolName(sdkToolName: string): string {
   const prefix = `mcp__${FRAMEWORK_SERVER}__`;
@@ -262,11 +280,16 @@ interface PendingToolCall {
   readonly args: Record<string, unknown>;
 }
 
-export class ClaudeCodeLanguageModel implements LanguageModelV1 {
-  readonly specificationVersion = "v1" as const;
+export class ClaudeCodeLanguageModel implements LanguageModelV2 {
+  readonly specificationVersion = "v2" as const;
   readonly provider = "claude-code";
   readonly modelId: string;
-  readonly defaultObjectGenerationMode = "tool" as const;
+  /**
+   * No remote URLs are natively supported — the Claude Agent SDK takes a flat
+   * string prompt, so any URL must be downloaded by the AI SDK and passed as
+   * data. An empty map means "download everything".
+   */
+  readonly supportedUrls: Record<string, RegExp[]> = {};
 
   private readonly _opts: ClaudeCodeProviderOptions;
 
@@ -279,13 +302,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
   // doGenerate
   // -------------------------------------------------------------------------
 
-  doGenerate(options: LanguageModelV1CallOptions): ReturnType<LanguageModelV1["doGenerate"]> {
+  doGenerate(options: LanguageModelV2CallOptions): ReturnType<LanguageModelV2["doGenerate"]> {
     return this._doGenerate(options);
   }
 
   private async _doGenerate(
-    options: LanguageModelV1CallOptions,
-  ): Promise<Awaited<ReturnType<LanguageModelV1["doGenerate"]>>> {
+    options: LanguageModelV2CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
     const { systemPrompt, promptString, sdkOptions, captured } = this._prepare(options);
 
     const textParts: string[] = [];
@@ -332,27 +355,32 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
     }
 
     const text = textParts.join("");
-    const toolCalls: LanguageModelV1FunctionToolCall[] = captured.toolCalls.map((tc) => ({
-      toolCallType: "function" as const,
-      toolCallId: tc.toolCallId,
-      toolName: tc.toolName,
-      args: JSON.stringify(tc.args),
-    }));
+
+    // v5 output is an ordered `content` parts array (was top-level
+    // text/toolCalls). Tool-call `input` is a stringified JSON object.
+    const content: LanguageModelV2Content[] = [];
+    if (text.length > 0) {
+      content.push({ type: "text" as const, text });
+    }
+    for (const tc of captured.toolCalls) {
+      content.push({
+        type: "tool-call" as const,
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        input: JSON.stringify(tc.args),
+      });
+    }
 
     const finishReason = deriveFinishReason({
-      hasToolCalls: toolCalls.length > 0,
+      hasToolCalls: captured.toolCalls.length > 0,
       sdkStopReason,
     });
 
     return {
-      text,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      content,
       finishReason,
-      usage: { promptTokens: inputTokens, completionTokens: outputTokens },
-      rawCall: {
-        rawPrompt: promptString,
-        rawSettings: { systemPrompt, model: sdkOptions.model ?? this.modelId },
-      },
+      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+      warnings: [],
     };
   }
 
@@ -360,22 +388,34 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
   // doStream
   // -------------------------------------------------------------------------
 
-  doStream(options: LanguageModelV1CallOptions): ReturnType<LanguageModelV1["doStream"]> {
+  doStream(options: LanguageModelV2CallOptions): ReturnType<LanguageModelV2["doStream"]> {
     return this._doStream(options);
   }
 
   private async _doStream(
-    options: LanguageModelV1CallOptions,
-  ): Promise<Awaited<ReturnType<LanguageModelV1["doStream"]>>> {
+    options: LanguageModelV2CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doStream"]>>> {
     const { systemPrompt, promptString, sdkOptions, captured } = this._prepare(options);
+    // v5 text deltas are grouped by a stable `id` between text-start/text-end.
+    const textId = "text-0";
 
-    const stream = new ReadableStream<LanguageModelV1StreamPart>({
+    const stream = new ReadableStream<LanguageModelV2StreamPart>({
       start: async (controller) => {
         let inputTokens = 0;
         let outputTokens = 0;
         let sdkStopReason: string | null = null;
         const emittedTextChunks = new Set<number>();
         const textBuffer: string[] = [];
+        let textStarted = false;
+        const startText = () => {
+          if (!textStarted) {
+            controller.enqueue({ type: "text-start", id: textId });
+            textStarted = true;
+          }
+        };
+
+        // v5 requires a leading `stream-start` carrying any warnings.
+        controller.enqueue({ type: "stream-start", warnings: [] });
 
         try {
           for await (const msg of query({
@@ -388,7 +428,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
               const delta = maybe.event?.delta?.text;
               if (delta) {
                 textBuffer.push(delta);
-                controller.enqueue({ type: "text-delta", textDelta: delta });
+                startText();
+                controller.enqueue({ type: "text-delta", id: textId, delta });
               }
             } else if (msgType === "assistant" && "message" in msg) {
               const content = (msg as { message?: { content?: unknown[] } }).message?.content;
@@ -402,9 +443,11 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
                     typeof (block as { text: unknown }).text === "string"
                   ) {
                     if (textBuffer.length === 0 && !emittedTextChunks.has(idx)) {
+                      startText();
                       controller.enqueue({
                         type: "text-delta",
-                        textDelta: (block as { text: string }).text,
+                        id: textId,
+                        delta: (block as { text: string }).text,
                       });
                       emittedTextChunks.add(idx);
                     }
@@ -430,14 +473,17 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
           }
         }
 
+        if (textStarted) {
+          controller.enqueue({ type: "text-end", id: textId });
+        }
+
         for (const tc of captured.toolCalls) {
           controller.enqueue({
             type: "tool-call",
-            toolCallType: "function",
             toolCallId: tc.toolCallId,
             toolName: tc.toolName,
-            args: JSON.stringify(tc.args),
-          });
+            input: JSON.stringify(tc.args),
+          } satisfies LanguageModelV2ToolCall & { type: "tool-call" });
         }
 
         const finishReason = deriveFinishReason({
@@ -448,7 +494,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
         controller.enqueue({
           type: "finish",
           finishReason,
-          usage: { promptTokens: inputTokens, completionTokens: outputTokens },
+          usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
         });
         controller.close();
       },
@@ -456,10 +502,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
 
     return {
       stream,
-      rawCall: {
-        rawPrompt: promptString,
-        rawSettings: { systemPrompt, model: sdkOptions.model ?? this.modelId },
-      },
+      request: { body: promptString },
+      response: {},
     };
   }
 
@@ -467,7 +511,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
   // Internal — build SDK options + prompt string for a call
   // -------------------------------------------------------------------------
 
-  private _prepare(options: LanguageModelV1CallOptions): {
+  private _prepare(options: LanguageModelV2CallOptions): {
     systemPrompt: string | undefined;
     promptString: string;
     sdkOptions: SDKOptions;
@@ -476,9 +520,11 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
     const systemPrompt = extractSystemPrompt(options.prompt);
     const promptString = renderConversation(options.prompt) || " ";
 
-    const fnTools: LanguageModelV1FunctionTool[] = [];
-    if (options.mode.type === "regular" && options.mode.tools) {
-      for (const t of options.mode.tools) {
+    // v5 lifts tools to the top-level `options.tools` array (was
+    // `options.mode.tools`). We only handle plain function tools.
+    const fnTools: LanguageModelV2FunctionTool[] = [];
+    if (options.tools) {
+      for (const t of options.tools) {
         if (t.type === "function") fnTools.push(t);
       }
     }
@@ -538,7 +584,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV1 {
 function deriveFinishReason(args: {
   hasToolCalls: boolean;
   sdkStopReason: string | null;
-}): LanguageModelV1FinishReason {
+}): LanguageModelV2FinishReason {
   if (args.hasToolCalls) return "tool-calls";
   switch (args.sdkStopReason) {
     case "end_turn":
@@ -558,7 +604,7 @@ function deriveFinishReason(args: {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a `LanguageModelV1` backed by the Claude Agent SDK.
+ * Create a `LanguageModelV2` backed by the Claude Agent SDK.
  *
  * @example
  * ```ts

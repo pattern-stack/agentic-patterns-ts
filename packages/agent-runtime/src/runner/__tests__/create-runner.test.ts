@@ -49,10 +49,10 @@ function restoreEnv(saved: Record<string, string | undefined>) {
 function stubProviderLoad(provider: ProviderProtocol, cannedModelId?: string) {
   return vi.spyOn(provider, "load").mockImplementation(async (modelId) => {
     return {
-      specificationVersion: "v1",
+      specificationVersion: "v2",
       provider: provider.name,
       modelId: cannedModelId ?? modelId,
-      // biome-ignore lint/suspicious/noExplicitAny: test stub for LanguageModelV1
+      // biome-ignore lint/suspicious/noExplicitAny: test stub for LanguageModelV2
     } as any;
   });
 }

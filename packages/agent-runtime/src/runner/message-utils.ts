@@ -1,14 +1,14 @@
 /**
- * Message history conversion — canonical format to Vercel AI SDK CoreMessage[].
+ * Message history conversion — canonical format to Vercel AI SDK ModelMessage[].
  *
  * Ported from Python: _convert_history_to_messages() in runners/agent.py
  */
 
-import type { CoreMessage } from "ai";
+import type { ModelMessage } from "ai";
 import type { CanonicalMessage } from "./types.js";
 
 /**
- * Convert canonical internal message format to Vercel AI SDK CoreMessage[].
+ * Convert canonical internal message format to Vercel AI SDK ModelMessage[].
  *
  * Canonical format (from orchestration layer):
  *   { kind: "request", parts: [{ type: "user_prompt", content: "..." }] }
@@ -18,13 +18,13 @@ import type { CanonicalMessage } from "./types.js";
  *     { type: "tool_return", tool_name: "...", tool_call_id: "...", content: "..." },
  *   ]}
  *
- * Vercel AI SDK format:
+ * Vercel AI SDK v5 (ModelMessage) format:
  *   { role: "user", content: "..." }
- *   { role: "assistant", content: [{ type: "text", text: "..." }, { type: "tool-call", ... }] }
- *   { role: "tool", content: [{ type: "tool-result", ... }] }
+ *   { role: "assistant", content: [{ type: "text", text: "..." }, { type: "tool-call", input, ... }] }
+ *   { role: "tool", content: [{ type: "tool-result", output: { type: "text", value }, ... }] }
  */
-export function convertHistory(history: CanonicalMessage[]): CoreMessage[] {
-  const messages: CoreMessage[] = [];
+export function convertHistory(history: CanonicalMessage[]): ModelMessage[] {
+  const messages: ModelMessage[] = [];
 
   for (const msg of history) {
     if (msg.kind === "request") {
@@ -74,14 +74,15 @@ export function convertHistory(history: CanonicalMessage[]): CoreMessage[] {
             content: textParts.join(""),
           });
         } else {
-          // Mixed text + tool calls — use content array format
+          // Mixed text + tool calls — use content array format. v5's
+          // ToolCallPart carries the call payload under `input` (was `args`).
           const contentParts: Array<
             | { type: "text"; text: string }
             | {
                 type: "tool-call";
                 toolCallId: string;
                 toolName: string;
-                args: Record<string, unknown>;
+                input: unknown;
               }
           > = [];
 
@@ -93,7 +94,7 @@ export function convertHistory(history: CanonicalMessage[]): CoreMessage[] {
               type: "tool-call",
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              args: tc.args,
+              input: tc.args,
             });
           }
 
@@ -104,13 +105,15 @@ export function convertHistory(history: CanonicalMessage[]): CoreMessage[] {
         }
       }
 
-      // Tool results as separate tool messages
+      // Tool results as separate tool messages. v5's ToolResultPart carries the
+      // result under `output` as a typed union; the canonical format only has a
+      // string, so we wrap it as `{ type: "text", value }`.
       if (toolReturns.length > 0) {
         const toolResultParts = toolReturns.map((tr) => ({
           type: "tool-result" as const,
           toolCallId: tr.toolCallId,
           toolName: "", // not available in canonical format
-          result: tr.content,
+          output: { type: "text" as const, value: tr.content },
         }));
         messages.push({
           role: "tool" as const,

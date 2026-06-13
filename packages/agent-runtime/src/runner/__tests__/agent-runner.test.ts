@@ -1,9 +1,10 @@
 /**
- * Tests for AgentRunner using MockLanguageModelV1.
+ * Tests for AgentRunner using MockLanguageModelV2.
  */
 
 import { ToolSchema } from "@agentic-patterns/core";
-import { MockLanguageModelV1 } from "ai/test";
+import type { LanguageModelV2Content } from "@ai-sdk/provider";
+import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -12,6 +13,63 @@ import type { AgentEvent } from "../../events/types.js";
 import { AgentRunner, ToolCallBlocked } from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 import type { ToolExecutor } from "../types.js";
+
+// ---------------------------------------------------------------------------
+// v5 mock fixture helpers — build a doGenerate result from content parts.
+// ---------------------------------------------------------------------------
+
+type V2Result = Awaited<ReturnType<MockLanguageModelV2["doGenerate"]>>;
+
+/** A text-only doGenerate result. */
+function textResult(text: string, inputTokens: number, outputTokens: number): V2Result {
+  return {
+    content: [{ type: "text", text }],
+    finishReason: "stop",
+    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    warnings: [],
+  };
+}
+
+/** A single-tool-call doGenerate result (`input` is the parsed args object). */
+function toolCallResult(
+  call: { toolCallId: string; toolName: string; input: Record<string, unknown> },
+  inputTokens: number,
+  outputTokens: number,
+): V2Result {
+  return {
+    content: [
+      {
+        type: "tool-call",
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+        input: JSON.stringify(call.input),
+      },
+    ],
+    finishReason: "tool-calls",
+    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    warnings: [],
+  };
+}
+
+/** A multi-tool-call doGenerate result. */
+function toolCallsResult(
+  calls: Array<{ toolCallId: string; toolName: string; input: Record<string, unknown> }>,
+  inputTokens: number,
+  outputTokens: number,
+): V2Result {
+  const content: LanguageModelV2Content[] = calls.map((c) => ({
+    type: "tool-call",
+    toolCallId: c.toolCallId,
+    toolName: c.toolName,
+    input: JSON.stringify(c.input),
+  }));
+  return {
+    content,
+    finishReason: "tool-calls",
+    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    warnings: [],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,13 +134,8 @@ function collectEvents(bus: AgentEventBus): AgentEvent[] {
 describe("AgentRunner", () => {
   describe("single-turn no tools", () => {
     it("should return response directly when no tools are available", async () => {
-      const model = new MockLanguageModelV1({
-        doGenerate: async () => ({
-          text: "Hello! How can I help?",
-          finishReason: "stop",
-          usage: { promptTokens: 10, completionTokens: 5 },
-          rawCall: { rawPrompt: null, rawSettings: {} },
-        }),
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult("Hello! How can I help?", 10, 5),
       });
 
       const runner = new AgentRunner(model);
@@ -102,32 +155,19 @@ describe("AgentRunner", () => {
   describe("single-turn with tools", () => {
     it("should execute tool and return final response", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
             // First call: return tool call
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-1",
-                  toolName: "get_weather",
-                  args: JSON.stringify({ city: "Seattle" }),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 20, completionTokens: 10 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult(
+              { toolCallId: "tc-1", toolName: "get_weather", input: { city: "Seattle" } },
+              20,
+              10,
+            );
           }
           // Second call: return final text
-          return {
-            text: "The weather in Seattle is rainy.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 30, completionTokens: 15 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("The weather in Seattle is rainy.", 30, 15);
         },
       });
 
@@ -156,45 +196,24 @@ describe("AgentRunner", () => {
   describe("multi-iteration tool loop", () => {
     it("should handle tool -> response -> tool -> response chain", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-1",
-                  toolName: "search",
-                  args: JSON.stringify({ query: "weather" }),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 10, completionTokens: 5 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult(
+              { toolCallId: "tc-1", toolName: "search", input: { query: "weather" } },
+              10,
+              5,
+            );
           }
           if (callCount === 2) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-2",
-                  toolName: "format",
-                  args: JSON.stringify({ data: "raw-result" }),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 15, completionTokens: 8 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult(
+              { toolCallId: "tc-2", toolName: "format", input: { data: "raw-result" } },
+              15,
+              8,
+            );
           }
-          return {
-            text: "Here is the formatted result.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 20, completionTokens: 12 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("Here is the formatted result.", 20, 12);
         },
       });
 
@@ -221,20 +240,9 @@ describe("AgentRunner", () => {
 
   describe("max iterations", () => {
     it("should return gracefully with finishReason max_iterations", async () => {
-      const model = new MockLanguageModelV1({
-        doGenerate: async () => ({
-          toolCalls: [
-            {
-              toolCallType: "function" as const,
-              toolCallId: "tc-loop",
-              toolName: "infinite_tool",
-              args: JSON.stringify({}),
-            },
-          ],
-          finishReason: "tool-calls" as const,
-          usage: { promptTokens: 5, completionTokens: 3 },
-          rawCall: { rawPrompt: null, rawSettings: {} },
-        }),
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult({ toolCallId: "tc-loop", toolName: "infinite_tool", input: {} }, 5, 3),
       });
 
       const toolSchema = z.object({});
@@ -259,36 +267,20 @@ describe("AgentRunner", () => {
   describe("parallel tool execution", () => {
     it("should execute multiple tools concurrently", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-a",
-                  toolName: "tool_a",
-                  args: JSON.stringify({}),
-                },
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-b",
-                  toolName: "tool_b",
-                  args: JSON.stringify({}),
-                },
+            return toolCallsResult(
+              [
+                { toolCallId: "tc-a", toolName: "tool_a", input: {} },
+                { toolCallId: "tc-b", toolName: "tool_b", input: {} },
               ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 10, completionTokens: 5 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+              10,
+              5,
+            );
           }
-          return {
-            text: "Both tools completed.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 20, completionTokens: 10 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("Both tools completed.", 20, 10);
         },
       });
 
@@ -319,13 +311,8 @@ describe("AgentRunner", () => {
 
   describe("event emission", () => {
     it("should emit events in correct order for simple run", async () => {
-      const model = new MockLanguageModelV1({
-        doGenerate: async () => ({
-          text: "Done!",
-          finishReason: "stop",
-          usage: { promptTokens: 10, completionTokens: 5 },
-          rawCall: { rawPrompt: null, rawSettings: {} },
-        }),
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult("Done!", 10, 5),
       });
 
       const bus = new AgentEventBus();
@@ -348,30 +335,17 @@ describe("AgentRunner", () => {
 
     it("should emit tool events for tool calls", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-1",
-                  toolName: "my_tool",
-                  args: JSON.stringify({ key: "val" }),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 10, completionTokens: 5 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult(
+              { toolCallId: "tc-1", toolName: "my_tool", input: { key: "val" } },
+              10,
+              5,
+            );
           }
-          return {
-            text: "Done.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 15, completionTokens: 8 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("Done.", 15, 8);
         },
       });
 
@@ -396,30 +370,13 @@ describe("AgentRunner", () => {
   describe("token counting", () => {
     it("should accumulate tokens across iterations", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-1",
-                  toolName: "tool",
-                  args: JSON.stringify({}),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 100, completionTokens: 50 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult({ toolCallId: "tc-1", toolName: "tool", input: {} }, 100, 50);
           }
-          return {
-            text: "Final.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 200, completionTokens: 75 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("Final.", 200, 75);
         },
       });
 
@@ -440,30 +397,17 @@ describe("AgentRunner", () => {
   describe("tool executor error handling", () => {
     it("should handle tool execution errors gracefully", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-1",
-                  toolName: "failing_tool",
-                  args: JSON.stringify({}),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 10, completionTokens: 5 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult(
+              { toolCallId: "tc-1", toolName: "failing_tool", input: {} },
+              10,
+              5,
+            );
           }
-          return {
-            text: "I see the tool failed.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 20, completionTokens: 10 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("I see the tool failed.", 20, 10);
         },
       });
 
@@ -485,30 +429,13 @@ describe("AgentRunner", () => {
 
     it("should handle missing tool executor", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-1",
-                  toolName: "my_tool",
-                  args: JSON.stringify({}),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 10, completionTokens: 5 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult({ toolCallId: "tc-1", toolName: "my_tool", input: {} }, 10, 5);
           }
-          return {
-            text: "No executor available.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 20, completionTokens: 10 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("No executor available.", 20, 10);
         },
       });
 
@@ -527,20 +454,13 @@ describe("AgentRunner", () => {
 
   describe("gate integration", () => {
     it("should throw ToolCallBlocked when gate blocks", async () => {
-      const model = new MockLanguageModelV1({
-        doGenerate: async () => ({
-          toolCalls: [
-            {
-              toolCallType: "function" as const,
-              toolCallId: "tc-blocked",
-              toolName: "dangerous_tool",
-              args: JSON.stringify({}),
-            },
-          ],
-          finishReason: "tool-calls" as const,
-          usage: { promptTokens: 10, completionTokens: 5 },
-          rawCall: { rawPrompt: null, rawSettings: {} },
-        }),
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-blocked", toolName: "dangerous_tool", input: {} },
+            10,
+            5,
+          ),
       });
 
       const schema = z.object({});
@@ -569,30 +489,17 @@ describe("AgentRunner", () => {
       // collectEvents() here: it subscribes to agent.tool.intent and would mask
       // the bug by making publish() return a non-empty handler list.
       let callCount = 0;
-      const model = new MockLanguageModelV1({
+      const model = new MockLanguageModelV2({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
-            return {
-              toolCalls: [
-                {
-                  toolCallType: "function" as const,
-                  toolCallId: "tc-allowed",
-                  toolName: "safe_tool",
-                  args: JSON.stringify({}),
-                },
-              ],
-              finishReason: "tool-calls" as const,
-              usage: { promptTokens: 10, completionTokens: 5 },
-              rawCall: { rawPrompt: null, rawSettings: {} },
-            };
+            return toolCallResult(
+              { toolCallId: "tc-allowed", toolName: "safe_tool", input: {} },
+              10,
+              5,
+            );
           }
-          return {
-            text: "Done.",
-            finishReason: "stop" as const,
-            usage: { promptTokens: 20, completionTokens: 10 },
-            rawCall: { rawPrompt: null, rawSettings: {} },
-          };
+          return textResult("Done.", 20, 10);
         },
       });
 
