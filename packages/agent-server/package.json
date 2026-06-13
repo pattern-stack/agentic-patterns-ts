@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/server",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Hono HTTP server for agentic-patterns agents — routes, SSE streaming, admin API",
   "license": "MIT",
   "type": "module",
