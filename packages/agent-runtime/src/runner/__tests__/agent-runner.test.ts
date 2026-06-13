@@ -561,6 +561,68 @@ describe("AgentRunner", () => {
 
       await expect(runner.run(agent, "Do something dangerous")).rejects.toThrow(ToolCallBlocked);
     });
+
+    it("allows tool calls when a gate permits and nothing subscribes to agent.tool.intent (regression)", async () => {
+      // Regression for the unsound `results.length > 0` gate-allow heuristic.
+      // With a gate attached and NO subscriber on agent.tool.intent, an allowed
+      // intent must execute — not be treated as blocked. Do NOT attach
+      // collectEvents() here: it subscribes to agent.tool.intent and would mask
+      // the bug by making publish() return a non-empty handler list.
+      let callCount = 0;
+      const model = new MockLanguageModelV1({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              toolCalls: [
+                {
+                  toolCallType: "function" as const,
+                  toolCallId: "tc-allowed",
+                  toolName: "safe_tool",
+                  args: JSON.stringify({}),
+                },
+              ],
+              finishReason: "tool-calls" as const,
+              usage: { promptTokens: 10, completionTokens: 5 },
+              rawCall: { rawPrompt: null, rawSettings: {} },
+            };
+          }
+          return {
+            text: "Done.",
+            finishReason: "stop" as const,
+            usage: { promptTokens: 20, completionTokens: 10 },
+            rawCall: { rawPrompt: null, rawSettings: {} },
+          };
+        },
+      });
+
+      const schema = z.object({});
+      const tools = [ToolSchema.fromZod("safe_tool", "Safe", schema)];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      // An allow gate: present (so gates.length > 0) but never blocks.
+      bus.addGate({
+        name: "AllowAll",
+        category: 0,
+        categoryName: "SAFETY",
+        check: async () => ({ action: "allow" as const }),
+        getBlockReason: () => "",
+      });
+
+      let toolRan = false;
+      const executor = makeToolExecutor(async () => {
+        toolRan = true;
+        return { ok: true };
+      });
+
+      const runner = new AgentRunner(model, bus);
+      const result = await runner.run(agent, "Use safe tool", { toolExecutor: executor });
+
+      expect(toolRan).toBe(true);
+      expect(result.toolCallsCount).toBe(1);
+      expect(result.response).toBe("Done.");
+    });
   });
 
   describe("ToolCallBlocked error", () => {
