@@ -84,11 +84,28 @@ export class AgentRunner implements RunnerProtocol {
   /**
    * Emit an intent event and check if it was blocked by a gate.
    * Returns true if allowed, false if blocked.
+   *
+   * We cannot infer allowed-vs-blocked from publish()'s return value: an
+   * *allowed* intent returns `[]` whenever nothing is subscribed to
+   * `agent.tool.intent` (gates are not handlers, so they don't contribute to
+   * the handler-results array). That is indistinguishable from a block, so the
+   * old `results.length > 0` heuristic wrongly blocked every tool call when a
+   * gate was attached but no observability exporter happened to subscribe.
+   * Instead, listen for the `agent.tool.rejected` event the gate chain emits
+   * on a block. (Mirrors ClaudeCodeRunner.emitIntent.)
    */
   private async emitIntent(event: AgentEvent): Promise<boolean> {
-    const results = await this.eventBus.publish(event);
-    // If no gates, always allowed; if gates exist and returned empty list, blocked
-    return results.length > 0 || this.eventBus.gates.length === 0;
+    let blocked = false;
+    const onRejected = () => {
+      blocked = true;
+    };
+    this.eventBus.subscribe("agent.tool.rejected", onRejected);
+    try {
+      await this.eventBus.publish(event);
+    } finally {
+      this.eventBus.unsubscribe("agent.tool.rejected", onRejected);
+    }
+    return !blocked;
   }
 
   /**
