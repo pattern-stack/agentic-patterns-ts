@@ -58,6 +58,31 @@ test-live:
 test-claude:
     RUN_LIVE_CLAUDE=1 pnpm --filter @agentic-patterns/runtime test
 
+# ── Worktrees ────────────────────────────────
+
+# Remove stale Claude Code agent worktrees under .claude/worktrees/ (created when the
+# Agent tool spawns with isolation:"worktree"; harness auto-cleanup misses dirty ones).
+# Refuses to remove worktrees with uncommitted changes; prunes the registry at the end.
+clean-worktrees:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    paths=$(git worktree list --porcelain | awk '/^worktree.*\.claude\/worktrees\// {print $2}')
+    if [[ -z "$paths" ]]; then
+      echo "No worktrees under .claude/worktrees/ to clean."
+      git worktree prune
+      exit 0
+    fi
+    while IFS= read -r path; do
+      echo "→ $path"
+      if git -C "$path" diff --quiet && git -C "$path" diff --cached --quiet && [[ -z $(git -C "$path" status --porcelain) ]]; then
+        git worktree remove "$path" && echo "  removed"
+      else
+        echo "  SKIPPED — has uncommitted changes (run \`git worktree remove --force '$path'\` to force)"
+      fi
+    done <<< "$paths"
+    git worktree prune
+    echo "done."
+
 # ── Release ──────────────────────────────────
 
 # Bump @agentic-patterns/* versions in lockstep (patch|minor|major|--to=X.Y.Z)
