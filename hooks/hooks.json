@@ -1,4 +1,5 @@
 {
+  "description": "Emit Claude Code lifecycle events to the agentic-patterns dashboard (default http://localhost:3456; override via AP_DASHBOARD_URL). WorktreeCreate is deliberately ABSENT: the harness gives it PROVIDER semantics — a registered hook REPLACES the built-in `git worktree add` and must print the created worktree path to stdout synchronously. A passive async emit.mjs telemetry hook returns no path and breaks every `isolation: \"worktree\"` Agent spawn harness-wide. WorktreeRemove is observer-safe and stays. Do NOT re-add WorktreeCreate here. Mirrors the claudecode-patterns sdlc plugin carve-out.",
   "hooks": {
     "SessionStart": [
       {
@@ -241,19 +242,6 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/emit.mjs FileChanged",
-            "async": true,
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "WorktreeCreate": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/emit.mjs WorktreeCreate",
             "async": true,
             "timeout": 10
           }
