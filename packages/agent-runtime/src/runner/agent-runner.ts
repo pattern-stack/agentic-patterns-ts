@@ -25,6 +25,11 @@ import { type ModelMessage, type ToolSet, generateId, generateText, streamText, 
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
 import { type AgentEvent, createEvent } from "../events/types.js";
+import {
+  type ModelResolver,
+  constantModelResolver,
+  isModelResolver,
+} from "../providers/model-resolver.js";
 import { convertHistory } from "./message-utils.js";
 import type { AgentLike, RunOptions, RunResult, RunnerProtocol, ToolExecutor } from "./types.js";
 
@@ -65,10 +70,17 @@ export class ToolCallBlocked extends Error {
  */
 export class AgentRunner implements RunnerProtocol {
   private _eventBus: AgentEventBus | undefined;
-  private readonly _model: LanguageModelV2;
+  private readonly _resolver: ModelResolver;
 
-  constructor(model: LanguageModelV2, eventBus?: AgentEventBus) {
-    this._model = model;
+  /**
+   * @param model A {@link ModelResolver} — the runner resolves `agent.getModel()`
+   *   per run, so the model belongs to the agent (overridable per-agent). OR a
+   *   concrete `LanguageModelV2`, which is wrapped in a
+   *   {@link constantModelResolver} so the model is pinned regardless of what the
+   *   agent declares (back-compat; the path tests use with `MockLanguageModelV2`).
+   */
+  constructor(model: LanguageModelV2 | ModelResolver, eventBus?: AgentEventBus) {
+    this._resolver = isModelResolver(model) ? model : constantModelResolver(model);
     this._eventBus = eventBus;
   }
 
@@ -151,12 +163,13 @@ export class AgentRunner implements RunnerProtocol {
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
 
-    // Resolve model name and tools. Use the bound LanguageModelV2's actual
-    // modelId for event attribution — agent.getModel() is the agent's
-    // *declared* model (often a default) and can lie when the runtime
-    // selected a different provider (e.g. agent declares claude-sonnet but
-    // createRunner picked ollama qwen3:4b via OLLAMA_HOST).
-    const modelName = this._model.modelId;
+    // Resolve the agent's declared model to a live model for this run. With a
+    // resolver-backed runner this honours agent.getModel() (the model belongs to
+    // the agent); with the back-compat constant resolver it returns the pinned
+    // model and ignores the id. Event attribution uses the *resolved* model's
+    // modelId — the id actually dispatched.
+    const model = await this._resolver.resolve(agent.getModel());
+    const modelName = model.modelId;
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -222,7 +235,7 @@ export class AgentRunner implements RunnerProtocol {
         // default. Tools are `execute`-less so the SDK can't run/loop them; we
         // dispatch through the gate chain + toolExecutor below.
         result = await generateText({
-          model: this._model,
+          model,
           system,
           messages,
           tools: hasTools ? tools : undefined,
@@ -499,7 +512,8 @@ export class AgentRunner implements RunnerProtocol {
     const toolExecutor = options?.toolExecutor;
     const conversationId = generateId();
 
-    const modelName = this._model.modelId;
+    const model = await this._resolver.resolve(agent.getModel());
+    const modelName = model.modelId;
     const agentTools = agent.getTools();
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -569,7 +583,7 @@ export class AgentRunner implements RunnerProtocol {
       // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` (v5 single-step default),
       // tools `execute`-less — the SDK won't run/loop tools; we dispatch below.
       const streamResult = streamText({
-        model: this._model,
+        model,
         system,
         messages,
         tools: hasTools ? tools : undefined,
