@@ -96,3 +96,25 @@ export class AgentConfig extends AgenticModel<typeof AgentConfigSchema.shape> {
     return lines.join("\n");
   }
 }
+
+/**
+ * A partial patch over an {@link AgentConfig} — used to override an
+ * already-defined agent's config for one workflow's use (e.g. a different model,
+ * judgments, or mission per step). `roleTemplate` is itself partial so a patch
+ * can tweak just its judgments without restating persona/responsibilities.
+ *
+ * Applied by `mergeAgentConfig` (organisms): top-level fields replace the base
+ * when present; `roleTemplate` is shallow-merged one level deep.
+ */
+export const AgentConfigOverrideSchema = z
+  .object({
+    roleTemplate: RoleTemplateConfigSchema.partial().strict().optional(),
+    mission: MissionSchema.optional(),
+    background: BackgroundSchema.optional(),
+    awareness: AwarenessSchema.optional(),
+    model: z.string().nullable().optional(),
+    capabilities: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export type AgentConfigOverride = z.infer<typeof AgentConfigOverrideSchema>;

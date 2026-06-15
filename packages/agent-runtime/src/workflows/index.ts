@@ -92,3 +92,9 @@ export {
   type ConversationRunOptions,
   ConversationLoop,
 } from "./conversation-loop.js";
+
+export {
+  buildWorkflowFromConfig,
+  compileMessageTemplate,
+  type BuildWorkflowOptions,
+} from "./build-workflow-from-config.js";

@@ -16,7 +16,12 @@
 
 import type { z } from "zod";
 
-import { AgentConfig, type AgentConfigSchema } from "../atoms/agent-config.js";
+import {
+  AgentConfig,
+  type AgentConfigData,
+  type AgentConfigOverride,
+  type AgentConfigSchema,
+} from "../atoms/agent-config.js";
 import { Awareness } from "../atoms/awareness.js";
 import { Background } from "../atoms/background.js";
 import { Judgment } from "../atoms/judgment.js";
@@ -87,4 +92,30 @@ export function buildAgentFromConfig(
   }
 
   return builder.build();
+}
+
+/**
+ * Apply an {@link AgentConfigOverride} onto a base {@link AgentConfigData},
+ * returning new merged data (the base is not mutated).
+ *
+ * Semantics: top-level fields (mission / background / awareness / model /
+ * capabilities) replace the base when present; `roleTemplate` is shallow-merged
+ * one level deep, so a patch can tweak just its judgments without restating
+ * persona / responsibilities. Used by `buildWorkflowFromConfig` to override an
+ * already-defined agent's config per workflow step.
+ */
+export function mergeAgentConfig(
+  base: AgentConfigData,
+  override: AgentConfigOverride,
+): AgentConfigData {
+  return {
+    roleTemplate: override.roleTemplate
+      ? { ...base.roleTemplate, ...override.roleTemplate }
+      : base.roleTemplate,
+    mission: override.mission ?? base.mission,
+    background: override.background ?? base.background,
+    awareness: override.awareness ?? base.awareness,
+    model: override.model !== undefined ? override.model : base.model,
+    capabilities: override.capabilities ?? base.capabilities,
+  };
 }
