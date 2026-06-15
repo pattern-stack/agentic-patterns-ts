@@ -73,6 +73,15 @@ export {
   AgentConfig,
   AgentConfigSchema,
   type AgentConfigData,
+  AgentConfigOverrideSchema,
+  type AgentConfigOverride,
   RoleTemplateConfigSchema,
   type RoleTemplateConfigData,
 } from "./agent-config.js";
+export {
+  WorkflowConfigSchema,
+  type WorkflowConfig,
+  type WorkflowConfigInput,
+  WorkflowStepConfigSchema,
+  type WorkflowStepConfig,
+} from "./workflow-config.js";
