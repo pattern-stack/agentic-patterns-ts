@@ -20,6 +20,7 @@ export {
   type GoalEvaluatorProtocol,
   resolveMessage,
   makeStepName,
+  applyStepModel,
   executeStep,
 } from "./base.js";
 

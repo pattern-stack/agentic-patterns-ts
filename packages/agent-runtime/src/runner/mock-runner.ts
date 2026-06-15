@@ -34,6 +34,8 @@ export interface MockCall {
   message: string;
   agentName: string;
   model: string;
+  /** `RunOptions.maxIterations` the call was made with (undefined = runner default). */
+  maxIterations?: number;
   timestamp: Date;
 }
 
@@ -94,6 +96,7 @@ export class MockRunner implements RunnerProtocol {
       message,
       agentName: agent.role.name,
       model: agent.getModel(),
+      maxIterations: options?.maxIterations,
       timestamp: new Date(),
     });
 
@@ -150,6 +153,7 @@ export class MockRunner implements RunnerProtocol {
       message,
       agentName: agent.role.name,
       model: agent.getModel(),
+      maxIterations: options?.maxIterations,
       timestamp: new Date(),
     });
 

@@ -32,6 +32,19 @@ export interface Step {
   readonly name?: string;
   readonly outputKey?: string;
   readonly contextExtractor?: (result: StepResult, context: PatternContext) => PatternContext;
+  /**
+   * Per-step model override. The step runs an *agent view* whose `getModel()`
+   * returns this id (the model still belongs to the agent — see
+   * {@link applyStepModel}), so a resolver-backed runner dispatches it. Has no
+   * effect with a constant/pinned runner. Use for split-model pipelines — e.g. a
+   * cheap model for retrieval, a strong model for synthesis — with one runner.
+   */
+  readonly model?: string;
+  /**
+   * Per-step tool-loop cap (threaded into `RunOptions.maxIterations`). Falls
+   * back to the runner's default (10) when unset.
+   */
+  readonly maxIterations?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +225,26 @@ export function makeStepName(name: string | undefined, index: number): string {
 }
 
 /**
+ * Apply a per-step model override. Returns an `AgentLike` whose `getModel()`
+ * yields `model`, delegating every other member to `agent`; without an override
+ * returns `agent` unchanged.
+ *
+ * The model still belongs to the agent — this is a per-step agent *view* with a
+ * different declared model, NOT a per-step runner. It only takes effect with a
+ * resolver-backed runner; a constant/pinned runner ignores `getModel()`.
+ */
+export function applyStepModel(agent: AgentLike, model: string | undefined): AgentLike {
+  if (!model) return agent;
+  return {
+    role: agent.role,
+    getModel: () => model,
+    getTools: () => agent.getTools(),
+    getSystemPrompt: () => agent.getSystemPrompt(),
+    renderInitialPrompt: () => agent.renderInitialPrompt(),
+  };
+}
+
+/**
  * Execute a single step: resolve message, run agent, return result.
  */
 export async function executeStep(
@@ -221,7 +254,10 @@ export async function executeStep(
   toolExecutor?: ToolExecutor,
 ): Promise<StepResult> {
   const message = resolveMessage(step.messageTemplate, context);
-  const runResult = await runner.run(step.agent, message, { toolExecutor });
+  const runResult = await runner.run(applyStepModel(step.agent, step.model), message, {
+    toolExecutor,
+    maxIterations: step.maxIterations,
+  });
   const stepName = makeStepName(step.name, 0);
   return createStepResult(stepName, runResult);
 }

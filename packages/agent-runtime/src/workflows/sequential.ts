@@ -12,7 +12,7 @@ import type {
   Step,
   StepResult,
 } from "./base.js";
-import { createStepResult, makeStepName, resolveMessage } from "./base.js";
+import { applyStepModel, createStepResult, makeStepName, resolveMessage } from "./base.js";
 
 // ---------------------------------------------------------------------------
 // SequentialResult
@@ -92,8 +92,9 @@ export class Sequential implements PatternProtocol {
             throw new Error("Runner is required for Step execution");
           }
           const message = resolveMessage(step.messageTemplate, currentContext);
-          const runResult = await runner.run(step.agent, message, {
+          const runResult = await runner.run(applyStepModel(step.agent, step.model), message, {
             toolExecutor,
+            maxIterations: step.maxIterations,
           });
           const stepName = makeStepName(step.name, i);
           const stepResult = createStepResult(stepName, runResult);

@@ -12,7 +12,7 @@ import type {
   Step,
   StepResult,
 } from "./base.js";
-import { createStepResult, makeStepName, resolveMessage } from "./base.js";
+import { applyStepModel, createStepResult, makeStepName, resolveMessage } from "./base.js";
 
 // ---------------------------------------------------------------------------
 // Consolidator
@@ -120,7 +120,10 @@ export class Parallel implements PatternProtocol {
 
       try {
         const message = resolveMessage(step.messageTemplate, contextSnapshot);
-        const runResult = await runner.run(step.agent, message, { toolExecutor });
+        const runResult = await runner.run(applyStepModel(step.agent, step.model), message, {
+          toolExecutor,
+          maxIterations: step.maxIterations,
+        });
         const stepResult = createStepResult(stepName, runResult);
         orderedResults[index] = stepResult;
 
