@@ -4,6 +4,7 @@
  * Selection priority (first match wins):
  *   1. options.runner                → use it verbatim
  *   2. options.model (LanguageModelV2) → new AgentRunner(model)
+ *   2.5 resolveAgentModel/profiles/modelsPath → new AgentRunner(resolver)  (per-agent model)
  *   3. options.provider + tier/modelId → new AgentRunner(provider.load(...))
  *   4. env vars (in PROVIDER_PRIORITY order) → new AgentRunner(...)
  *   5. claude CLI on PATH            → new ClaudeCodeAPIRunner()  (fallback, limited events)
@@ -25,6 +26,7 @@ import {
   type SupportedProvider,
   resolveModelId,
 } from "../providers/index.js";
+import { type ModelProfiles, createModelResolver } from "../providers/model-resolver.js";
 import { AgentRunner } from "./agent-runner.js";
 import { ClaudeCodeAPIRunner } from "./claude-code-api-runner.js";
 import { MockRunner } from "./mock-runner.js";
@@ -78,11 +80,25 @@ export interface CreateRunnerOptions {
    * instead of throwing. Defaults to false.
    */
   fallbackToMock?: boolean;
+  /**
+   * Opt into agent-model-driven dispatch: build a resolver-backed runner that
+   * resolves each agent's `getModel()` at run time (the model belongs to the
+   * agent, overridable per-agent). Well-known families are pattern-matched;
+   * supply `profiles` / `modelsPath` for custom / `openai-compatible` ids.
+   * Implied when `profiles` or `modelsPath` is set. Default: false (a single
+   * bound model is selected from model/provider/env, as before).
+   */
+  resolveAgentModel?: boolean;
+  /** In-code model profiles for resolver mode (implies `resolveAgentModel`). */
+  profiles?: ModelProfiles;
+  /** Path to a `models.yaml` for resolver mode (implies `resolveAgentModel`). */
+  modelsPath?: string;
 }
 
 export type RunnerSource =
   | "explicit-runner"
   | "explicit-model"
+  | "model-resolver"
   | "explicit-provider"
   | `env-${SupportedProvider}`
   | "claude-cli"
@@ -126,6 +142,23 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
       runner: new AgentRunner(opts.model, opts.eventBus),
       reason: "using caller-provided LanguageModelV2 via AgentRunner",
       source: "explicit-model",
+    });
+  }
+
+  // 2.5 Resolver-backed runner — dispatch each agent's declared model at run
+  // time (the model belongs to the agent). Opt-in via resolveAgentModel, or
+  // implied by profiles/modelsPath for custom / openai-compatible ids.
+  if (opts.resolveAgentModel || opts.profiles || opts.modelsPath) {
+    const resolver = await createModelResolver({
+      profiles: opts.profiles,
+      modelsPath: opts.modelsPath,
+    });
+    return log(verbose, {
+      runner: new AgentRunner(resolver, opts.eventBus),
+      reason: opts.modelsPath
+        ? `resolving agent models per run (profiles + ${opts.modelsPath})`
+        : "resolving agent models per run",
+      source: "model-resolver",
     });
   }
 
