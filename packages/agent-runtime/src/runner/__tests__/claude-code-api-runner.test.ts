@@ -93,7 +93,7 @@ describe("ClaudeCodeAPIRunner", () => {
     // the documented fallback. On darwin with a logged-in user it's set.
     if (process.platform === "darwin" && opts.env) {
       expect(opts.env.CLAUDE_CONFIG_DIR).toBeDefined();
-      expect(opts.env.CLAUDE_CONFIG_DIR).toContain("ap-cc-api-");
+      expect(opts.env.CLAUDE_CONFIG_DIR).toContain("ap-cc-cfg-");
       expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN?.length ?? 0).toBeGreaterThan(20);
     }
   });

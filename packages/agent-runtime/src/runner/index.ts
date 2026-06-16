@@ -10,7 +10,12 @@ export type {
   CanonicalMessagePart,
 } from "./types.js";
 export { ClaudeCodeRunner } from "./claude-code-runner.js";
-export type { ClaudeCodeRunnerOptions } from "./claude-code-runner.js";
+export type {
+  ClaudeCodeRunnerOptions,
+  CCConfigSource,
+  NativeToolsSetting,
+  OAuthTokenSource,
+} from "./claude-code-runner.js";
 export { ClaudeCodeAPIRunner } from "./claude-code-api-runner.js";
 export type { ClaudeCodeAPIRunnerOptions } from "./claude-code-api-runner.js";
 export { buildAgentServers, buildCapabilityServer } from "./sdk-bridge.js";
