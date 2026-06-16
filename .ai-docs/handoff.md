@@ -1,16 +1,13 @@
-# Handoff — 2026-06-14
+# Handoff — 2026-06-16
 
-**Branch:** `dug/release-0.1.14` (agentic-patterns-ts — the framework repo)
-**Last action:** Framed up the framework gap-register + release plan in `.ai-docs/research/eval-multimodel-dogfood-gaps.md` — gaps **G1** (per-step runner), **G2** (RunContext / state-into-tools), **G3** (structured step result), **G4** (Workflow-as-config), plus the **model→runner factory** and **eval-as-framework**, all surfaced by the `retrieval-agent` eval/multi-model dogfood, with decisions + a sequenced plan.
-**Next action:** Execute the critical path — **Phase 0** model→runner factory (`runnerFor(modelId)`, reuse `create-runner.ts` provider detection) → **G1** (`Step.runner?` + `maxIterations?` on `workflows/base.ts:28`; `(step.runner ?? runner)` in sequential/parallel/evaluator-loop) → **G4** (`WorkflowConfig` schema in `agent-core` + `buildWorkflowFromConfig` in `agent-runtime` + tests). G2/G3 ride alongside.
+**Branch:** `main` (local is 4 commits BEHIND origin — `git pull` to `95376a8` before any work)
+**Last action:** Released **v0.3.0** — core/runtime/server/cli bumped 0.2.0→0.3.0 (PR #73, `95376a8`), CI published all four to npm `latest` via OIDC trusted publishing.
+**Next action:** Quick follow-up PR: bump `actions/checkout@v4` + `actions/setup-node@v4` → v5 in `.github/workflows/ci.yml` (GitHub forces Node-20 actions to Node 24 starting 2026-06-16; next CI run at risk).
 **Obstacles:**
-- G2 changes `ToolDefinition.execute` signature (`molecules/toolbox.ts:21`) — keep `ctx` optional (back-compat); bigger blast radius → can be fast-follow.
-- G4 must NOT conflate with `Agency` (`agency.ts` = team/messaging; `WorkflowConfig` = pipeline) — document the boundary.
+- CC-vs-API benchmark (the user's real next goal) is unstarted — portable briefing is in the prior chat, nothing written to a file yet.
+- Deferred follow-ups: wire `dispose()` into server/`create-runner`; native retry + cross-provider failover; fold in PR #40 (session-resume, tracked by issue #42) on top of the unified CC runner.
 
 ## Notes
-- **Plan/breakdown source:** `.ai-docs/research/eval-multimodel-dogfood-gaps.md` (companion to `dogfood-readiness-audit.md`). Every gap has framework `file:line` + the `retrieval-agent` workaround it replaces (PRs #26–#34).
-- **Why G4 is the keystone:** completes the declarative stack — Roles (extraction/synthesis/presentation) → Agents (DealExtraction/DealContextValidator/DealSummaryAgent) → Workflows (config, per-step override). Doug wants it ASAP.
-- **Decisions:** G1–G4 + model→runner factory all IN; **eval ships in the framework** (fast-follow, built from the `retrieval-agent` harness); dual-renderer + forgotten-executor = **capture only** (already in the readiness audit).
-- **Consumer thread (gated on this release):** sibling `retrieval-agent` will then delete its hacks — two-runner orchestration → `Sequential`/per-step runners; pipeline → `WorkflowConfig`; `EvidenceSet` closure → `RunContext` — and re-run its eval suite. Its env is parked on GPT (`gpt-5.4-nano`, OpenAI-direct); the paid Gemini key depleted mid-session.
-- **Horizon:** trigger-dependent workflows (`"Transcript received"` → run a `WorkflowConfig`).
-- **Uncommitted:** this handoff + the gap doc are untracked on `dug/release-0.1.14`.
+- This session shipped 3 stacked PRs then a release: #70 CC runner config×nativeTools seams + `dispose()`; #71 removed per-id `openai-compatible` profile kind; #72 re-added gateway as resolver-level `GatewayConfig` (Bifrost = "just the URL", model stays per-agent; env `AP_GATEWAY_BASE_URL`).
+- Benchmark path to build: `new AgentRunner(claudeCode("sonnet"))` vs `new AgentRunner(anthropic("claude-sonnet-4-5"))`; gate behind `RUN_LIVE_CLAUDE=1`; watch the auth gotcha (`ANTHROPIC_API_KEY` can hijack the CC subprocess), per-turn history re-flatten, and empty tool-param schemas. Start from `providers/__tests__/claude-code.test.ts`.
+- Working agreement this session: fresh worktree off origin/main per change → real PR (not draft) → squash auto-merge + delete branch → clean up worktree.
