@@ -27,8 +27,20 @@ import { generateId } from "ai";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
 import { type AgentEvent, createEvent } from "../events/types.js";
+import {
+  type CCConfigSource,
+  type NativeToolsSetting,
+  type OAuthTokenSource,
+  applyIsolatedEnv,
+  applyNativeTools,
+  createIsolatedConfigDir,
+  removeIsolatedConfigDir,
+  resolveOAuthToken,
+} from "./cc-config.js";
 import { type AgentLikeForBridge, buildAgentServers } from "./sdk-bridge.js";
 import type { RunOptions, RunResult, RunnerProtocol } from "./types.js";
+
+export type { CCConfigSource, NativeToolsSetting, OAuthTokenSource } from "./cc-config.js";
 
 // ---------------------------------------------------------------------------
 // Model mapping
@@ -105,6 +117,29 @@ export interface ClaudeCodeRunnerOptions {
   defaults?: Partial<SDKOptions>;
   /** Optional event bus for emitting agent events. */
   eventBus?: AgentEventBus;
+  /**
+   * Config source (Axis B). `{ mode: "host" }` (default) inherits the
+   * developer's ~/.claude. `{ mode: "isolated" }` runs in a fresh
+   * CLAUDE_CONFIG_DIR — empty, or seeded from `profile` for a reproducible
+   * curated setup. Isolated mode injects an OAuth token (see `oauthToken`).
+   */
+  config?: CCConfigSource;
+  /**
+   * Native Claude Code tools (Axis C): "all" (default) | "none" | an
+   * explicit allow-list. Orthogonal to `config`.
+   */
+  nativeTools?: NativeToolsSetting;
+  /**
+   * Extra tool names or `mcp__<server>` prefixes to block via SDK
+   * `disallowedTools`. Useful to strip specific connectors.
+   */
+  extraDisallowedTools?: readonly string[];
+  /**
+   * OAuth token source for isolated mode. Falls back to the
+   * CLAUDE_CODE_OAUTH_TOKEN env var, then the macOS Keychain. Set this to
+   * use isolated mode off macOS, where the Keychain lookup is unavailable.
+   */
+  oauthToken?: OAuthTokenSource;
 }
 
 /**
@@ -121,10 +156,38 @@ export interface ClaudeCodeRunnerOptions {
 export class ClaudeCodeRunner implements RunnerProtocol {
   protected _eventBus: AgentEventBus | undefined;
   protected readonly _defaults: Partial<SDKOptions>;
+  private readonly _config: CCConfigSource;
+  private readonly _nativeTools: NativeToolsSetting;
+  private readonly _extraDisallowed: readonly string[];
+  private readonly _oauthToken: OAuthTokenSource | undefined;
+  /** Isolated CLAUDE_CONFIG_DIR created at construction; null in host mode. */
+  private readonly _isolatedConfigDir: string | null;
+  private _disposed = false;
 
   constructor(opts?: ClaudeCodeRunnerOptions) {
     this._eventBus = opts?.eventBus;
     this._defaults = opts?.defaults ?? {};
+    this._config = opts?.config ?? { mode: "host" };
+    this._nativeTools = opts?.nativeTools ?? "all";
+    this._extraDisallowed = opts?.extraDisallowedTools ?? [];
+    this._oauthToken = opts?.oauthToken;
+    this._isolatedConfigDir =
+      this._config.mode === "isolated" ? createIsolatedConfigDir(this._config.profile) : null;
+  }
+
+  /**
+   * Remove the isolated CLAUDE_CONFIG_DIR created for this runner, if any.
+   * Isolated dirs are created once per instance and reused across every
+   * run — they are NOT cleaned up between runs — so a runner you no longer
+   * need should be disposed to avoid leaking tmpdirs. Idempotent, and a
+   * no-op for host-mode runners. Pair with a `try { … } finally { runner.dispose() }`.
+   */
+  dispose(): void {
+    if (this._disposed) return;
+    this._disposed = true;
+    if (this._isolatedConfigDir) {
+      removeIsolatedConfigDir(this._isolatedConfigDir);
+    }
   }
 
   protected get eventBus(): AgentEventBus {
@@ -449,6 +512,26 @@ export class ClaudeCodeRunner implements RunnerProtocol {
       if (Object.keys(mcpServers).length > 0) {
         sdkOpts.mcpServers = mcpServers as SDKOptions["mcpServers"];
         sdkOpts.allowedTools = [...(sdkOpts.allowedTools ?? []), ...allowedTools];
+      }
+    }
+
+    // Axis C — native built-in tools. "all" leaves any `defaults.tools`
+    // untouched; "none"/list override it.
+    applyNativeTools(sdkOpts, this._nativeTools);
+
+    // Additional connector/tool blocks.
+    if (this._extraDisallowed.length > 0) {
+      sdkOpts.disallowedTools = [...(sdkOpts.disallowedTools ?? []), ...this._extraDisallowed];
+    }
+
+    // Axis B — isolated config dir + injected OAuth. Strips connectors,
+    // settings, plugins, skills, hooks (or seeds a curated profile) without
+    // breaking auth. If no token resolves (e.g. off macOS with none passed)
+    // fall through to the binary's own auth — connectors may leak.
+    if (this._isolatedConfigDir) {
+      const token = resolveOAuthToken(this._oauthToken);
+      if (token) {
+        applyIsolatedEnv(sdkOpts, this._isolatedConfigDir, token);
       }
     }
 

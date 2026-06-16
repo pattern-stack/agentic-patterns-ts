@@ -127,4 +127,11 @@ export interface RunnerProtocol {
    * Optional — not all runners support streaming.
    */
   stream?(agent: AgentLike, message: string, options?: RunOptions): AsyncGenerator<AgentEvent>;
+
+  /**
+   * Release any resources held by the runner (e.g. an isolated
+   * CLAUDE_CONFIG_DIR). Optional — runners without resources omit it.
+   * Safe to call multiple times; callers may invoke as `runner.dispose?.()`.
+   */
+  dispose?(): void;
 }
