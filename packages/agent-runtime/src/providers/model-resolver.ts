@@ -17,9 +17,13 @@
  *   1. an explicit {@link ModelProfile} — registered in-code or loaded from a
  *      `models.yaml` via {@link loadModelProfiles}. Aliases or pins a model id
  *      to one of the named providers.
- *   2. a pattern-matched well-known family (`gemini-*` → google, `gpt-*`/`o1`/`o3`
+ *   2. a configured {@link GatewayConfig} (if any) — routes the id through one
+ *      OpenAI-compatible gateway (e.g. Bifrost): one endpoint, the agent's model
+ *      id passed through (optionally prefixed/qualified). Profiles still win, so
+ *      a profile is the per-id escape hatch to go direct.
+ *   3. a pattern-matched well-known family (`gemini-*` → google, `gpt-*`/`o1`/`o3`
  *      → openai, `claude-*` → anthropic, …) — zero-config for the common clouds.
- *   3. a helpful error listing the known families + registered profiles.
+ *   4. a helpful error listing the known families + registered profiles.
  */
 
 import type { LanguageModelV2 } from "@ai-sdk/provider";
@@ -106,6 +110,48 @@ export const ModelProfilesSchema = z.record(ModelProfileSchema);
 export type ModelProfiles = z.infer<typeof ModelProfilesSchema>;
 
 // ---------------------------------------------------------------------------
+// GatewayConfig — route many ids through one OpenAI-compatible endpoint
+// ---------------------------------------------------------------------------
+
+/**
+ * An OpenAI-compatible gateway (e.g. Bifrost, LiteLLM, OpenRouter, vLLM).
+ *
+ * A gateway is "just the URL (+ key)": one endpoint that fronts many upstream
+ * models and does its own routing / load-balancing / failover. Agents stay
+ * clean — each agent still declares its own model id (`agent.getModel()`),
+ * which is passed through to the gateway, optionally prefixed/qualified to the
+ * gateway's namespace (e.g. `claude-sonnet-4-5` → `anthropic/claude-sonnet-4-5`).
+ *
+ * When a resolver has a gateway, it routes every id through it EXCEPT ids that
+ * have an explicit profile — so a profile is the per-id escape hatch to go
+ * direct. Requires the optional `@ai-sdk/openai-compatible` package.
+ */
+export interface GatewayConfig {
+  /** Gateway endpoint base URL. */
+  readonly baseURL: string;
+  /** Inline gateway key. Prefer {@link GatewayConfig.apiKeyEnv} to keep secrets out of config. */
+  readonly apiKey?: string;
+  /** Name of an env var holding the gateway key (read at resolve time). */
+  readonly apiKeyEnv?: string;
+  /** Extra request headers (e.g. a gateway routing / virtual-key header). */
+  readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Prepended to the agent's declared id to form the gateway model id (gateways
+   * often namespace by vendor). Ignored when {@link GatewayConfig.qualify} is set.
+   */
+  readonly modelPrefix?: string;
+  /** Full control over agent-id → gateway-id mapping. Overrides `modelPrefix`. */
+  readonly qualify?: (modelId: string) => string;
+}
+
+/** Map an agent's declared id to the id the gateway expects. */
+function qualifyGatewayId(modelId: string, gw: GatewayConfig): string {
+  if (gw.qualify) return gw.qualify(modelId);
+  if (gw.modelPrefix) return `${gw.modelPrefix}${modelId}`;
+  return modelId;
+}
+
+// ---------------------------------------------------------------------------
 // Pattern-match: bare id → well-known provider
 // ---------------------------------------------------------------------------
 
@@ -140,6 +186,12 @@ export function inferProvider(modelId: string): SupportedProvider | undefined {
 export interface HybridModelResolverOptions {
   /** Seed profiles (merged via {@link HybridModelResolver.register}). */
   profiles?: ModelProfiles;
+  /**
+   * Route ids through an OpenAI-compatible gateway (e.g. Bifrost). Profiles
+   * still win; every other id goes through the gateway instead of native
+   * pattern-match. See {@link GatewayConfig}.
+   */
+  gateway?: GatewayConfig;
 }
 
 /**
@@ -150,8 +202,10 @@ export interface HybridModelResolverOptions {
 export class HybridModelResolver implements ModelResolver {
   private readonly _profiles = new Map<string, ModelProfile>();
   private readonly _cache = new Map<string, Promise<LanguageModelV2>>();
+  private readonly _gateway: GatewayConfig | undefined;
 
   constructor(opts: HybridModelResolverOptions = {}) {
+    this._gateway = opts.gateway;
     for (const [id, profile] of Object.entries(opts.profiles ?? {})) {
       this.register(id, profile);
     }
@@ -186,6 +240,8 @@ export class HybridModelResolver implements ModelResolver {
     const profile = this._profiles.get(modelId);
     if (profile) return buildFromProfile(modelId, profile);
 
+    if (this._gateway) return buildFromGateway(modelId, this._gateway);
+
     const inferred = inferProvider(modelId);
     if (inferred) return PROVIDERS[inferred].load(modelId);
 
@@ -219,6 +275,25 @@ function buildFromProfile(id: string, profile: ModelProfile): Promise<LanguageMo
 }
 
 // ---------------------------------------------------------------------------
+// Gateway → LanguageModelV2
+// ---------------------------------------------------------------------------
+
+async function buildFromGateway(modelId: string, gw: GatewayConfig): Promise<LanguageModelV2> {
+  const apiKey = gw.apiKey ?? (gw.apiKeyEnv ? process.env[gw.apiKeyEnv] : undefined);
+  const mod = await importOptional(
+    "@ai-sdk/openai-compatible",
+    "gateway routing (openai-compatible)",
+  );
+  const provider = mod.createOpenAICompatible({
+    name: "gateway",
+    baseURL: gw.baseURL,
+    ...(apiKey ? { apiKey } : {}),
+    ...(gw.headers ? { headers: gw.headers } : {}),
+  });
+  return provider(qualifyGatewayId(modelId, gw));
+}
+
+// ---------------------------------------------------------------------------
 // YAML loader (optional dep, dynamically imported per repo convention)
 // ---------------------------------------------------------------------------
 
@@ -245,6 +320,8 @@ export interface CreateModelResolverOptions {
   profiles?: ModelProfiles;
   /** Path to a `models.yaml`; loaded and merged under `profiles`. */
   modelsPath?: string;
+  /** Route non-profile ids through an OpenAI-compatible gateway. See {@link GatewayConfig}. */
+  gateway?: GatewayConfig;
 }
 
 /** Build a {@link HybridModelResolver}, optionally loading profiles from a `models.yaml`. */
@@ -252,5 +329,8 @@ export async function createModelResolver(
   opts: CreateModelResolverOptions = {},
 ): Promise<HybridModelResolver> {
   const fromYaml = opts.modelsPath ? await loadModelProfiles(opts.modelsPath) : {};
-  return new HybridModelResolver({ profiles: { ...fromYaml, ...opts.profiles } });
+  return new HybridModelResolver({
+    profiles: { ...fromYaml, ...opts.profiles },
+    gateway: opts.gateway,
+  });
 }

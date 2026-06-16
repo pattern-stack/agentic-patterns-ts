@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunner } from "../../runner/agent-runner.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
+import { createRunner } from "../../runner/create-runner.js";
 import { anthropicProvider, openaiProvider } from "../index.js";
 import {
   HybridModelResolver,
@@ -229,6 +230,68 @@ describe("ModelProfileSchema", () => {
   });
   it("rejects unknown keys (strict)", () => {
     expect(() => ModelProfileSchema.parse({ provider: "openai", bogus: 1 })).toThrow();
+  });
+});
+
+// --- GatewayConfig (gateway routing) ----------------------------------------
+
+describe("GatewayConfig — gateway routing", () => {
+  const GW = { baseURL: "https://gw.example/v1", apiKey: "sk-test" };
+
+  it("routes a non-profile id through the gateway (real adapter, no network)", async () => {
+    const aSpy = vi.spyOn(anthropicProvider, "load").mockResolvedValue(fakeModel("direct"));
+    // The id pattern-matches anthropic, but the gateway short-circuits first.
+    const r = new HybridModelResolver({ gateway: GW });
+    const m = await r.resolve("claude-sonnet-4-5");
+    expect(m.modelId).toBe("claude-sonnet-4-5"); // passed through to the gateway
+    expect(aSpy).not.toHaveBeenCalled(); // did NOT go direct to anthropic
+  });
+
+  it("modelPrefix qualifies the id", async () => {
+    const r = new HybridModelResolver({ gateway: { ...GW, modelPrefix: "anthropic/" } });
+    const m = await r.resolve("claude-sonnet-4-5");
+    expect(m.modelId).toBe("anthropic/claude-sonnet-4-5");
+  });
+
+  it("qualify() overrides modelPrefix", async () => {
+    const r = new HybridModelResolver({
+      gateway: { ...GW, modelPrefix: "ignored/", qualify: (id) => `virt:${id}` },
+    });
+    const m = await r.resolve("gpt-4o");
+    expect(m.modelId).toBe("virt:gpt-4o");
+  });
+
+  it("a profile still wins over the gateway (per-id escape hatch)", async () => {
+    const aSpy = vi.spyOn(anthropicProvider, "load").mockResolvedValue(fakeModel("direct"));
+    const r = new HybridModelResolver({
+      gateway: GW,
+      profiles: { "pin-direct": { provider: "anthropic", model: "claude-x" } },
+    });
+    const m = await r.resolve("pin-direct");
+    expect(aSpy).toHaveBeenCalledWith("claude-x");
+    expect(m.modelId).toBe("direct");
+  });
+
+  it("apiKeyEnv is read at resolve time", async () => {
+    vi.stubEnv("GW_KEY", "sk-from-env");
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", apiKeyEnv: "GW_KEY" },
+    });
+    const m = await r.resolve("any-model");
+    expect(m.modelId).toBe("any-model");
+  });
+
+  it("createModelResolver passes the gateway through", async () => {
+    const r = await createModelResolver({ gateway: GW });
+    const m = await r.resolve("some-model");
+    expect(m.modelId).toBe("some-model");
+  });
+
+  it("createRunner picks up AP_GATEWAY_BASE_URL from env", async () => {
+    vi.stubEnv("AP_GATEWAY_BASE_URL", "https://gw.example/v1");
+    const { source, reason } = await createRunner({ verbose: false });
+    expect(source).toBe("model-resolver");
+    expect(reason).toContain("gateway https://gw.example/v1");
   });
 });
 

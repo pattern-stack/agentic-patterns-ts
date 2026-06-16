@@ -85,6 +85,7 @@
       },
       "devDependencies": {
         "@ai-sdk/anthropic": "^2.0.0",
+        "@ai-sdk/openai-compatible": "^1.0.0",
         "@anthropic-ai/claude-agent-sdk": "^0.2.104",
         "@types/better-sqlite3": "^7.6.13",
         "@types/node": "^25.6.0",
@@ -143,6 +144,8 @@
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@2.0.82", "", { "dependencies": { "@ai-sdk/provider": "2.0.3", "@ai-sdk/provider-utils": "3.0.26" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-bMiG4rUwdgQ6+E2klFSaJ1BHO65zCrfHRqC/hkdhA19tmx8FqLoAmXpx92dcWsADFMtAzQd3Q9kRJ8zk4/PpnA=="],
 
     "@ai-sdk/gateway": ["@ai-sdk/gateway@2.0.100", "", { "dependencies": { "@ai-sdk/provider": "2.0.3", "@ai-sdk/provider-utils": "3.0.26", "@vercel/oidc": "3.1.0" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-u+YH/7SUHNpnYNB44UO0e92CpO0nwz9dZ7Be/ah86QcpW/YmPlpLGgWvKTdn/txi+jMMlIc5EMUNPUgfFTvZ3w=="],
+
+    "@ai-sdk/openai-compatible": ["@ai-sdk/openai-compatible@1.0.40", "", { "dependencies": { "@ai-sdk/provider": "2.0.3", "@ai-sdk/provider-utils": "3.0.26" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-K8SzN+Hpr25Fx23VurW9rtg8dmUgqX+rDI7LKJFCIJcM3TIu3PfknxYlRGivDIrmsmgzH3PjvMGuCq+E8ZW7rA=="],
 
     "@ai-sdk/provider": ["@ai-sdk/provider@2.0.3", "", { "dependencies": { "json-schema": "^0.4.0" } }, "sha512-h88OPkavHTiN9tMn2l5awAznGB0lXzjcLhgR1/rvjB2zlLprsNxbM2tt6OJsHUxduLC3klq0/eqaSf6fX5XVww=="],
 
