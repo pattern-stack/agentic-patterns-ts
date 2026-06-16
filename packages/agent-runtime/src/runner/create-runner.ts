@@ -84,7 +84,7 @@ export interface CreateRunnerOptions {
    * Opt into agent-model-driven dispatch: build a resolver-backed runner that
    * resolves each agent's `getModel()` at run time (the model belongs to the
    * agent, overridable per-agent). Well-known families are pattern-matched;
-   * supply `profiles` / `modelsPath` for custom / `openai-compatible` ids.
+   * supply `profiles` / `modelsPath` to alias or pin custom ids.
    * Implied when `profiles` or `modelsPath` is set. Default: false (a single
    * bound model is selected from model/provider/env, as before).
    */
@@ -147,7 +147,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
 
   // 2.5 Resolver-backed runner — dispatch each agent's declared model at run
   // time (the model belongs to the agent). Opt-in via resolveAgentModel, or
-  // implied by profiles/modelsPath for custom / openai-compatible ids.
+  // implied by profiles/modelsPath for custom / aliased ids.
   if (opts.resolveAgentModel || opts.profiles || opts.modelsPath) {
     const resolver = await createModelResolver({
       profiles: opts.profiles,

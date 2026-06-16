@@ -15,9 +15,8 @@
  *
  * {@link HybridModelResolver} resolution precedence (first match wins):
  *   1. an explicit {@link ModelProfile} — registered in-code or loaded from a
- *      `models.yaml` via {@link loadModelProfiles}. This is where
- *      `openai-compatible` endpoints (custom `baseURL` + auth, e.g. a gateway
- *      such as Bifrost, or direct-vendor with a BYO key) live.
+ *      `models.yaml` via {@link loadModelProfiles}. Aliases or pins a model id
+ *      to one of the named providers.
  *   2. a pattern-matched well-known family (`gemini-*` → google, `gpt-*`/`o1`/`o3`
  *      → openai, `claude-*` → anthropic, …) — zero-config for the common clouds.
  *   3. a helpful error listing the known families + registered profiles.
@@ -32,8 +31,7 @@ import { PROVIDERS, type SupportedProvider } from "./index.js";
  * Dynamically import an optional package, throwing an accurate,
  * package-manager-neutral error if it isn't installed. Unlike
  * providers/`importProvider`, this is not provider-framed — it's used by the
- * yaml loader and the openai-compatible adapter, which a consumer installs only
- * when they use those features.
+ * yaml loader, which a consumer installs only when they use that feature.
  */
 // biome-ignore lint/suspicious/noExplicitAny: imported module shape is opaque
 async function importOptional(pkg: string, feature: string): Promise<any> {
@@ -74,7 +72,7 @@ export function constantModelResolver(model: LanguageModelV2): ModelResolver {
 // ModelProfile — the serializable registry entry (also the models.yaml shape)
 // ---------------------------------------------------------------------------
 
-/** Provider kinds a profile may target — every {@link SupportedProvider} plus the custom-endpoint escape hatch. */
+/** Provider kinds a profile may target — every {@link SupportedProvider}. */
 export const PROFILE_PROVIDERS = [
   "anthropic",
   "openai",
@@ -85,14 +83,12 @@ export const PROFILE_PROVIDERS = [
   "deepseek",
   "openrouter",
   "ollama",
-  "openai-compatible",
 ] as const;
 
 /**
  * A single model profile — serializable, so it round-trips through `models.yaml`
- * and (later) a workflow config. `openai-compatible` is the only kind that
- * threads `baseURL`/auth through; the named `@ai-sdk/*` providers authenticate
- * from their own env vars (point a profile at one to alias/pin an id).
+ * and (later) a workflow config. A profile aliases or pins a model id to one of
+ * the named `@ai-sdk/*` providers, which authenticate from their own env vars.
  */
 export const ModelProfileSchema = z
   .object({
@@ -100,14 +96,6 @@ export const ModelProfileSchema = z
     provider: z.enum(PROFILE_PROVIDERS),
     /** Upstream model id sent to the provider. Defaults to the profile key. */
     model: z.string().optional(),
-    /** Endpoint base URL — required for `openai-compatible`. */
-    baseURL: z.string().url().optional(),
-    /** Inline API key. Prefer {@link ModelProfileSchema.shape.apiKeyEnv} to keep secrets out of yaml. */
-    apiKey: z.string().optional(),
-    /** Name of an env var holding the API key (read at resolve time). */
-    apiKeyEnv: z.string().optional(),
-    /** Extra request headers (e.g. a gateway auth header). Openai-compatible only. */
-    headers: z.record(z.string()).optional(),
   })
   .strict();
 
@@ -214,7 +202,7 @@ export class HybridModelResolver implements ModelResolver {
         ? `Registered profiles: ${registered.join(", ")}.`
         : "No profiles are registered.",
       "Add a profile (in-code via resolver.register(id, profile) or in a models.yaml loaded with loadModelProfiles),",
-      'e.g. { provider: "openai-compatible", baseURL: "https://gateway/v1", model: "…" }.',
+      'e.g. { provider: "anthropic", model: "claude-haiku-4-5" }.',
     ].join("\n");
   }
 }
@@ -223,39 +211,10 @@ export class HybridModelResolver implements ModelResolver {
 // Profile → LanguageModelV2
 // ---------------------------------------------------------------------------
 
-async function buildFromProfile(id: string, profile: ModelProfile): Promise<LanguageModelV2> {
+function buildFromProfile(id: string, profile: ModelProfile): Promise<LanguageModelV2> {
+  // A profile aliases/pins an id to a named provider; that provider's loader
+  // authenticates from its own env vars and takes only a model id.
   const upstreamId = profile.model ?? id;
-  const apiKey = profile.apiKey ?? (profile.apiKeyEnv ? process.env[profile.apiKeyEnv] : undefined);
-
-  if (profile.provider === "openai-compatible") {
-    if (!profile.baseURL) {
-      throw new Error(
-        `ModelResolver: profile "${id}" uses provider "openai-compatible" but has no baseURL.`,
-      );
-    }
-    const mod = await importOptional("@ai-sdk/openai-compatible", 'provider "openai-compatible"');
-    const provider = mod.createOpenAICompatible({
-      name: id,
-      baseURL: profile.baseURL,
-      ...(apiKey ? { apiKey } : {}),
-      ...(profile.headers ? { headers: profile.headers } : {}),
-    });
-    return provider(upstreamId);
-  }
-
-  // Named @ai-sdk/* providers authenticate from their own env vars and their
-  // loader takes only a model id. Reject custom-endpoint/auth fields rather than
-  // silently dropping them — otherwise an `openai` profile aimed at a gateway
-  // would validate and then quietly hit the cloud with the real key.
-  if (profile.baseURL || profile.apiKey || profile.apiKeyEnv || profile.headers) {
-    throw new Error(
-      [
-        `ModelResolver: profile "${id}" sets baseURL/apiKey/apiKeyEnv/headers, which only apply to`,
-        `provider "openai-compatible". Named providers ("${profile.provider}") authenticate from their`,
-        'own env vars — use provider: "openai-compatible" for a custom endpoint or BYO key.',
-      ].join(" "),
-    );
-  }
   return PROVIDERS[profile.provider].load(upstreamId);
 }
 

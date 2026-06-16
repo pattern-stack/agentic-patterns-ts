@@ -2,8 +2,8 @@
  * Tests for the ModelResolver — the seam that lets AgentRunner dispatch each
  * agent's *declared* model (agent.getModel()) instead of a model bound to the
  * runner. Covers pattern-match routing, profile precedence + aliasing,
- * openai-compatible custom endpoints, the YAML loader, memoisation, and the
- * AgentRunner integration (resolver honours the agent; constant = back-compat).
+ * the YAML loader, memoisation, and the AgentRunner integration (resolver
+ * honours the agent; constant = back-compat).
  */
 
 import { promises as fs } from "node:fs";
@@ -177,13 +177,14 @@ describe("HybridModelResolver", () => {
     await expect(r.resolve("mystery-xyz")).rejects.toThrow(/known/);
   });
 
-  it("rejects baseURL/apiKey/headers on a named (non-openai-compatible) provider", async () => {
-    // Footgun guard: an `openai` profile aimed at a gateway would otherwise
-    // validate and silently hit api.openai.com.
-    const r = new HybridModelResolver({
-      profiles: { gw: { provider: "openai", baseURL: "https://gw.example/v1" } },
-    });
-    await expect(r.resolve("gw")).rejects.toThrow(/openai-compatible/);
+  it("rejects gateway fields (baseURL/apiKey/headers) — gateway support removed", () => {
+    // These used to configure an openai-compatible endpoint; that kind is gone,
+    // so the strict schema rejects them as unknown keys (and TS rejects them too).
+    expect(() =>
+      ModelProfileSchema.parse({ provider: "openai", baseURL: "https://gw/v1" }),
+    ).toThrow();
+    expect(() => ModelProfileSchema.parse({ provider: "openai", apiKey: "sk" })).toThrow();
+    expect(() => ModelProfileSchema.parse({ provider: "openai", headers: {} })).toThrow();
   });
 
   it("a stale failed build does not evict a newer cached entry", async () => {
@@ -215,29 +216,6 @@ describe("HybridModelResolver", () => {
     expect(b2).toBe(b);
     expect(spy).toHaveBeenCalledTimes(2);
   });
-
-  it("openai-compatible without baseURL fails fast", async () => {
-    const r = new HybridModelResolver({
-      profiles: { gw: { provider: "openai-compatible", model: "m" } },
-    });
-    await expect(r.resolve("gw")).rejects.toThrow(/baseURL/);
-  });
-
-  it("builds an openai-compatible model from a profile (real adapter, no network)", async () => {
-    vi.stubEnv("TEST_GW_KEY", "sk-test");
-    const r = new HybridModelResolver({
-      profiles: {
-        gw: {
-          provider: "openai-compatible",
-          baseURL: "https://gw.example/v1",
-          model: "my-model",
-          apiKeyEnv: "TEST_GW_KEY",
-        },
-      },
-    });
-    const m = await r.resolve("gw");
-    expect(m.modelId).toBe("my-model");
-  });
 });
 
 // --- ModelProfileSchema -----------------------------------------------------
@@ -263,10 +241,9 @@ describe("loadModelProfiles / createModelResolver", () => {
     await fs.writeFile(
       file,
       [
-        "gw:",
-        "  provider: openai-compatible",
-        "  baseURL: https://gw.example/v1",
-        "  model: m",
+        "slow:",
+        "  provider: openai",
+        "  model: gpt-4o",
         "fast:",
         "  provider: anthropic",
         "  model: claude-haiku-4",
@@ -274,7 +251,7 @@ describe("loadModelProfiles / createModelResolver", () => {
     );
 
     const profiles = await loadModelProfiles(file);
-    expect(profiles.gw?.provider).toBe("openai-compatible");
+    expect(profiles.slow?.provider).toBe("openai");
     expect(profiles.fast?.model).toBe("claude-haiku-4");
 
     const oSpy = vi.spyOn(openaiProvider, "load").mockResolvedValue(fakeModel("gpt-x"));
@@ -283,7 +260,7 @@ describe("loadModelProfiles / createModelResolver", () => {
       modelsPath: file,
       profiles: { fast: { provider: "openai", model: "gpt-x" } },
     });
-    expect(r.has("gw")).toBe(true);
+    expect(r.has("slow")).toBe(true);
     await r.resolve("fast");
     expect(oSpy).toHaveBeenCalledWith("gpt-x");
 
