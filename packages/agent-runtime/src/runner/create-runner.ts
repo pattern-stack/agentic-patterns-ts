@@ -26,7 +26,11 @@ import {
   type SupportedProvider,
   resolveModelId,
 } from "../providers/index.js";
-import { type ModelProfiles, createModelResolver } from "../providers/model-resolver.js";
+import {
+  type GatewayConfig,
+  type ModelProfiles,
+  createModelResolver,
+} from "../providers/model-resolver.js";
 import { AgentRunner } from "./agent-runner.js";
 import { ClaudeCodeAPIRunner } from "./claude-code-api-runner.js";
 import { MockRunner } from "./mock-runner.js";
@@ -93,6 +97,13 @@ export interface CreateRunnerOptions {
   profiles?: ModelProfiles;
   /** Path to a `models.yaml` for resolver mode (implies `resolveAgentModel`). */
   modelsPath?: string;
+  /**
+   * Route ids through an OpenAI-compatible gateway (e.g. Bifrost). Implies
+   * `resolveAgentModel`. Also auto-detected from env when unset: set
+   * `AP_GATEWAY_BASE_URL` (+ optional `AP_GATEWAY_API_KEY`,
+   * `AP_GATEWAY_MODEL_PREFIX`). See {@link GatewayConfig}.
+   */
+  gateway?: GatewayConfig;
 }
 
 export type RunnerSource =
@@ -110,6 +121,24 @@ export interface RunnerSelection {
   reason: string;
   /** Which branch of the priority tree fired. */
   source: RunnerSource;
+}
+
+/**
+ * Build a {@link GatewayConfig} from env: `AP_GATEWAY_BASE_URL` (required),
+ * `AP_GATEWAY_API_KEY`, `AP_GATEWAY_MODEL_PREFIX`. Returns undefined when no
+ * gateway URL is set — so setting one env var routes every agent through the
+ * gateway, no code change.
+ */
+function envGateway(): GatewayConfig | undefined {
+  const baseURL = process.env.AP_GATEWAY_BASE_URL;
+  if (!baseURL) return undefined;
+  return {
+    baseURL,
+    ...(process.env.AP_GATEWAY_API_KEY ? { apiKey: process.env.AP_GATEWAY_API_KEY } : {}),
+    ...(process.env.AP_GATEWAY_MODEL_PREFIX
+      ? { modelPrefix: process.env.AP_GATEWAY_MODEL_PREFIX }
+      : {}),
+  };
 }
 
 /**
@@ -147,17 +176,21 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
 
   // 2.5 Resolver-backed runner — dispatch each agent's declared model at run
   // time (the model belongs to the agent). Opt-in via resolveAgentModel, or
-  // implied by profiles/modelsPath for custom / aliased ids.
-  if (opts.resolveAgentModel || opts.profiles || opts.modelsPath) {
+  // implied by profiles/modelsPath/gateway for custom / aliased / gateway ids.
+  const gateway = opts.gateway ?? envGateway();
+  if (opts.resolveAgentModel || opts.profiles || opts.modelsPath || gateway) {
     const resolver = await createModelResolver({
       profiles: opts.profiles,
       modelsPath: opts.modelsPath,
+      gateway,
     });
     return log(verbose, {
       runner: new AgentRunner(resolver, opts.eventBus),
-      reason: opts.modelsPath
-        ? `resolving agent models per run (profiles + ${opts.modelsPath})`
-        : "resolving agent models per run",
+      reason: gateway
+        ? `resolving agent models per run (gateway ${gateway.baseURL})`
+        : opts.modelsPath
+          ? `resolving agent models per run (profiles + ${opts.modelsPath})`
+          : "resolving agent models per run",
       source: "model-resolver",
     });
   }
