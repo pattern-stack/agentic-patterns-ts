@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "agentic — CLI for running agent projects. Crawls ./agents/, wires observability, serves chat + admin dashboard.",
   "license": "MIT",
   "type": "module",

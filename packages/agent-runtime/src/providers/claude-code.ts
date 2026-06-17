@@ -46,7 +46,7 @@ import {
   query,
   tool as sdkTool,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { z } from "zod";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Model name mapping
@@ -223,6 +223,74 @@ function renderToolOutput(
 // Tools → MCP server
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// JSON Schema → Zod (just enough to round-trip the tool param schemas)
+//
+// The provider sits at the LanguageModelV2 boundary, where the AI SDK has
+// already projected each tool to JSON Schema (the original Zod is gone). But the
+// Agent SDK's tool() helper only accepts a ZodRawShape — so we rebuild one from
+// `inputSchema`. Without it Claude sees NO parameter types and serializes nested
+// objects (filter/rank_by) as strings → the real tool's Zod rejects them. We only
+// need enough for Claude to form valid calls; the framework's real tool does the
+// authoritative validation after canUseTool hands execution back to AgentRunner.
+// ---------------------------------------------------------------------------
+
+type JsonSchemaNode = Record<string, unknown>;
+
+function resolveRef(node: JsonSchemaNode, root: JsonSchemaNode): JsonSchemaNode {
+  const ref = node.$ref;
+  if (typeof ref !== "string" || !ref.startsWith("#/")) return node;
+  let cur: unknown = root;
+  for (const seg of ref.slice(2).split("/")) cur = (cur as JsonSchemaNode | undefined)?.[seg];
+  return (cur as JsonSchemaNode) ?? node;
+}
+
+function objectShape(node: JsonSchemaNode, root: JsonSchemaNode): Record<string, z.ZodTypeAny> {
+  const props = (node.properties as Record<string, JsonSchemaNode>) ?? {};
+  const required = new Set(Array.isArray(node.required) ? (node.required as string[]) : []);
+  const shape: Record<string, z.ZodTypeAny> = {};
+  for (const [k, v] of Object.entries(props)) {
+    const zt = jsonSchemaToZod(v, root);
+    shape[k] = required.has(k) ? zt : zt.optional();
+  }
+  return shape;
+}
+
+function jsonSchemaToZod(schema: JsonSchemaNode | undefined, root: JsonSchemaNode): z.ZodTypeAny {
+  if (!schema || typeof schema !== "object") return z.any();
+  const node = "$ref" in schema ? resolveRef(schema, root) : schema;
+  const desc = typeof node.description === "string" ? node.description : undefined;
+  const withDesc = (zt: z.ZodTypeAny): z.ZodTypeAny => (desc ? zt.describe(desc) : zt);
+  if (node.anyOf || node.oneOf || node.allOf) return withDesc(z.any());
+  const type = Array.isArray(node.type) ? node.type[0] : node.type;
+  switch (type) {
+    case "string": {
+      const en = node.enum;
+      if (Array.isArray(en) && en.length > 0 && en.every((v) => typeof v === "string")) {
+        return withDesc(z.enum(en as [string, ...string[]]));
+      }
+      return withDesc(z.string());
+    }
+    case "number":
+    case "integer":
+      return withDesc(z.number());
+    case "boolean":
+      return withDesc(z.boolean());
+    case "array":
+      return withDesc(z.array(jsonSchemaToZod(node.items as JsonSchemaNode, root)));
+    case "object":
+      return withDesc(z.object(objectShape(node, root)).passthrough());
+    default:
+      return withDesc(z.any());
+  }
+}
+
+/** Top-level JSON Schema → ZodRawShape for the Agent SDK's tool() helper. */
+function jsonSchemaToZodShape(schema: unknown): Record<string, z.ZodTypeAny> {
+  const root = (schema ?? {}) as JsonSchemaNode;
+  return objectShape(root, root);
+}
+
 const FRAMEWORK_SERVER = "agent_runner_tools";
 
 /**
@@ -239,9 +307,10 @@ function buildToolsServer(tools: ReadonlyArray<LanguageModelV2FunctionTool>):
   if (tools.length === 0) return undefined;
 
   const sdkTools = tools.map((t) =>
-    // We pass an empty Zod shape — Claude will still see the tool name +
-    // description and `canUseTool` records the actual call arguments.
-    sdkTool(t.name, t.description ?? "", {} as Record<string, z.ZodTypeAny>, async () => {
+    // Rebuild a ZodRawShape from the tool's JSON Schema so Claude sees the real
+    // parameter types (the SDK's tool() only accepts Zod). canUseTool still
+    // records the actual call + denies, handing execution back to AgentRunner.
+    sdkTool(t.name, t.description ?? "", jsonSchemaToZodShape(t.inputSchema), async () => {
       // Never reached — canUseTool aborts before handler runs.
       return {
         content: [{ type: "text" as const, text: "__AGENT_RUNNER_INTERCEPTED__" }],
@@ -563,7 +632,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
         ...(sdkOptions.mcpServers ?? {}),
         [FRAMEWORK_SERVER]: built.server,
       } as SDKOptions["mcpServers"];
-      sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...built.allowedTools];
+      // Do NOT add these to `allowedTools`. Under permissionMode:"default", a tool
+      // in `allowedTools` is PRE-APPROVED — the SDK auto-runs its MCP handler and
+      // never consults `canUseTool`. Our handler just returns the
+      // `__AGENT_RUNNER_INTERCEPTED__` placeholder, so the call would "succeed" with
+      // no data and never reach the framework's toolExecutor. Leaving the tools
+      // unlisted routes every call through `canUseTool` (deny + interrupt) — the
+      // intercept this provider depends on to hand execution back to AgentRunner.
     }
 
     if (!this._opts.allowBuiltinTools) {
