@@ -30,7 +30,7 @@ import {
   constantModelResolver,
   isModelResolver,
 } from "../providers/model-resolver.js";
-import { convertHistory } from "./message-utils.js";
+import { convertHistory, sanitizeResponseMessages } from "./message-utils.js";
 import type { AgentLike, RunOptions, RunResult, RunnerProtocol, ToolExecutor } from "./types.js";
 
 // Re-export AgentLike here so existing consumers importing from "./agent-runner"
@@ -454,7 +454,7 @@ export class AgentRunner implements RunnerProtocol {
       // Anthropic thinking blocks). Dropping them — as the old hand-rebuild did —
       // breaks Gemini 3.x multi-turn tool loops with "function call is missing a
       // thought_signature". This is the whole point of the v5 migration.
-      messages.push(...result.response.messages);
+      messages.push(...sanitizeResponseMessages(result.response.messages));
 
       // Our own tool results (we ran the tools, not the SDK). v5's
       // ToolResultPart carries the result under `output` as a typed union.
@@ -914,7 +914,7 @@ export class AgentRunner implements RunnerProtocol {
       // and Anthropic thinking blocks. Hand-rebuilding the assistant turn drops
       // them and breaks Gemini 3.x multi-turn tool loops.
       const streamResponse = await streamResult.response;
-      messages.push(...streamResponse.messages);
+      messages.push(...sanitizeResponseMessages(streamResponse.messages));
 
       // Our own tool results (we ran the tools, not the SDK). v5's
       // ToolResultPart carries the result under `output` as a typed union.

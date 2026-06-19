@@ -2,9 +2,63 @@
  * Tests for message history conversion.
  */
 
+import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { convertHistory } from "../message-utils.js";
+import { convertHistory, sanitizeResponseMessages } from "../message-utils.js";
 import type { CanonicalMessage } from "../types.js";
+
+describe("sanitizeResponseMessages", () => {
+  it("defaults a missing reasoning `text` to '' while preserving providerOptions (Gemini thoughtSignature round-trip)", () => {
+    // Gemini 3.x emits a reasoning part carrying only the signature in providerOptions, no `text`.
+    // AI SDK v5's modelMessageSchema requires reasoning.text: string, so re-sending it throws.
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", providerOptions: { google: { thoughtSignature: "sig" } } },
+          { type: "tool-call", toolCallId: "t1", toolName: "search", input: {} },
+        ],
+      },
+    ] as unknown as ModelMessage[];
+
+    const out = sanitizeResponseMessages(messages);
+    const part = (out[0]!.content as unknown as Array<Record<string, unknown>>)[0]!;
+    expect(part.text).toBe(""); // now a string → passes validation
+    expect(part.providerOptions).toEqual({ google: { thoughtSignature: "sig" } }); // signature kept
+  });
+
+  it("also coerces a text part with a missing text (same missing-required-string class)", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "text", providerOptions: { google: { thoughtSignature: "sig" } } }],
+      },
+    ] as unknown as ModelMessage[];
+    const part = (
+      sanitizeResponseMessages(messages)[0]!.content as unknown as Array<Record<string, unknown>>
+    )[0]!;
+    expect(part.text).toBe("");
+    expect(part.providerOptions).toEqual({ google: { thoughtSignature: "sig" } });
+  });
+
+  it("leaves a reasoning part with real text untouched", () => {
+    const messages = [
+      { role: "assistant", content: [{ type: "reasoning", text: "thought" }] },
+    ] as unknown as ModelMessage[];
+    const part = (
+      sanitizeResponseMessages(messages)[0]!.content as unknown as Array<Record<string, unknown>>
+    )[0]!;
+    expect(part.text).toBe("thought");
+  });
+
+  it("ignores string-content and non-assistant messages", () => {
+    const messages = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "done" },
+    ] as unknown as ModelMessage[];
+    expect(sanitizeResponseMessages(messages)).toEqual(messages);
+  });
+});
 
 describe("convertHistory", () => {
   it("should return empty array for empty history", () => {

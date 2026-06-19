@@ -23,6 +23,30 @@ import type { CanonicalMessage } from "./types.js";
  *   { role: "assistant", content: [{ type: "text", text: "..." }, { type: "tool-call", input, ... }] }
  *   { role: "tool", content: [{ type: "tool-result", output: { type: "text", value }, ... }] }
  */
+/**
+ * Sanitize the SDK's own response messages before re-pushing them into the next iteration's
+ * prompt. The runner re-pushes them VERBATIM to preserve provider metadata for multi-turn
+ * continuity (Gemini's `thoughtSignature`, Anthropic thinking blocks). But Gemini 3.x can emit
+ * a `reasoning` or `text` part whose payload is ONLY the signature (in `providerOptions`) with
+ * no `text` — and AI SDK v5's `modelMessageSchema` requires `text: string` on both — so
+ * re-sending it throws "messages must be a ModelMessage[]" and aborts the run mid-loop. Coerce
+ * a missing / non-string `text` to "" on reasoning and text parts — which preserves
+ * `providerOptions`/`thoughtSignature` (so Gemini multi-turn keeps working) while satisfying
+ * validation. Mutates in place (these messages are about to be appended and re-sent; the SDK
+ * returns them as structuredClone copies, so they are safe to mutate) and returns the array.
+ */
+export function sanitizeResponseMessages(messages: ModelMessage[]): ModelMessage[] {
+  for (const m of messages) {
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    for (const part of m.content as Array<{ type?: string; text?: unknown }>) {
+      if ((part?.type === "reasoning" || part?.type === "text") && typeof part.text !== "string") {
+        part.text = "";
+      }
+    }
+  }
+  return messages;
+}
+
 export function convertHistory(history: CanonicalMessage[]): ModelMessage[] {
   const messages: ModelMessage[] = [];
 
