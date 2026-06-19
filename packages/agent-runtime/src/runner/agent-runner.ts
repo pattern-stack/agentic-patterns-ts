@@ -20,7 +20,7 @@
  */
 
 import type { ToolSchema } from "@agentic-patterns/core";
-import type { JSONValue, LanguageModelV2 } from "@ai-sdk/provider";
+import type { LanguageModelV2 } from "@ai-sdk/provider";
 import { type ModelMessage, type ToolSet, generateId, generateText, streamText, tool } from "ai";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
@@ -30,7 +30,7 @@ import {
   constantModelResolver,
   isModelResolver,
 } from "../providers/model-resolver.js";
-import { convertHistory, sanitizeResponseMessages } from "./message-utils.js";
+import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
 import type { AgentLike, RunOptions, RunResult, RunnerProtocol, ToolExecutor } from "./types.js";
 
 // Re-export AgentLike here so existing consumers importing from "./agent-runner"
@@ -464,7 +464,7 @@ export class AgentRunner implements RunnerProtocol {
           type: "tool-result" as const,
           toolCallId: tr.toolCallId,
           toolName: tr.toolName,
-          output: { type: "json" as const, value: tr.result as JSONValue },
+          output: { type: "json" as const, value: toJsonValue(tr.result) },
         })),
       });
 
@@ -924,7 +924,7 @@ export class AgentRunner implements RunnerProtocol {
           type: "tool-result" as const,
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
-          output: { type: "json" as const, value: tc.result as JSONValue },
+          output: { type: "json" as const, value: toJsonValue(tc.result) },
         })),
       });
 

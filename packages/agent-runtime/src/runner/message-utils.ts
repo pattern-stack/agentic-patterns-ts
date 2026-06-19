@@ -4,8 +4,34 @@
  * Ported from Python: _convert_history_to_messages() in runners/agent.py
  */
 
+import type { JSONValue } from "@ai-sdk/provider";
 import type { ModelMessage } from "ai";
 import type { CanonicalMessage } from "./types.js";
+
+/**
+ * Coerce an arbitrary tool result into a valid AI SDK v5 JSON value before it is
+ * embedded in a `tool-result` part's `output: { type: "json", value }`. The SDK
+ * validates that value against `jsonValueSchema`, which rejects `undefined`,
+ * non-finite numbers (`NaN`/`Infinity`), `bigint`, and functions — none of which
+ * are JSON. A tool returning a row with an absent field (e.g. `occurred_at:
+ * undefined`) would otherwise abort the whole run mid-loop with "messages must be
+ * a ModelMessage[]". Round-trip through JSON — dropping `undefined` keys, nulling
+ * non-finite numbers, stringifying `bigint` — to guarantee a conforming value.
+ * (`Date` is handled by its own `toJSON`.) Falls back to a string on circular /
+ * otherwise non-serializable input.
+ */
+export function toJsonValue(value: unknown): JSONValue {
+  try {
+    const json = JSON.stringify(value, (_k, v) => {
+      if (typeof v === "bigint") return v.toString();
+      if (typeof v === "number" && !Number.isFinite(v)) return null;
+      return v;
+    });
+    return (json === undefined ? null : JSON.parse(json)) as JSONValue;
+  } catch {
+    return String(value);
+  }
+}
 
 /**
  * Convert canonical internal message format to Vercel AI SDK ModelMessage[].

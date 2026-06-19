@@ -4,7 +4,7 @@
 
 import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
-import { convertHistory, sanitizeResponseMessages } from "../message-utils.js";
+import { convertHistory, sanitizeResponseMessages, toJsonValue } from "../message-utils.js";
 import type { CanonicalMessage } from "../types.js";
 
 describe("sanitizeResponseMessages", () => {
@@ -193,5 +193,60 @@ describe("convertHistory", () => {
     expect(result[1]!.role).toBe("assistant");
     expect(result[2]!.role).toBe("tool");
     expect(result[3]!.role).toBe("assistant");
+  });
+});
+
+describe("toJsonValue", () => {
+  // Asserts no non-JSON value (undefined / non-finite number / bigint / function)
+  // survives anywhere in the tree — that is exactly what v5's jsonValueSchema rejects.
+  const hasNonJson = (v: unknown): boolean => {
+    if (v === undefined) return true;
+    if (typeof v === "number" && !Number.isFinite(v)) return true;
+    if (typeof v === "bigint" || typeof v === "function") return true;
+    if (Array.isArray(v)) return v.some(hasNonJson);
+    if (v && typeof v === "object") return Object.values(v).some(hasNonJson);
+    return false;
+  };
+
+  it("strips `undefined` fields from a tool result (the inspect-row regression)", () => {
+    // Mirrors the captured failure: inspect returns rows with absent fields left as
+    // undefined, which aborted the run with "messages must be a ModelMessage[]".
+    const toolResult = {
+      items: [
+        { id: "r1", normalized_text: "wants SSO", type: undefined, occurred_at: undefined },
+        { id: "r2", normalized_text: "wants punch-out", type: undefined, occurred_at: undefined },
+      ],
+    };
+    const cleaned = toJsonValue(toolResult);
+    expect(hasNonJson(cleaned)).toBe(false);
+    expect(cleaned).toEqual({
+      items: [
+        { id: "r1", normalized_text: "wants SSO" },
+        { id: "r2", normalized_text: "wants punch-out" },
+      ],
+    });
+  });
+
+  it("nulls non-finite numbers, stringifies bigint, and drops functions", () => {
+    const cleaned = toJsonValue({
+      nan: Number.NaN,
+      inf: Number.POSITIVE_INFINITY,
+      big: 10n,
+      fn: () => 1,
+      ok: 42,
+    }) as Record<string, unknown>;
+    expect(hasNonJson(cleaned)).toBe(false);
+    expect(cleaned.nan).toBeNull();
+    expect(cleaned.inf).toBeNull();
+    expect(cleaned.big).toBe("10");
+    expect("fn" in cleaned).toBe(false);
+    expect(cleaned.ok).toBe(42);
+  });
+
+  it("preserves valid JSON unchanged and survives circular input", () => {
+    expect(toJsonValue({ a: 1, b: [true, "x", null] })).toEqual({ a: 1, b: [true, "x", null] });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(typeof toJsonValue(circular)).toBe("string");
   });
 });
