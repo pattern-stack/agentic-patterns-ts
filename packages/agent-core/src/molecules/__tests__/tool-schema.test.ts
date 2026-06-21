@@ -13,6 +13,21 @@ describe("ToolSchema", () => {
       expect(schema.parameters).toHaveProperty("type", "object");
       expect(schema.parameters).toHaveProperty("properties");
     });
+
+    it("carries a returns schema when one is provided", () => {
+      const params = z.object({ q: z.string() });
+      const returns = z.array(z.object({ id: z.string(), title: z.string() }));
+      const schema = ToolSchema.fromZod("search", "Search", params, returns);
+
+      expect(schema.returns).toBeDefined();
+      expect(schema.returns).toHaveProperty("type", "array");
+      expect((schema.returns as { items?: unknown }).items).toBeDefined();
+    });
+
+    it("leaves returns undefined when no returns schema is given", () => {
+      const schema = ToolSchema.fromZod("search", "Search", z.object({ q: z.string() }));
+      expect(schema.returns).toBeUndefined();
+    });
   });
 
   describe("fromOpenAI", () => {
@@ -55,6 +70,15 @@ describe("ToolSchema", () => {
         description: "Test tool",
         parameters: { type: "object", properties: {} },
       });
+    });
+
+    it("includes returns only when declared", () => {
+      const ret = { type: "object", properties: { ok: { type: "boolean" } } };
+      const withReturns = new ToolSchema("t", "T", { type: "object" }, undefined, ret);
+      expect(withReturns.toDict()).toHaveProperty("returns", ret);
+
+      const noReturns = new ToolSchema("t", "T", { type: "object" });
+      expect(noReturns.toDict()).not.toHaveProperty("returns");
     });
   });
 

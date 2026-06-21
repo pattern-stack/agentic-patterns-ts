@@ -42,6 +42,8 @@ export class ToolSchema {
   readonly name: string;
   readonly description: string;
   readonly parameters: Record<string, unknown>;
+  /** Optional output schema (JSON schema) — the shape `execute` resolves to. */
+  readonly returns?: Record<string, unknown>;
 
   /** Optional: original Zod schema, kept for toVercelAI(). */
   private readonly _zodSchema?: ZodTypeAny;
@@ -51,20 +53,35 @@ export class ToolSchema {
     description: string,
     parameters: Record<string, unknown>,
     zodSchema?: ZodTypeAny,
+    returns?: Record<string, unknown>,
   ) {
     this.name = name;
     this.description = description;
     this.parameters = parameters;
     this._zodSchema = zodSchema;
+    this.returns = returns;
     Object.freeze(this);
   }
 
-  /** Create ToolSchema from a Zod schema. */
-  static fromZod(name: string, description: string, schema: ZodTypeAny): ToolSchema {
+  /**
+   * Create ToolSchema from a Zod parameters schema, and optionally a Zod
+   * returns schema (the tool's declared output shape — see ToolDefinition.returns).
+   */
+  static fromZod(
+    name: string,
+    description: string,
+    schema: ZodTypeAny,
+    returnsSchema?: ZodTypeAny,
+  ): ToolSchema {
     const jsonSchema = zodToJsonSchema(schema, { target: "openApi3" }) as Record<string, unknown>;
     // Remove $schema and additionalProperties top-level noise
     jsonSchema.$schema = undefined;
-    return new ToolSchema(name, description, jsonSchema, schema);
+    let returns: Record<string, unknown> | undefined;
+    if (returnsSchema) {
+      returns = zodToJsonSchema(returnsSchema, { target: "openApi3" }) as Record<string, unknown>;
+      returns.$schema = undefined;
+    }
+    return new ToolSchema(name, description, jsonSchema, schema, returns);
   }
 
   /** Create ToolSchema from OpenAI function calling format. */
@@ -79,11 +96,18 @@ export class ToolSchema {
   }
 
   /** Convert to a plain dict representation. */
-  toDict(): { name: string; description: string; parameters: Record<string, unknown> } {
+  toDict(): {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+    returns?: Record<string, unknown>;
+  } {
     return {
       name: this.name,
       description: this.description,
       parameters: this.parameters,
+      // only present when declared — keeps the dict byte-identical for params-only tools
+      ...(this.returns !== undefined ? { returns: this.returns } : {}),
     };
   }
 
