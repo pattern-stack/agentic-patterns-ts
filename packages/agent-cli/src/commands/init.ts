@@ -182,6 +182,13 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
       copyDir(pluginSrc.hooksDir, path.join(targetDir, "hooks"));
       created.push(".claude-plugin/", "hooks/");
 
+      // Ship the plugin's skills into the project's .claude/skills/ so Claude
+      // Code picks them up for sessions started here (e.g. build-on-agentic-patterns).
+      if (pluginSrc.skillsDir && fs.existsSync(pluginSrc.skillsDir)) {
+        copyDir(pluginSrc.skillsDir, path.join(targetDir, ".claude", "skills"));
+        created.push(".claude/skills/");
+      }
+
       // Mirror hooks.json into .claude/settings.json so Claude Code activates
       // them immediately for sessions started in this directory. If the user
       // already has a settings.json, merge our hooks into it non-destructively
@@ -573,7 +580,11 @@ function mergeHookSettings(settingsPath: string, ours: HookSettings): MergeOutco
  *      when the CLI is installed via `npm install -g @agentic-patterns/cli`)
  *   2. The monorepo root (dogfood path — walks up from the running script)
  */
-function resolvePluginSource(): { pluginDir: string; hooksDir: string } | null {
+function resolvePluginSource(): {
+  pluginDir: string;
+  hooksDir: string;
+  skillsDir?: string;
+} | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
 
   // Candidate 1 (priority): bundled plugin-template inside the CLI package.
@@ -587,14 +598,18 @@ function resolvePluginSource(): { pluginDir: string; hooksDir: string } | null {
     const pluginDir = path.join(base, ".claude-plugin");
     const hooksDir = path.join(base, "hooks");
     if (fs.existsSync(pluginDir) && fs.existsSync(hooksDir)) {
-      return { pluginDir, hooksDir };
+      return { pluginDir, hooksDir, skillsDir: path.join(base, "skills") };
     }
   }
 
   // Candidate 2: monorepo root (for local `bun --filter` / tsx runs).
   const root = resolveMonorepoRoot();
   if (root) {
-    return { pluginDir: path.join(root, ".claude-plugin"), hooksDir: path.join(root, "hooks") };
+    return {
+      pluginDir: path.join(root, ".claude-plugin"),
+      hooksDir: path.join(root, "hooks"),
+      skillsDir: path.join(root, "skills"),
+    };
   }
   return null;
 }
