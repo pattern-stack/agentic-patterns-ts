@@ -308,6 +308,31 @@
   color: var(--err-ink);
 }
 
+/* copy chip — pinned to the top-right of a code surface, revealed on hover */
+.chat-code > .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--fill);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font: 600 11px var(--font-sans);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast, 120ms) var(--ease-out, ease);
+}
+.chat-code:hover > .copy-btn,
+.chat-code > .copy-btn:focus-visible {
+  opacity: 0.85;
+}
+.chat-code > .copy-btn:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+  opacity: 1;
+}
+
 /* ── error part ────────────────────────────────────────────────────────────*/
 .chat-error {
   border: 1px solid color-mix(in oklch, var(--err) 45%, var(--line));
