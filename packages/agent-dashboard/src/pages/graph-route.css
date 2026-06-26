@@ -1,0 +1,106 @@
+/*
+ * Scoped fallback theme for the /graph route ONLY -- Phase A.
+ *
+ * The ported constellation renderer + constellation.css + the T token wrapper
+ * read the swe-brain cockpit CSS-var layer: --paper --ink --line --accent
+ * --ok --err --space-N --fz-N --radius-N --shadow-N --motion-mid --ease-out.
+ * The dashboard globals.css uses a DIFFERENT namespace, so without these vars
+ * the graph would lay out but fall to transparent, and the
+ * "var(--motion-mid) var(--ease-out)" transitions + pulses would no-op on an
+ * invalid timing var. This block supplies a minimal DARK palette + the
+ * derivation layer so the constellation tones and animates. The global theming
+ * decision is deferred to the later theming phase per the playbook section 5.
+ *
+ * Dark-only to match the dashboard dark shell. Scoped to .graph-route.
+ */
+.graph-route {
+  /* fonts */
+  --font-sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-hand: "Kalam", cursive;
+
+  /* geometry / density / spacing / type / motion (theme-independent) */
+  --radius-xs: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+  --row-height-cozy: 38px;
+  --row-pad-x: 12px;
+  --row-pad-y: 7px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --fz-micro: 10.5px;
+  --fz-tiny: 11px;
+  --fz-small: 12px;
+  --fz-base: 12.5px;
+  --fz-md: 13px;
+  --fz-lg: 14px;
+  --fz-xl: 17px;
+  --fz-xxl: 19px;
+  --fz-hero: 22px;
+  --lh-tight: 1.2;
+  --lh-base: 1.45;
+  --lh-loose: 1.6;
+  --motion-fast: 120ms;
+  --motion-mid: 200ms;
+  --motion-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* DARK (blue) palette — hsl triples consumed via hsl(var(--*)) */
+  --background: 222 28% 9%;
+  --foreground: 216 24% 90%;
+  --card: 222 24% 12%;
+  --secondary: 222 18% 17%;
+  --muted: 222 18% 15%;
+  --muted-foreground: 216 12% 60%;
+  --accent: 240 62% 66%;
+  --border: 222 14% 24%;
+  --destructive: 4 70% 62%;
+  --status-completed: 168 44% 52%;
+
+  /* derivation layer — color-mix over the palette triples */
+  --paper: hsl(var(--card));
+  --ink: hsl(var(--foreground));
+  --ink-2: color-mix(in oklch, hsl(var(--foreground)) 72%, hsl(var(--muted-foreground)));
+  --mute: hsl(var(--muted-foreground));
+  --line: hsl(var(--border));
+  --line-2: color-mix(in oklch, hsl(var(--border)) 55%, hsl(var(--card)));
+  --fill: hsl(var(--secondary));
+  --fill-2: hsl(var(--muted));
+  --accent-soft: color-mix(in oklch, hsl(var(--accent)) 18%, hsl(var(--card)));
+  --accent-ink: color-mix(in oklch, hsl(var(--accent)) 64%, hsl(var(--foreground)));
+  --ok: hsl(var(--status-completed));
+  --ok-soft: color-mix(in oklch, hsl(var(--status-completed)) 18%, hsl(var(--card)));
+  --ok-ink: color-mix(in oklch, hsl(var(--status-completed)) 60%, hsl(var(--foreground)));
+  --err: hsl(var(--destructive));
+  --err-soft: color-mix(in srgb, hsl(var(--destructive)) 16%, hsl(var(--card)));
+  --err-ink: color-mix(in oklch, hsl(var(--destructive)) 60%, hsl(var(--foreground)));
+  --warn: oklch(0.74 0.14 75);
+  --warn-soft: color-mix(in oklch, oklch(0.74 0.14 75) 14%, hsl(var(--card)));
+  --warn-ink: color-mix(in oklch, oklch(0.74 0.14 75) 65%, hsl(var(--foreground)));
+
+  /* shadows */
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --chalk-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* the HUD live dot + node pulse reuse this keyframe (cockpit globals.css) */
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

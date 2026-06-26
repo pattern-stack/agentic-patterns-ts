@@ -1,0 +1,75 @@
+/* Constellation · Live Run — motion only. Colours come from inline CSS-var
+   styles so every node/edge re-tones per theme; this file holds the keyframes +
+   transforms the design language needs (pulse ring, marching ants, the energy
+   particle, the just-in-time tool reveal). No palette here. */
+
+/* active node — expanding accent pulse ring (var set inline per node) */
+@keyframes constPulseRing {
+  0% {
+    box-shadow: 0 0 0 0 var(--const-ring);
+  }
+  70% {
+    box-shadow: 0 0 0 12px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.const-disc--active {
+  animation: constPulseRing 1.7s var(--ease-out) infinite;
+}
+
+/* active edge — marching ants (the data-visibly-flows wire) */
+@keyframes constMarch {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.const-edge--active {
+  animation: constMarch 0.65s linear infinite;
+}
+
+/* nodes/edges share a single eased transition for state + reveal changes */
+.const-disc,
+.const-tool-wrap {
+  transition:
+    opacity var(--motion-mid) var(--ease-out),
+    transform var(--motion-mid) var(--ease-out),
+    border-color var(--motion-mid) var(--ease-out),
+    background var(--motion-mid) var(--ease-out),
+    box-shadow var(--motion-mid) var(--ease-out);
+}
+
+/* the result chip springs in when a tool node is active */
+@keyframes constChipIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.const-chip {
+  animation: constChipIn var(--motion-mid) var(--ease-out);
+}
+
+/* React Flow chrome: let our themed canvas show through. */
+.const-flow .react-flow__attribution {
+  display: none;
+}
+.const-flow .react-flow__handle {
+  opacity: 0;
+  pointer-events: none;
+  min-width: 1px;
+  min-height: 1px;
+  width: 1px;
+  height: 1px;
+  border: 0;
+}
+.const-flow .react-flow__node.selected,
+.const-flow .react-flow__node:focus,
+.const-flow .react-flow__node:focus-visible {
+  outline: none;
+}
