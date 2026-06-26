@@ -10,7 +10,7 @@
  * so this stays correct whichever shape the builder emitted. Positions are by
  * disc CENTRE; React Flow positions by top-left, so we offset by half the disc.
  */
-import { type ConstNode, type Constellation, DISC } from './constellation-model';
+import { type ConstNode, type Constellation, DISC } from "./constellation-model";
 
 const AGENT_GAP = 280; // horizontal pitch between chained agents
 const UP = -Math.PI / 2; // 12 o'clock (screen y grows downward)
@@ -33,7 +33,7 @@ const agIndex = (id: string): number => {
 export function layoutChain(graph: Constellation): Constellation {
   const center = new Map<string, { x: number; y: number }>();
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const childrenOf = (id: string, kind: 'tool' | 'tether'): string[] =>
+  const childrenOf = (id: string, kind: "tool" | "tether"): string[] =>
     graph.edges.filter((e) => e.source === id && e.data?.kind === kind).map((e) => e.target);
 
   /** Fan `ids` symmetrically around (cx,cy), centred on 12 o'clock, at `radius`. */
@@ -48,25 +48,32 @@ export function layoutChain(graph: Constellation): Constellation {
 
   // agents along the row, in chain order
   const agents = graph.nodes
-    .filter((n) => n.data.kind === 'agent' || n.data.kind === 'subagent')
+    .filter((n) => n.data.kind === "agent" || n.data.kind === "subagent")
     .sort((a, b) => agIndex(a.id) - agIndex(b.id));
   agents.forEach((a, i) => center.set(a.id, { x: i * AGENT_GAP, y: 0 }));
 
   for (const a of agents) {
     const c = center.get(a.id);
     if (!c) continue;
-    const capIds = childrenOf(a.id, 'tether').filter((id) => byId.get(id)?.data.kind === 'capability');
+    const capIds = childrenOf(a.id, "tether").filter(
+      (id) => byId.get(id)?.data.kind === "capability",
+    );
     if (capIds.length > 0) {
       // grouped: capabilities orbit the agent, then each capability's tools orbit it.
       fan(c.x, c.y, capIds, DISC[a.data.kind] / 2 + DISC.capability / 2 + CAP_GAP);
       for (const capId of capIds) {
         const cc = center.get(capId);
         if (!cc) continue;
-        fan(cc.x, cc.y, childrenOf(capId, 'tool'), DISC.capability / 2 + DISC.tool / 2 + CAP_TOOL_GAP);
+        fan(
+          cc.x,
+          cc.y,
+          childrenOf(capId, "tool"),
+          DISC.capability / 2 + DISC.tool / 2 + CAP_TOOL_GAP,
+        );
       }
     } else {
       // collapsed: tools orbit the agent directly.
-      fan(c.x, c.y, childrenOf(a.id, 'tool'), DISC[a.data.kind] / 2 + DISC.tool / 2 + TOOL_GAP);
+      fan(c.x, c.y, childrenOf(a.id, "tool"), DISC[a.data.kind] / 2 + DISC.tool / 2 + TOOL_GAP);
     }
   }
 

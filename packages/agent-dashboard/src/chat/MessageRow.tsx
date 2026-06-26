@@ -4,9 +4,9 @@
  * text part, and an empty still-streaming assistant message shows the waiting
  * indicator instead of an empty bubble.
  */
-import { Avatar, Dots, RelativeTime } from './atoms';
-import type { ChatMessage } from './model';
-import { PartView } from './parts';
+import { Avatar, Dots, RelativeTime } from "./atoms";
+import type { ChatMessage } from "./model";
+import { PartView } from "./parts";
 
 function MessageFooter({ message }: { message: ChatMessage }) {
   const bits: string[] = [];
@@ -14,10 +14,10 @@ function MessageFooter({ message }: { message: ChatMessage }) {
   if (message.inputTokens != null) bits.push(`${message.inputTokens.toLocaleString()} in`);
   if (message.outputTokens != null) bits.push(`${message.outputTokens.toLocaleString()} out`);
   if (!bits.length) return null;
-  return <div className="chat-footer">{bits.join(' · ')}</div>;
+  return <div className="chat-footer">{bits.join(" · ")}</div>;
 }
 
-export function WaitingIndicator({ label = 'thinking' }: { label?: string }) {
+export function WaitingIndicator({ label = "thinking" }: { label?: string }) {
   return (
     <div className="chat-waiting">
       <Dots />
@@ -28,7 +28,7 @@ export function WaitingIndicator({ label = 'thinking' }: { label?: string }) {
 
 export function MessageRow({
   message,
-  assistantName = 'agent',
+  assistantName = "agent",
   showAttribution = true,
 }: {
   message: ChatMessage;
@@ -38,7 +38,7 @@ export function MessageRow({
   const { role, parts, streaming } = message;
   // index of the last text part — the only one that carries the live cursor.
   const lastTextIdx = (() => {
-    for (let i = parts.length - 1; i >= 0; i--) if (parts[i]?.kind === 'text') return i;
+    for (let i = parts.length - 1; i >= 0; i--) if (parts[i]?.kind === "text") return i;
     return -1;
   })();
   // An assistant turn that has started streaming but produced no renderable text
@@ -51,7 +51,7 @@ export function MessageRow({
       <div className="chat-body">
         {showAttribution && (
           <div className="chat-attr">
-            <span className="name">{role === 'assistant' ? assistantName : 'You'}</span>
+            <span className="name">{role === "assistant" ? assistantName : "You"}</span>
             <RelativeTime at={message.at} />
           </div>
         )}
@@ -59,8 +59,12 @@ export function MessageRow({
           // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only and stable by position.
           <PartView key={i} part={part} role={role} streaming={streaming && i === lastTextIdx} />
         ))}
-        {onlyToolsOrEmpty && <WaitingIndicator label={parts.some((p) => p.kind === 'tool_call') ? 'running tools' : 'thinking'} />}
-        {role === 'assistant' && !streaming && <MessageFooter message={message} />}
+        {onlyToolsOrEmpty && (
+          <WaitingIndicator
+            label={parts.some((p) => p.kind === "tool_call") ? "running tools" : "thinking"}
+          />
+        )}
+        {role === "assistant" && !streaming && <MessageFooter message={message} />}
       </div>
     </div>
   );

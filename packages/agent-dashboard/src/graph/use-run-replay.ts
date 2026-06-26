@@ -8,9 +8,9 @@
  * `runKey` identifies the run: when it changes the cursor resets to idle. Growing
  * `steps` within the SAME runKey (live streaming) does NOT reset.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type Constellation, type Frame, computeFrame } from './constellation-model';
-import type { TraceStep } from './types';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Constellation, type Frame, computeFrame } from "./constellation-model";
+import type { TraceStep } from "./types";
 
 /** ms between auto-advanced steps during playback. */
 const STEP_MS = 1100;
@@ -35,6 +35,7 @@ export function useRunReplay(steps: TraceStep[], graph: Constellation, runKey: s
 
   // New run → back to idle. Keyed on runKey (not `steps`) so live appends within
   // one run don't rewind the cursor.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runKey is the intentional reset trigger — the body reads no captured value (only stable setters), so biome sees runKey as "unnecessary", but it must stay to re-run the reset on each new run.
   useEffect(() => {
     setCursor(-1);
     setPlaying(false);

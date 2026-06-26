@@ -12,15 +12,15 @@
  * Read-only surfaces (replaying a persisted run) simply omit `onSend` and pass
  * already-complete messages (no `streaming` flag).
  */
-import { useEffect, useRef, useState } from 'react';
-import './chat.css';
-import { ChatComposer } from './ChatComposer';
-import { MessageRow } from './MessageRow';
-import type { ChatMessage } from './model';
+import { useEffect, useRef, useState } from "react";
+import "./chat.css";
+import { ChatComposer } from "./ChatComposer";
+import { MessageRow } from "./MessageRow";
+import type { ChatMessage } from "./model";
 
 export interface ChatPanelProps {
   messages: ChatMessage[];
-  size?: 'full' | 'compact';
+  size?: "full" | "compact";
   /** Fill a height-bounded parent with an inner scroll (docks/panels). Default
    *  grows with content and lets the page scroll (in-page consoles). */
   fill?: boolean;
@@ -38,10 +38,10 @@ const NEAR_BOTTOM_PX = 48;
 
 export function ChatPanel({
   messages,
-  size = 'full',
+  size = "full",
   fill = false,
-  assistantName = 'agent',
-  emptyLabel = 'No messages yet.',
+  assistantName = "agent",
+  emptyLabel = "No messages yet.",
   onSend,
   onAbort,
   streaming,
@@ -73,7 +73,7 @@ export function ChatPanel({
   };
 
   return (
-    <div className={`chat-root ${size}${fill ? ' fill' : ''}`} style={{ position: 'relative' }}>
+    <div className={`chat-root ${size}${fill ? " fill" : ""}`} style={{ position: "relative" }}>
       <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
         {messages.length === 0 ? (
           <div className="chat-empty">{emptyLabel}</div>
@@ -87,7 +87,13 @@ export function ChatPanel({
         </button>
       )}
       {onSend && (
-        <ChatComposer onSend={onSend} onAbort={onAbort} streaming={streaming} disabled={disabled} placeholder={placeholder} />
+        <ChatComposer
+          onSend={onSend}
+          onAbort={onAbort}
+          streaming={streaming}
+          disabled={disabled}
+          placeholder={placeholder}
+        />
       )}
     </div>
   );

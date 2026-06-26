@@ -3,15 +3,15 @@
  * (Shift+Enter = newline), Escape to abort an in-flight stream. Send/Stop swap
  * on `streaming`. Optional; ChatPanel renders it only when `onSend` is provided.
  */
-import { type KeyboardEvent, useRef, useState } from 'react';
-import { Button } from '../ui/atoms';
+import { type KeyboardEvent, useRef, useState } from "react";
+import { Button } from "../ui/atoms";
 
 export function ChatComposer({
   onSend,
   onAbort,
   streaming,
   disabled,
-  placeholder = 'Send a message…',
+  placeholder = "Send a message…",
 }: {
   onSend: (text: string) => void;
   onAbort?: () => void;
@@ -19,13 +19,13 @@ export function ChatComposer({
   disabled?: boolean;
   placeholder?: string;
 }) {
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const grow = () => {
     const el = ref.current;
     if (!el) return;
-    el.style.height = 'auto';
+    el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   };
 
@@ -33,15 +33,15 @@ export function ChatComposer({
     const t = value.trim();
     if (!t || disabled || streaming) return;
     onSend(t);
-    setValue('');
-    if (ref.current) ref.current.style.height = 'auto';
+    setValue("");
+    if (ref.current) ref.current.style.height = "auto";
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit();
-    } else if (e.key === 'Escape' && streaming && onAbort) {
+    } else if (e.key === "Escape" && streaming && onAbort) {
       e.preventDefault();
       onAbort();
     }

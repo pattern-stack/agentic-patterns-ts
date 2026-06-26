@@ -190,7 +190,9 @@ function Header({
       {loadError && (
         <div style={{ fontSize: 12, color: "var(--red)" }}>Failed to load agents: {loadError}</div>
       )}
-      {chatError && <div style={{ fontSize: 12, color: "var(--red)" }}>Stream error: {chatError}</div>}
+      {chatError && (
+        <div style={{ fontSize: 12, color: "var(--red)" }}>Stream error: {chatError}</div>
+      )}
     </div>
   );
 }

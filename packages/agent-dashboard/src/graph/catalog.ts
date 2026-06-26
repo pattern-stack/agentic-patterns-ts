@@ -4,20 +4,20 @@
  * capability→tool catalog for the retrieval agent lives in composition.ts; this
  * file only owns the cross-cutting blast-radius display language.
  */
-import type { BlastRadius, CapabilityMeta } from './types';
+import type { BlastRadius, CapabilityMeta } from "./types";
 
 /** read = no tint · write = green (Emit hue 155) · external = amber (Generate hue 75). */
 export const BLAST_COLOR: Record<BlastRadius, string> = {
-  read: 'var(--mute)',
-  write: 'oklch(0.6 0.13 155)',
-  external: 'oklch(0.66 0.15 75)',
+  read: "var(--mute)",
+  write: "oklch(0.6 0.13 155)",
+  external: "oklch(0.66 0.15 75)",
 };
 export const BLAST_NOTE: Record<BlastRadius, string> = {
-  read: 'observes only — safe',
-  write: 'mutates your records',
-  external: 'leaves your walls',
+  read: "observes only — safe",
+  write: "mutates your records",
+  external: "leaves your walls",
 };
-export const BLAST_ORDER: BlastRadius[] = ['read', 'write', 'external'];
+export const BLAST_ORDER: BlastRadius[] = ["read", "write", "external"];
 
 /** Title-case a capability slug for a fallback label (`query-surface` → `Query Surface`). */
 export function prettifySlug(slug: string): string {
@@ -25,7 +25,7 @@ export function prettifySlug(slug: string): string {
     .split(/[-_]/)
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
+    .join(" ");
 }
 
 export type { BlastRadius, CapabilityMeta };

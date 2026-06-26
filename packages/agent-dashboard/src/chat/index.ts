@@ -7,10 +7,10 @@
  * useChat       — streaming-first driver over the framework SSE transport.
  * model         — Part / ChatMessage types + the applyParts reducer + folders.
  */
-export { ChatPanel, type ChatPanelProps } from './ChatPanel';
-export { useChat, type UseChatResult } from './useChat';
-export { MessageRow, WaitingIndicator } from './MessageRow';
-export { ChatComposer } from './ChatComposer';
+export { ChatPanel, type ChatPanelProps } from "./ChatPanel";
+export { useChat, type UseChatResult } from "./useChat";
+export { MessageRow, WaitingIndicator } from "./MessageRow";
+export { ChatComposer } from "./ChatComposer";
 export {
   type ChatMessage,
   type Part,
@@ -18,4 +18,4 @@ export {
   applyParts,
   eventsToAssistantMessage,
   textMessage,
-} from './model';
+} from "./model";

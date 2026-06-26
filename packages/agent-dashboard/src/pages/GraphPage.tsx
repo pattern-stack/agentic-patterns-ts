@@ -9,12 +9,17 @@
  * GraphPanel's chain mode. Read-only graph; no sessions, no scrubber (live).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type AgentSummary, createConversation, listAgents, streamMessage } from "../api/chat-client";
+import {
+  type AgentSummary,
+  createConversation,
+  listAgents,
+  streamMessage,
+} from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
+import { GraphPanel } from "../components/GraphPanel";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
-import { GraphPanel } from "../components/GraphPanel";
 import type { EventLite, GraphSource } from "../graph/composition";
 
 export function GraphPage() {

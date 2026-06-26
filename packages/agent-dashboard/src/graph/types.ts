@@ -7,7 +7,7 @@
  */
 
 /** side-effect class: read = neutral · write = mutates our store · external = leaves our walls. */
-export type BlastRadius = 'read' | 'write' | 'external';
+export type BlastRadius = "read" | "write" | "external";
 
 export interface CapabilityMeta {
   name: string;
@@ -34,7 +34,7 @@ export interface CapabilityRecord {
 
 /* ── run trace ──────────────────────────────────────────────────────────── */
 
-export type TraceStepKind = 'context' | 'model' | 'tool_call' | 'tool_result' | 'finish';
+export type TraceStepKind = "context" | "model" | "tool_call" | "tool_result" | "finish";
 
 export interface TraceStep {
   seq: number;

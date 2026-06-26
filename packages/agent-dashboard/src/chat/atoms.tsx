@@ -3,15 +3,15 @@
  * All token-driven (scoped chat tokens via chat.css class hooks). Kept dependency
  * free; markdown reuses the hand-rolled `md()` + `.answer .md-*` styles.
  */
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
-import { md } from '../lib/markdown';
-import type { Role } from './model';
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { md } from "../lib/markdown";
+import type { Role } from "./model";
 
 /* ── Avatar ─────────────────────────────────────────────────────────────────*/
 export function Avatar({ role }: { role: Role }) {
   return (
     <div className={`chat-avatar ${role}`} aria-hidden>
-      {role === 'assistant' ? '◆' : '›'}
+      {role === "assistant" ? "◆" : "›"}
     </div>
   );
 }
@@ -35,7 +35,7 @@ export function Dots() {
 /* ── Relative timestamp (auto-refreshing) ───────────────────────────────────*/
 function relative(at: number): string {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
-  if (s < 5) return 'now';
+  if (s < 5) return "now";
   if (s < 60) return `${s}s ago`;
   const m = Math.round(s / 60);
   if (m < 60) return `${m}m ago`;
@@ -52,7 +52,11 @@ export function RelativeTime({ at }: { at?: number }) {
   }, [at]);
   if (at == null) return null;
   return (
-    <time className="time" dateTime={new Date(at).toISOString()} title={new Date(at).toLocaleString()}>
+    <time
+      className="time"
+      dateTime={new Date(at).toISOString()}
+      title={new Date(at).toLocaleString()}
+    >
       {relative(at)}
     </time>
   );
@@ -65,7 +69,7 @@ export function RelativeTime({ at }: { at?: number }) {
 export function Markdown({ content, className }: { content: string; className?: string }) {
   return (
     <div
-      className={`answer md ${className ?? ''}`}
+      className={`answer md ${className ?? ""}`}
       // biome-ignore lint/security/noDangerouslySetInnerHtml: md() emits a controlled tag set on escaped input.
       dangerouslySetInnerHTML={{ __html: md(content) }}
     />
@@ -86,7 +90,7 @@ export function CodeBlock({
 }) {
   const style: CSSProperties | undefined = maxHeight != null ? { maxHeight } : undefined;
   return (
-    <pre className={`chat-code${danger ? ' danger' : ''}`} style={style}>
+    <pre className={`chat-code${danger ? " danger" : ""}`} style={style}>
       {copyable && <CopyChip text={text} />}
       {text}
     </pre>
@@ -95,19 +99,19 @@ export function CodeBlock({
 
 /* ── Copy chip (reuses the .copy-btn surface) ───────────────────────────────*/
 export function CopyChip({ text }: { text: string }) {
-  const [label, setLabel] = useState('copy');
+  const [label, setLabel] = useState("copy");
   const copy = async (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const t = String(text ?? '').trim();
+    const t = String(text ?? "").trim();
     if (!t) return;
     try {
       await navigator.clipboard.writeText(t);
-      setLabel('copied!');
+      setLabel("copied!");
     } catch {
-      setLabel('failed');
+      setLabel("failed");
     }
-    setTimeout(() => setLabel('copy'), 1300);
+    setTimeout(() => setLabel("copy"), 1300);
   };
   return (
     <button type="button" className="copy-btn" onClick={copy} title="Copy">
@@ -118,5 +122,5 @@ export function CopyChip({ text }: { text: string }) {
 
 /* ── tiny presentational wrapper used by parts/rows ─────────────────────────*/
 export function Stack({ children, gap = 6 }: { children: ReactNode; gap?: number }) {
-  return <div style={{ display: 'flex', flexDirection: 'column', gap }}>{children}</div>;
+  return <div style={{ display: "flex", flexDirection: "column", gap }}>{children}</div>;
 }

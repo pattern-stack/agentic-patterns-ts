@@ -141,7 +141,7 @@
 
 /* ── DARK palette — shared by system-dark (@media) + forced-dark ── */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --background: hsl(222 28% 9%);
     --foreground: hsl(216 24% 90%);
@@ -163,7 +163,7 @@
     --warn: oklch(0.74 0.14 75);
   }
 }
-:root[data-theme='dark'] {
+:root[data-theme="dark"] {
   color-scheme: dark;
   --background: hsl(222 28% 9%);
   --foreground: hsl(216 24% 90%);

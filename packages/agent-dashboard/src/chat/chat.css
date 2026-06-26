@@ -296,7 +296,7 @@
   border-radius: var(--radius-sm);
   padding: 9px 11px;
   margin: 0;
-  font: 11.5px/1.5 var(--font-mono);
+  font: 11.5px / 1.5 var(--font-mono);
   color: var(--ink-2);
   overflow-x: auto;
   white-space: pre-wrap;

@@ -12,10 +12,10 @@
  * An `AbortController` per turn distinguishes a user-pressed Stop (AbortError →
  * mark the message `aborted`) from a real transport failure (→ `error`).
  */
-import { useCallback, useRef, useState } from 'react';
-import { createConversation, streamMessage } from '../api/chat-client';
-import { toEventLike } from '../api/event-adapter';
-import { applyParts, type ChatMessage } from './model';
+import { useCallback, useRef, useState } from "react";
+import { createConversation, streamMessage } from "../api/chat-client";
+import { toEventLike } from "../api/event-adapter";
+import { type ChatMessage, applyParts } from "./model";
 
 export interface UseChatResult {
   messages: ChatMessage[];
@@ -53,8 +53,8 @@ export function useChat(agentId: string | null): UseChatResult {
       const assistantId = nextId();
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: 'user', parts: [{ kind: 'text', content: q }], at },
-        { id: assistantId, role: 'assistant', parts: [], at: Date.now(), streaming: true },
+        { id: nextId(), role: "user", parts: [{ kind: "text", content: q }], at },
+        { id: assistantId, role: "assistant", parts: [], at: Date.now(), streaming: true },
       ]);
       setStreaming(true);
       const ctrl = new AbortController();
@@ -80,9 +80,9 @@ export function useChat(agentId: string | null): UseChatResult {
         patch(assistantId, (m) => ({ ...m, streaming: false }));
       } catch (e) {
         // AbortError (user pressed Stop) is expected — mark aborted, not errored.
-        const aborted = e instanceof DOMException && e.name === 'AbortError';
+        const aborted = e instanceof DOMException && e.name === "AbortError";
         patch(assistantId, (m) => ({ ...m, streaming: false, aborted }));
-        if (!aborted) setError(e instanceof Error ? e.message : 'stream dropped');
+        if (!aborted) setError(e instanceof Error ? e.message : "stream dropped");
       } finally {
         setStreaming(false);
         abortRef.current = null;
