@@ -1,8 +1,6 @@
+// Convention discovery: export a bare Agent under any name (`rootAgent` is the
+// conventional one) and the CLI infers id `writing-coach` + name "Writing Coach"
+// from the folder. No registration wrapper needed.
 import { buildWritingCoachAgent } from "../../packages/agent-runtime/dist/index.js";
 
-export default () => ({
-  id: "writing-coach",
-  name: "Writing Coach",
-  description: "Actionable feedback on clarity, structure, and style — no tools, pure reasoning",
-  agent: buildWritingCoachAgent(),
-});
+export const rootAgent = buildWritingCoachAgent();

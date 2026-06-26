@@ -2,6 +2,13 @@
 
 Practical guide for building and testing agents on top of this monorepo.
 
+> **Active initiative — Dashboard rebuild (constellation cockpit).** We're porting a
+> richer chat/agent-graph UI into `@agentic-patterns/dashboard`. Start here:
+> [`docs/migration/cockpit-port.md`](docs/migration/cockpit-port.md) (cold-start playbook —
+> contracts, source→target map, step checklist) and
+> [`docs/adr/0001-constellation-dashboard.md`](docs/adr/0001-constellation-dashboard.md)
+> (the why). Source UI lives in `~/Projects/retrieval-agent/src/cli/cockpit-ui/`.
+
 ## Dev loop (one command)
 
 ```bash

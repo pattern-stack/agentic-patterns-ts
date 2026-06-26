@@ -1,0 +1,213 @@
+/*
+ * Dashboard theme — ported from the cockpit "Blue" family (swe-brain), made
+ * GLOBAL. Two-layer token system:
+ *   1. theme-INDEPENDENT primitives — fonts, geometry, density, spacing, type
+ *      ramp, motion.
+ *   2. a base COLOR palette + a color-mix DERIVATION layer
+ *      (--paper/--ink/--line/--ok/--err/--accent-soft/…). The derivation lives
+ *      in :root and references the base palette tokens, so a palette swap in the
+ *      dark/light blocks re-skins everything.
+ *
+ * NOTE on representation: the cockpit stored its palette as bare hsl-triples
+ * (used via `hsl(var(--card))`). The dashboard admin surface consumes the same
+ * token NAMES directly as colors (`var(--card)`, `var(--border)`, …). To let
+ * both consumers share one global namespace, the base palette here holds full
+ * COLOR values and the derivation references them with `var()` (not
+ * `hsl(var())`). The hover/selection/focus triples stay as triples because the
+ * typed `T.state` accessor still wraps them in `hsl()`.
+ *
+ * Modes: no [data-theme] attribute → follows the OS (system). [data-theme="dark"]
+ * / [data-theme="light"] force the palette. The dashboard defaults the mode to
+ * DARK (see ui/theme-mode.ts + the before-paint script in index.html), so the
+ * default look is dark.
+ *
+ * An ALIAS BRIDGE at the bottom of :root maps the dashboard's legacy token names
+ * (--bg-*, --fg-*, --green/--red/--yellow/--purple, --accent-emerald…) onto the
+ * cockpit tokens, so every admin page adopts this palette with no per-file edit.
+ */
+:root {
+  color-scheme: light;
+
+  /* ── Fonts ────────────────────────────────────────── */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-hand: "Kalam", "Caveat", cursive;
+
+  /* ── Geometry / density / spacing / type / motion (theme-independent) ── */
+  --radius-xs: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+  --row-height: 30px;
+  --row-height-cozy: 38px;
+  --row-pad-x: 12px;
+  --row-pad-y: 7px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --fz-micro: 10.5px;
+  --fz-tiny: 11px;
+  --fz-small: 12px;
+  --fz-base: 12.5px;
+  --fz-md: 13px;
+  --fz-lg: 14px;
+  --fz-xl: 17px;
+  --fz-xxl: 19px;
+  --fz-hero: 22px;
+  --lh-tight: 1.2;
+  --lh-base: 1.45;
+  --lh-loose: 1.6;
+  --motion-fast: 120ms;
+  --motion-mid: 200ms;
+  --motion-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ── LIGHT base palette — full colors ─────────────────────────────────── */
+  --background: hsl(218 30% 98%);
+  --foreground: hsl(222 22% 18%);
+  --card: hsl(216 36% 99%);
+  --secondary: hsl(216 24% 94%);
+  --accent: hsl(240 58% 56%);
+  --muted: hsl(216 28% 96%);
+  --muted-foreground: hsl(220 12% 46%);
+  --border: hsl(216 20% 86%);
+  --destructive: hsl(4 65% 52%);
+  --status-completed: hsl(168 42% 38%);
+
+  /* hover / selection / focus stay as hsl-triples (T.state wraps in hsl()) */
+  --hover-bg: 216 24% 94%;
+  --row-selected-bg: 240 55% 94%;
+  --focus-ring: 222 22% 22%;
+
+  --shadow-1: 0 1px 0 rgba(30, 34, 60, 0.06);
+  --shadow-2: 0 4px 14px rgba(30, 34, 60, 0.07), 0 1px 0 rgba(30, 34, 60, 0.05);
+  --shadow-3: 0 14px 36px rgba(30, 34, 60, 0.11), 0 2px 4px rgba(30, 34, 60, 0.05);
+  --chalk-inset: inset 0 -1px 0 rgba(30, 34, 60, 0.06);
+
+  /* warn → spec amber (re-resolves per mode, see dark block) */
+  --warn: oklch(0.68 0.13 75);
+
+  /* ── Derivation layer — color-mix over the base palette (re-resolves per
+       mode because it references --card/--accent/… overridden below). ── */
+  --paper: var(--card);
+  --ink: var(--foreground);
+  --ink-2: color-mix(in oklch, var(--foreground) 72%, var(--muted-foreground));
+  --ink-3: color-mix(in oklch, var(--muted-foreground) 70%, var(--card));
+  --mute: var(--muted-foreground);
+  --line: var(--border);
+  --line-2: color-mix(in oklch, var(--border) 55%, var(--card));
+  --fill: var(--secondary);
+  --fill-2: var(--muted);
+  --accent-soft: color-mix(in oklch, var(--accent) 14%, var(--card));
+  --accent-ink: color-mix(in oklch, var(--accent) 64%, var(--foreground));
+  --ok: var(--status-completed);
+  --ok-soft: color-mix(in oklch, var(--status-completed) 15%, var(--card));
+  --ok-ink: color-mix(in oklch, var(--status-completed) 60%, var(--foreground));
+  --err: var(--destructive);
+  --err-soft: color-mix(in srgb, var(--destructive) 13%, var(--card));
+  --err-ink: color-mix(in oklch, var(--destructive) 60%, var(--foreground));
+  --warn-soft: color-mix(in oklch, var(--warn) 13%, var(--card));
+  --warn-ink: color-mix(in oklch, var(--warn) 55%, var(--foreground));
+  --pen: color-mix(in oklch, var(--accent) 75%, var(--foreground));
+  --violet: color-mix(in oklch, var(--accent) 58%, var(--err));
+
+  /* ══ ALIAS BRIDGE — dashboard legacy token names → cockpit tokens. These
+       reference the cockpit vars (never hardcode), so light mode flips them. ══ */
+  --bg-canvas: var(--background);
+  --bg-surface: var(--fill);
+  --bg-surface-hover: var(--fill-2);
+  --bg-inset: var(--background);
+  --border-muted: var(--line-2);
+  --fg-default: var(--ink);
+  --fg-muted: var(--ink-2);
+  --fg-subtle: var(--ink-3);
+  --green: var(--ok);
+  --red: var(--err);
+  --yellow: var(--warn);
+  --purple: var(--violet);
+  --accent-emerald: var(--accent);
+  --accent-emerald-dim: var(--accent-soft);
+  /* --accent, --card, --border, --foreground, --muted, --muted-foreground,
+     --secondary, --destructive, --status-completed, --background, --font-sans,
+     --font-mono are already cockpit tokens above and consumed directly. */
+}
+
+/* ── DARK palette — shared by system-dark (@media) + forced-dark ── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --background: hsl(222 28% 9%);
+    --foreground: hsl(216 24% 90%);
+    --card: hsl(222 24% 12%);
+    --secondary: hsl(222 18% 17%);
+    --accent: hsl(240 62% 66%);
+    --muted: hsl(222 18% 15%);
+    --muted-foreground: hsl(216 12% 60%);
+    --border: hsl(222 14% 24%);
+    --destructive: hsl(4 70% 62%);
+    --status-completed: hsl(168 44% 52%);
+    --hover-bg: 222 16% 18%;
+    --row-selected-bg: 240 48% 28%;
+    --focus-ring: 216 16% 80%;
+    --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.4);
+    --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+    --chalk-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --warn: oklch(0.74 0.14 75);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: hsl(222 28% 9%);
+  --foreground: hsl(216 24% 90%);
+  --card: hsl(222 24% 12%);
+  --secondary: hsl(222 18% 17%);
+  --accent: hsl(240 62% 66%);
+  --muted: hsl(222 18% 15%);
+  --muted-foreground: hsl(216 12% 60%);
+  --border: hsl(222 14% 24%);
+  --destructive: hsl(4 70% 62%);
+  --status-completed: hsl(168 44% 52%);
+  --hover-bg: 222 16% 18%;
+  --row-selected-bg: 240 48% 28%;
+  --focus-ring: 216 16% 80%;
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --chalk-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --warn: oklch(0.74 0.14 75);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* ── Keyframes shared by cockpit-native + admin atoms (moved here from the
+     per-route css so they resolve globally). ── */
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes pulseBtn {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}

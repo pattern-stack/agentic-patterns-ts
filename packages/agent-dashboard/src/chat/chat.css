@@ -1,0 +1,410 @@
+/* Chat organism styles — bubbles, avatars, streaming cursor, tool-call cards,
+   thinking disclosure, composer, waiting dots. Token-driven (theme.css vars) so
+   the whole thread re-tones with the active light/dark theme. Scoped under
+   .chat-root so nothing leaks into the rest of the cockpit. */
+
+.chat-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  font-family: var(--font-sans);
+  color: var(--ink);
+}
+/* fill a height-bounded parent (docks / fixed panels) → inner scroll. Default
+   (no .fill) grows with content and lets the page scroll. */
+.chat-root.fill {
+  height: 100%;
+}
+
+/* ── scroll viewport ───────────────────────────────────────────────────────*/
+.chat-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-row-gap, 18px);
+  padding: var(--chat-pad, 4px 2px 12px);
+}
+.chat-root.compact .chat-scroll {
+  --chat-row-gap: 12px;
+  --chat-pad: 2px 0 8px;
+}
+
+/* ── message row ───────────────────────────────────────────────────────────*/
+.chat-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  max-width: var(--chat-msg-max, min(760px, 100%));
+}
+.chat-row.user {
+  flex-direction: row-reverse;
+  margin-left: auto;
+}
+.chat-root.compact .chat-row {
+  gap: 8px;
+  --chat-msg-max: 100%;
+}
+
+.chat-body {
+  min-width: 0;
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chat-row.user .chat-body {
+  align-items: flex-end;
+}
+/* Assistant body fills the reading column so tool-call / thinking / error cards
+   keep a CONSISTENT width — opening one card no longer stretches its closed
+   siblings. Text bubbles still hug their content (don't fill the whole column). */
+.chat-row.assistant .chat-body {
+  flex: 1 1 auto;
+}
+.chat-row.assistant .chat-body > .chat-bubble {
+  align-self: flex-start;
+}
+
+/* attribution line (name · time) */
+.chat-attr {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: var(--fz-tiny);
+  line-height: 1;
+}
+.chat-attr .name {
+  font-weight: 600;
+  color: var(--ink);
+}
+.chat-attr .time {
+  color: var(--mute);
+  font-size: var(--fz-micro);
+}
+
+/* ── avatar ────────────────────────────────────────────────────────────────*/
+.chat-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  border: 1px solid var(--line);
+}
+.chat-root.compact .chat-avatar {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+.chat-avatar.assistant {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: color-mix(in oklch, var(--accent) 30%, var(--line));
+}
+.chat-avatar.user {
+  background: var(--fill);
+  color: var(--ink-2);
+}
+
+/* ── text bubble (markdown) ────────────────────────────────────────────────*/
+.chat-bubble {
+  border-radius: var(--radius-lg);
+  padding: 9px 13px;
+  font-size: var(--fz-md);
+  line-height: var(--lh-base);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.chat-bubble.user {
+  background: var(--accent-soft);
+  color: var(--ink);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--line));
+}
+.chat-bubble.assistant {
+  background: var(--paper);
+  border: 1px solid var(--line);
+}
+.chat-root.compact .chat-bubble {
+  padding: 7px 10px;
+  font-size: var(--fz-small);
+}
+
+/* neutralize the .answer box when markdown renders inside a bubble — keep the
+   .answer .md-* child rules (which need the .answer ancestor) but drop its
+   container chrome since the bubble already provides it. */
+.chat-bubble.answer.md {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  position: static;
+}
+
+/* ── streaming cursor ──────────────────────────────────────────────────────*/
+.chat-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent-ink);
+  animation: chat-blink 1s steps(2, start) infinite;
+}
+@keyframes chat-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* ── waiting dots ──────────────────────────────────────────────────────────*/
+.chat-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mute);
+  font-size: var(--fz-small);
+}
+.chat-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.chat-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--mute);
+  animation: chat-bounce 1.2s infinite ease-in-out both;
+}
+.chat-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.chat-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes chat-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* ── thinking disclosure ───────────────────────────────────────────────────*/
+.chat-thinking {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--fill) 60%, transparent);
+}
+.chat-thinking > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 11px;
+  font-size: var(--fz-tiny);
+  color: var(--mute);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
+}
+.chat-thinking > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-thinking[open] > summary {
+  border-bottom: 1px dashed var(--line);
+}
+.chat-thinking .thinking-body {
+  padding: 9px 12px;
+  font-size: var(--fz-small);
+  line-height: var(--lh-base);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+.chat-thinking .glyph {
+  color: var(--accent-ink);
+}
+
+/* ── tool-call card ────────────────────────────────────────────────────────*/
+.chat-tool {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--mute);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  font-size: var(--fz-small);
+}
+.chat-tool.ok {
+  border-left-color: var(--ok);
+}
+.chat-tool.err {
+  border-left-color: var(--err);
+}
+.chat-tool.running {
+  border-left-color: var(--accent);
+}
+.chat-tool > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+.chat-tool > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-tool .tool-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+.chat-tool .tool-dur {
+  margin-left: auto;
+  color: var(--mute);
+  font-size: var(--fz-micro);
+  font-family: var(--font-mono);
+}
+.chat-tool .tool-io {
+  padding: 0 11px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-tool .io-label {
+  font-size: var(--fz-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mute);
+  margin-bottom: 3px;
+}
+
+/* shared code surface for tool io / code blocks */
+.chat-code {
+  position: relative;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  margin: 0;
+  font: 11.5px / 1.5 var(--font-mono);
+  color: var(--ink-2);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: var(--chat-code-max, 320px);
+}
+.chat-code.danger {
+  border-color: color-mix(in oklch, var(--err) 45%, var(--line));
+  color: var(--err-ink);
+}
+
+/* copy chip — pinned to the top-right of a code surface, revealed on hover */
+.chat-code > .copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: var(--fill);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 9px;
+  font: 600 11px var(--font-sans);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--motion-fast, 120ms) var(--ease-out, ease);
+}
+.chat-code:hover > .copy-btn,
+.chat-code > .copy-btn:focus-visible {
+  opacity: 0.85;
+}
+.chat-code > .copy-btn:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+  opacity: 1;
+}
+
+/* ── error part ────────────────────────────────────────────────────────────*/
+.chat-error {
+  border: 1px solid color-mix(in oklch, var(--err) 45%, var(--line));
+  border-radius: var(--radius-md);
+  background: var(--err-soft);
+  color: var(--err-ink);
+  padding: 8px 12px;
+  font-size: var(--fz-small);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* ── message footer (model · tokens) ───────────────────────────────────────*/
+.chat-footer {
+  font: 500 var(--fz-micro) / 1.3 var(--font-mono);
+  color: var(--mute);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── composer ──────────────────────────────────────────────────────────────*/
+.chat-composer {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  padding: 10px 2px 2px;
+  border-top: 1px solid var(--line);
+}
+.chat-composer textarea {
+  flex: 1;
+  resize: none;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: var(--radius-md);
+  padding: 9px 11px;
+  font: var(--fz-md) / var(--lh-base) var(--font-sans);
+  min-height: 40px;
+  max-height: 160px;
+}
+.chat-composer textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── scroll-to-bottom affordance ───────────────────────────────────────────*/
+.chat-jump {
+  position: absolute;
+  bottom: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-2);
+  color: var(--ink-2);
+  font: 600 var(--fz-tiny) var(--font-sans);
+  padding: 5px 13px;
+  cursor: pointer;
+  z-index: 3;
+}
+.chat-jump:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+.chat-empty {
+  margin: auto;
+  color: var(--mute);
+  font-size: var(--fz-small);
+  text-align: center;
+}

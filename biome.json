@@ -41,7 +41,8 @@
       "bun.lock",
       "demo/",
       "packages/agent-cli/assets/dashboard/",
-      "packages/agent-cli/assets/plugin-template/"
+      "packages/agent-cli/assets/plugin-template/",
+      "**/__fixtures__/**"
     ]
   }
 }

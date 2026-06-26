@@ -1,19 +1,20 @@
 /**
- * ChatPage — pick a registered agent, converse with it over SSE.
+ * ChatPage — pick a registered agent, converse with it over the framework SSE
+ * transport, rendered through the ported cockpit chat organism.
  *
- * Fetches the agent registry from /agents, lets the operator pick one,
- * and renders ChatPanel wired to useChat. Header mirrors the status
- * line from pattern-stack/chat-patterns — agent badge, exchange count,
- * streaming spinner, short conversation id.
+ * Fetches the agent registry from /agents, lets the operator pick one, and
+ * renders the cockpit <ChatPanel> driven by the rewired useChat (Phase B). The
+ * chat subtree is wrapped in `.chat-route` so the cockpit design tokens resolve
+ * locally (see pages/chat-route.css) without a global theme.css port.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { type AgentSummary, listAgents } from "../api/chat-client";
+import { ChatPanel, useChat } from "../chat";
+import "./chat-route.css";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
-import { ChatPanel } from "../components/organisms/ChatPanel";
-import { useChat } from "../hooks/useChat";
 
 export function ChatPage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -41,7 +42,11 @@ export function ChatPage() {
     [agents, selectedId],
   );
 
-  const chat = useChat(selected);
+  const chat = useChat(selectedId);
+  const exchangeCount = useMemo(
+    () => chat.messages.filter((m) => m.role === "user").length,
+    [chat.messages],
+  );
 
   return (
     <div
@@ -62,23 +67,30 @@ export function ChatPage() {
         }}
         onNewChat={chat.reset}
         conversationId={chat.conversationId}
-        exchangeCount={chat.exchangeCount}
+        exchangeCount={exchangeCount}
         streaming={chat.streaming}
         loadError={loadError}
+        chatError={chat.error}
         description={selected?.description}
       />
       <div style={{ flex: 1, minHeight: 0 }}>
-        <ChatPanel
-          messages={chat.messages}
-          streaming={chat.streaming}
-          error={chat.error}
-          onSend={chat.send}
-          onAbort={chat.abort}
-          disabled={!selected}
-          placeholder={
-            selected ? `Message ${selected.name}…` : "Select an agent to start chatting."
-          }
-        />
+        <div className="chat-route">
+          <ChatPanel
+            messages={chat.messages}
+            fill
+            streaming={chat.streaming}
+            assistantName={selected?.name ?? "agent"}
+            onSend={chat.send}
+            onAbort={chat.abort}
+            disabled={!selected}
+            emptyLabel={
+              selected ? "No messages yet — say hello." : "Select an agent to start chatting."
+            }
+            placeholder={
+              selected ? `Message ${selected.name}…` : "Select an agent to start chatting."
+            }
+          />
+        </div>
       </div>
     </div>
   );
@@ -93,6 +105,7 @@ interface HeaderProps {
   exchangeCount: number;
   streaming: boolean;
   loadError: string | null;
+  chatError: string | null;
   description?: string;
 }
 
@@ -105,6 +118,7 @@ function Header({
   exchangeCount,
   streaming,
   loadError,
+  chatError,
   description,
 }: HeaderProps) {
   const selected = agents.find((a) => a.id === selectedId);
@@ -175,6 +189,9 @@ function Header({
       {description && <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>{description}</div>}
       {loadError && (
         <div style={{ fontSize: 12, color: "var(--red)" }}>Failed to load agents: {loadError}</div>
+      )}
+      {chatError && (
+        <div style={{ fontSize: 12, color: "var(--red)" }}>Stream error: {chatError}</div>
       )}
     </div>
   );

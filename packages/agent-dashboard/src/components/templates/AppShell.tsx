@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
+import { ThemeToggle } from "../ThemeToggle";
 
 const navItems = [
   { to: "/", label: "Dashboard" },
@@ -8,6 +9,7 @@ const navItems = [
   { to: "/tools", label: "Tools" },
   { to: "/tokens", label: "Tokens" },
   { to: "/live", label: "Live" },
+  { to: "/graph", label: "Graph" },
   { to: "/claude-code", label: "Claude Code" },
   { to: "/conversations", label: "Conversations" },
 ];
@@ -18,6 +20,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <nav
         style={{
           width: 220,
+          display: "flex",
+          flexDirection: "column",
           background: "var(--bg-surface)",
           borderRight: "1px solid var(--border)",
           padding: "20px 0",
@@ -53,6 +57,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             {item.label}
           </NavLink>
         ))}
+        <div style={{ marginTop: "auto", padding: "16px 20px 0" }}>
+          <ThemeToggle />
+        </div>
       </nav>
       <main style={{ flex: 1, padding: 24, overflow: "auto" }}>{children}</main>
     </div>

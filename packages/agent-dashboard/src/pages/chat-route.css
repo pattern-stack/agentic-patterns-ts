@@ -1,0 +1,12 @@
+/*
+ * Layout for the /chat route. The cockpit design tokens are now GLOBAL (see
+ * styles/theme.css), so the previous scoped token re-declarations were removed;
+ * only the layout the chat surface needs survives here. The .chat-route must
+ * itself fill its bounded parent for the inner scroll to work.
+ */
+.chat-route {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
