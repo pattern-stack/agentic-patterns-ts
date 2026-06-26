@@ -13,7 +13,7 @@
  * Kept minimal on purpose — no PID file, no project registry, no port
  * offsetting. Add those if we grow beyond "server + dashboard".
  *
- * Run:  pnpm dev  (from repo root — see root package.json)
+ * Run:  bun run dev  (from repo root — see root package.json)
  */
 
 import { type ChildProcess, execSync, spawn } from "node:child_process";
@@ -43,14 +43,14 @@ const APPS: readonly AppSpec[] = [
   {
     name: "server",
     color: "36", // cyan
-    command: "pnpm",
-    args: ["--silent", "--filter", "@agentic-patterns/server", "dev"],
+    command: "bun",
+    args: ["run", "--filter", "@agentic-patterns/server", "dev"],
   },
   {
     name: "dashboard",
     color: "35", // magenta
-    command: "pnpm",
-    args: ["--silent", "--filter", "@agentic-patterns/dashboard", "dev"],
+    command: "bun",
+    args: ["run", "--filter", "@agentic-patterns/dashboard", "dev"],
   },
 ];
 
@@ -68,7 +68,7 @@ class Orchestrator {
     // Build workspace packages so dist/ is current before tsx resolves
     // @agentic-patterns/* imports. Fast if nothing changed (tsup caches).
     process.stdout.write("\x1b[2mbuilding packages...\x1b[0m\n");
-    execSync("pnpm --silent build", { stdio: "inherit" });
+    execSync("bun run build", { stdio: "inherit" });
 
     for (const app of apps) {
       this.processes.push(this.spawnApp(app));
