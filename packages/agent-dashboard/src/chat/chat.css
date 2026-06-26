@@ -103,7 +103,7 @@
 .chat-avatar.assistant {
   background: var(--accent-soft);
   color: var(--accent-ink);
-  border-color: color-mix(in oklch, hsl(var(--accent)) 30%, var(--line));
+  border-color: color-mix(in oklch, var(--accent) 30%, var(--line));
 }
 .chat-avatar.user {
   background: var(--fill);
@@ -122,7 +122,7 @@
 .chat-bubble.user {
   background: var(--accent-soft);
   color: var(--ink);
-  border: 1px solid color-mix(in oklch, hsl(var(--accent)) 22%, var(--line));
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--line));
 }
 .chat-bubble.assistant {
   background: var(--paper);
@@ -249,7 +249,7 @@
   border-left-color: var(--err);
 }
 .chat-tool.running {
-  border-left-color: hsl(var(--accent));
+  border-left-color: var(--accent);
 }
 .chat-tool > summary {
   cursor: pointer;
@@ -378,7 +378,7 @@
 }
 .chat-composer textarea:focus {
   outline: none;
-  border-color: hsl(var(--accent));
+  border-color: var(--accent);
 }
 
 /* ── scroll-to-bottom affordance ───────────────────────────────────────────*/

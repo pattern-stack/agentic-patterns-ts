@@ -22,7 +22,7 @@ function Meta({ children }: { children: string }) {
 
 export function RunBarHud({ hud }: { hud: Frame['hud'] }) {
   const { phase, iter, maxIter, elapsedMs, tokensIn, tokensOut, running, done } = hud;
-  const dotColor = done ? T.tone.ok.color : running ? 'hsl(var(--accent))' : 'var(--mute)';
+  const dotColor = done ? T.tone.ok.color : running ? 'var(--accent)' : 'var(--mute)';
 
   return (
     <div

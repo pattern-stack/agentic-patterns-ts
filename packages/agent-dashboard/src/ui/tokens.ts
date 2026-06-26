@@ -61,7 +61,7 @@ export const T = {
     ok: { color: 'var(--ok)', soft: 'var(--ok-soft)', ink: 'var(--ok-ink)' },
     warn: { color: 'var(--warn)', soft: 'var(--warn-soft)', ink: 'var(--warn-ink)' },
     err: { color: 'var(--err)', soft: 'var(--err-soft)', ink: 'var(--err-ink)' },
-    accent: { color: 'hsl(var(--accent))', soft: 'var(--accent-soft)', ink: 'var(--accent-ink)' },
+    accent: { color: 'var(--accent)', soft: 'var(--accent-soft)', ink: 'var(--accent-ink)' },
     mute: { color: 'var(--mute)', soft: 'var(--fill)', ink: 'var(--ink-2)' },
   } satisfies Record<string, { color: string; soft: string; ink: string }>,
   statusVar: {

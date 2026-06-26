@@ -54,11 +54,11 @@ export function ConstellationEdge(props: EdgeProps) {
   const [path] = getStraightPath({ sourceX: sx, sourceY: sy, targetX: tx, targetY: ty });
 
   const stroke = active
-    ? 'hsl(var(--accent))'
+    ? 'var(--accent)'
     : complete
       ? T.tone.ok.color
       : emerging
-        ? 'color-mix(in oklch, hsl(var(--accent)) 50%, var(--line))'
+        ? 'color-mix(in oklch, var(--accent) 50%, var(--line))'
         : 'var(--line)';
   const strokeWidth = active ? 2 : 1.25;
   const resting = !active && !complete && !emerging;
@@ -86,7 +86,7 @@ export function ConstellationEdge(props: EdgeProps) {
       />
       {/* the "data flows" particle — only on an active hand-off (the chain step) */}
       {active && kind === 'handoff' && (
-        <circle r={3} fill="hsl(var(--accent))">
+        <circle r={3} fill="var(--accent)">
           <animateMotion dur="1s" repeatCount="indefinite" path={path} />
         </circle>
       )}

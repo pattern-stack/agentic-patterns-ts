@@ -47,9 +47,9 @@ function stateTone(state: RunState, active: boolean): Tone {
     };
   if (active || state === 'running')
     return {
-      border: 'hsl(var(--accent))',
+      border: 'var(--accent)',
       bg: 'var(--accent-soft)',
-      ring: 'color-mix(in oklch, hsl(var(--accent)) 42%, transparent)',
+      ring: 'color-mix(in oklch, var(--accent) 42%, transparent)',
       ink: 'var(--accent-ink)',
     };
   if (state === 'complete')

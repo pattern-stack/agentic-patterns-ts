@@ -100,7 +100,7 @@ function Scrubber({ replay, count }: { replay: ReturnType<typeof useRunReplay>; 
         max={count - 1}
         value={replay.cursor}
         onChange={(e) => replay.seek(Number(e.target.value))}
-        style={{ flex: 1, accentColor: 'hsl(var(--accent))' }}
+        style={{ flex: 1, accentColor: 'var(--accent)' }}
       />
       <span style={{ fontFamily: T.font.mono, fontSize: T.fz.micro, color: 'var(--ink-2)', minWidth: 72, textAlign: 'right' }}>
         {replay.cursor < 0 ? 'idle' : `${replay.cursor + 1} / ${count}`}

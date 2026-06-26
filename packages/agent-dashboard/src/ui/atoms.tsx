@@ -14,7 +14,7 @@ const TONE_BG: Record<Tone, string> = {
   warn: 'var(--warn-soft)',
   accent: 'var(--accent-soft)',
   mute: 'var(--fill)',
-  run: 'color-mix(in oklch, hsl(var(--accent)) 18%, var(--card))',
+  run: 'color-mix(in oklch, var(--accent) 18%, var(--card))',
 };
 const TONE_INK: Record<Tone, string> = {
   ok: 'var(--ok-ink)',
@@ -78,7 +78,7 @@ export function Button({
   const styles: Record<string, CSSProperties> = {
     // Soft accent CTA — tinted fill + accent ink, cohesive with the chips /
     // active tabs / rail toggles rather than a heavy solid-blue + white block.
-    primary: { background: 'var(--accent-soft)', color: 'var(--accent-ink)', border: '1px solid color-mix(in oklch, hsl(var(--accent)) 30%, var(--line))' },
+    primary: { background: 'var(--accent-soft)', color: 'var(--accent-ink)', border: '1px solid color-mix(in oklch, var(--accent) 30%, var(--line))' },
     default: { background: 'var(--fill)', color: 'var(--ink)', border: '1px solid var(--line)' },
     ghost: { background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line)' },
   };
@@ -126,7 +126,7 @@ export function Tabs({
               cursor: 'pointer',
               background: 'transparent',
               border: 'none',
-              borderBottom: '2px solid ' + (sel ? 'hsl(var(--accent))' : 'transparent'),
+              borderBottom: '2px solid ' + (sel ? 'var(--accent)' : 'transparent'),
               color: sel ? 'var(--ink)' : 'var(--mute)',
               fontSize: T.fz.md,
               fontWeight: sel ? 600 : 500,

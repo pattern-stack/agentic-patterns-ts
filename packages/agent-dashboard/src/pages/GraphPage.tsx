@@ -16,7 +16,6 @@ import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
 import { GraphPanel } from "../components/GraphPanel";
 import type { EventLite, GraphSource } from "../graph/composition";
-import "./graph-route.css";
 
 export function GraphPage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
