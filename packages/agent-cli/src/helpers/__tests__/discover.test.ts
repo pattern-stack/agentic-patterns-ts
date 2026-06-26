@@ -23,7 +23,7 @@ describe("loadAgentsFromFile — accepted export shapes", () => {
     expect(a?.description).toBeUndefined();
   });
 
-  it("`rootAgent` named export (ADK spelling) → inferred from folder", async () => {
+  it("`rootAgent` named export → inferred from folder", async () => {
     const [a] = await loadAgentsFromFile(path.join(agents, "coach/agent.mjs"), FX);
     expect(a).toMatchObject({ id: "coach", name: "Coach" });
   });

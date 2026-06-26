@@ -24,7 +24,7 @@ Before any of the algebra matters, your agent has to be *found*. Discovery is **
 // 1. bare default — the simplest form
 export default buildMyAgent();
 
-// 2. a named `rootAgent` (the ADK spelling)
+// 2. a named `rootAgent` (the conventional name)
 export const rootAgent = buildMyAgent();
 
 // 3. any named export that is an Agent — multiple per file is fine
@@ -38,6 +38,8 @@ export default () => buildMyAgent();
 //    or several agents with hand-set ids in one file)
 export default { id: "my-agent", name: "My Agent", description: "…", agent: buildMyAgent() };
 ```
+
+> **Factory caveat:** the factory form (#4) is invoked only for `default` and `rootAgent` exports. A *named* export must be an **already-built Agent** — `export const reviewer = buildReviewer()`, not `() => buildReviewer()` (a named function export is skipped, not called).
 
 **Identity is inferred** when you don't set it: the **name** comes from a meaningful export key (`reviewerAgent` → `Reviewer`), else the folder/filename; the **id** is that local name, **namespaced by `{domain}`** when the file sits under a nested `{domain}/agents/…` (`dealbrain/agents/retrieval/agent.ts` → `dealbrain/retrieval`). A top-level `agents/` stays un-namespaced. Namespacing means two domains can each ship a `retrieval` agent with no collision.
 
@@ -114,7 +116,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
      );
    }
    ```
-5. **Judgment + Persona** (`roles/`) — decision rules and identity as named exports.
+5. **Judgment + Persona** (`roles/`) — decision rules and identity as named exports. **Don't start from zero:** `@agentic-patterns/runtime` ships preset judgments (`RETRIEVAL_STRATEGY`, `EVIDENCE_QUALITY`, `ROUTING`, `QUALITY_REVIEW`, …), responsibilities, and whole roles (`retrievalRole`, `analystRole`, `coordinatorRole`) — clone or compose those before authoring new ones.
 6. **Role** — `new RoleBuilder(name).withPersona(p).withJudgment(j).withCapability(c).withDefaultModel(id).build()`. Requires a persona.
 7. **Mission** — thin: `new Mission({ objective, success_criteria, /* grounding rendered from a context AgenticModel */ })`. No protocol text.
 8. **Agent** — `new AgentBuilder(role).withMission(m).withModel(id).build()`. Requires a mission. **This built Agent is what your `agents/<name>/agent.ts` exports** (§0).
@@ -126,6 +128,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
    const toolExecutor = createToolboxExecutor(agent); // ← do NOT skip this
    await runner.run(agent, message, { toolExecutor, eventBus: bus, maxIterations: 12 });
    ```
+   **Gate destructive tools.** The runtime ships a gate chain (safety / approval / rate-limit / audit). The moment an agent gets a tool that writes or deletes, attach `HumanApprovalGate` (or the relevant gate) to the bus alongside the exporter — that's the "gate behavior" the `ConsoleExporter` surfaces.
 10. **Declarative route** *(optional)* — export `createXResolver(deps): CapabilityResolver` (name → live `Capability`), then `buildAgentFromConfig(config, { resolver })` where `config.capabilities` is `string[]`. The library never touches credentials; the app supplies `deps`.
 
 ## 4. Anti-patterns (the reasons builds fail)
@@ -135,20 +138,22 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 - **`EmptyToolbox`.** Reaching for a toolbox-less capability to expose "plays only" (a stub `Toolbox` with `tools = {}`). The toolbox is the **required atom** — faking it is the canonical smell. What you actually want is *curated exposure* (hide raw verbs, show plays): that's a framework exposure feature, **not** a toolbox-less capability. **Today:** give the capability the real verbs its plays compose, or keep the play-only capability *library-resident* (exported/tested, consumed by no role) until the exposure feature lands.
 - **Forgotten executor.** Build an agent with tools, call `runner.run(agent, msg)` without `toolExecutor` → every tool call silently returns `{ error: "No tool executor configured" }`, the loop continues, nothing throws. *Symptom:* "my tools aren't firing" / "the model says the tool errored." → Always pass `toolExecutor: createToolboxExecutor(agent)`. (`ap playground`/`ap run` and the HTTP entry points wire it for you; the low-level `AgentRunner.run` does not.)
 - **Deps via globals.** There is no `RunContext`-into-every-tool channel (a known framework gap). → **Closure capture**: a factory takes `deps = { context, client }`; the toolbox/playbook close over it. Mark the site `// FRAMEWORK GAP: deps injection`.
-- **Provider surprise.** `createRunner` env-detects in priority order (`ANTHROPIC_API_KEY` → … → `OLLAMA_HOST`). For a local model: set `OLLAMA_HOST`, blank competing keys (`ANTHROPIC_API_KEY=`). `@ai-sdk/*` packages must be hand-installed for non-Ollama providers; Ollama works out of the box.
+- **Provider surprise.** `createRunner` env-detects in priority order (`ANTHROPIC_API_KEY` → … → `OLLAMA_HOST`). For a local model: set `OLLAMA_HOST`, blank competing keys (`ANTHROPIC_API_KEY=`). `@ai-sdk/*` packages must be hand-installed for non-Ollama providers; Ollama works out of the box. With **no** provider env set, `createRunner` falls back to the local `claude` CLI runner if `claude` is on PATH — which emits a *limited event vocabulary*, so the graph/trace can look sparse; set a real key to get full events.
 - **Extract without assemble** (the subtle one). You correctly move discipline → `Judgment`, recipe → `Playbook`, how-to → `Manual` — and *stop there*, leaving the running agents on their old fat missions. Now the knowledge lives in **two** places and the agents ignore the slots. Extracting is half the job: **rewire the agents to consume the slots and delete the fat-mission copies.**
 - **Backward dependency arrow.** A toolbox/capability factory that takes an *agent-level* `deps` bundle creates `toolshed → agents` — a backward arrow (often a cycle). A factory should take **only what it uses** (the client/secret), not the agent's run-context bundle. Keep arrows one-way: `cli → agents → roles → toolshed → lib`.
 
 ## 5. Validate it (the loop)
 
 - **Hermetic harness first.** Implement the toolbox's backend interface (port/client) with an in-memory fake, build the agent over it, and run against a small local model (Ollama). No creds, repeatable, fast. This proves the *loop* — composition + tool dispatch + state mutation — before touching a real backend.
-- **Poke the tools with no LLM.** `ap tools list <id>` shows every tool an agent exposes; `ap tools call <id> <tool> …` invokes one directly. Prove the capability floor before involving the model.
+- **Poke the tools with no LLM.** `ap tools list <id>` shows every tool an agent exposes; `ap tools call <id> <tool> --field=value …` invokes one directly. Prove the capability floor before involving the model.
 - **Benchmark is the gate, not eyeballing.** Any prompt/slot change runs a ground-truth suite old-vs-new on the same model. Small models magnify slot mistakes, so they're the better stress test: *strengthen the protocol (Manual/Playbook/Judgment) before upgrading the model.*
 
 ## Deeper references
 
 - Framework layer model + import rules: the framework repo's `CLAUDE.md` and `AGENTS.md`.
 - The dev loop: `ap playground` (server + dashboard with a live agent **graph** + streaming chat), `ap run` (terminal), `ap agents` / `ap tools` (introspection).
+- Building *inside* the framework monorepo itself (vs a consuming app): `bun run dev` boots server `:3456` + dashboard `:5173`; point it at your agent with `DEMO_FILE=examples/my-agent.ts`, copying `packages/agent-server/examples/live-demo.ts` for the full observability wiring (EventBus → collector → SSE exporter).
+- Mixed-model routing (a cheaper model per capability): `HybridModelResolver` + `models.yaml` profiles in `@agentic-patterns/runtime`.
 
 ---
 *Lightweight and living. Update in place as the framework's discovery + exposure features evolve; this is the distillation of the proven pattern, not a spec.*

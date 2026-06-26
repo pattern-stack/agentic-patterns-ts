@@ -9,7 +9,7 @@
  *   • Within each imported module we introspect EVERY export and keep the ones
  *     that ARE an Agent — by structural shape, so the export name is irrelevant:
  *       export default buildCalculatorAgent()        // bare default
- *       export const rootAgent = buildAgent()        // the ADK spelling
+ *       export const rootAgent = buildAgent()        // the conventional name
  *       export const reviewer = buildReviewer()      // any named export
  *       export const a = …, b = …                    // multiple per file
  *   • The legacy registration wrapper is still honored:

@@ -94,7 +94,7 @@ async function main(): Promise<void> {
   // Project context — every other command needs it.
   const config = resolveProjectConfig();
 
-  // ADK-style discovery override: `ap playground <dir>` (or `--agents-dir <dir>`)
+  // Discovery override: `ap playground <dir>` (or `--agents-dir <dir>`)
   // treats <dir> AS the agents root and recursively finds every child agent
   // (`<domain>/agents/<name>/agent.ts` at any depth). Falls back to the project
   // root + the configured/`--agents` glob.
