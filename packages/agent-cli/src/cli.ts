@@ -7,6 +7,7 @@
  * Bare `ap` shows a status dashboard (mirrors `st`).
  */
 
+import path from "node:path";
 import { parseArgs } from "node:util";
 import { runAgentsCommand } from "./commands/agents.js";
 import { runConfigSetCommand, runConfigStatusCommand } from "./commands/config.js";
@@ -30,7 +31,9 @@ Commands:
   run <agent> [message]           chat in terminal — interactive or one-shot
   tools list <agent>              list every tool exposed by an agent
   tools call <agent> <tool> ...   invoke a tool directly (no LLM in the loop)
-  playground                      launch UI environment (server + dashboard)
+  playground [<dir>]              launch UI environment (server + dashboard);
+                                    point <dir> at an agents root to discover
+                                    every child agent recursively
   init [<dir>]                    scaffold a new agent project
   config                          show env detection status
   config set                      interactive .env editor
@@ -41,6 +44,8 @@ Options:
   --no-dashboard                  playground without dashboard (API only)
   --no-open                       don't auto-open the browser
   --agents <glob>                 override agent discovery glob
+  --agents-dir <dir>              discover agents recursively under <dir>
+                                    (same as the playground positional)
   --with-plugin                   (init) drop the Claude Code plugin too
   --provider <p>                  (init) anthropic | openai | ollama
   --link                          (init) use file: deps against the local
@@ -56,6 +61,7 @@ async function main(): Promise<void> {
       "no-dashboard": { type: "boolean" },
       "no-open": { type: "boolean" },
       agents: { type: "string" },
+      "agents-dir": { type: "string" },
       "with-plugin": { type: "boolean" },
       provider: { type: "string" },
       link: { type: "boolean" },
@@ -87,8 +93,20 @@ async function main(): Promise<void> {
 
   // Project context — every other command needs it.
   const config = resolveProjectConfig();
-  const globs = values.agents ? [String(values.agents)] : config.agents;
-  const { agents, errors } = await discoverAgents(config.root, globs);
+
+  // ADK-style discovery override: `ap playground <dir>` (or `--agents-dir <dir>`)
+  // treats <dir> AS the agents root and recursively finds every child agent
+  // (`<domain>/agents/<name>/agent.ts` at any depth). Falls back to the project
+  // root + the configured/`--agents` glob.
+  const dirPositional = command === "playground" ? positionals[1] : undefined;
+  const agentsDir = values["agents-dir"] ? String(values["agents-dir"]) : dirPositional;
+  const explicitGlob = values.agents ? [String(values.agents)] : undefined;
+
+  const discoveryRoot = agentsDir ? path.resolve(process.cwd(), agentsDir) : config.root;
+  const globs =
+    explicitGlob ??
+    (agentsDir ? ["**/agent.{ts,js,mjs}", "**/*.agent.{ts,js,mjs}"] : config.agents);
+  const { agents, errors } = await discoverAgents(discoveryRoot, globs);
 
   switch (command) {
     case undefined: {
