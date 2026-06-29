@@ -24,8 +24,6 @@ export interface ParallelOpts<TBranch, TC> {
   readonly consolidate?: Consolidate<TBranch, TC>;
   /** Bound concurrency (reuses {@link runWithConcurrency}). Unbounded when unset. */
   readonly maxConcurrency?: number;
-  /** Collect failed branches and proceed. Default `true` (§5.3). */
-  readonly continueOnError?: boolean;
 }
 
 /** A named, hand-authored branch over the shared input. */
@@ -43,12 +41,6 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
   private readonly branches: ReadonlyArray<ParallelBranch<TIn, TBranch>>;
   private readonly consolidate?: Consolidate<TBranch, TC>;
   private readonly maxConcurrency?: number;
-  /**
-   * Collect failed branches and proceed (default `true`, §5.3). All branches
-   * are dispatched concurrently, so this only documents intent; a failed branch
-   * surfaces via `result.succeeded === false` and its sibling outputs remain.
-   */
-  private readonly continueOnError: boolean;
 
   constructor(
     branches: ReadonlyArray<ParallelBranch<TIn, TBranch>>,
@@ -58,7 +50,6 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
     this.name = opts?.name;
     this.consolidate = opts?.consolidate;
     this.maxConcurrency = opts?.maxConcurrency;
-    this.continueOnError = opts?.continueOnError ?? true;
   }
 
   async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TC>> {
@@ -89,35 +80,51 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
         timestamp: new Date(),
       });
 
-      const res = await branch.node.run(input, branchCtx);
-      totalInputTokens += res.totalInputTokens;
-      totalOutputTokens += res.totalOutputTokens;
-      outputs[index] = res.output;
-      parentSlots.join(branchCtx.slots as SlotStore);
+      try {
+        const res = await branch.node.run(input, branchCtx);
+        totalInputTokens += res.totalInputTokens;
+        totalOutputTokens += res.totalOutputTokens;
+        outputs[index] = res.output;
+        parentSlots.join(branchCtx.slots as SlotStore);
 
-      if (res.succeeded) {
-        const outcome: NodeOutcome<unknown> = {
-          nodeName: branch.name,
-          output: res.output,
-          succeeded: true,
-          inputTokens: res.totalInputTokens,
-          outputTokens: res.totalOutputTokens,
-        };
-        await hooks?.onStepComplete?.({
-          type: "pattern.step.complete",
-          stepName: branch.name,
-          stepIndex: index,
-          result: outcome,
-          timestamp: new Date(),
-        });
-      } else {
+        if (res.succeeded) {
+          const outcome: NodeOutcome<unknown> = {
+            nodeName: branch.name,
+            output: res.output,
+            succeeded: true,
+            inputTokens: res.totalInputTokens,
+            outputTokens: res.totalOutputTokens,
+          };
+          await hooks?.onStepComplete?.({
+            type: "pattern.step.complete",
+            stepName: branch.name,
+            stepIndex: index,
+            result: outcome,
+            timestamp: new Date(),
+          });
+        } else {
+          succeeded = false;
+          firstError ??= res.error;
+          await hooks?.onStepError?.({
+            type: "pattern.step.error",
+            stepName: branch.name,
+            stepIndex: index,
+            error: res.error ?? new Error(`Branch "${branch.name}" failed`),
+            timestamp: new Date(),
+          });
+        }
+      } catch (err) {
+        // A well-behaved Node never throws (leaves catch internally), but a
+        // nested/third-party node might. Convert a throw into a failed branch so
+        // one bad branch can't reject the pool and abort its siblings.
         succeeded = false;
-        firstError ??= res.error;
+        const e = err instanceof Error ? err : new Error(String(err));
+        firstError ??= e;
         await hooks?.onStepError?.({
           type: "pattern.step.error",
           stepName: branch.name,
           stepIndex: index,
-          error: res.error ?? new Error(`Branch "${branch.name}" failed`),
+          error: e,
           timestamp: new Date(),
         });
       }
@@ -135,10 +142,6 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
     const consolidated: TC = this.consolidate
       ? this.consolidate(outputs)
       : (outputs as unknown as TC);
-
-    // `continueOnError` is collect-and-continue by construction here (all branches
-    // are dispatched). Reading it keeps intent explicit and the field consumed.
-    void this.continueOnError;
 
     const result: NodeResult<TC> = Object.freeze({
       output: consolidated,
@@ -169,7 +172,9 @@ export async function runWithConcurrency(
 ): Promise<void> {
   const executing = new Set<Promise<void>>();
   for (const task of tasks) {
-    const p = task().then(() => {
+    // `.finally` deletes on settle (fulfil OR reject), so a rejecting task can't
+    // leave a stale entry in the pool; the rejection still propagates.
+    const p = task().finally(() => {
       executing.delete(p);
     });
     executing.add(p);

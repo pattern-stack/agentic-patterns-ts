@@ -30,7 +30,7 @@ describe("FanOut", () => {
     expect(result.output).toBe(14); // 1 + 4 + 9
   });
 
-  it("collects failures and proceeds (continueOnError default true)", async () => {
+  it("collects failures and proceeds", async () => {
     const runner = new MockRunner();
     const fan = new FanOut<{ items: number[] }, number, string>({
       name: "maybe",

@@ -26,7 +26,7 @@ export interface LoopSpec<TState> {
   readonly maxIterations: number;
 }
 
-export type LoopExitReason = "predicate_met" | "max_iterations";
+export type LoopExitReason = "predicate_met" | "max_iterations" | "error";
 
 export interface LoopResult<TState> extends NodeResult<TState> {
   readonly iterations: number;
@@ -78,11 +78,23 @@ export class Loop<TState> implements Node<TState, TState> {
       const res = await this.spec.body.run(state, childCtx);
       totalInputTokens += res.totalInputTokens;
       totalOutputTokens += res.totalOutputTokens;
-      state = res.output;
+
       if (!res.succeeded) {
+        // Body failed — stop. Do NOT thread the failed (possibly undefined)
+        // output forward or evaluate the predicate on it. `output` stays the
+        // last good state; the caller branches on exitReason === "error".
         succeeded = false;
         error = res.error;
+        exitReason = "error";
+        await hooks?.onIterationComplete?.({
+          type: "pattern.iteration.complete",
+          iteration: i,
+          timestamp: new Date(),
+        });
+        break;
       }
+
+      state = res.output;
 
       await hooks?.onIterationComplete?.({
         type: "pattern.iteration.complete",

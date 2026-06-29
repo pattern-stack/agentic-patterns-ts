@@ -34,7 +34,7 @@ import {
 import type { ZodType } from "zod";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
-import { type AgentEvent, createEvent } from "../events/types.js";
+import { type AgentEvent, type BaseEvent, createEvent } from "../events/types.js";
 import {
   type ModelResolver,
   constantModelResolver,
@@ -90,7 +90,9 @@ export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean
   const id = modelId.toLowerCase();
   // Strip any gateway/provider prefix (e.g. "bifrost:openai/gpt-4o" → "gpt-4o",
   // "openai/gpt-5" → "gpt-5") so the family match works on the bare model name.
-  const bare = id.split(/[:/]/).pop() ?? id;
+  // Split on "/" only (NOT ":") so a version tag like "gpt-4o:2024-08-06"
+  // keeps its family prefix instead of collapsing to the version.
+  const bare = id.split("/").pop() ?? id;
   return (
     // openai/gpt-4o*  (gpt-4o, gpt-4o-mini, gpt-4o-2024-…)
     bare.startsWith("gpt-4o") ||
@@ -157,9 +159,20 @@ export class AgentRunner implements RunnerProtocol {
    * on a block. (Mirrors ClaudeCodeRunner.emitIntent.)
    */
   private async emitIntent(event: AgentEvent): Promise<boolean> {
+    // Correlate the rejection to THIS intent's toolCallId. The AI SDK runs
+    // multiple tool calls within a step concurrently (the capable runStructured
+    // path hands execute-bearing tools to the SDK), so a payload-blind handler
+    // would let one tool's rejection spuriously block a concurrent sibling.
+    const intentId = (event as { toolCallId?: string }).toolCallId;
     let blocked = false;
-    const onRejected = () => {
-      blocked = true;
+    const onRejected = (rejected: BaseEvent) => {
+      // The gate chain emits the rejection carrying `originalIntent` (the intent
+      // it blocked), NOT a top-level toolCallId — correlate on that so a
+      // concurrent sibling's rejection can't flip this intent's `blocked`.
+      const oi = (rejected as { originalIntent?: { toolCallId?: string } }).originalIntent;
+      if (oi?.toolCallId === intentId) {
+        blocked = true;
+      }
     };
     this.eventBus.subscribe("agent.tool.rejected", onRejected);
     try {
@@ -725,6 +738,15 @@ export class AgentRunner implements RunnerProtocol {
       totalOutputTokens += tier1.outputTokens;
       toolCallsCount = tier1.toolCallsCount;
       iterations = tier1.iterations;
+
+      // Guard: if tier 1 produced no text (e.g. its tool loop hit maxIterations),
+      // the structured finish would get an empty body and throw an opaque schema
+      // error. Surface the real cause instead.
+      if (!tier1.response || tier1.response.trim() === "") {
+        throw new Error(
+          `runStructured: 2-tier fallback got empty tier-1 output (finishReason="${tier1.finishReason}") — the tool loop likely hit maxIterations before producing an answer. Raise maxIterations or simplify the step.`,
+        );
+      }
 
       const tier2 = await generateText({
         model,

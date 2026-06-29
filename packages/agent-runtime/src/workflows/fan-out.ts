@@ -30,8 +30,6 @@ export interface FanOutSpec<TIn, TItem, TOut, TC = TOut[]> {
   readonly consolidate?: Consolidate<TOut, TC>;
   /** Bound concurrency (reuses {@link runWithConcurrency}). Unbounded when unset. */
   readonly maxConcurrency?: number;
-  /** Collect failed branches and proceed. Default `true` (§5.3). */
-  readonly continueOnError?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -75,35 +73,51 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
         timestamp: new Date(),
       });
 
-      const res = await this.spec.step.run(item, branchCtx);
-      totalInputTokens += res.totalInputTokens;
-      totalOutputTokens += res.totalOutputTokens;
-      outputs[index] = res.output;
-      parentSlots.join(branchCtx.slots as SlotStore);
+      try {
+        const res = await this.spec.step.run(item, branchCtx);
+        totalInputTokens += res.totalInputTokens;
+        totalOutputTokens += res.totalOutputTokens;
+        outputs[index] = res.output;
+        parentSlots.join(branchCtx.slots as SlotStore);
 
-      if (res.succeeded) {
-        const outcome: NodeOutcome<unknown> = {
-          nodeName: stepName,
-          output: res.output,
-          succeeded: true,
-          inputTokens: res.totalInputTokens,
-          outputTokens: res.totalOutputTokens,
-        };
-        await hooks?.onStepComplete?.({
-          type: "pattern.step.complete",
-          stepName,
-          stepIndex: index,
-          result: outcome,
-          timestamp: new Date(),
-        });
-      } else {
+        if (res.succeeded) {
+          const outcome: NodeOutcome<unknown> = {
+            nodeName: stepName,
+            output: res.output,
+            succeeded: true,
+            inputTokens: res.totalInputTokens,
+            outputTokens: res.totalOutputTokens,
+          };
+          await hooks?.onStepComplete?.({
+            type: "pattern.step.complete",
+            stepName,
+            stepIndex: index,
+            result: outcome,
+            timestamp: new Date(),
+          });
+        } else {
+          succeeded = false;
+          firstError ??= res.error;
+          await hooks?.onStepError?.({
+            type: "pattern.step.error",
+            stepName,
+            stepIndex: index,
+            error: res.error ?? new Error(`FanOut item ${index} failed`),
+            timestamp: new Date(),
+          });
+        }
+      } catch (err) {
+        // A well-behaved Node never throws (leaves catch internally), but a
+        // nested/third-party node might. Convert a throw into a failed item so
+        // one bad item can't reject the pool and abort its siblings.
         succeeded = false;
-        firstError ??= res.error;
+        const e = err instanceof Error ? err : new Error(String(err));
+        firstError ??= e;
         await hooks?.onStepError?.({
           type: "pattern.step.error",
           stepName,
           stepIndex: index,
-          error: res.error ?? new Error(`FanOut item ${index} failed`),
+          error: e,
           timestamp: new Date(),
         });
       }
@@ -117,9 +131,6 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
     } else {
       await Promise.all(items.map((_, i) => executeOne(i)));
     }
-
-    // `continueOnError` is collect-and-continue by construction (all items dispatched).
-    void this.spec.continueOnError;
 
     const consolidated: TC = this.spec.consolidate
       ? this.spec.consolidate(outputs)

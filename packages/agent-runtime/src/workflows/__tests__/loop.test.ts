@@ -4,6 +4,29 @@ import { FunctionStep } from "../function-step.js";
 import { Loop } from "../loop.js";
 
 describe("Loop", () => {
+  it("exits with error when the body fails — keeps last good state, no garbage threaded", async () => {
+    const runner = new MockRunner();
+    const loop = new Loop<number>({
+      name: "fails-at-2",
+      body: new FunctionStep<number, number>({
+        name: "inc-or-throw",
+        fn: (n) => {
+          if (n >= 2) throw new Error("boom");
+          return n + 1;
+        },
+      }),
+      until: () => false,
+      maxIterations: 10,
+    });
+
+    const result = await loop.run(0, { runner });
+    expect(result.exitReason).toBe("error");
+    expect(result.succeeded).toBe(false);
+    expect(result.error?.message).toBe("boom");
+    expect(result.output).toBe(2); // last GOOD state — the failed output is not threaded
+    expect(result.iterations).toBe(3);
+  });
+
   it("exits with predicate_met when the predicate first holds", async () => {
     const runner = new MockRunner();
     const loop = new Loop<number>({

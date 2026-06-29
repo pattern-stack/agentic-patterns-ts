@@ -3,6 +3,7 @@ import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import { AgentStep } from "../agent-step.js";
 import { FunctionStep } from "../function-step.js";
+import type { Node } from "../node.js";
 import { Parallel } from "../parallel.js";
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,34 @@ function makeAgent(name = "test-agent"): AgentLike {
 // ---------------------------------------------------------------------------
 
 describe("Parallel", () => {
+  it("converts a throwing branch into a failed branch — siblings proceed", async () => {
+    const runner = new MockRunner();
+    const ok: Node<string, string> = {
+      name: "ok",
+      run: async () => ({
+        output: "ok",
+        succeeded: true,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+      }),
+    };
+    const boom: Node<string, string> = {
+      name: "boom",
+      run: async () => {
+        throw new Error("kaboom");
+      },
+    };
+    const par = new Parallel<string, string>([
+      { name: "a", node: ok },
+      { name: "b", node: boom },
+    ]);
+
+    const result = await par.run("in", { runner });
+    expect(result.succeeded).toBe(false);
+    expect(result.error?.message).toBe("kaboom");
+    expect((result.output as string[])[0]).toBe("ok"); // sibling completed despite the throw
+  });
+
   it("runs N branches over the shared input, collecting outputs in branch order", async () => {
     const runner = new MockRunner()
       .addResponse("task-A", { content: "result-A", inputTokens: 1, outputTokens: 2 })
@@ -89,7 +118,7 @@ describe("Parallel", () => {
     expect(order).toEqual(["first", "second", "third"]);
   });
 
-  it("collects failures and proceeds (continueOnError default true)", async () => {
+  it("collects failures and proceeds", async () => {
     const runner = new MockRunner();
     const par = new Parallel<unknown, string>([
       { name: "good", node: new FunctionStep({ name: "good", fn: () => "ok" }) },
