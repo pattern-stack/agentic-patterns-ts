@@ -33,7 +33,7 @@ export function createServer(config: ServerConfig): Hono {
   app.route("/", conversationRoutes(config.agents, conversations, config.eventBus));
   app.route("/", adminRoutes(config));
   app.route("/", hookRoutes(config.eventBus));
-  app.route("/", eventRoutes(config.eventStore));
+  app.route("/", eventRoutes(config.eventStore, config.eventBus));
 
   return app;
 }

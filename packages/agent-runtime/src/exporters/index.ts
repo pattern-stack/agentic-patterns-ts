@@ -2,6 +2,7 @@
 
 export { BaseExporter, type Exporter } from "./base.js";
 export { ConsoleExporter, createConsoleExporter, type ConsoleLogger } from "./console.js";
+export { HttpEventExporter, type HttpEventExporterOptions } from "./http.js";
 export {
   LangfuseExporter,
   type LangfuseClient,
