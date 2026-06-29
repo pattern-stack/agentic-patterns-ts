@@ -45,15 +45,24 @@ export async function createConversation(agentId: string): Promise<ConversationC
  * Aborting the passed-in AbortSignal terminates the fetch and stops the
  * generator.
  */
+export interface SendOptions {
+  /** Per-message cap on the agent tool-loop (server clamps 1–50). Omit → server default. */
+  maxIterations?: number;
+}
+
 export async function* streamMessage(
   conversationId: string,
   content: string,
+  opts?: SendOptions,
   signal?: AbortSignal,
 ): AsyncGenerator<ClientEvent, void, void> {
   const res = await fetch(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      ...(opts?.maxIterations != null ? { maxIterations: opts.maxIterations } : {}),
+    }),
     signal,
   });
 

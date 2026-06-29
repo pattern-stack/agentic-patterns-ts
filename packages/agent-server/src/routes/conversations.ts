@@ -52,12 +52,19 @@ export function conversationRoutes(
       return c.json({ error: "Conversation not found" }, 404);
     }
 
-    const body = await c.req.json<{ content: string }>();
+    const body = await c.req.json<{ content: string; maxIterations?: number }>();
     const content = body.content;
 
     if (!content || typeof content !== "string") {
       return c.json({ error: "content is required" }, 400);
     }
+
+    // Optional per-message cap on the agent tool-loop (clamped to a sane range);
+    // omitted → the runner's own default applies.
+    const maxIterations =
+      typeof body.maxIterations === "number" && Number.isFinite(body.maxIterations)
+        ? Math.min(Math.max(1, Math.trunc(body.maxIterations)), 50)
+        : undefined;
 
     const { conversation } = entry;
 
@@ -70,7 +77,7 @@ export function conversationRoutes(
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
     return streamSSE(c, async (stream) => {
-      for await (const event of conversation.stream(content, { eventBus })) {
+      for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
         const msg = agentEventToSSE(event);
         if (msg) {
           await stream.writeSSE(msg);

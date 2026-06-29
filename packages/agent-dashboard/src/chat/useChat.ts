@@ -13,7 +13,7 @@
  * mark the message `aborted`) from a real transport failure (→ `error`).
  */
 import { useCallback, useRef, useState } from "react";
-import { createConversation, streamMessage } from "../api/chat-client";
+import { createConversation, type SendOptions, streamMessage } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
 import { type ChatMessage, applyParts } from "./model";
 
@@ -28,12 +28,15 @@ export interface UseChatResult {
   reset: () => void;
 }
 
-export function useChat(agentId: string | null): UseChatResult {
+export function useChat(agentId: string | null, runOptions?: SendOptions): UseChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const convIdRef = useRef<string | null>(null);
+  // keep run options current without re-creating `send` each render.
+  const runOptionsRef = useRef<SendOptions | undefined>(runOptions);
+  runOptionsRef.current = runOptions;
   const seq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -70,7 +73,7 @@ export function useChat(agentId: string | null): UseChatResult {
           setConversationId(convId);
         }
 
-        for await (const ev of streamMessage(convId, q, ctrl.signal)) {
+        for await (const ev of streamMessage(convId, q, runOptionsRef.current, ctrl.signal)) {
           const e = toEventLike(ev);
           patch(assistantId, (m) => {
             const r = applyParts(m.parts, e);

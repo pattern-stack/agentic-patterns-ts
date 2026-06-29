@@ -189,7 +189,7 @@ export class Conversation {
    */
   async *stream(
     message: string,
-    options?: { eventBus?: AgentEventBus },
+    options?: { eventBus?: AgentEventBus; maxIterations?: number },
   ): AsyncGenerator<AgentEvent> {
     if (!this.runner.stream) {
       throw new Error("Runner does not support streaming");
@@ -225,6 +225,7 @@ export class Conversation {
         messageHistory,
         toolExecutor: this._toolExecutor,
         eventBus: options?.eventBus,
+        ...(options?.maxIterations != null ? { maxIterations: options.maxIterations } : {}),
       })) {
         yield event;
 

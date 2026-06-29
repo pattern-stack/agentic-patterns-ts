@@ -20,6 +20,7 @@ export function ChatPage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [maxIterations, setMaxIterations] = useState(10); // matches the runner default
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +43,7 @@ export function ChatPage() {
     [agents, selectedId],
   );
 
-  const chat = useChat(selectedId);
+  const chat = useChat(selectedId, { maxIterations });
   const exchangeCount = useMemo(
     () => chat.messages.filter((m) => m.role === "user").length,
     [chat.messages],
@@ -72,6 +73,8 @@ export function ChatPage() {
         loadError={loadError}
         chatError={chat.error}
         description={selected?.description}
+        maxIterations={maxIterations}
+        onMaxIterations={setMaxIterations}
       />
       <div style={{ flex: 1, minHeight: 0 }}>
         <div className="chat-route">
@@ -107,6 +110,8 @@ interface HeaderProps {
   loadError: string | null;
   chatError: string | null;
   description?: string;
+  maxIterations: number;
+  onMaxIterations: (n: number) => void;
 }
 
 function Header({
@@ -120,6 +125,8 @@ function Header({
   loadError,
   chatError,
   description,
+  maxIterations,
+  onMaxIterations,
 }: HeaderProps) {
   const selected = agents.find((a) => a.id === selectedId);
   return (
@@ -158,6 +165,29 @@ function Header({
         <Button variant="ghost" size="sm" onClick={onNewChat} disabled={!conversationId}>
           New Chat
         </Button>
+        <label
+          title="Cap the agent's tool-loop iterations for each message (the runner stops after this many)."
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg-muted)" }}
+        >
+          max tool calls
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={maxIterations}
+            onChange={(e) => onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))}
+            style={{
+              width: 56,
+              fontFamily: "inherit",
+              fontSize: 13,
+              background: "var(--bg-inset)",
+              color: "var(--fg-default)",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              padding: "6px 8px",
+            }}
+          />
+        </label>
         <div style={{ flex: 1 }} />
         {selected && (
           <Badge tone="emerald" variant="outline">
