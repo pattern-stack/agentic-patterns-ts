@@ -1,90 +1,37 @@
 /**
- * Workflow base types — shared types, events, hooks, and helpers
- * that all workflow patterns depend on.
+ * Workflow base — the infrastructure shared by the typed `Node` substrate
+ * (`node.ts`) and the composites (`sequential.ts`, `parallel.ts`, …).
  *
- * Ported from Python: workflows/base.py
+ * The legacy string-threading core (`Step`, `StepResult`, `PatternResult`,
+ * `MessageTemplate`, `executeStep`, `createStepResult`, `resolveMessage`,
+ * `contextExtractor`) has been REMOVED — threading now flows through typed
+ * `Node<TIn, TOut>` return values (DESIGN §2-§6). What remains here is the
+ * lifecycle infrastructure the composites still emit/consume:
+ *
+ *  - {@link PatternContext} — the (now Slot-backed) string-config shared-state carrier
+ *  - {@link PatternEvent} union + {@link PatternHooks} — pattern lifecycle observability
+ *  - {@link PatternRunOptions} — a structural subset of {@link NodeRunContext}
+ *  - {@link PatternProtocol} — the declarative-config entry point, `Node<PatternContext, string>`
+ *  - {@link applyStepModel} / {@link makeStepName} — per-step helpers reused by composites
  */
 
 import type { AgentLike } from "../runner/agent-runner.js";
-import type { RunResult, RunnerProtocol, ToolExecutor } from "../runner/types.js";
+import type { RunnerProtocol, ToolExecutor } from "../runner/types.js";
+import type { Node, NodeOutcome, NodeResult } from "./node.js";
 
-// Re-export AgentLike so workflow consumers don't need to import from runner
+// Re-export AgentLike so workflow consumers don't need to import from runner.
 export type { AgentLike } from "../runner/agent-runner.js";
 
 // ---------------------------------------------------------------------------
 // Context
 // ---------------------------------------------------------------------------
 
-/** Shared context passed through workflow steps. */
-export type PatternContext = Record<string, unknown>;
-
-/** A message template: either a static string or a function that builds one. */
-export type MessageTemplate = string | ((context: PatternContext) => string);
-
-// ---------------------------------------------------------------------------
-// Step
-// ---------------------------------------------------------------------------
-
-/** A single step in a workflow pattern. */
-export interface Step {
-  readonly agent: AgentLike;
-  readonly messageTemplate: MessageTemplate;
-  readonly name?: string;
-  readonly outputKey?: string;
-  readonly contextExtractor?: (result: StepResult, context: PatternContext) => PatternContext;
-  /**
-   * Per-step model override. The step runs an *agent view* whose `getModel()`
-   * returns this id (the model still belongs to the agent — see
-   * {@link applyStepModel}), so a resolver-backed runner dispatches it. Has no
-   * effect with a constant/pinned runner. Use for split-model pipelines — e.g. a
-   * cheap model for retrieval, a strong model for synthesis — with one runner.
-   */
-  readonly model?: string;
-  /**
-   * Per-step tool-loop cap (threaded into `RunOptions.maxIterations`). Falls
-   * back to the runner's default (10) when unset.
-   */
-  readonly maxIterations?: number;
-}
-
-// ---------------------------------------------------------------------------
-// StepResult
-// ---------------------------------------------------------------------------
-
-/** Result of executing a single step. */
-export interface StepResult {
-  readonly stepName: string;
-  readonly runResult: RunResult;
-  /** Shortcut for `runResult.response`. */
-  readonly content: string;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
-}
-
 /**
- * Create a frozen StepResult from a RunResult.
+ * Shared context bag for the declarative string-config path. No longer the
+ * threading carrier (typed I/O does that now) — it is the `TIn`/shared-state
+ * type used by {@link PatternProtocol} and `buildWorkflowFromConfig`.
  */
-export function createStepResult(stepName: string, runResult: RunResult): StepResult {
-  return Object.freeze({
-    stepName,
-    runResult,
-    content: runResult.response,
-    inputTokens: runResult.inputTokens,
-    outputTokens: runResult.outputTokens,
-  });
-}
-
-// ---------------------------------------------------------------------------
-// PatternResult
-// ---------------------------------------------------------------------------
-
-/** Aggregate result of a workflow pattern execution. */
-export interface PatternResult {
-  readonly totalInputTokens: number;
-  readonly totalOutputTokens: number;
-  readonly succeeded: boolean;
-  readonly finalContent: string;
-}
+export type PatternContext = Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
 // PatternEvent — discriminated union of 7 event types
@@ -107,7 +54,8 @@ export interface PatternStepCompleteEvent {
   readonly type: "pattern.step.complete";
   readonly stepName: string;
   readonly stepIndex: number;
-  readonly result: StepResult;
+  /** Generalized from the legacy `StepResult` to the typed per-child record. */
+  readonly result: NodeOutcome<unknown>;
   readonly timestamp: Date;
 }
 
@@ -134,7 +82,8 @@ export interface PatternIterationCompleteEvent {
 export interface PatternCompleteEvent {
   readonly type: "pattern.complete";
   readonly patternName: string;
-  readonly result: PatternResult;
+  /** Generalized from the legacy `PatternResult` to the typed aggregate result. */
+  readonly result: NodeResult<unknown>;
   readonly timestamp: Date;
 }
 
@@ -152,10 +101,9 @@ export type PatternEvent =
 // ---------------------------------------------------------------------------
 
 /**
- * Callbacks for pattern lifecycle events.
- *
- * NOTE: These are workflow-level hooks for pattern orchestration.
- * They are NOT the same as the deprecated runner-level Hooks interface.
+ * Callbacks for pattern lifecycle events. Workflow-level orchestration hooks
+ * (NOT the runner-level hooks). Every composite emits these where the legacy
+ * classes did.
  */
 export interface PatternHooks {
   onPatternStart?: (event: PatternStartEvent) => void | Promise<void>;
@@ -171,7 +119,11 @@ export interface PatternHooks {
 // PatternRunOptions
 // ---------------------------------------------------------------------------
 
-/** Options passed to pattern.run(). */
+/**
+ * Options for the declarative-config `run()`. A structural subset of
+ * {@link NodeRunContext} (its `slots` field is optional/engine-defaulted), so
+ * any `PatternRunOptions` value is a valid `NodeRunContext`.
+ */
 export interface PatternRunOptions {
   readonly runner: RunnerProtocol;
   readonly hooks?: PatternHooks;
@@ -183,36 +135,17 @@ export interface PatternRunOptions {
 // PatternProtocol
 // ---------------------------------------------------------------------------
 
-/** Interface that all workflow patterns implement. */
-export interface PatternProtocol {
-  run(context?: PatternContext, options?: PatternRunOptions): Promise<PatternResult>;
-}
-
-// ---------------------------------------------------------------------------
-// GoalEvaluatorProtocol
-// ---------------------------------------------------------------------------
-
-/** Result tuple: [achieved, reason, confident]. */
-export type GoalEvaluationResult = readonly [achieved: boolean, reason: string, confident: boolean];
-
-/** Protocol for evaluating whether a goal has been achieved. */
-export interface GoalEvaluatorProtocol {
-  evaluate(goal: string, output: string, context?: PatternContext): Promise<GoalEvaluationResult>;
-}
+/**
+ * The declarative-config entry point's contract — a string-pinned `Node`
+ * (DESIGN §4). `PatternContext` stays as the shared-state carrier; `TOut` is
+ * pinned to `string` because the serialized config schema cannot carry type
+ * parameters.
+ */
+export type PatternProtocol = Node<PatternContext, string>;
 
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
-
-/**
- * Resolve a message template to a string.
- */
-export function resolveMessage(template: MessageTemplate, context: PatternContext): string {
-  if (typeof template === "string") {
-    return template;
-  }
-  return template(context);
-}
 
 /**
  * Generate a step name, falling back to `step_<index>` if none provided.
@@ -242,22 +175,4 @@ export function applyStepModel(agent: AgentLike, model: string | undefined): Age
     getSystemPrompt: () => agent.getSystemPrompt(),
     renderInitialPrompt: () => agent.renderInitialPrompt(),
   };
-}
-
-/**
- * Execute a single step: resolve message, run agent, return result.
- */
-export async function executeStep(
-  step: Step,
-  context: PatternContext,
-  runner: RunnerProtocol,
-  toolExecutor?: ToolExecutor,
-): Promise<StepResult> {
-  const message = resolveMessage(step.messageTemplate, context);
-  const runResult = await runner.run(applyStepModel(step.agent, step.model), message, {
-    toolExecutor,
-    maxIterations: step.maxIterations,
-  });
-  const stepName = makeStepName(step.name, 0);
-  return createStepResult(stepName, runResult);
 }

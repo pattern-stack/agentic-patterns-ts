@@ -1,195 +1,156 @@
 /**
- * Sequential — Chain agents in sequence, threading context through the pipeline.
+ * `Sequential` — N named steps in order, threading typed output node→node
+ * (DESIGN §6.2).
  *
- * Ported from Python: workflows/compositions/sequential.py
+ * The single typed `Sequential` (replaces the legacy string-pinned class). A
+ * fluent builder whose each `.then()` seam type-checks `step[i].TOut ===
+ * step[i+1].TIn` — return-value chaining REPLACES the old `outputKey` string
+ * threading. The built object implements {@link Node}, so it nests anywhere a
+ * node is accepted.
  */
 
-import type {
-  PatternContext,
-  PatternProtocol,
-  PatternResult,
-  PatternRunOptions,
-  Step,
-  StepResult,
-} from "./base.js";
-import { applyStepModel, createStepResult, makeStepName, resolveMessage } from "./base.js";
+import type { PatternHooks } from "./base.js";
+import type { Node, NodeOutcome, NodeResult, NodeRunContext } from "./node.js";
+import { createSlotStore } from "./slot.js";
 
 // ---------------------------------------------------------------------------
-// SequentialResult
+// Options
 // ---------------------------------------------------------------------------
 
-export interface SequentialResult extends PatternResult {
-  readonly steps: ReadonlyArray<StepResult | PatternResult>;
-  readonly finalContext: Readonly<PatternContext>;
-}
-
-// ---------------------------------------------------------------------------
-// SequentialOptions
-// ---------------------------------------------------------------------------
-
-export interface SequentialOptions {
+export interface SeqOpts {
+  /** Continue past a child returning `succeeded: false`. Default `false` (stop). */
   readonly continueOnError?: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Sequential
+// Builder
 // ---------------------------------------------------------------------------
 
 /**
- * Chain agents in sequence, threading context through the pipeline.
- *
- * Each step reads context, writes via `outputKey` and `contextExtractor`.
- * Supports nested patterns (any PatternProtocol) as steps.
- *
- * Example:
- *   const seq = new Sequential([
- *     { agent: writer, messageTemplate: "Write about {topic}" },
- *     { agent: reviewer, messageTemplate: (ctx) => `Review: ${ctx.draft}` },
- *   ]);
+ * Accumulates a typed pipeline. `TIn` is the pipeline input; `TCur` is the
+ * output type of the most recently appended node (and the required input type
+ * of the next `.then()`).
  */
-export class Sequential implements PatternProtocol {
-  private readonly steps: ReadonlyArray<Step | PatternProtocol>;
-  private readonly continueOnError: boolean;
+export class SequentialBuilder<TIn, TCur> {
+  private constructor(
+    // biome-ignore lint/suspicious/noExplicitAny: heterogeneous node list; the typed seams live on the builder methods.
+    private readonly nodes: ReadonlyArray<Node<any, any>>,
+    private readonly opts: SeqOpts,
+  ) {}
 
-  constructor(steps: Array<Step | PatternProtocol>, options?: SequentialOptions) {
-    this.steps = steps;
-    this.continueOnError = options?.continueOnError ?? false;
+  /** Begin a pipeline with its first node. */
+  static start<A, B>(first: Node<A, B>, opts?: SeqOpts): SequentialBuilder<A, B> {
+    return new SequentialBuilder<A, B>([first], opts ?? {});
   }
 
-  async run(context: PatternContext = {}, options?: PatternRunOptions): Promise<SequentialResult> {
-    const runner = options?.runner;
-    const hooks = options?.hooks;
-    const toolExecutor = options?.toolExecutor;
+  /**
+   * Append a node. Compile error if `node`'s `TIn` ≠ the current `TCur` — this
+   * typed seam REPLACES `outputKey` threading.
+   */
+  // biome-ignore lint/suspicious/noThenProperty: `.then()` is the intended fluent-builder seam (DESIGN §6.2), not a thenable.
+  then<TNext>(node: Node<TCur, TNext>): SequentialBuilder<TIn, TNext> {
+    return new SequentialBuilder<TIn, TNext>([...this.nodes, node], this.opts);
+  }
+
+  /** Fold the pipeline into a single runnable `Node<TIn, TCur>`. */
+  build(name?: string): Node<TIn, TCur> {
+    return new SequentialNode<TIn, TCur>(this.nodes, this.opts, name);
+  }
+}
+
+/** Public alias — author as `Sequential.start(a).then(b).build()`. */
+export const Sequential = SequentialBuilder;
+
+// ---------------------------------------------------------------------------
+// The folded node
+// ---------------------------------------------------------------------------
+
+class SequentialNode<TIn, TCur> implements Node<TIn, TCur> {
+  constructor(
+    // biome-ignore lint/suspicious/noExplicitAny: heterogeneous, type-checked at build time.
+    private readonly nodes: ReadonlyArray<Node<any, any>>,
+    private readonly opts: SeqOpts,
+    readonly name?: string,
+  ) {}
+
+  async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TCur>> {
+    const hooks: PatternHooks | undefined = ctx.hooks;
+    const patternName = this.name ?? "Sequential";
+    const continueOnError = this.opts.continueOnError ?? false;
+    const childCtx: NodeRunContext = { ...ctx, slots: ctx.slots ?? createSlotStore() };
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",
-      patternName: "Sequential",
+      patternName,
       timestamp: new Date(),
     });
 
-    let currentContext = { ...context };
-    const stepResults: Array<StepResult | PatternResult> = [];
+    let current: unknown = input;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let succeeded = true;
-    let finalContent = "";
+    let error: Error | undefined;
 
-    for (let i = 0; i < this.steps.length; i++) {
-      const step = this.steps[i]!;
+    for (let i = 0; i < this.nodes.length; i++) {
+      const node = this.nodes[i]!;
+      const stepName = node.name ?? `step_${i}`;
 
       await hooks?.onStepStart?.({
         type: "pattern.step.start",
-        stepName: isStep(step) ? makeStepName(step.name, i) : `nested_${i}`,
+        stepName,
         stepIndex: i,
         timestamp: new Date(),
       });
 
-      try {
-        let result: StepResult | PatternResult;
+      const res = await node.run(current, childCtx);
+      totalInputTokens += res.totalInputTokens;
+      totalOutputTokens += res.totalOutputTokens;
+      current = res.output;
 
-        if (isStep(step)) {
-          if (!runner) {
-            throw new Error("Runner is required for Step execution");
-          }
-          const message = resolveMessage(step.messageTemplate, currentContext);
-          const runResult = await runner.run(applyStepModel(step.agent, step.model), message, {
-            toolExecutor,
-            maxIterations: step.maxIterations,
-          });
-          const stepName = makeStepName(step.name, i);
-          const stepResult = createStepResult(stepName, runResult);
-
-          // Update context
-          if (step.outputKey) {
-            currentContext[step.outputKey] = stepResult.content;
-          }
-          if (step.contextExtractor) {
-            currentContext = {
-              ...currentContext,
-              ...step.contextExtractor(stepResult, currentContext),
-            };
-          }
-
-          result = stepResult;
-          totalInputTokens += stepResult.inputTokens;
-          totalOutputTokens += stepResult.outputTokens;
-          finalContent = stepResult.content;
-        } else {
-          // Nested pattern
-          const nestedResult = await step.run(currentContext, options);
-          result = nestedResult;
-          totalInputTokens += nestedResult.totalInputTokens;
-          totalOutputTokens += nestedResult.totalOutputTokens;
-          finalContent = nestedResult.finalContent;
-          if (!nestedResult.succeeded) {
-            succeeded = false;
-          }
-        }
-
-        stepResults.push(result);
-
+      if (res.succeeded) {
+        const outcome: NodeOutcome<unknown> = {
+          nodeName: stepName,
+          output: res.output,
+          succeeded: true,
+          inputTokens: res.totalInputTokens,
+          outputTokens: res.totalOutputTokens,
+        };
         await hooks?.onStepComplete?.({
           type: "pattern.step.complete",
-          stepName: isStep(step) ? makeStepName(step.name, i) : `nested_${i}`,
+          stepName,
           stepIndex: i,
-          result: isStepResult(result)
-            ? result
-            : createStepResult(`nested_${i}`, {
-                response: result.finalContent,
-                inputTokens: result.totalInputTokens,
-                outputTokens: result.totalOutputTokens,
-                toolCallsCount: 0,
-                iterations: 1,
-                finishReason: "stop",
-              }),
+          result: outcome,
           timestamp: new Date(),
         });
-      } catch (error) {
+      } else {
         succeeded = false;
-        const err = error instanceof Error ? error : new Error(String(error));
-
+        error = res.error;
         await hooks?.onStepError?.({
           type: "pattern.step.error",
-          stepName: isStep(step) ? makeStepName(step.name, i) : `nested_${i}`,
+          stepName,
           stepIndex: i,
-          error: err,
+          error: res.error ?? new Error(`Step "${stepName}" failed`),
           timestamp: new Date(),
         });
-
-        if (!this.continueOnError) {
-          break;
-        }
+        if (!continueOnError) break;
       }
     }
 
-    const result: SequentialResult = Object.freeze({
-      steps: Object.freeze(stepResults),
-      finalContext: Object.freeze(currentContext),
+    const result: NodeResult<TCur> = Object.freeze({
+      output: current as TCur,
+      succeeded,
+      error,
       totalInputTokens,
       totalOutputTokens,
-      succeeded,
-      finalContent,
     });
 
     await hooks?.onPatternComplete?.({
       type: "pattern.complete",
-      patternName: "Sequential",
+      patternName,
       result,
       timestamp: new Date(),
     });
 
     return result;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Type guards
-// ---------------------------------------------------------------------------
-
-function isStep(step: Step | PatternProtocol): step is Step {
-  return "agent" in step && "messageTemplate" in step;
-}
-
-function isStepResult(result: StepResult | PatternResult): result is StepResult {
-  return "stepName" in result;
 }

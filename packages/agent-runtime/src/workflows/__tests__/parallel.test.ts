@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
-import type { Step } from "../base.js";
-import { Parallel, collectByName, collectContents } from "../parallel.js";
+import { AgentStep } from "../agent-step.js";
+import { FunctionStep } from "../function-step.js";
+import { Parallel } from "../parallel.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -23,121 +24,115 @@ function makeAgent(name = "test-agent"): AgentLike {
 // ---------------------------------------------------------------------------
 
 describe("Parallel", () => {
-  it("runs 3 parallel steps", async () => {
+  it("runs N branches over the shared input, collecting outputs in branch order", async () => {
     const runner = new MockRunner()
       .addResponse("task-A", { content: "result-A", inputTokens: 1, outputTokens: 2 })
       .addResponse("task-B", { content: "result-B", inputTokens: 3, outputTokens: 4 })
       .addResponse("task-C", { content: "result-C", inputTokens: 5, outputTokens: 6 });
 
-    const steps: Step[] = [
-      { agent: makeAgent("a"), messageTemplate: "task-A", name: "step-a" },
-      { agent: makeAgent("b"), messageTemplate: "task-B", name: "step-b" },
-      { agent: makeAgent("c"), messageTemplate: "task-C", name: "step-c" },
-    ];
+    const par = new Parallel<unknown, string>([
+      {
+        name: "a",
+        node: new AgentStep({ name: "a", agent: makeAgent("a"), prompt: () => "task-A" }),
+      },
+      {
+        name: "b",
+        node: new AgentStep({ name: "b", agent: makeAgent("b"), prompt: () => "task-B" }),
+      },
+      {
+        name: "c",
+        node: new AgentStep({ name: "c", agent: makeAgent("c"), prompt: () => "task-C" }),
+      },
+    ]);
 
-    const par = new Parallel(steps);
     const result = await par.run({}, { runner });
 
-    expect(result.allSucceeded).toBe(true);
     expect(result.succeeded).toBe(true);
-    expect(result.successful).toHaveLength(3);
-    expect(result.failed).toHaveLength(0);
+    expect(result.output).toEqual(["result-A", "result-B", "result-C"]);
     expect(result.totalInputTokens).toBe(9);
     expect(result.totalOutputTokens).toBe(12);
   });
 
-  it("maxConcurrency=1 runs serially", async () => {
-    const order: string[] = [];
+  it("passes the same input to every branch", async () => {
     const runner = new MockRunner();
+    const par = new Parallel<{ x: number }, number>([
+      { name: "p1", node: new FunctionStep({ name: "p1", fn: (i) => i.x + 1 }) },
+      { name: "p2", node: new FunctionStep({ name: "p2", fn: (i) => i.x * 10 }) },
+    ]);
 
-    // Use a custom runner that tracks order
-    const trackingRunner = {
-      async run(agent: AgentLike, message: string) {
-        order.push(message);
-        return runner.run(agent, message);
+    const result = await par.run({ x: 5 }, { runner });
+    expect(result.output).toEqual([6, 50]);
+  });
+
+  it("maxConcurrency=1 runs branches serially in order", async () => {
+    const runner = new MockRunner();
+    const order: string[] = [];
+    const branch = (name: string) => ({
+      name,
+      node: new FunctionStep<unknown, string>({
+        name,
+        fn: () => {
+          order.push(name);
+          return name;
+        },
+      }),
+    });
+
+    const par = new Parallel<unknown, string>(
+      [branch("first"), branch("second"), branch("third")],
+      {
+        maxConcurrency: 1,
       },
-    };
+    );
+    await par.run({}, { runner });
 
-    const steps: Step[] = [
-      { agent: makeAgent(), messageTemplate: "first", name: "s1" },
-      { agent: makeAgent(), messageTemplate: "second", name: "s2" },
-      { agent: makeAgent(), messageTemplate: "third", name: "s3" },
-    ];
-
-    const par = new Parallel(steps, { maxConcurrency: 1 });
-    await par.run({}, { runner: trackingRunner });
-
-    // With maxConcurrency=1, order should be preserved
     expect(order).toEqual(["first", "second", "third"]);
   });
 
-  it("handles mixed success/failure", async () => {
-    const runner = new MockRunner()
-      .addResponse("ok", { content: "success", inputTokens: 1, outputTokens: 1 })
-      .addResponse("fail", { content: "", error: new Error("boom") });
+  it("collects failures and proceeds (continueOnError default true)", async () => {
+    const runner = new MockRunner();
+    const par = new Parallel<unknown, string>([
+      { name: "good", node: new FunctionStep({ name: "good", fn: () => "ok" }) },
+      {
+        name: "bad",
+        node: new FunctionStep({
+          name: "bad",
+          fn: () => {
+            throw new Error("boom");
+          },
+        }),
+      },
+      { name: "good2", node: new FunctionStep({ name: "good2", fn: () => "ok2" }) },
+    ]);
 
-    const steps: Step[] = [
-      { agent: makeAgent(), messageTemplate: "ok", name: "good" },
-      { agent: makeAgent(), messageTemplate: "fail", name: "bad" },
-      { agent: makeAgent(), messageTemplate: "ok", name: "good2" },
-    ];
-
-    const par = new Parallel(steps, { returnExceptions: true });
     const result = await par.run({}, { runner });
 
-    expect(result.allSucceeded).toBe(false);
-    expect(result.successful).toHaveLength(2);
-    expect(result.failed).toHaveLength(1);
-    expect(result.failed[0]?.[0]).toBe(1); // index of failed step
-    expect(result.failed[0]?.[1].message).toBe("boom");
+    expect(result.succeeded).toBe(false);
+    expect(result.error?.message).toBe("boom");
+    // Siblings still produced their outputs (failed branch slot is undefined).
+    expect(result.output[0]).toBe("ok");
+    expect(result.output[1]).toBeUndefined();
+    expect(result.output[2]).toBe("ok2");
   });
 
-  it("applies custom consolidator", async () => {
-    const runner = new MockRunner().addResponse("*", {
-      content: "data",
-      inputTokens: 1,
-      outputTokens: 1,
-    });
+  it("applies a consolidate reducer whose result becomes the node output", async () => {
+    const runner = new MockRunner();
+    const par = new Parallel<unknown, number, number>(
+      [
+        { name: "p1", node: new FunctionStep({ name: "p1", fn: () => 2 }) },
+        { name: "p2", node: new FunctionStep({ name: "p2", fn: () => 3 }) },
+        { name: "p3", node: new FunctionStep({ name: "p3", fn: () => 4 }) },
+      ],
+      { consolidate: (outs) => outs.reduce((a, b) => a + b, 0) },
+    );
 
-    const steps: Step[] = [
-      { agent: makeAgent(), messageTemplate: "a", name: "s1" },
-      { agent: makeAgent(), messageTemplate: "b", name: "s2" },
-    ];
-
-    const par = new Parallel(steps, {
-      consolidator: collectContents,
-      outputKey: "all",
-    });
     const result = await par.run({}, { runner });
-
-    expect(result.consolidatedOutput.all).toEqual(["data", "data"]);
-  });
-
-  it("collectByName consolidator works", async () => {
-    const runner = new MockRunner()
-      .addResponse("q1", { content: "answer-1" })
-      .addResponse("q2", { content: "answer-2" });
-
-    const steps: Step[] = [
-      { agent: makeAgent(), messageTemplate: "q1", name: "question-1" },
-      { agent: makeAgent(), messageTemplate: "q2", name: "question-2" },
-    ];
-
-    const par = new Parallel(steps, {
-      consolidator: collectByName,
-      outputKey: "answers",
-    });
-    const result = await par.run({}, { runner });
-
-    const answers = result.consolidatedOutput.answers as Record<string, string>;
-    expect(answers["question-1"]).toBe("answer-1");
-    expect(answers["question-2"]).toBe("answer-2");
+    expect(result.output).toBe(9);
   });
 
   it("fires hook callbacks", async () => {
-    const runner = new MockRunner().addResponse("*", { content: "ok" });
+    const runner = new MockRunner();
     const events: string[] = [];
-
     const hooks = {
       onPatternStart: () => {
         events.push("start");
@@ -153,7 +148,9 @@ describe("Parallel", () => {
       },
     };
 
-    const par = new Parallel([{ agent: makeAgent(), messageTemplate: "test", name: "s1" }]);
+    const par = new Parallel<unknown, string>([
+      { name: "s1", node: new FunctionStep({ name: "s1", fn: () => "ok" }) },
+    ]);
     await par.run({}, { runner, hooks });
 
     expect(events).toContain("start");
@@ -162,9 +159,11 @@ describe("Parallel", () => {
     expect(events).toContain("complete");
   });
 
-  it("returns frozen result", async () => {
-    const runner = new MockRunner().addResponse("*", { content: "ok" });
-    const par = new Parallel([{ agent: makeAgent(), messageTemplate: "test" }]);
+  it("returns a frozen result", async () => {
+    const runner = new MockRunner();
+    const par = new Parallel<unknown, string>([
+      { name: "s1", node: new FunctionStep({ name: "s1", fn: () => "ok" }) },
+    ]);
     const result = await par.run({}, { runner });
     expect(Object.isFrozen(result)).toBe(true);
   });

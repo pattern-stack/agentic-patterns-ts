@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
-import type { PatternResult, PatternRunOptions, Step } from "../base.js";
+import { AgentStep } from "../agent-step.js";
+import { FunctionStep } from "../function-step.js";
 import { Sequential } from "../sequential.js";
 
 // ---------------------------------------------------------------------------
@@ -23,132 +24,137 @@ function makeAgent(name = "test-agent"): AgentLike {
 // ---------------------------------------------------------------------------
 
 describe("Sequential", () => {
-  it("chains 3 steps with context threading", async () => {
+  it("threads typed output node→node and rolls up tokens (AgentStep chain)", async () => {
     const runner = new MockRunner()
       .addResponse("Step 1", { content: "result-1", inputTokens: 5, outputTokens: 10 })
       .addResponse("Step 2", { content: "result-2", inputTokens: 6, outputTokens: 11 })
       .addResponse("Step 3", { content: "result-3", inputTokens: 7, outputTokens: 12 });
 
-    const steps: Step[] = [
-      {
-        agent: makeAgent("agent-1"),
-        messageTemplate: "Step 1",
+    const seq = Sequential.start(
+      new AgentStep<{ topic: string }, string>({
         name: "first",
-        outputKey: "step1",
-      },
-      {
-        agent: makeAgent("agent-2"),
-        messageTemplate: (ctx) => `Step 2: ${ctx.step1 as string}`,
-        name: "second",
-        outputKey: "step2",
-      },
-      {
-        agent: makeAgent("agent-3"),
-        messageTemplate: (ctx) => `Step 3: ${ctx.step2 as string}`,
-        name: "third",
-      },
-    ];
+        agent: makeAgent("agent-1"),
+        prompt: (input) => `Step 1: ${input.topic}`,
+      }),
+    )
+      .then(
+        new AgentStep<string, string>({
+          name: "second",
+          agent: makeAgent("agent-2"),
+          prompt: (prev) => `Step 2: ${prev}`,
+        }),
+      )
+      .then(
+        new AgentStep<string, string>({
+          name: "third",
+          agent: makeAgent("agent-3"),
+          prompt: (prev) => `Step 3: ${prev}`,
+        }),
+      )
+      .build();
 
-    const seq = new Sequential(steps);
-    const result = await seq.run({}, { runner });
+    const result = await seq.run({ topic: "go" }, { runner });
 
     expect(result.succeeded).toBe(true);
-    expect(result.steps).toHaveLength(3);
+    expect(result.output).toBe("result-3");
     expect(result.totalInputTokens).toBe(18);
     expect(result.totalOutputTokens).toBe(33);
-    expect(result.finalContent).toBe("result-3");
-    expect(result.finalContext.step1).toBe("result-1");
-    expect(result.finalContext.step2).toBe("result-2");
 
-    // Verify context threading via runner call history
+    // Threading: each step's typed output is the next step's input.
     expect(runner.callHistory[1]?.message).toBe("Step 2: result-1");
     expect(runner.callHistory[2]?.message).toBe("Step 3: result-2");
   });
 
-  it("supports nested parallel within sequential", async () => {
-    const runner = new MockRunner().addResponse("*", {
-      content: "nested-result",
-      inputTokens: 1,
-      outputTokens: 2,
-    });
+  it("threads typed objects through FunctionStep nodes", async () => {
+    const runner = new MockRunner();
+    const seq = Sequential.start(
+      new FunctionStep<number, { n: number }>({ name: "wrap", fn: (n) => ({ n: n + 1 }) }),
+    )
+      .then(new FunctionStep<{ n: number }, number>({ name: "double", fn: (x) => x.n * 2 }))
+      .build();
 
-    const nestedPattern = {
-      async run(
-        _context?: Record<string, unknown>,
-        _options?: PatternRunOptions,
-      ): Promise<PatternResult> {
-        return {
-          totalInputTokens: 100,
-          totalOutputTokens: 200,
-          succeeded: true,
-          finalContent: "nested-output",
-        };
-      },
-    };
-
-    const steps: Array<Step | { run: typeof nestedPattern.run }> = [
-      {
-        agent: makeAgent(),
-        messageTemplate: "First step",
-        name: "step-1",
-        outputKey: "s1",
-      },
-      nestedPattern,
-    ];
-
-    const seq = new Sequential(steps);
-    const result = await seq.run({}, { runner });
-
+    const result = await seq.run(10, { runner });
     expect(result.succeeded).toBe(true);
-    expect(result.steps).toHaveLength(2);
-    expect(result.totalInputTokens).toBe(101);
-    expect(result.totalOutputTokens).toBe(202);
-    expect(result.finalContent).toBe("nested-output");
+    expect(result.output).toBe(22);
   });
 
-  it("stops on error by default", async () => {
-    const runner = new MockRunner()
-      .addResponse("step-1", { content: "ok" })
-      .addResponse("step-2", { content: "ok", error: new Error("boom") })
-      .addResponse("step-3", { content: "ok" });
+  it("supports a nested Sequential as a child node", async () => {
+    const runner = new MockRunner();
+    const inner = Sequential.start(
+      new FunctionStep<number, number>({ name: "inc", fn: (n) => n + 1 }),
+    )
+      .then(new FunctionStep<number, number>({ name: "inc2", fn: (n) => n + 1 }))
+      .build("inner");
 
-    const steps: Step[] = [
-      { agent: makeAgent(), messageTemplate: "step-1", name: "s1" },
-      { agent: makeAgent(), messageTemplate: "step-2", name: "s2" },
-      { agent: makeAgent(), messageTemplate: "step-3", name: "s3" },
-    ];
+    const outer = Sequential.start(inner)
+      .then(new FunctionStep<number, number>({ name: "times10", fn: (n) => n * 10 }))
+      .build("outer");
 
-    const seq = new Sequential(steps);
-    const result = await seq.run({}, { runner });
-
-    expect(result.succeeded).toBe(false);
-    expect(result.steps).toHaveLength(1); // Only first step completed
+    const result = await outer.run(0, { runner });
+    expect(result.succeeded).toBe(true);
+    expect(result.output).toBe(20);
   });
 
-  it("continues on error when continueOnError is true", async () => {
-    const runner = new MockRunner()
-      .addResponse("step-1", { content: "ok-1", inputTokens: 1, outputTokens: 1 })
-      .addResponse("step-2", { content: "ok", error: new Error("boom") })
-      .addResponse("step-3", { content: "ok-3", inputTokens: 2, outputTokens: 2 });
+  it("stops on the first failed child by default", async () => {
+    const runner = new MockRunner();
+    const reached: string[] = [];
+    const seq = Sequential.start(new FunctionStep<number, number>({ name: "ok", fn: (n) => n + 1 }))
+      .then(
+        new FunctionStep<number, number>({
+          name: "boom",
+          fn: () => {
+            throw new Error("boom");
+          },
+        }),
+      )
+      .then(
+        new FunctionStep<number, number>({
+          name: "never",
+          fn: (n) => {
+            reached.push("never");
+            return n;
+          },
+        }),
+      )
+      .build();
 
-    const steps: Step[] = [
-      { agent: makeAgent(), messageTemplate: "step-1", name: "s1" },
-      { agent: makeAgent(), messageTemplate: "step-2", name: "s2" },
-      { agent: makeAgent(), messageTemplate: "step-3", name: "s3" },
-    ];
-
-    const seq = new Sequential(steps, { continueOnError: true });
-    const result = await seq.run({}, { runner });
-
+    const result = await seq.run(0, { runner });
     expect(result.succeeded).toBe(false);
-    expect(result.steps).toHaveLength(2); // step-1 and step-3 succeeded
-    expect(result.finalContent).toBe("ok-3");
+    expect(result.error?.message).toBe("boom");
+    expect(reached).toEqual([]); // third step never ran
+  });
+
+  it("continues past a failed child when continueOnError is true", async () => {
+    const runner = new MockRunner();
+    const reached: string[] = [];
+    const seq = Sequential.start(
+      new FunctionStep<number, number>({
+        name: "boom",
+        fn: () => {
+          throw new Error("boom");
+        },
+      }),
+      { continueOnError: true },
+    )
+      .then(
+        new FunctionStep<number, number>({
+          name: "after",
+          fn: (n) => {
+            reached.push("after");
+            return n;
+          },
+        }),
+      )
+      .build();
+
+    const result = await seq.run(7, { runner });
+    expect(result.succeeded).toBe(false); // a child failed
+    expect(reached).toEqual(["after"]); // but we continued
   });
 
   it("fires hook callbacks in order", async () => {
-    const runner = new MockRunner().addResponse("*", { content: "ok" });
+    const runner = new MockRunner();
     const events: string[] = [];
-
     const hooks = {
       onPatternStart: () => {
         events.push("pattern-start");
@@ -164,44 +170,20 @@ describe("Sequential", () => {
       },
     };
 
-    const seq = new Sequential([{ agent: makeAgent(), messageTemplate: "do it", name: "s1" }]);
-    await seq.run({}, { runner, hooks });
+    const seq = Sequential.start(
+      new FunctionStep<number, number>({ name: "s1", fn: (n) => n }),
+    ).build();
+    await seq.run(1, { runner, hooks });
 
     expect(events).toEqual(["pattern-start", "step-start", "step-complete", "pattern-complete"]);
   });
 
-  it("uses contextExtractor to update context", async () => {
-    const runner = new MockRunner()
-      .addResponse("extract", { content: "raw data" })
-      .addResponse("*", { content: "final" });
-
-    const steps: Step[] = [
-      {
-        agent: makeAgent(),
-        messageTemplate: "extract",
-        name: "extractor",
-        contextExtractor: (_result, _ctx) => ({
-          extracted: "custom-value",
-        }),
-      },
-      {
-        agent: makeAgent(),
-        messageTemplate: (ctx) => `Use ${ctx.extracted as string}`,
-        name: "user",
-      },
-    ];
-
-    const seq = new Sequential(steps);
-    const result = await seq.run({}, { runner });
-
-    expect(result.succeeded).toBe(true);
-    expect(runner.callHistory[1]?.message).toBe("Use custom-value");
-  });
-
-  it("returns frozen result", async () => {
-    const runner = new MockRunner().addResponse("*", { content: "ok" });
-    const seq = new Sequential([{ agent: makeAgent(), messageTemplate: "test" }]);
-    const result = await seq.run({}, { runner });
+  it("returns a frozen result", async () => {
+    const runner = new MockRunner();
+    const seq = Sequential.start(
+      new FunctionStep<number, number>({ name: "s1", fn: (n) => n }),
+    ).build();
+    const result = await seq.run(1, { runner });
     expect(Object.isFrozen(result)).toBe(true);
   });
 });

@@ -1,8 +1,8 @@
 /**
- * G1 — per-step model & maxIterations on workflow steps.
+ * G1 — per-step model & maxIterations on workflow leaves.
  *
  * Under the "model belongs to the agent" architecture there is NO per-step
- * runner: a step optionally overrides the model, which the pattern applies as an
+ * runner: an AgentStep optionally overrides the model, which it applies as an
  * agent *view* (applyStepModel) whose getModel() returns the override. One
  * (resolver-backed) runner then dispatches each step's model. These tests use
  * MockRunner, whose callHistory records the dispatched agent.getModel() and the
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
-import type { Step } from "../base.js";
+import { AgentStep } from "../agent-step.js";
 import { applyStepModel } from "../base.js";
 import { Parallel } from "../parallel.js";
 import { Sequential } from "../sequential.js";
@@ -45,11 +45,11 @@ describe("applyStepModel", () => {
     };
     const view = applyStepModel(a, "override-model");
     expect(view.getModel()).toBe("override-model");
-    expect(view.getTools()).toBe(tools); // delegated (same reference)
+    expect(view.getTools()).toBe(tools);
     expect(view.getSystemPrompt()).toBe("sys");
     expect(view.renderInitialPrompt()).toBe("init");
     expect(view.role.name).toBe("a");
-    expect(a.getModel()).toBe("base"); // original is untouched
+    expect(a.getModel()).toBe("base");
   });
 });
 
@@ -57,13 +57,21 @@ describe("Sequential — per-step model & maxIterations", () => {
   it("dispatches each step's model override — one runner, per-step models", async () => {
     const runner = new MockRunner().addResponse("*", { content: "ok" });
     const agent = makeAgent("shared", "agent-default");
-    const steps: Step[] = [
-      { agent, messageTemplate: "gather", model: "cheap-model" },
-      { agent, messageTemplate: "synthesize", model: "strong-model" },
-      { agent, messageTemplate: "no-override" }, // falls through to agent.getModel()
-    ];
 
-    await new Sequential(steps).run({}, { runner });
+    const seq = Sequential.start(
+      new AgentStep<unknown, string>({ agent, prompt: () => "gather", model: "cheap-model" }),
+    )
+      .then(
+        new AgentStep<string, string>({
+          agent,
+          prompt: () => "synthesize",
+          model: "strong-model",
+        }),
+      )
+      .then(new AgentStep<string, string>({ agent, prompt: () => "no-override" }))
+      .build();
+
+    await seq.run({}, { runner });
 
     expect(runner.callHistory.map((c) => c.model)).toEqual([
       "cheap-model",
@@ -75,12 +83,14 @@ describe("Sequential — per-step model & maxIterations", () => {
   it("threads per-step maxIterations into RunOptions (default when unset)", async () => {
     const runner = new MockRunner().addResponse("*", { content: "ok" });
     const agent = makeAgent("a");
-    const steps: Step[] = [
-      { agent, messageTemplate: "m1", maxIterations: 3 },
-      { agent, messageTemplate: "m2" },
-    ];
 
-    await new Sequential(steps).run({}, { runner });
+    const seq = Sequential.start(
+      new AgentStep<unknown, string>({ agent, prompt: () => "m1", maxIterations: 3 }),
+    )
+      .then(new AgentStep<string, string>({ agent, prompt: () => "m2" }))
+      .build();
+
+    await seq.run({}, { runner });
 
     expect(runner.callHistory[0]?.maxIterations).toBe(3);
     expect(runner.callHistory[1]?.maxIterations).toBeUndefined();
@@ -88,17 +98,17 @@ describe("Sequential — per-step model & maxIterations", () => {
 });
 
 describe("Parallel — per-step model", () => {
-  it("dispatches each step's model override", async () => {
+  it("dispatches each branch's model override", async () => {
     const runner = new MockRunner().addResponse("*", { content: "ok" });
     const agent = makeAgent("shared", "agent-default");
-    const steps: Step[] = [
-      { agent, messageTemplate: "a", name: "a", model: "model-a" },
-      { agent, messageTemplate: "b", name: "b", model: "model-b" },
-    ];
 
-    await new Parallel(steps).run({}, { runner });
+    const par = new Parallel<unknown, string>([
+      { name: "a", node: new AgentStep({ agent, prompt: () => "a", model: "model-a" }) },
+      { name: "b", node: new AgentStep({ agent, prompt: () => "b", model: "model-b" }) },
+    ]);
 
-    // Parallel may complete in any order — assert as a set.
+    await par.run({}, { runner });
+
     expect(new Set(runner.callHistory.map((c) => c.model))).toEqual(
       new Set(["model-a", "model-b"]),
     );

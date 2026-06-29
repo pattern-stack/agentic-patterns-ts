@@ -1,63 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { RunResult, RunnerProtocol } from "../../runner/types.js";
-import {
-  type AgentLike,
-  type PatternEvent,
-  type Step,
-  createStepResult,
-  executeStep,
-  makeStepName,
-  resolveMessage,
-} from "../base.js";
-
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-function makeAgent(name = "test-agent"): AgentLike {
-  return {
-    role: { name },
-    getModel: () => "mock-model",
-    getTools: () => [],
-    getSystemPrompt: () => "You are a test agent.",
-    renderInitialPrompt: () => "Initial prompt",
-  };
-}
-
-function makeRunResult(overrides: Partial<RunResult> = {}): RunResult {
-  return {
-    response: "Hello from mock",
-    inputTokens: 10,
-    outputTokens: 20,
-    toolCallsCount: 0,
-    iterations: 1,
-    finishReason: "stop",
-    ...overrides,
-  };
-}
-
-function makeRunner(result: RunResult): RunnerProtocol {
-  return {
-    async run() {
-      return result;
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// resolveMessage
-// ---------------------------------------------------------------------------
-
-describe("resolveMessage", () => {
-  it("returns a static string unchanged", () => {
-    expect(resolveMessage("hello", {})).toBe("hello");
-  });
-
-  it("calls a function template with context", () => {
-    const template = (ctx: Record<string, unknown>) => `Hello ${ctx.name as string}`;
-    expect(resolveMessage(template, { name: "World" })).toBe("Hello World");
-  });
-});
+import type { PatternEvent } from "../base.js";
+import { type AgentLike, applyStepModel, makeStepName } from "../base.js";
+import type { NodeOutcome, NodeResult } from "../node.js";
 
 // ---------------------------------------------------------------------------
 // makeStepName
@@ -78,92 +22,37 @@ describe("makeStepName", () => {
 });
 
 // ---------------------------------------------------------------------------
-// createStepResult
+// applyStepModel
 // ---------------------------------------------------------------------------
 
-describe("createStepResult", () => {
-  it("creates a frozen StepResult with correct content", () => {
-    const runResult = makeRunResult({ response: "Test output" });
-    const result = createStepResult("my-step", runResult);
-
-    expect(result.stepName).toBe("my-step");
-    expect(result.content).toBe("Test output");
-    expect(result.inputTokens).toBe(10);
-    expect(result.outputTokens).toBe(20);
-    expect(result.runResult).toBe(runResult);
-    expect(Object.isFrozen(result)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// executeStep
-// ---------------------------------------------------------------------------
-
-describe("executeStep", () => {
-  it("resolves message, runs agent, and returns StepResult", async () => {
-    const runResult = makeRunResult({ response: "Agent response" });
-    const runner = makeRunner(runResult);
-    const step: Step = {
-      agent: makeAgent(),
-      messageTemplate: "Do something",
-      name: "action-step",
+describe("applyStepModel", () => {
+  it("returns the agent unchanged when no override is given", () => {
+    const a: AgentLike = {
+      role: { name: "a" },
+      getModel: () => "base",
+      getTools: () => [],
+      getSystemPrompt: () => "sys",
+      renderInitialPrompt: () => "init",
     };
-
-    const result = await executeStep(step, {}, runner);
-
-    expect(result.stepName).toBe("action-step");
-    expect(result.content).toBe("Agent response");
-    expect(result.inputTokens).toBe(10);
-    expect(result.outputTokens).toBe(20);
+    expect(applyStepModel(a, undefined)).toBe(a);
   });
 
-  it("resolves dynamic message template with context", async () => {
-    let capturedMessage = "";
-    const runner: RunnerProtocol = {
-      async run(_agent, message) {
-        capturedMessage = message;
-        return makeRunResult();
-      },
+  it("overrides getModel and delegates every other member to the original agent", () => {
+    const tools = [{ marker: 1 }];
+    const a: AgentLike = {
+      role: { name: "a" },
+      getModel: () => "base",
+      getTools: () => tools,
+      getSystemPrompt: () => "sys",
+      renderInitialPrompt: () => "init",
     };
-    const step: Step = {
-      agent: makeAgent(),
-      messageTemplate: (ctx) => `Analyze ${ctx.topic as string}`,
-    };
-
-    await executeStep(step, { topic: "TypeScript" }, runner);
-
-    expect(capturedMessage).toBe("Analyze TypeScript");
-  });
-
-  it("passes toolExecutor to runner", async () => {
-    let receivedOptions: Record<string, unknown> = {};
-    const runner: RunnerProtocol = {
-      async run(_agent, _message, options) {
-        receivedOptions = options as Record<string, unknown>;
-        return makeRunResult();
-      },
-    };
-    const executor = { execute: async () => null };
-    const step: Step = {
-      agent: makeAgent(),
-      messageTemplate: "test",
-    };
-
-    await executeStep(step, {}, runner, executor);
-
-    expect(receivedOptions.toolExecutor).toBe(executor);
-  });
-
-  it("falls back to step_0 when step has no name", async () => {
-    const runner = makeRunner(makeRunResult());
-    const step: Step = {
-      agent: makeAgent(),
-      messageTemplate: "test",
-    };
-
-    const result = await executeStep(step, {}, runner);
-
-    expect(result.stepName).toBe("step_0");
+    const view = applyStepModel(a, "override-model");
+    expect(view.getModel()).toBe("override-model");
+    expect(view.getTools()).toBe(tools);
+    expect(view.getSystemPrompt()).toBe("sys");
+    expect(view.renderInitialPrompt()).toBe("init");
+    expect(view.role.name).toBe("a");
+    expect(a.getModel()).toBe("base");
   });
 });
 
@@ -172,20 +61,29 @@ describe("executeStep", () => {
 // ---------------------------------------------------------------------------
 
 describe("PatternEvent", () => {
-  it("discriminates event types", () => {
+  it("discriminates event types over the typed Node records", () => {
+    const outcome: NodeOutcome<string> = {
+      nodeName: "s1",
+      output: "out",
+      succeeded: true,
+      inputTokens: 1,
+      outputTokens: 2,
+    };
+    const result: NodeResult<string> = {
+      output: "final",
+      succeeded: true,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    };
+
     const events: PatternEvent[] = [
       { type: "pattern.start", patternName: "test", timestamp: new Date() },
-      {
-        type: "pattern.step.start",
-        stepName: "s1",
-        stepIndex: 0,
-        timestamp: new Date(),
-      },
+      { type: "pattern.step.start", stepName: "s1", stepIndex: 0, timestamp: new Date() },
       {
         type: "pattern.step.complete",
         stepName: "s1",
         stepIndex: 0,
-        result: createStepResult("s1", makeRunResult()),
+        result: outcome,
         timestamp: new Date(),
       },
       {
@@ -195,27 +93,9 @@ describe("PatternEvent", () => {
         error: new Error("fail"),
         timestamp: new Date(),
       },
-      {
-        type: "pattern.iteration.start",
-        iteration: 1,
-        timestamp: new Date(),
-      },
-      {
-        type: "pattern.iteration.complete",
-        iteration: 1,
-        timestamp: new Date(),
-      },
-      {
-        type: "pattern.complete",
-        patternName: "test",
-        result: {
-          totalInputTokens: 0,
-          totalOutputTokens: 0,
-          succeeded: true,
-          finalContent: "",
-        },
-        timestamp: new Date(),
-      },
+      { type: "pattern.iteration.start", iteration: 1, timestamp: new Date() },
+      { type: "pattern.iteration.complete", iteration: 1, timestamp: new Date() },
+      { type: "pattern.complete", patternName: "test", result, timestamp: new Date() },
     ];
 
     expect(events).toHaveLength(7);

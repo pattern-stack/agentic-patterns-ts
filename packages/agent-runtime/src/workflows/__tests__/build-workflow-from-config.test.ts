@@ -16,7 +16,6 @@ import { MockRunner } from "../../runner/mock-runner.js";
 import type { RunnerProtocol } from "../../runner/types.js";
 import { buildWorkflowFromConfig, compileMessageTemplate } from "../build-workflow-from-config.js";
 import { Parallel } from "../parallel.js";
-import { Sequential } from "../sequential.js";
 
 const AGENTS: Record<string, object> = {
   Extractor: {
@@ -63,7 +62,9 @@ describe("buildWorkflowFromConfig", () => {
       { agentResolver: makeResolver() },
     );
 
-    expect(wf).toBeInstanceOf(Sequential);
+    // Sequential mode builds a folded Node<PatternContext, string> (not a Parallel).
+    expect(wf).not.toBeInstanceOf(Parallel);
+    expect(typeof wf.run).toBe("function");
     await wf.run({}, { runner });
 
     expect(runner.callHistory.map((c) => c.model)).toEqual([
