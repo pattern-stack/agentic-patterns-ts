@@ -21,7 +21,7 @@ Today every unit of work is `(PatternContext bag) -> StepResult{ content: string
 | Refinement evaluator returns flat `{score, feedback, qualityMet}` — no structured `issues[]` | `evaluator-loop.ts:29-35` |
 | The runner never calls `generateObject` — no structured-output path | confirmed: `grep generateObject` over `packages/` → none; only `generateText` (`agent-runner.ts:237`) + `streamText` (`:585`) |
 
-**The foundational decision (chosen over "additive"):** generalize the core node contract to typed object I/O. Every node is conceptually `(input: object) => Promise<output: object>`. Today's string `Step` becomes the special case `Node<…, string>`. This reworks the core execution types; back-compat for existing string consumers is preserved by re-expressing the legacy types as string specializations of the new generic ones (§4, §9).
+**The foundational decision (chosen over "additive"):** generalize the core node contract to typed object I/O. Every node is conceptually `(input: object) => Promise<output: object>`. Today's string `Step` becomes the special case `Node<…, string>`. This reworks the core execution types. Existing string consumers live only in `workflows/**` (grep-proven — no external imports), so the legacy types are **replaced** outright; the string world survives only as the special case `TOut = string` (§4, §9).
 
 ---
 
@@ -95,7 +95,7 @@ export interface Node<TIn, TOut> {
 }
 ```
 
-**Field-name decisions (resolving the verifier's `succeeded`-vs-`ok` blocker):** `NodeResult` keeps `succeeded` and `totalInputTokens`/`totalOutputTokens` — the *exact* names on today's `PatternResult` (read at e.g. `parallel.test.ts:42`). No silent rename. The legacy `PatternResult` then refines `NodeResult<string>` without dropping any field (§4).
+**Field-name decisions (resolving the verifier's `succeeded`-vs-`ok` blocker):** `NodeResult` keeps `succeeded` and `totalInputTokens`/`totalOutputTokens` — the *exact* names on today's `PatternResult` (read at e.g. `parallel.test.ts:42`). No silent rename. The string world reuses these exact fields directly as `NodeResult<string>` — there is no separate `PatternResult` type (§4).
 
 **Token accounting (resolving the `meter` blocker):** there is **no required `meter` field** on the run context. Each composite rolls up its children's `totalInputTokens`/`totalOutputTokens` into its own `NodeResult` — the same bottom-up summation the existing patterns already do (`parallel.ts`, `sequential.ts` accumulate token totals). Rollup lives in the result, not in a mandatory context object, so existing `.run({}, { runner })` calls keep compiling.
 
@@ -116,41 +116,31 @@ export interface NodeOutcome<TOut> {
 }
 ```
 
-## 4. Back-compat string special-case (the legacy types reframed, not deleted)
+## 4. The single-world string seam (legacy types replaced, not aliased)
 
-The old declarations are **reframed as string specializations**, so every existing reader (`.finalContent`, `.content`, `.succeeded`, `finalContext`) keeps compiling.
+Under the drop-back-compat decision there is one world: `NodeResult<TOut>` is THE result type and `NodeOutcome<TOut>` THE per-child record. There are **no** `PatternResult`/`StepResult` alias gymnastics — the string world is simply `TOut = string`. Nothing outside `workflows/**` imports this layer (grep-proven), so the legacy declarations are **rewritten in place** and the workflow tests that read `.finalContent`/`.content` are **rewritten** to read `.output`.
 
 ```ts
-// base.ts — additive reframing
+// base.ts — the legacy string types collapse into the generic ones
 
-export type PatternResult = NodeResult<string> & {
-  /** Alias of `output`; retained so existing `.finalContent` readers keep working. */
-  readonly finalContent: string;
-};
+// PatternResult is GONE — callers use NodeResult<string> directly.
+// StepResult   is GONE — composites build NodeOutcome<string> directly.
 
-export type StepResult = NodeOutcome<string> & {
-  readonly stepName: string;       // alias of nodeName
-  readonly content: string;        // alias of output (still === runResult.response)
-  readonly runResult: RunResult;   // narrowed back to REQUIRED on the string path
-};
-
-/** PatternProtocol is structurally a string Node. Kept as a named interface for nominal
- *  back-compat and as buildWorkflowFromConfig's return type. The second param is OPTIONAL
- *  (widened from NodeRunContext) so `new Sequential(steps).run({}, { runner })` still
- *  type-checks (per-step-model.test.ts:66,83,99). */
-export interface PatternProtocol extends Node<PatternContext, string> {
-  run(context?: PatternContext, ctx?: NodeRunContext): Promise<PatternResult>;
-}
+/** The declarative-config entry point's contract is just a string-pinned Node.
+ *  PatternContext stays as the (now Slot-backed) shared-state carrier; TOut = string.
+ *  No widened/optional params and no PatternResult return alias — the typed signature
+ *  is the only signature, because no caller outside workflows/** depends on the old one. */
+export type PatternProtocol = Node<PatternContext, string>;
 ```
 
-**`createStepResult` is updated, not "unchanged"** (resolving the verifier's gap): it must now also populate `nodeName` (= `stepName`) and `output` (= `content`) so its return value satisfies `NodeOutcome<string>`. The body is a one-line additive change; all existing call sites and readers are unaffected because the legacy aliases remain.
+**`createStepResult` is deleted** — its only job was minting the old `StepResult`. Composites now build `NodeOutcome<string>` inline (`nodeName`/`output` instead of `stepName`/`content`). Every reader moves `.finalContent`/`.content`/`.stepName` → `.output`/`.nodeName`; this is a mechanical rewrite of the `workflows/**` tests, with no external call sites to preserve.
 
-| Today | Becomes | Back-compat |
+| Today | Becomes | Disposition |
 |---|---|---|
-| `PatternResult { finalContent: string; succeeded; totalIn/OutTokens }` | `NodeResult<TOut> { output: TOut; succeeded; totalIn/OutTokens }` | `PatternResult = NodeResult<string> & { finalContent }` — `.finalContent`/`.succeeded` survive |
-| `StepResult { stepName; content: string; runResult; tokens }` | `NodeOutcome<TOut> { nodeName; output; runResult?; tokens }` | `StepResult = NodeOutcome<string> & { stepName; content; runResult }` |
-| `PatternProtocol.run(context?, options?)` | `Node<TIn,TOut>.run(input, ctx)` | `PatternProtocol extends Node<PatternContext,string>`; params widen, not narrow |
-| `Step { agent; messageTemplate; outputKey?; contextExtractor?; … }` | `AgentStep` (§5.1) + `FunctionStep` (§5.2) | legacy `Step` kept verbatim, consumed only by legacy `Sequential`/`Parallel` + `buildWorkflowFromConfig` |
+| `PatternResult { finalContent: string; succeeded; totalIn/OutTokens }` | `NodeResult<string> { output; succeeded; totalIn/OutTokens }` | type **deleted**; readers rewritten `.finalContent` → `.output` |
+| `StepResult { stepName; content: string; runResult; tokens }` | `NodeOutcome<string> { nodeName; output; runResult?; tokens }` | type **deleted**; `createStepResult` deleted; readers rewritten |
+| `PatternProtocol.run(context?, options?)` | `PatternProtocol = Node<PatternContext, string>` | typed `run(input, ctx)`; no param widening |
+| `Step { agent; messageTemplate; outputKey?; contextExtractor?; … }` | `AgentStep` (§5.1) + `FunctionStep` (§5.2) | legacy `Step` **deleted**; `buildWorkflowFromConfig` emits string-pinned `AgentStep`s |
 
 ---
 
@@ -258,7 +248,7 @@ Genuinely new — there is no deterministic-node concept today; consolidation wa
 - **Sequential** honors `continueOnError` (default `false` ⇒ stop on first `succeeded:false`, preserving `SequentialOptions.continueOnError` semantics, `sequential.ts`).
 - **Parallel / FanOut** honor `continueOnError` (replacing/equivalent to today's `returnExceptions`, `parallel.ts:54-59`, default collect-and-continue): a failed branch lands in a `failed: [index, Error]` channel; siblings proceed.
 
-**Bridging legacy throwing steps:** the existing `executeStep` (`base.ts:250`) and legacy `Sequential`/`Parallel` are built around `try/catch` on a *throwing* step. The composite engines normalize both regimes: when running a child `Node`, inspect `result.succeeded`; when running a legacy `Step` (string path), the engine's own `try/catch` produces the equivalent `{ succeeded:false }` outcome. One uniform rule — `succeeded:false` (however produced) is what `continueOnError` branches on.
+**One uniform failure rule:** every child is a `Node`, so the composite always branches on `result.succeeded`. There is no throwing-`Step` regime to bridge — the legacy `executeStep` try/catch path (`base.ts:250`) is deleted along with `Step`; any internal LLM/fn throw is caught by the leaf (§5.1/§5.2) and surfaced as `succeeded:false`. `continueOnError` branches on that single signal.
 
 This is the locked **Open-Q3** resolution: a throwing `FunctionStep` behaves *exactly* like a throwing `AgentStep`. Identical signature ⇒ identical failure contract. Fatality remains opt-in per error (the `RetryLoop.fatalErrors` precedent, `retry-loop.ts:70-77`), never hardwired per node type.
 
@@ -268,7 +258,7 @@ This is the locked **Open-Q3** resolution: a throwing `FunctionStep` behaves *ex
 
 All implement `Node<TIn, TOut>` and are freely nestable (generalizing today's "Sequential accepts `Array<Step | PatternProtocol>`", `sequential.ts:50`, to "any node accepts any node"). Nesting **fixes** the asymmetries the trace found: nested writes propagate via typed `TOut` (not dropped as at `sequential.ts:119,123`), and slots propagate via the explicit scope rule (§7).
 
-> **Design choice (resolving the verifier's "kept-verbatim vs replaced" blocker):** the existing `Sequential`/`Parallel` **classes are kept VERBATIM** as the legacy string path (their constructors, `SequentialResult`/`ParallelResult` shapes, `consolidatedOutput`, `finalContext` all preserved — so `parallel.test.ts:113,132,42` and `sequential.test.ts` stay green). The typed grid is delivered as **siblings**: `TypedSequential` (fluent builder), `TypedParallel`, plus the three new composites `FanOut`/`Accumulate`/`Loop`. We do **not** replace the legacy classes' constructors or return types. This is the only path consistent with the contained, non-breaking blast-radius claim.
+> **Design choice (single world, no `Typed*` siblings):** there is exactly **one** `Sequential` and **one** `Parallel` — the typed `Node` versions below. The old string-pinned `Sequential`/`Parallel` are **replaced**, not kept as a parallel `Typed*` hierarchy; `sequential.test.ts`/`parallel.test.ts` are **rewritten** against the typed contract (`.output`, typed branches). The four legacy loop classes (`RetryLoop`/`EvaluatorLoop`/`TaskLoop`/`ConversationLoop`) are **deleted**, their behavior subsumed by `Loop` + `Accumulate`. Nothing outside `workflows/**` imports any of these (grep-proven), so the replacement is contained. (Sequencing, §10: the foundation PRs add the typed classes; the legacy deletions land in a later PR so the package compiles at every step.)
 
 ### 6.1 Shared typed consolidation contract (Parallel + FanOut)
 
@@ -283,36 +273,38 @@ All implement `Node<TIn, TOut>` and are freely nestable (generalizing today's "S
 export type Consolidate<TOut, TConsolidated> = (outputs: readonly TOut[]) => TConsolidated;
 ```
 
-### 6.2 `TypedSequential` — N named steps in order, thread typed output node→node
+### 6.2 `Sequential` — N named steps in order, thread typed output node→node
 
-A fluent builder (chosen over a recursive-conditional tuple type — the verifier flagged the tuple as fragile with poor error messages). Each `.then()` seam type-checks `step[i].TOut === step[i+1].TIn`.
+The **one** `Sequential` (this replaces the legacy string class). A fluent builder (chosen over a recursive-conditional tuple type — the verifier flagged the tuple as fragile with poor error messages). Each `.then()` seam type-checks `step[i].TOut === step[i+1].TIn`.
 
 ```ts
-// packages/agent-runtime/src/workflows/sequential-typed.ts  (NEW)
+// packages/agent-runtime/src/workflows/sequential.ts  (REPLACES the legacy string Sequential)
 
-class TypedSequentialBuilder<TIn, TCur> {
+class SequentialBuilder<TIn, TCur> {
   private constructor(private readonly nodes: Node<any, any>[], private readonly opts: SeqOpts) {}
   static start<A, B>(first: Node<A, B>, opts?: SeqOpts) {
-    return new TypedSequentialBuilder<A, B>([first], opts ?? {});
+    return new SequentialBuilder<A, B>([first], opts ?? {});
   }
   /** Compile error if `node`'s TIn ≠ TCur — this typed seam REPLACES outputKey threading. */
-  then<TNext>(node: Node<TCur, TNext>): TypedSequentialBuilder<TIn, TNext> {
-    return new TypedSequentialBuilder<TIn, TNext>([...this.nodes, node], this.opts);
+  then<TNext>(node: Node<TCur, TNext>): SequentialBuilder<TIn, TNext> {
+    return new SequentialBuilder<TIn, TNext>([...this.nodes, node], this.opts);
   }
   build(name?: string): Node<TIn, TCur> { /* fold: out_n = in_{n+1}; roll up token totals */ }
 }
-export const TypedSequential = TypedSequentialBuilder;
-// usage: TypedSequential.start(plan).then(implement).then(judge).build()  →  Node<Goal, Verdict>
+export const Sequential = SequentialBuilder;
+// usage: Sequential.start(plan).then(implement).then(judge).build()  →  Node<Goal, Verdict>
 ```
 
 `SeqOpts = { continueOnError?: boolean }`, default `false` (break on first `succeeded:false`). **Replaces** the string-key threading (`outputKey`, `sequential.ts:103-105`) with return-value chaining.
 
-### 6.3 `TypedParallel<TIn, TBranch, TConsolidated = TBranch[]>` — N named branches at once over a shared input
+### 6.3 `Parallel<TIn, TBranch, TConsolidated = TBranch[]>` — N named branches at once over a shared input
+
+The **one** `Parallel` (this replaces the legacy string class).
 
 ```ts
-// packages/agent-runtime/src/workflows/parallel-typed.ts  (NEW)
+// packages/agent-runtime/src/workflows/parallel.ts  (REPLACES the legacy string Parallel)
 
-class TypedParallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
+class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
   constructor(
     branches: ReadonlyArray<{ name: string; node: Node<TIn, TBranch> }>,
     opts?: {
@@ -386,7 +378,7 @@ export class Loop<TState> implements Node<TState, TState> {
 }
 ```
 
-`state = input`; loop: `state = (await body.run(state, ctx)).output`; if `until(state, i)` → exit `predicate_met`; if `i+1 >= maxIterations` → exit `max_iterations` returning **last** state. Generalizes the four divergent loop `run` shapes (`RetryLoop`/`EvaluatorLoop`/`TaskLoop`/`ConversationLoop`) into one `Node`-shaped loop. The producer/evaluator refinement of `EvaluatorLoop` becomes `body = TypedSequential.start(produce).then(evaluate)` whose `TState` carries `{ content, score, feedback, issues[] }` — the flat `{score,feedback,qualityMet}` (`evaluator-loop.ts:29`) upgraded to structured `issues[]` via an `AgentStep` with a Zod schema.
+`state = input`; loop: `state = (await body.run(state, ctx)).output`; if `until(state, i)` → exit `predicate_met`; if `i+1 >= maxIterations` → exit `max_iterations` returning **last** state. Replaces the four now-deleted loop classes (`RetryLoop`/`EvaluatorLoop`/`TaskLoop`/`ConversationLoop`) — their four divergent `run` shapes collapse into one `Node`-shaped loop. The producer/evaluator refinement of `EvaluatorLoop` becomes `body = Sequential.start(produce).then(evaluate)` whose `TState` carries `{ content, score, feedback, issues[] }` — the flat `{score,feedback,qualityMet}` (`evaluator-loop.ts:29`) upgraded to structured `issues[]` via an `AgentStep` with a Zod schema.
 
 ### 6.7 Worked example — the coding-agent workflow, end to end
 
@@ -404,7 +396,7 @@ const Verdict = z.object({ diff: z.string(), grade: z.enum(["GOOD","NEEDS_WORK"]
 // Backpack: the implemented codebase — written once, read by everyone (the CitationBook analogue).
 const codebase = slot<{ diff: string }>({ key: "codebase", scope: "run", init: () => ({ diff: "" }) });
 
-const workflow = TypedSequential
+const workflow = Sequential
   .start(new AgentStep({ name: "plan",      agent: planner, output: Plan,
                          prompt: (task: { goal: string }) => `Plan: ${task.goal}` }))
   .then(new AgentStep({ name: "implement",  agent: coder,   output: Impl,
@@ -412,7 +404,7 @@ const workflow = TypedSequential
   // record the impl into the Backpack so reviewers/fixers read it without threading it everywhere
   .then(new FunctionStep({ name: "stash",
                            fn: (impl, slots) => { slots.set(codebase, { diff: impl.diff }); return impl; } }))
-  .then(new TypedParallel<Impl, Review>(
+  .then(new Parallel<Impl, Review>(
       [{ name: "revA", node: review(reviewerA) },
        { name: "revB", node: review(reviewerB) },
        { name: "revC", node: review(reviewerC) }]))                 // omit consolidate => Review[]
@@ -424,7 +416,7 @@ const workflow = TypedSequential
                             prompt: (finding, slots) => `Fix in ${slots.get(codebase).diff}: ${finding.note}` }),
       consolidate: (fixes) => ({ diff: applyAll(fixes), grade: "NEEDS_WORK" as const }) }))
   .then(new Loop<Verdict>({ name: "polish",
-      body: TypedSequential
+      body: Sequential
         .start(new AgentStep({ name: "fix",   agent: fixer,  output: z.object({ diff: z.string() }),
                                prompt: (v) => `Improve:\n${v.diff}` }))
         .then(new AgentStep({ name: "judge",  agent: grader, output: Verdict,
@@ -443,7 +435,7 @@ function review(agent: AgentLike): Node<Impl, Review> {
 }
 ```
 
-What each piece replaces: `plan/implement` replace string `Step`s; `TypedParallel` replaces `parallel.ts:77` (now typed/nestable/threaded); the `consolidate` `FunctionStep` is the first-class form of the orphaned `Consolidator` (`parallel.ts:180-188`); `FanOut` is the brand-new runtime-map; `Loop` replaces `EvaluatorLoop` (`evaluator-loop.ts:74`) with structured `Verdict`; the `codebase` slot replaces the SLOT half of `contextExtractor`/`finalContext` (`sequential.ts:106-111,167`).
+What each piece replaces: `plan/implement` replace string `Step`s; `Parallel` (typed) replaces the legacy `parallel.ts:77` class (now typed/nestable/threaded); the `consolidate` `FunctionStep` is the first-class form of the orphaned `Consolidator` (`parallel.ts:180-188`); `FanOut` is the brand-new runtime-map; `Loop` replaces the deleted `EvaluatorLoop` (`evaluator-loop.ts:74`) with structured `Verdict`; the `codebase` slot replaces the SLOT half of `contextExtractor`/`finalContext` (`sequential.ts:106-111,167`).
 
 ---
 
@@ -639,34 +631,34 @@ Incidental finding (fixed): local `node_modules` was stale — `ai@4.3.19` insta
 
 ## 10. Migration + sequencing
 
-**Strategy:** the typed `Node` contract becomes the real core; the legacy string types are *redefined as string specializations* and kept exported, so existing consumers compile. The declarative `WorkflowConfig` path is **pinned to `Node<PatternContext, string>`** — its schema (string-only `messageTemplate`/`outputKey`, `workflow-config.ts:37,41`) cannot carry type params, which is the intended ceiling. FanOut/Accumulate/Loop/Slots/typed I/O are **code-API only** (consistent with `contextExtractor`/`consolidator` already being code-only).
+**Strategy:** the typed `Node` contract is the only core; the legacy string types (`PatternResult`/`StepResult`/`Step`) are **deleted** and the legacy `Sequential`/`Parallel`/loop classes are **replaced** — there are no consumers outside `workflows/**` to keep compiling (grep-proven), so the workflow tests are rewritten in lockstep. The declarative `WorkflowConfig` path is **pinned to `Node<PatternContext, string>`** — its schema (string-only `messageTemplate`/`outputKey`, `workflow-config.ts:37,41`) cannot carry type params, which is the intended ceiling. FanOut/Accumulate/Loop/Slots/typed I/O are **code-API only** (consistent with `contextExtractor`/`consolidator` already being code-only).
 
 ### Ordered PRs
 
 | PR | Scope | Breaking? |
 |---|---|---|
 | **1** | Runner structured-output: `StructuredRunResult`, optional `runStructured?` on `RunnerProtocol`, `AgentRunner.runStructured` (`generateObject`), `MockRunner.runStructured`. Zero workflow coupling. | Additive only |
-| **2** | `node.ts` (`Node`/`NodeResult`/`NodeRunContext`/`NodeOutcome`) + `slot.ts`. Reframe `PatternResult`/`StepResult`/`PatternProtocol` as string refinements (§4); update `createStepResult` to populate `nodeName`/`output`. | Contained to `workflows/**`; legacy aliases preserve all readers |
-| **3** | Leaves: `AgentStep`, `FunctionStep`. Legacy `Step` reframed as degenerate `AgentStep<_, string>`; `stepToNode`/`nodeToStep` shim. | Additive |
-| **4a** | Typed siblings `TypedSequential` (builder) + `TypedParallel`. Legacy `Sequential`/`Parallel` classes kept **verbatim**. | Additive |
+| **2** | `node.ts` (`Node`/`NodeResult`/`NodeRunContext`/`NodeOutcome`) + `slot.ts`. **Delete** `PatternResult`/`StepResult`/`createStepResult`; `PatternProtocol` becomes `Node<PatternContext, string>` (§4). Rewrite affected workflow tests to read `.output`/`.nodeName`. | Contained to `workflows/**` + tests |
+| **3** | Leaves: `AgentStep`, `FunctionStep`. Legacy `Step` **deleted**; the string path is `AgentStep<_, string>` with no `output` schema. No shims. | Contained to `workflows/**` |
+| **4a** | The one typed `Sequential` (builder) + `Parallel`, **replacing** the legacy string classes. Rewrite `sequential.test.ts`/`parallel.test.ts` to the typed contract. | Contained to `workflows/**` + tests |
 | **4b** | New composites `FanOut`, `Accumulate`, `Loop` (reuse `runWithConcurrency` `parallel.ts:220`, `applyStepModel` `base.ts:236`). | Additive |
-| **5** | Keep `RetryLoop`/`EvaluatorLoop`/`TaskLoop`/`ConversationLoop` exported and behavior-unchanged; document `Loop`/`Accumulate` as the primitives they conceptually instantiate. No forced migration. | None |
-| **6** | Declarative config gate: `WorkflowConfig` stays string-pinned; `buildWorkflowFromConfig` keeps emitting string-contract `Sequential`/`Parallel`; `{{key}}`/`outputKey` interpolation preserved (`build-workflow-from-config.test.ts:74` stays green). | None |
+| **5** | **Delete** `RetryLoop`/`EvaluatorLoop`/`TaskLoop`/`ConversationLoop`; their use cases rebuild on `Loop` + `Accumulate`. Rewrite/remove their tests. | Contained to `workflows/**` + tests |
+| **6** | Declarative config gate: `WorkflowConfig` stays string-pinned; `buildWorkflowFromConfig` emits the typed `Sequential`/`Parallel` pinned to `TOut = string` (string `AgentStep`s); `{{key}}`/`outputKey` interpolation preserved. Rewrite `build-workflow-from-config.test.ts` to read `.output`. | Contained to `workflows/**` + tests |
 | **7** | `docs/HANDOFF.md` workflow note (the only published-doc reference). | None |
 
-### Breaking vs preserved
+### Unaffected vs rewritten
 
-| Preserved (no consumer break) | Reworked (contained to `workflows/**` + tests) |
+| Unaffected (no consumer break) | Rewritten (contained to `workflows/**` + tests) |
 |---|---|
-| `PatternResult.finalContent` / `.succeeded` / token fields (refinement of `NodeResult<string>`) | `PatternContext` *as the threading carrier* → demoted to pure Slot store; threading now via typed return values |
-| `Sequential`/`Parallel` constructors + `SequentialResult`/`ParallelResult`/`consolidatedOutput`/`finalContext` (kept verbatim) | The five incompatible loop `run()` shapes unified under `Node.run` (legacy loops kept behind their current signatures, so not user-visible) |
-| Declarative `WorkflowConfig` JSON (schema unchanged) | `Consolidator` typed (`Consolidate<TOut,TC>`) — source-compatible for untyped callers |
-| All barrel-exported symbols remain exported | `createStepResult`/`StepResult.content` reshaped (no external callers) |
-| `runner.run()` / `RunResult` unchanged; `runStructured` additive optional | — |
+| `runner.run()` / `RunResult` unchanged; `runStructured` additive optional | `PatternResult`/`StepResult`/`createStepResult` **deleted**; readers move to `NodeResult<string>`/`NodeOutcome<string>` |
+| Declarative `WorkflowConfig` JSON (schema unchanged) | `Sequential`/`Parallel` classes **replaced** by the typed versions; `SequentialResult`/`ParallelResult`/`consolidatedOutput`/`finalContext` superseded by `NodeResult<TOut>` + threaded `consolidate` |
+| Nothing outside `workflows/**` imports this layer (grep-proven) — no server/dashboard/preset/runner-consumer break | The four legacy loop classes **deleted**; the five incompatible loop `run()` shapes collapse into `Loop`/`Accumulate` |
+| Barrel still exports the public composite names (`Sequential`/`Parallel`/`FanOut`/`Accumulate`/`Loop`) | `PatternContext` *as the threading carrier* → demoted to pure Slot store; threading now via typed return values |
+| — | `Consolidator` typed as `Consolidate<TOut,TC>`; `buildWorkflowFromConfig` emits typed string-pinned nodes; its test reads `.output` |
 
 ### PatternStack-first
 
-PRs 1–7 land entirely in the framework with **zero consuming-app changes** — nothing downstream depends on the workflow layer (no server/dashboard/runner/preset consumers; only `docs/HANDOFF.md` needs a note). The consuming-agent migration (CitationBook → Slot, per-subject FanOut, fat-prompt → Role) is a **separate later track** with no migration pressure, because the legacy string surface stays live throughout.
+PRs 1–7 land entirely in the framework with **zero consuming-app changes** — nothing downstream depends on the workflow layer (no server/dashboard/runner/preset consumers; only `docs/HANDOFF.md` needs a note). The consuming-agent migration (CitationBook → Slot, per-subject FanOut, fat-prompt → Role) is a **separate later track** with no migration pressure: there are no external consumers to break, and the typed string seam (`AgentStep<_, string>`, `Sequential`/`Parallel` pinned to `TOut = string`) reproduces every shape the old string `Step` surface produced.
 
 ---
 
@@ -674,11 +666,11 @@ PRs 1–7 land entirely in the framework with **zero consuming-app changes** —
 
 ### Names
 
-- **`Sequential` / `Parallel`** — kept (legacy classes verbatim; typed siblings `TypedSequential`/`TypedParallel`). Already public, already mean their grid cell.
+- **`Sequential` / `Parallel`** — names kept, **reimplemented** as the single typed `Node` versions (no `Typed*` siblings; the legacy string classes are replaced). Already public, already mean their grid cell.
 - **`FanOut`** — industry-standard for one operation dispatched concurrently over N runtime items. Distinguishes from `Parallel` precisely: Parallel = N *different* hand-written branches over a *shared* input (count known at authoring time); FanOut = the *same* step over a *runtime-derived list* (`over: (ctx) => TItem[]`, count known only at execution). Independent branches → licenses concurrency.
 - **`Accumulate`** (over runner-up `Cumulative`) — names the *act* (threading an accumulator forward), an imperative node verb consistent with `FanOut`/`Loop`. Its threaded accumulator IS its consolidation.
 - **`AgentStep` / `FunctionStep`** — the two leaves, same `(input) => Promise<output>` signature, named by *what produces the output*. "Step" (not "Node") for leaves keeps continuity with today's `Step` and reserves bare `Node` for the universal contract. Structured output is the DEFAULT — no `StructuredStep`; raw string is `TOut = string`.
-- **`Loop`** — the single repeat-until primitive that today's four loop classes conceptually instantiate.
+- **`Loop`** — the single repeat-until primitive that **replaces** today's four (now-deleted) loop classes.
 
 ### Explicit Non-Goals
 
@@ -687,7 +679,7 @@ PRs 1–7 land entirely in the framework with **zero consuming-app changes** —
 3. **Flipping `per_subject` (or any consuming-app gather) to real parallel** — observability/trace-ordering concern owned by the app, not the framework. (Also why Slot `merge` is deferred — §8.1.)
 4. **Slot `merge` semantics under concurrency** — deferred until concurrency is actually flipped. Shipping run/branch scope without merge is parity with today's already-non-merging nested patterns.
 5. **Router / conditional / orchestrator nodes** — none exist today and none are in scope. The grid is four composites + `Loop`; branching is out.
-6. **Migrating the four legacy loops or the consuming agent** — foundation-first; later, pressure-free tracks because the legacy string surface stays live.
+6. **Migrating the consuming agent** — foundation-first; a later, pressure-free track (no external consumers to break). The four legacy loop classes are **deleted** here, not migrated; their use cases rebuild on `Loop`/`Accumulate`.
 
 ---
 
@@ -695,13 +687,13 @@ PRs 1–7 land entirely in the framework with **zero consuming-app changes** —
 
 | Risk | Mitigation in this design |
 |---|---|
-| Run-context additions breaking existing `.run({}, { runner })` calls | `slots` is **optional** (engine-defaulted); token rollup lives in `NodeResult`, **no required `meter`**; second `run` param widened to `NodeRunContext?` on `PatternProtocol`. §3, §4 |
-| Sequential/Parallel "kept vs replaced" ambiguity | **Resolved:** legacy classes kept verbatim; typed grid is siblings (`TypedSequential`/`TypedParallel`). §6 |
+| Run-context additions breaking existing `.run({}, { runner })` calls | `slots` is **optional** (engine-defaulted); token rollup lives in `NodeResult`, **no required `meter`**. The only `.run` callers live in `workflows/**` tests, which are rewritten to the typed `run(input, ctx)` signature. §3, §4 |
+| Sequential/Parallel "kept vs replaced" ambiguity | **Resolved:** single world — one typed `Sequential`/`Parallel` **replaces** the legacy classes (no `Typed*` siblings); their tests are rewritten. §6 |
 | Loop cap-hit specified three ways | **Resolved:** return LAST + `exitReason: "max_iterations"`; no `onMaxIterations`/`score` knob. §8.2 |
-| Leaf failure ownership | **Resolved:** leaf always returns `{succeeded:false}`; composite inspects `.succeeded`; engine normalizes throwing legacy steps. §5.3 |
+| Leaf failure ownership | **Resolved:** leaf always returns `{succeeded:false}`; the composite inspects `.succeeded`. Every child is a `Node`, so there is no throwing-`Step` regime to normalize. §5.3 |
 | Concurrent run-scoped Slot write ordering (canonical CitationBook) | **Resolved:** `set`/`update` must be synchronous; order-sensitive aggregation uses the threaded ordered `TOut[]`, not slot appends; slots are for order-insensitive accumulation. §8.1 |
 | `succeeded` vs `ok` rename | **Resolved:** `NodeResult.succeeded` keeps the existing name; token fields keep `totalInputTokens`/`totalOutputTokens`. §3 |
-| `createStepResult` "unchanged" claim | **Corrected:** it is updated to also populate `nodeName`/`output` (one-line additive). §4 |
+| `createStepResult` "unchanged" claim | **Resolved:** `createStepResult` is **deleted**; composites build `NodeOutcome<string>` inline. §4 |
 | Structured pass abort/cancel under-specified | Deferred with `RunOptions.signal` (no such field today); structured pass omits it until the field exists. §9.2 |
-| Typed/legacy nesting boundary | Stated plainly: typed and legacy composites intercompose **only at `TOut = string` seams** via `stepToNode`/`nodeToStep`; no free mixing during migration. §10 |
+| Replacing legacy classes breaking imports | **Resolved:** nothing outside `workflows/**` imports the layer (grep-proven), so the deletions/replacements are contained; tests are rewritten in the same PRs. The string world is `TOut = string` end-to-end — no typed/legacy nesting boundary to police. §10 |
 | `generateObject` second round-trip cost/latency | Accepted for gate-chain safety; noted explicitly. §9.2 |

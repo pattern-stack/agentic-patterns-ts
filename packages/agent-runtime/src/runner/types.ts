@@ -4,6 +4,7 @@
  * Ported from Python: systems/runners/base.py
  */
 
+import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
 
@@ -50,6 +51,15 @@ export interface RunResult {
   /** Reason the run finished (e.g. "stop", "max_iterations"). */
   readonly finishReason: string;
 }
+
+/**
+ * Result of a structured agent execution — a {@link RunResult} plus the typed
+ * object parsed from the model's structured output.
+ */
+export type StructuredRunResult<T> = RunResult & {
+  /** The schema-valid object produced by the structured-output path. */
+  readonly object: T;
+};
 
 // ---------------------------------------------------------------------------
 // ToolExecutor
@@ -127,6 +137,18 @@ export interface RunnerProtocol {
    * Optional — not all runners support streaming.
    */
   stream?(agent: AgentLike, message: string, options?: RunOptions): AsyncGenerator<AgentEvent>;
+
+  /**
+   * Execute an agent and return a typed object validated against `schema`,
+   * via a capability-gated structured-output path (see DESIGN §9.4).
+   * Optional — not all runners support structured output.
+   */
+  runStructured?<T>(
+    agent: AgentLike,
+    message: string,
+    schema: ZodType<T>,
+    options?: RunOptions,
+  ): Promise<StructuredRunResult<T>>;
 
   /**
    * Release any resources held by the runner (e.g. an isolated

@@ -24,6 +24,34 @@ export {
   executeStep,
 } from "./base.js";
 
+export type {
+  Node,
+  NodeResult,
+  NodeOutcome,
+  NodeRunContext,
+} from "./node.js";
+
+export {
+  type Slot,
+  type SlotReader,
+  type SlotAccess,
+  type SlotStore,
+  slot,
+  DefaultSlotStore,
+  createSlotStore,
+} from "./slot.js";
+
+export {
+  type AgentStepSpec,
+  AgentStep,
+  StructuredOutputUnsupported,
+} from "./agent-step.js";
+
+export {
+  type FunctionStepSpec,
+  FunctionStep,
+} from "./function-step.js";
+
 export {
   type SequentialResult,
   type SequentialOptions,
