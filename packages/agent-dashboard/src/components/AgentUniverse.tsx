@@ -96,7 +96,9 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
               <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-default)" }}>
                 {cap.name}
               </span>
-              <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--fg-subtle)" }}>
+              <span
+                style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--fg-subtle)" }}
+              >
                 {cap.tools.length} tool{cap.tools.length === 1 ? "" : "s"}
               </span>
             </div>
@@ -117,7 +119,13 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
               >
                 <span
                   aria-hidden
-                  style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--fg-subtle)", flex: "none" }}
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: "50%",
+                    background: "var(--fg-subtle)",
+                    flex: "none",
+                  }}
                 />
                 {t.name}
               </div>

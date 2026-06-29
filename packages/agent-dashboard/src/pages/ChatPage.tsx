@@ -169,7 +169,13 @@ function Header({
         </Button>
         <label
           title="Cap the agent's tool-loop iterations for each message (the runner stops after this many)."
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--fg-muted)" }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            color: "var(--fg-muted)",
+          }}
         >
           max tool calls
           <input
@@ -177,7 +183,9 @@ function Header({
             min={1}
             max={50}
             value={maxIterations}
-            onChange={(e) => onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))}
+            onChange={(e) =>
+              onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))
+            }
             style={{
               width: 56,
               fontFamily: "inherit",

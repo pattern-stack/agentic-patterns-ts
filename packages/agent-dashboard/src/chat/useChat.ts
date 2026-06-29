@@ -13,7 +13,7 @@
  * mark the message `aborted`) from a real transport failure (→ `error`).
  */
 import { useCallback, useRef, useState } from "react";
-import { createConversation, type SendOptions, streamMessage } from "../api/chat-client";
+import { type SendOptions, createConversation, streamMessage } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
 import { type ChatMessage, applyParts } from "./model";
 
