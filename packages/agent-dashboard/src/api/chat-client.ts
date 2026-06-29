@@ -26,6 +26,31 @@ export async function listAgents(): Promise<AgentSummary[]> {
   return res.json() as Promise<AgentSummary[]>;
 }
 
+export interface CapabilityTool {
+  name: string;
+  description: string;
+}
+export interface AgentCapability {
+  name: string;
+  toolbox?: string;
+  tools: CapabilityTool[];
+  plays: string[];
+}
+export interface AgentComposition {
+  id: string;
+  name: string;
+  description: string;
+  model?: string;
+  capabilities: AgentCapability[];
+}
+
+/** The agent's declared composition — what it CAN do (capabilities → tools/plays). */
+export async function fetchAgentCapabilities(agentId: string): Promise<AgentComposition> {
+  const res = await fetch(`/agents/${encodeURIComponent(agentId)}/capabilities`);
+  if (!res.ok) throw new Error(`GET /agents/${agentId}/capabilities failed: ${res.status}`);
+  return res.json() as Promise<AgentComposition>;
+}
+
 /** Create a new conversation with a given agent. */
 export async function createConversation(agentId: string): Promise<ConversationCreated> {
   const res = await fetch("/conversations", {

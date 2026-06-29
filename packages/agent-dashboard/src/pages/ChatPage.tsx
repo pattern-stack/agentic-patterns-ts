@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type AgentSummary, listAgents } from "../api/chat-client";
 import { ChatPanel, useChat } from "../chat";
 import "./chat-route.css";
+import { AgentUniverse } from "../components/AgentUniverse";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
@@ -76,8 +77,8 @@ export function ChatPage() {
         maxIterations={maxIterations}
         onMaxIterations={setMaxIterations}
       />
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <div className="chat-route">
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>
+        <div className="chat-route" style={{ flex: 1, minWidth: 0 }}>
           <ChatPanel
             messages={chat.messages}
             fill
@@ -94,6 +95,7 @@ export function ChatPage() {
             }
           />
         </div>
+        <AgentUniverse agentId={selectedId} />
       </div>
     </div>
   );
