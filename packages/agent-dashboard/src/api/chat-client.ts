@@ -26,6 +26,31 @@ export async function listAgents(): Promise<AgentSummary[]> {
   return res.json() as Promise<AgentSummary[]>;
 }
 
+export interface CapabilityTool {
+  name: string;
+  description: string;
+}
+export interface AgentCapability {
+  name: string;
+  toolbox?: string;
+  tools: CapabilityTool[];
+  plays: string[];
+}
+export interface AgentComposition {
+  id: string;
+  name: string;
+  description: string;
+  model?: string;
+  capabilities: AgentCapability[];
+}
+
+/** The agent's declared composition — what it CAN do (capabilities → tools/plays). */
+export async function fetchAgentCapabilities(agentId: string): Promise<AgentComposition> {
+  const res = await fetch(`/agents/${encodeURIComponent(agentId)}/capabilities`);
+  if (!res.ok) throw new Error(`GET /agents/${agentId}/capabilities failed: ${res.status}`);
+  return res.json() as Promise<AgentComposition>;
+}
+
 /** Create a new conversation with a given agent. */
 export async function createConversation(agentId: string): Promise<ConversationCreated> {
   const res = await fetch("/conversations", {
@@ -45,15 +70,24 @@ export async function createConversation(agentId: string): Promise<ConversationC
  * Aborting the passed-in AbortSignal terminates the fetch and stops the
  * generator.
  */
+export interface SendOptions {
+  /** Per-message cap on the agent tool-loop (server clamps 1–50). Omit → server default. */
+  maxIterations?: number;
+}
+
 export async function* streamMessage(
   conversationId: string,
   content: string,
+  opts?: SendOptions,
   signal?: AbortSignal,
 ): AsyncGenerator<ClientEvent, void, void> {
   const res = await fetch(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      ...(opts?.maxIterations != null ? { maxIterations: opts.maxIterations } : {}),
+    }),
     signal,
   });
 

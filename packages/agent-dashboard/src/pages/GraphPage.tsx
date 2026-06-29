@@ -80,7 +80,7 @@ export function GraphPage() {
     const ac = new AbortController();
     abortRef.current = ac;
     try {
-      for await (const ev of streamMessage(conv, content, ac.signal)) {
+      for await (const ev of streamMessage(conv, content, undefined, ac.signal)) {
         setLiveEvents((prev) => [...prev, toEventLike(ev)]);
       }
     } catch (err) {

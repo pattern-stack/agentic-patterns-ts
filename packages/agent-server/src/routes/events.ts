@@ -7,11 +7,44 @@
  * can degrade gracefully.
  */
 
-import type { EventStore } from "@agentic-patterns/runtime";
+import type { AgentEventBus, EventStore } from "@agentic-patterns/runtime";
 import { Hono } from "hono";
 
-export function eventRoutes(eventStore: EventStore | undefined): Hono {
+export function eventRoutes(eventStore: EventStore | undefined, eventBus?: AgentEventBus): Hono {
   const app = new Hono();
+
+  // POST /events — ingest AgentEvents forwarded from another process (a consumer
+  // app's HttpEventExporter) and republish onto this server's bus, so they flow to
+  // the dashboard via the existing SSE/collector pipeline. Accepts a single event,
+  // an array, or `{ events: [...] }`. Optional shared-secret via AP_INGEST_TOKEN.
+  app.post("/events", async (c) => {
+    if (!eventBus) {
+      return c.json({ error: "event bus not available on this server" }, 503);
+    }
+    const token = process.env.AP_INGEST_TOKEN;
+    if (token && c.req.header("authorization") !== `Bearer ${token}`) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON" }, 400);
+    }
+    const list: unknown[] = Array.isArray((body as { events?: unknown[] })?.events)
+      ? (body as { events: unknown[] }).events
+      : Array.isArray(body)
+        ? body
+        : [body];
+    let published = 0;
+    for (const ev of list) {
+      if (ev && typeof ev === "object" && typeof (ev as { type?: unknown }).type === "string") {
+        await eventBus.publish(ev as Parameters<AgentEventBus["publish"]>[0]);
+        published += 1;
+      }
+    }
+    return c.json({ ok: true, published });
+  });
 
   app.get("/admin/events/recent", (c) => {
     if (!eventStore) {
