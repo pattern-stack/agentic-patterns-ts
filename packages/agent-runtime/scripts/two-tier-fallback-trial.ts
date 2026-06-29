@@ -37,27 +37,36 @@ const lookup = tool({
 });
 
 async function main() {
-  if (!process.env.BIFROST_BASE_URL) {
-    console.error("Set BIFROST_BASE_URL (+ BIFROST_USERNAME/PASSWORD).");
+  // biome-ignore lint/suspicious/noExplicitAny: trial harness, providers vary
+  let model: any;
+  let id: string;
+
+  if (process.env.ANTHROPIC_API_KEY && !process.env.BIFROST_BASE_URL) {
+    // Native Anthropic path (claude-sonnet-4-5+) — proves the 2-tier on the primary provider.
+    const { anthropic } = await import("@ai-sdk/anthropic");
+    id = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
+    model = anthropic(id);
+  } else if (process.env.BIFROST_BASE_URL) {
+    const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
+    const headers: Record<string, string> = {};
+    if (process.env.BIFROST_USERNAME && process.env.BIFROST_PASSWORD) {
+      headers.Authorization = `Basic ${Buffer.from(
+        `${process.env.BIFROST_USERNAME}:${process.env.BIFROST_PASSWORD}`,
+      ).toString("base64")}`;
+    }
+    const gw = createOpenAICompatible({
+      name: "bifrost",
+      baseURL: process.env.BIFROST_BASE_URL,
+      apiKey: process.env.BIFROST_API_KEY ?? "bifrost",
+      headers,
+      supportsStructuredOutputs: true,
+    });
+    id = process.env.BIFROST_MODEL ?? "gemini/gemini-3.1-flash-lite";
+    model = gw(id);
+  } else {
+    console.error("Set ANTHROPIC_API_KEY (native) or BIFROST_BASE_URL (+ creds).");
     process.exit(1);
   }
-  const { createOpenAICompatible } = await import("@ai-sdk/openai-compatible");
-  const headers: Record<string, string> = {};
-  if (process.env.BIFROST_USERNAME && process.env.BIFROST_PASSWORD) {
-    headers.Authorization = `Basic ${Buffer.from(
-      `${process.env.BIFROST_USERNAME}:${process.env.BIFROST_PASSWORD}`,
-    ).toString("base64")}`;
-  }
-  const gw = createOpenAICompatible({
-    name: "bifrost",
-    baseURL: process.env.BIFROST_BASE_URL,
-    apiKey: process.env.BIFROST_API_KEY ?? "bifrost",
-    headers,
-    supportsStructuredOutputs: true,
-  });
-  const id = process.env.BIFROST_MODEL ?? "gemini/gemini-3.1-flash-lite";
-  // biome-ignore lint/suspicious/noExplicitAny: trial harness
-  const model = gw(id) as any;
 
   console.log(`Two-tier fallback on ${id} (the model that FAILS single-call tools+structured)\n`);
 

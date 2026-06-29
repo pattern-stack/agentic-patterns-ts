@@ -612,7 +612,7 @@ Built on **`Output.object`** (v5 `experimental_output` → v6 `output`; `generat
 | `gemini/gemini-3.5-flash` | ✅ | ✅ capable |
 | `gemini/gemini-3.1-flash-lite` | ✅ | ❌ → 2-tier |
 | `gemini/gemini-2.5-pro`, `gemini/gemini-2.5-flash` | ✅ | ❌ → 2-tier |
-| `anthropic/*` | untested (§9.5) | untested (§9.5) |
+| `anthropic/*` (native, Sonnet 4.5) | ✅ | ❌ → 2-tier (JSON response format excludes tools) |
 
 Adding a model to the capable set is one entry, after verification. Default for any id not in the table = **not capable** (2-tier).
 
@@ -623,7 +623,7 @@ Verified live through the dealbrain Bifrost gateway via two throwaway harnesses 
 - **No-tools `Output.object`: passed on every model tested** (gemini 2.5/3.1/3.5, openai gpt-4o/gpt-5) → the universal path; `runStructured`'s no-tools branch is safe everywhere.
 - **Single-call tools+structured: `openai/*` ✓, `gemini-3.5-flash` ✓; `gemini ≤3.1 / 2.5` ✗** (invalid JSON / "No output specified", tool never fired) → this is the per-model gap the capability gate exists for.
 - **2-tier fallback on `gemini-3.1-flash-lite`: PASS** — tool fired in tier 1, schema-valid object in tier 2. The model-safe path is proven on the exact failing model.
-- **Anthropic: NOT yet tested** — the dealbrain Bifrost instance has only `gemini` + `openai` providers configured (`GET /api/providers`), and there is no native `ANTHROPIC_API_KEY`. Needs Anthropic added to Bifrost (or a native key) to validate the native `structuredOutputMode: "outputFormat"` row.
+- **Anthropic (native `@ai-sdk/anthropic`, claude-sonnet-4-5): validated** — no-tools `Output.object` **PASS**; single-call tools+structured **FAIL** (SDK warns "JSON response format does not support tools. The provided tools are ignored." → response doesn't match schema). So Anthropic's native structured output is **mutually exclusive with tool use** — same bucket as older Gemini, NOT a single-call provider. The 2-tier fallback on native claude-sonnet-4-5 **PASS** (tool fired tier 1, schema-valid object tier 2). This is the load-bearing case: had the runner assumed native Anthropic = single-call, every tool-using structured step on Claude would silently fail — the capability gate's conservative default (`anthropic/*` not capable → 2-tier) prevents it.
 
 Incidental finding (fixed): local `node_modules` was stale — `ai@4.3.19` installed vs lockfile `ai@5.0.206`; resolved via `bun install`. Anyone building locally needs the synced install.
 
