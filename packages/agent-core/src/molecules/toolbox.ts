@@ -18,6 +18,14 @@ import { ToolSchema } from "./tool-schema.js";
 export interface ToolDefinition {
   description: string;
   parameters: ZodTypeAny;
+  /**
+   * Optional output schema — what `execute` resolves to. Symmetric with
+   * `parameters`. A tool's TS return type is erased at runtime, so it can't be
+   * introspected; declare `returns` to make the output shape visible to
+   * consumers (e.g. a tool workbench rendering a `Returns` block) and to enable
+   * future output validation. Omit it and consumers simply get no return shape.
+   */
+  returns?: ZodTypeAny;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -35,7 +43,7 @@ export abstract class Toolbox {
   /** Get tool definitions as ToolSchema objects. */
   getToolSchemas(): ToolSchema[] {
     return Object.entries(this.tools).map(([name, def]) =>
-      ToolSchema.fromZod(name, def.description, def.parameters),
+      ToolSchema.fromZod(name, def.description, def.parameters, def.returns),
     );
   }
 

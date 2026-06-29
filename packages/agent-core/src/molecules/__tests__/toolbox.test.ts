@@ -18,9 +18,10 @@ class MathToolbox extends Toolbox {
     multiply: {
       description: "Multiply two numbers",
       parameters: z.object({ a: z.number(), b: z.number() }),
+      returns: z.object({ product: z.number() }),
       execute: async (args) => {
         const { a, b } = args as { a: number; b: number };
-        return a * b;
+        return { product: a * b };
       },
     },
   };
@@ -36,6 +37,13 @@ describe("Toolbox", () => {
       expect(schemas[0]!.name).toBe("add");
       expect(schemas[0]!.description).toBe("Add two numbers");
       expect(schemas[1]!.name).toBe("multiply");
+    });
+
+    it("carries a tool's declared returns schema through, and omits it otherwise", () => {
+      const schemas = toolbox.getToolSchemas();
+      // `add` declares no returns; `multiply` declares one.
+      expect(schemas[0]!.returns).toBeUndefined();
+      expect(schemas[1]!.returns).toHaveProperty("type", "object");
     });
   });
 
