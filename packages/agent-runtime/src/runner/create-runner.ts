@@ -128,16 +128,30 @@ export interface RunnerSelection {
  * `AP_GATEWAY_API_KEY`, `AP_GATEWAY_MODEL_PREFIX`. Returns undefined when no
  * gateway URL is set — so setting one env var routes every agent through the
  * gateway, no code change.
+ *
+ * Auth: a token gateway uses `AP_GATEWAY_API_KEY` (sent as `Authorization: Bearer`).
+ * A Basic-auth gateway (e.g. a Bifrost deployment fronted by HTTP Basic, which 401s
+ * on Bearer) instead takes `AP_GATEWAY_BASIC_USER` + `AP_GATEWAY_BASIC_PASS` — we send
+ * a precomputed `Authorization: Basic <base64(user:pass)>` header and omit the apiKey.
  */
 function envGateway(): GatewayConfig | undefined {
   const baseURL = process.env.AP_GATEWAY_BASE_URL;
   if (!baseURL) return undefined;
+  const basicUser = process.env.AP_GATEWAY_BASIC_USER;
+  const basicPass = process.env.AP_GATEWAY_BASIC_PASS;
+  const basicHeader =
+    basicUser && basicPass
+      ? {
+          authorization: `Basic ${Buffer.from(`${basicUser}:${basicPass}`).toString("base64")}`,
+        }
+      : undefined;
   return {
     baseURL,
     ...(process.env.AP_GATEWAY_API_KEY ? { apiKey: process.env.AP_GATEWAY_API_KEY } : {}),
     ...(process.env.AP_GATEWAY_MODEL_PREFIX
       ? { modelPrefix: process.env.AP_GATEWAY_MODEL_PREFIX }
       : {}),
+    ...(basicHeader ? { headers: basicHeader } : {}),
   };
 }
 
