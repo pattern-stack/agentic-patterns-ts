@@ -51,6 +51,9 @@ describe("Parallel", () => {
     expect(result.succeeded).toBe(false);
     expect(result.error?.message).toBe("kaboom");
     expect((result.output as string[])[0]).toBe("ok"); // sibling completed despite the throw
+    // the failure diagnostics channel reports which branch failed (index 1)
+    expect(result.failed.map(([i]) => i)).toEqual([1]);
+    expect(result.failed[0]?.[1].message).toBe("kaboom");
   });
 
   it("runs N branches over the shared input, collecting outputs in branch order", async () => {
