@@ -1,210 +1,159 @@
 /**
- * Parallel — Fan-out agents in parallel with optional concurrency limiting.
+ * `Parallel<TIn, TBranch, TConsolidated = TBranch[]>` — N named branches at once
+ * over a shared input (DESIGN §6.3).
  *
- * Ported from Python: workflows/compositions/parallel.py
+ * The single typed `Parallel` (replaces the legacy string-pinned class). Every
+ * branch receives the SAME `input` (an explicit value, not a context snapshot);
+ * each branch gets a forked branch-scoped slot store (§7.3); outputs are
+ * collected in branch order. With `consolidate` → return `consolidate(outputs)`;
+ * else → `TBranch[]`. Now typed, nestable, and its consolidated output threads.
  */
 
-import type {
-  PatternContext,
-  PatternProtocol,
-  PatternResult,
-  PatternRunOptions,
-  Step,
-  StepResult,
-} from "./base.js";
-import { applyStepModel, createStepResult, makeStepName, resolveMessage } from "./base.js";
+import type { PatternHooks } from "./base.js";
+import type { Consolidate } from "./consolidate.js";
+import type { Node, NodeOutcome, NodeResult, NodeRunContext } from "./node.js";
+import { type SlotStore, createSlotStore } from "./slot.js";
 
 // ---------------------------------------------------------------------------
-// Consolidator
+// Options
 // ---------------------------------------------------------------------------
 
-/** Consolidator: reduce step results to a single value. */
-export type Consolidator = (results: StepResult[]) => unknown;
-
-/** Collect all step contents into an array. */
-export function collectContents(results: StepResult[]): string[] {
-  return results.map((r) => r.content);
-}
-
-/** Collect step contents keyed by step name. */
-export function collectByName(results: StepResult[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const r of results) {
-    out[r.stepName] = r.content;
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// ParallelResult
-// ---------------------------------------------------------------------------
-
-export interface ParallelResult extends PatternResult {
-  readonly results: ReadonlyArray<StepResult | Error>;
-  readonly successful: ReadonlyArray<StepResult>;
-  readonly failed: ReadonlyArray<readonly [number, Error]>;
-  readonly consolidatedOutput: Readonly<Record<string, unknown>>;
-  readonly allSucceeded: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// ParallelOptions
-// ---------------------------------------------------------------------------
-
-export interface ParallelOptions {
-  readonly outputKey?: string;
-  readonly consolidator?: Consolidator;
-  readonly returnExceptions?: boolean;
+export interface ParallelOpts<TBranch, TC> {
+  readonly name?: string;
+  /** Reduce N branch outputs into one. Omit → the result is the array `TBranch[]`. */
+  readonly consolidate?: Consolidate<TBranch, TC>;
+  /** Bound concurrency (reuses {@link runWithConcurrency}). Unbounded when unset. */
   readonly maxConcurrency?: number;
+}
+
+/** A named, hand-authored branch over the shared input. */
+export interface ParallelBranch<TIn, TBranch> {
+  readonly name: string;
+  readonly node: Node<TIn, TBranch>;
 }
 
 // ---------------------------------------------------------------------------
 // Parallel
 // ---------------------------------------------------------------------------
 
-/**
- * Fan-out agents in parallel with optional concurrency limiting.
- *
- * All steps receive the same context snapshot.
- * Results preserve input order.
- *
- * Example:
- *   const par = new Parallel([
- *     { agent: analyst1, messageTemplate: "Analyze data" },
- *     { agent: analyst2, messageTemplate: "Analyze data" },
- *   ], { maxConcurrency: 2 });
- */
-export class Parallel implements PatternProtocol {
-  private readonly steps: ReadonlyArray<Step>;
-  private readonly outputKey: string | undefined;
-  private readonly consolidator: Consolidator | undefined;
-  private readonly returnExceptions: boolean;
-  private readonly maxConcurrency: number | undefined;
+export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
+  readonly name?: string;
+  private readonly branches: ReadonlyArray<ParallelBranch<TIn, TBranch>>;
+  private readonly consolidate?: Consolidate<TBranch, TC>;
+  private readonly maxConcurrency?: number;
 
-  constructor(steps: Step[], options?: ParallelOptions) {
-    this.steps = steps;
-    this.outputKey = options?.outputKey;
-    this.consolidator = options?.consolidator;
-    this.returnExceptions = options?.returnExceptions ?? true;
-    this.maxConcurrency = options?.maxConcurrency;
+  constructor(
+    branches: ReadonlyArray<ParallelBranch<TIn, TBranch>>,
+    opts?: ParallelOpts<TBranch, TC>,
+  ) {
+    this.branches = branches;
+    this.name = opts?.name;
+    this.consolidate = opts?.consolidate;
+    this.maxConcurrency = opts?.maxConcurrency;
   }
 
-  async run(context: PatternContext = {}, options?: PatternRunOptions): Promise<ParallelResult> {
-    const runner = options?.runner;
-    const hooks = options?.hooks;
-    const toolExecutor = options?.toolExecutor;
-
-    if (!runner) {
-      throw new Error("Runner is required for Parallel execution");
-    }
+  async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TC>> {
+    const hooks: PatternHooks | undefined = ctx.hooks;
+    const patternName = this.name ?? "Parallel";
+    const parentSlots: SlotStore = ctx.slots ?? createSlotStore();
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",
-      patternName: "Parallel",
+      patternName,
       timestamp: new Date(),
     });
 
-    const contextSnapshot = { ...context };
-    const orderedResults: Array<StepResult | Error> = new Array(this.steps.length);
+    const outputs = new Array<TBranch>(this.branches.length);
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let succeeded = true;
+    let firstError: Error | undefined;
 
     const executeOne = async (index: number): Promise<void> => {
-      const step = this.steps[index]!;
-      const stepName = makeStepName(step.name, index);
+      const branch = this.branches[index]!;
+      const branchCtx: NodeRunContext = { ...ctx, slots: parentSlots.fork() };
 
       await hooks?.onStepStart?.({
         type: "pattern.step.start",
-        stepName,
+        stepName: branch.name,
         stepIndex: index,
         timestamp: new Date(),
       });
 
       try {
-        const message = resolveMessage(step.messageTemplate, contextSnapshot);
-        const runResult = await runner.run(applyStepModel(step.agent, step.model), message, {
-          toolExecutor,
-          maxIterations: step.maxIterations,
-        });
-        const stepResult = createStepResult(stepName, runResult);
-        orderedResults[index] = stepResult;
+        const res = await branch.node.run(input, branchCtx);
+        totalInputTokens += res.totalInputTokens;
+        totalOutputTokens += res.totalOutputTokens;
+        outputs[index] = res.output;
+        parentSlots.join(branchCtx.slots as SlotStore);
 
-        await hooks?.onStepComplete?.({
-          type: "pattern.step.complete",
-          stepName,
-          stepIndex: index,
-          result: stepResult,
-          timestamp: new Date(),
-        });
-      } catch (error) {
-        const err = error instanceof Error ? error : new Error(String(error));
-        orderedResults[index] = err;
-
+        if (res.succeeded) {
+          const outcome: NodeOutcome<unknown> = {
+            nodeName: branch.name,
+            output: res.output,
+            succeeded: true,
+            inputTokens: res.totalInputTokens,
+            outputTokens: res.totalOutputTokens,
+          };
+          await hooks?.onStepComplete?.({
+            type: "pattern.step.complete",
+            stepName: branch.name,
+            stepIndex: index,
+            result: outcome,
+            timestamp: new Date(),
+          });
+        } else {
+          succeeded = false;
+          firstError ??= res.error;
+          await hooks?.onStepError?.({
+            type: "pattern.step.error",
+            stepName: branch.name,
+            stepIndex: index,
+            error: res.error ?? new Error(`Branch "${branch.name}" failed`),
+            timestamp: new Date(),
+          });
+        }
+      } catch (err) {
+        // A well-behaved Node never throws (leaves catch internally), but a
+        // nested/third-party node might. Convert a throw into a failed branch so
+        // one bad branch can't reject the pool and abort its siblings.
+        succeeded = false;
+        const e = err instanceof Error ? err : new Error(String(err));
+        firstError ??= e;
         await hooks?.onStepError?.({
           type: "pattern.step.error",
-          stepName,
+          stepName: branch.name,
           stepIndex: index,
-          error: err,
+          error: e,
           timestamp: new Date(),
         });
-
-        if (!this.returnExceptions) {
-          throw err;
-        }
       }
     };
 
     if (this.maxConcurrency && this.maxConcurrency > 0) {
       await runWithConcurrency(
-        this.steps.map((_, i) => () => executeOne(i)),
+        this.branches.map((_, i) => () => executeOne(i)),
         this.maxConcurrency,
       );
     } else {
-      await Promise.all(this.steps.map((_, i) => executeOne(i)));
+      await Promise.all(this.branches.map((_, i) => executeOne(i)));
     }
 
-    const successful: StepResult[] = [];
-    const failed: Array<readonly [number, Error]> = [];
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
+    const consolidated: TC = this.consolidate
+      ? this.consolidate(outputs)
+      : (outputs as unknown as TC);
 
-    for (let i = 0; i < orderedResults.length; i++) {
-      const r = orderedResults[i]!;
-      if (r instanceof Error) {
-        failed.push([i, r] as const);
-      } else {
-        successful.push(r);
-        totalInputTokens += r.inputTokens;
-        totalOutputTokens += r.outputTokens;
-      }
-    }
-
-    let consolidatedOutput: Record<string, unknown> = {};
-    if (this.consolidator && successful.length > 0) {
-      const consolidated = this.consolidator(successful);
-      if (this.outputKey) {
-        consolidatedOutput[this.outputKey] = consolidated;
-      } else {
-        consolidatedOutput = { consolidated };
-      }
-    }
-
-    const allSucceeded = failed.length === 0;
-    const finalContent = successful.length > 0 ? successful[successful.length - 1]!.content : "";
-
-    const result: ParallelResult = Object.freeze({
-      results: Object.freeze(orderedResults),
-      successful: Object.freeze(successful),
-      failed: Object.freeze(failed),
-      consolidatedOutput: Object.freeze(consolidatedOutput),
-      allSucceeded,
+    const result: NodeResult<TC> = Object.freeze({
+      output: consolidated,
+      succeeded,
+      error: firstError,
       totalInputTokens,
       totalOutputTokens,
-      succeeded: allSucceeded,
-      finalContent,
     });
 
     await hooks?.onPatternComplete?.({
       type: "pattern.complete",
-      patternName: "Parallel",
+      patternName,
       result,
       timestamp: new Date(),
     });
@@ -214,16 +163,18 @@ export class Parallel implements PatternProtocol {
 }
 
 // ---------------------------------------------------------------------------
-// Concurrency pool
+// Concurrency pool — shared by Parallel and FanOut
 // ---------------------------------------------------------------------------
 
-async function runWithConcurrency(
-  tasks: Array<() => Promise<void>>,
+export async function runWithConcurrency(
+  tasks: ReadonlyArray<() => Promise<void>>,
   maxConcurrency: number,
 ): Promise<void> {
   const executing = new Set<Promise<void>>();
   for (const task of tasks) {
-    const p = task().then(() => {
+    // `.finally` deletes on settle (fulfil OR reject), so a rejecting task can't
+    // leave a stale entry in the pool; the rejection still propagates.
+    const p = task().finally(() => {
       executing.delete(p);
     });
     executing.add(p);

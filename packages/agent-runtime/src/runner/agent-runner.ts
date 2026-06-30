@@ -21,17 +21,34 @@
 
 import type { ToolSchema } from "@agentic-patterns/core";
 import type { LanguageModelV2 } from "@ai-sdk/provider";
-import { type ModelMessage, type ToolSet, generateId, generateText, streamText, tool } from "ai";
+import {
+  type ModelMessage,
+  Output,
+  type ToolSet,
+  generateId,
+  generateText,
+  stepCountIs,
+  streamText,
+  tool,
+} from "ai";
+import type { ZodType } from "zod";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
-import { type AgentEvent, createEvent } from "../events/types.js";
+import { type AgentEvent, type BaseEvent, createEvent } from "../events/types.js";
 import {
   type ModelResolver,
   constantModelResolver,
   isModelResolver,
 } from "../providers/model-resolver.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
-import type { AgentLike, RunOptions, RunResult, RunnerProtocol, ToolExecutor } from "./types.js";
+import type {
+  AgentLike,
+  RunOptions,
+  RunResult,
+  RunnerProtocol,
+  StructuredRunResult,
+  ToolExecutor,
+} from "./types.js";
 
 // Re-export AgentLike here so existing consumers importing from "./agent-runner"
 // (including the public barrel and workflow modules) continue to work.
@@ -51,6 +68,39 @@ export class ToolCallBlocked extends Error {
     this.toolName = toolName;
     this.reason = reason;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Structured-output capability table (DESIGN §9.4 / §9.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Does this model support a SINGLE-CALL tools + structured-output round-trip
+ * (`experimental_output` while a tool loop runs)?
+ *
+ * Conservative, additive, empirically seeded (DESIGN §9.5). CAPABLE iff the
+ * resolved model id matches one of the verified-good families below; EVERY
+ * other id — including unknown ids and untested providers (anthropic, gemini
+ * ≤3.1 / 2.5) — returns `false`, routing to the model-safe 2-tier path.
+ *
+ * Correctness never depends on this flag (the 2-tier fallback is always
+ * correct); it only decides whether a round-trip can be saved.
+ */
+export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  // Strip any gateway/provider prefix (e.g. "bifrost:openai/gpt-4o" → "gpt-4o",
+  // "openai/gpt-5" → "gpt-5") so the family match works on the bare model name.
+  // Split on "/" only (NOT ":") so a version tag like "gpt-4o:2024-08-06"
+  // keeps its family prefix instead of collapsing to the version.
+  const bare = id.split("/").pop() ?? id;
+  return (
+    // openai/gpt-4o*  (gpt-4o, gpt-4o-mini, gpt-4o-2024-…)
+    bare.startsWith("gpt-4o") ||
+    // openai/gpt-5*
+    bare.startsWith("gpt-5") ||
+    // gemini 3.5 flash (NOT gemini 3.1 / 2.5)
+    bare.includes("gemini-3.5-flash")
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -109,9 +159,20 @@ export class AgentRunner implements RunnerProtocol {
    * on a block. (Mirrors ClaudeCodeRunner.emitIntent.)
    */
   private async emitIntent(event: AgentEvent): Promise<boolean> {
+    // Correlate the rejection to THIS intent's toolCallId. The AI SDK runs
+    // multiple tool calls within a step concurrently (the capable runStructured
+    // path hands execute-bearing tools to the SDK), so a payload-blind handler
+    // would let one tool's rejection spuriously block a concurrent sibling.
+    const intentId = (event as { toolCallId?: string }).toolCallId;
     let blocked = false;
-    const onRejected = () => {
-      blocked = true;
+    const onRejected = (rejected: BaseEvent) => {
+      // The gate chain emits the rejection carrying `originalIntent` (the intent
+      // it blocked), NOT a top-level toolCallId — correlate on that so a
+      // concurrent sibling's rejection can't flip this intent's `blocked`.
+      const oi = (rejected as { originalIntent?: { toolCallId?: string } }).originalIntent;
+      if (oi?.toolCallId === intentId) {
+        blocked = true;
+      }
     };
     this.eventBus.subscribe("agent.tool.rejected", onRejected);
     try {
@@ -490,6 +551,262 @@ export class AgentRunner implements RunnerProtocol {
       toolCallsCount: totalToolCalls,
       iterations: maxIterations,
       finishReason: "max_iterations",
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // runStructured() — capability-gated structured output (DESIGN §9.4)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Build the agent's tools WITH an `execute` function for the single-call
+   * capable path. Unlike {@link convertTools} (execute-less, gate-chain
+   * invariant), here the SDK DOES drive the tool loop — so each `execute`
+   * still routes through the gate chain + `toolExecutor` + event emission,
+   * preserving gate interception even though the SDK runs the loop.
+   */
+  private convertExecutableTools(
+    agent: AgentLike,
+    toolExecutor: ToolExecutor | undefined,
+    ctx: { traceId: string; runId: string; parentSpanId: string },
+  ): ToolSet {
+    const agentTools = agent.getTools() as ToolSchema[];
+    if (agentTools.length === 0) return {};
+
+    const tools: ToolSet = {};
+    for (const t of agentTools) {
+      const vercel = t.toVercelAI();
+      const toolName = t.name;
+      tools[toolName] = tool({
+        description: vercel.description,
+        inputSchema: vercel.parameters,
+        execute: async (input: unknown) => {
+          const args = (input ?? {}) as Record<string, unknown>;
+          const intent = createEvent("agent.tool.intent", {
+            traceId: ctx.traceId,
+            runId: ctx.runId,
+            parentSpanId: ctx.parentSpanId,
+            toolCallId: generateId(),
+            toolName,
+            arguments: args,
+          });
+          const allowed = await this.emitIntent(intent);
+          if (!allowed) {
+            throw new ToolCallBlocked(toolName, "Blocked by gate");
+          }
+
+          const tcStart = createEvent("agent.tool.start", {
+            traceId: ctx.traceId,
+            runId: ctx.runId,
+            parentSpanId: ctx.parentSpanId,
+            toolCallId: intent.toolCallId,
+            toolName,
+            arguments: args,
+          });
+          const tcSpanId = tcStart.spanId;
+          await this.emit(tcStart);
+
+          const startTime = Date.now();
+          let toolResult: unknown;
+          let errorMsg: string | undefined;
+          try {
+            if (toolExecutor) {
+              toolResult = await toolExecutor.execute(toolName, args);
+            } else {
+              toolResult = { error: "No tool executor configured" };
+              errorMsg = "No tool executor configured";
+            }
+          } catch (e: unknown) {
+            const err = e instanceof Error ? e : new Error(String(e));
+            toolResult = { error: err.message };
+            errorMsg = err.message;
+          }
+
+          await this.emit(
+            createEvent("agent.tool.end", {
+              traceId: ctx.traceId,
+              runId: ctx.runId,
+              spanId: tcSpanId,
+              parentSpanId: ctx.parentSpanId,
+              toolCallId: intent.toolCallId,
+              toolName,
+              arguments: args,
+              result: toolResult,
+              error: errorMsg,
+              durationMs: Date.now() - startTime,
+              resultTokens: 0,
+            }),
+          );
+
+          return toJsonValue(toolResult);
+        },
+      });
+    }
+    return tools;
+  }
+
+  async runStructured<T>(
+    agent: AgentLike,
+    message: string,
+    schema: ZodType<T>,
+    options?: RunOptions,
+  ): Promise<StructuredRunResult<T>> {
+    if (options?.eventBus) {
+      this._eventBus = options.eventBus;
+    }
+
+    const runId = generateId();
+    const effectiveTraceId = options?.traceId ?? runId;
+    const toolExecutor = options?.toolExecutor;
+
+    const model = await this._resolver.resolve(agent.getModel());
+    const modelName = model.modelId;
+    const agentTools = agent.getTools() as ToolSchema[];
+    const hasTools = agentTools.length > 0;
+    const system = agent.renderInitialPrompt();
+
+    // Emit message start event (root of the trace), mirroring run().
+    const startEvent = createEvent("agent.message.start", {
+      traceId: effectiveTraceId,
+      runId,
+      parentSpanId: options?.parentSpanId,
+      agentName: agent.role.name,
+      agentConfig: {
+        role: agent.role.name,
+        model: modelName,
+        tools: agentTools.map((t) => t.name),
+      },
+    });
+    const rootSpanId = startEvent.spanId;
+    await this.emit(startEvent);
+
+    const messages: ModelMessage[] = [];
+    if (options?.messageHistory) {
+      messages.push(...convertHistory(options.messageHistory));
+    }
+    messages.push({ role: "user" as const, content: message });
+
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let toolCallsCount = 0;
+    let iterations = 1;
+    let finishReason = "stop";
+    let rawObject: unknown;
+
+    if (!hasTools) {
+      // No tools → single Output.object call. Works on every model.
+      const result = await generateText({
+        model,
+        system,
+        messages,
+        experimental_output: Output.object({ schema }),
+      });
+      totalInputTokens = result.usage?.inputTokens ?? 0;
+      totalOutputTokens = result.usage?.outputTokens ?? 0;
+      finishReason = result.finishReason ?? "stop";
+      rawObject = result.experimental_output;
+    } else if (modelSupportsToolsWithStructuredOutput(modelName)) {
+      // Tools + capable model → single experimental_output + tools call. The
+      // SDK drives the loop; execute-bearing tools keep gate interception.
+      const tools = this.convertExecutableTools(agent, toolExecutor, {
+        traceId: effectiveTraceId,
+        runId,
+        parentSpanId: rootSpanId,
+      });
+      const result = await generateText({
+        model,
+        system,
+        messages,
+        tools,
+        stopWhen: stepCountIs(options?.maxIterations ?? 10),
+        experimental_output: Output.object({ schema }),
+      });
+      const usage = result.totalUsage ?? result.usage;
+      totalInputTokens = usage?.inputTokens ?? 0;
+      totalOutputTokens = usage?.outputTokens ?? 0;
+      finishReason = result.finishReason ?? "stop";
+      const steps = result.steps ?? [];
+      toolCallsCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
+      iterations = Math.max(1, steps.length);
+      rawObject = result.experimental_output;
+    } else {
+      // Tools + incapable/UNKNOWN model → 2-tier (model-safe). Tier 1: the
+      // normal gate-respecting tool loop to text. Tier 2: a no-tools
+      // Output.object finish over that text.
+      const tier1 = await this.run(agent, message, options);
+      totalInputTokens += tier1.inputTokens;
+      totalOutputTokens += tier1.outputTokens;
+      toolCallsCount = tier1.toolCallsCount;
+      iterations = tier1.iterations;
+
+      // Guard: if tier 1 produced no text (e.g. its tool loop hit maxIterations),
+      // the structured finish would get an empty body and throw an opaque schema
+      // error. Surface the real cause instead.
+      if (!tier1.response || tier1.response.trim() === "") {
+        throw new Error(
+          `runStructured: 2-tier fallback got empty tier-1 output (finishReason="${tier1.finishReason}") — the tool loop likely hit maxIterations before producing an answer. Raise maxIterations or simplify the step.`,
+        );
+      }
+
+      const tier2 = await generateText({
+        model,
+        system,
+        messages: [
+          {
+            role: "user" as const,
+            content: `From the following, produce the structured object.\n\n${tier1.response}`,
+          },
+        ],
+        experimental_output: Output.object({ schema }),
+      });
+      totalInputTokens += tier2.usage?.inputTokens ?? 0;
+      totalOutputTokens += tier2.usage?.outputTokens ?? 0;
+      iterations += 1;
+      finishReason = tier2.finishReason ?? "stop";
+      rawObject = tier2.experimental_output;
+    }
+
+    // Validate against the caller's schema — never trust the model's shape.
+    const parsed = schema.safeParse(rawObject);
+    if (!parsed.success) {
+      const err = new Error(
+        `runStructured: model output failed schema validation — ${parsed.error.message}`,
+      );
+      await this.emit(
+        createEvent("agent.error", {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: rootSpanId,
+          errorType: err.name,
+          message: err.message,
+          recoverable: false,
+          context: {},
+        }),
+      );
+      throw err;
+    }
+
+    await this.emit(
+      createEvent("agent.message.complete", {
+        traceId: effectiveTraceId,
+        runId,
+        spanId: rootSpanId,
+        parentSpanId: rootSpanId,
+        content: JSON.stringify(parsed.data),
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        model: modelName,
+      }),
+    );
+
+    return {
+      response: JSON.stringify(parsed.data),
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+      toolCallsCount,
+      iterations,
+      finishReason,
+      object: parsed.data,
     };
   }
 

@@ -6,10 +6,17 @@
  */
 
 import { generateId } from "ai";
+import type { ZodType } from "zod";
 
 import type { AgentEvent } from "../events/types.js";
 import { createEvent } from "../events/types.js";
-import type { AgentLike, RunOptions, RunResult, RunnerProtocol } from "./types.js";
+import type {
+  AgentLike,
+  RunOptions,
+  RunResult,
+  RunnerProtocol,
+  StructuredRunResult,
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +34,12 @@ export interface MockResponse {
   outputTokens?: number;
   delayMs?: number;
   error?: Error;
+  /**
+   * Object returned by {@link MockRunner.runStructured} when this response
+   * matches. Validated against the caller's schema at call time so typed
+   * `AgentStep`s are testable without an LLM.
+   */
+  object?: unknown;
 }
 
 /** A recorded call to the mock runner. */
@@ -127,6 +140,63 @@ export class MockRunner implements RunnerProtocol {
       toolCallsCount,
       iterations: 1,
       finishReason: "stop",
+    };
+  }
+
+  /**
+   * Execute an agent and return a typed object validated against `schema`.
+   *
+   * Mirrors {@link run}'s matching/recording, then validates the matched
+   * response's configured `object` against the caller's schema. Throws if no
+   * `object` was configured or it fails validation — so a typed `AgentStep`
+   * can be exercised deterministically without an LLM.
+   */
+  async runStructured<T>(
+    agent: AgentLike,
+    message: string,
+    schema: ZodType<T>,
+    options?: RunOptions,
+  ): Promise<StructuredRunResult<T>> {
+    const matched = this._findResponse(message);
+
+    this._callHistory.push({
+      message,
+      agentName: agent.role.name,
+      model: agent.getModel(),
+      maxIterations: options?.maxIterations,
+      timestamp: new Date(),
+    });
+
+    if (matched.delayMs && matched.delayMs > 0) {
+      await delay(matched.delayMs);
+    }
+
+    if (matched.error) {
+      throw matched.error;
+    }
+
+    if (matched.object === undefined) {
+      throw new Error(
+        "MockRunner.runStructured: matched response has no `object` configured. " +
+          "Add one via addResponse(trigger, { content, object }).",
+      );
+    }
+
+    const parsed = schema.safeParse(matched.object);
+    if (!parsed.success) {
+      throw new Error(
+        `MockRunner.runStructured: configured object failed schema validation — ${parsed.error.message}`,
+      );
+    }
+
+    return {
+      response: JSON.stringify(parsed.data),
+      inputTokens: matched.inputTokens ?? 0,
+      outputTokens: matched.outputTokens ?? 0,
+      toolCallsCount: 0,
+      iterations: 1,
+      finishReason: "stop",
+      object: parsed.data,
     };
   }
 

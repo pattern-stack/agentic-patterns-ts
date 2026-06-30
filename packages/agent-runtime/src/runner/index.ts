@@ -1,8 +1,13 @@
-export { AgentRunner, ToolCallBlocked } from "./agent-runner.js";
+export {
+  AgentRunner,
+  ToolCallBlocked,
+  modelSupportsToolsWithStructuredOutput,
+} from "./agent-runner.js";
 export type { AgentLike } from "./agent-runner.js";
 export { convertHistory } from "./message-utils.js";
 export type {
   RunResult,
+  StructuredRunResult,
   RunOptions,
   RunnerProtocol,
   ToolExecutor,
