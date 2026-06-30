@@ -10,6 +10,7 @@
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { runAgentsCommand } from "./commands/agents.js";
+import { runClaudeSkillCommand } from "./commands/claude-skill.js";
 import { runConfigSetCommand, runConfigStatusCommand } from "./commands/config.js";
 import { type Provider, runInitCommand } from "./commands/init.js";
 import { runPlaygroundCommand } from "./commands/playground.js";
@@ -35,6 +36,8 @@ Commands:
                                     point <dir> at an agents root to discover
                                     every child agent recursively
   init [<dir>]                    scaffold a new agent project
+  claude-skill [<name>]           install the bundled Claude Code skill(s)
+                                    into .claude/skills (standalone)
   config                          show env detection status
   config set                      interactive .env editor
 
@@ -50,6 +53,8 @@ Options:
   --provider <p>                  (init) anthropic | openai | ollama
   --link                          (init) use file: deps against the local
                                     monorepo (dogfooding before publish)
+  --global                        (claude-skill) install into ~/.claude/skills
+  --dir <path>                    (claude-skill) project root (default cwd)
 `;
 
 async function main(): Promise<void> {
@@ -65,6 +70,8 @@ async function main(): Promise<void> {
       "with-plugin": { type: "boolean" },
       provider: { type: "string" },
       link: { type: "boolean" },
+      global: { type: "boolean" },
+      dir: { type: "string" },
     },
     allowPositionals: true,
     strict: false,
@@ -87,6 +94,17 @@ async function main(): Promise<void> {
       withPlugin: Boolean(values["with-plugin"]),
       provider: providerRaw as Provider | undefined,
       link: Boolean(values.link),
+    });
+    return;
+  }
+
+  // `claude-skill` installs the bundled Claude Code skill(s) standalone — no
+  // project context required, so dispatch it before resolveProjectConfig().
+  if (command === "claude-skill") {
+    await runClaudeSkillCommand({
+      name: positionals[1],
+      global: Boolean(values.global),
+      targetDir: values.dir ? String(values.dir) : undefined,
     });
     return;
   }

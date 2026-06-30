@@ -495,7 +495,7 @@ function writeFile(root: string, rel: string, contents: string, log: string[]): 
   log.push(rel);
 }
 
-function copyDir(src: string, dest: string): void {
+export function copyDir(src: string, dest: string): void {
   fs.cpSync(src, dest, { recursive: true });
 }
 
@@ -580,7 +580,7 @@ function mergeHookSettings(settingsPath: string, ours: HookSettings): MergeOutco
  *      when the CLI is installed via `npm install -g @agentic-patterns/cli`)
  *   2. The monorepo root (dogfood path — walks up from the running script)
  */
-function resolvePluginSource(): {
+export function resolvePluginSource(): {
   pluginDir: string;
   hooksDir: string;
   skillsDir?: string;
