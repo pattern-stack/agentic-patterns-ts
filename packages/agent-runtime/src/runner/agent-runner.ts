@@ -721,11 +721,21 @@ export class AgentRunner implements RunnerProtocol {
         stopWhen: stepCountIs(options?.maxIterations ?? 10),
         experimental_output: Output.object({ schema }),
       });
-      const usage = result.totalUsage ?? result.usage;
+      const steps = result.steps ?? [];
+      // Prefer totalUsage (the whole multi-step loop). If a provider omits it,
+      // result.usage is LAST-step only — sum per-step usage to avoid undercounting.
+      const usage =
+        result.totalUsage ??
+        steps.reduce(
+          (a, s) => ({
+            inputTokens: (a.inputTokens ?? 0) + (s.usage?.inputTokens ?? 0),
+            outputTokens: (a.outputTokens ?? 0) + (s.usage?.outputTokens ?? 0),
+          }),
+          { inputTokens: 0, outputTokens: 0 },
+        );
       totalInputTokens = usage?.inputTokens ?? 0;
       totalOutputTokens = usage?.outputTokens ?? 0;
       finishReason = result.finishReason ?? "stop";
-      const steps = result.steps ?? [];
       toolCallsCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
       iterations = Math.max(1, steps.length);
       rawObject = result.experimental_output;
@@ -733,7 +743,13 @@ export class AgentRunner implements RunnerProtocol {
       // Tools + incapable/UNKNOWN model → 2-tier (model-safe). Tier 1: the
       // normal gate-respecting tool loop to text. Tier 2: a no-tools
       // Output.object finish over that text.
-      const tier1 = await this.run(agent, message, options);
+      // Thread the runStructured root's trace + span so tier-1's events nest
+      // under it instead of forming a fresh, disjoint trace.
+      const tier1 = await this.run(agent, message, {
+        ...options,
+        traceId: effectiveTraceId,
+        parentSpanId: rootSpanId,
+      });
       totalInputTokens += tier1.inputTokens;
       totalOutputTokens += tier1.outputTokens;
       toolCallsCount = tier1.toolCallsCount;

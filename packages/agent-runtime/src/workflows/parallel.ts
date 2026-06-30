@@ -32,6 +32,16 @@ export interface ParallelBranch<TIn, TBranch> {
   readonly node: Node<TIn, TBranch>;
 }
 
+/**
+ * Parallel's result extends {@link NodeResult} with a per-branch failure
+ * channel — `[branchIndex, error]` for EVERY failed branch (not just the first),
+ * in branch-index order. Empty when all branches succeed. `error` stays the
+ * first failure (NodeResult contract); `failed` is the full diagnostic list.
+ */
+export interface ParallelResult<TC> extends NodeResult<TC> {
+  readonly failed: ReadonlyArray<readonly [number, Error]>;
+}
+
 // ---------------------------------------------------------------------------
 // Parallel
 // ---------------------------------------------------------------------------
@@ -52,7 +62,7 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
     this.maxConcurrency = opts?.maxConcurrency;
   }
 
-  async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TC>> {
+  async run(input: TIn, ctx: NodeRunContext): Promise<ParallelResult<TC>> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "Parallel";
     const parentSlots: SlotStore = ctx.slots ?? createSlotStore();
@@ -68,6 +78,7 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
     let totalOutputTokens = 0;
     let succeeded = true;
     let firstError: Error | undefined;
+    const failed: Array<readonly [number, Error]> = [];
 
     const executeOne = async (index: number): Promise<void> => {
       const branch = this.branches[index]!;
@@ -104,12 +115,14 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
           });
         } else {
           succeeded = false;
-          firstError ??= res.error;
+          const e = res.error ?? new Error(`Branch "${branch.name}" failed`);
+          firstError ??= e;
+          failed.push([index, e] as const);
           await hooks?.onStepError?.({
             type: "pattern.step.error",
             stepName: branch.name,
             stepIndex: index,
-            error: res.error ?? new Error(`Branch "${branch.name}" failed`),
+            error: e,
             timestamp: new Date(),
           });
         }
@@ -120,6 +133,7 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
         succeeded = false;
         const e = err instanceof Error ? err : new Error(String(err));
         firstError ??= e;
+        failed.push([index, e] as const);
         await hooks?.onStepError?.({
           type: "pattern.step.error",
           stepName: branch.name,
@@ -143,12 +157,13 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
       ? this.consolidate(outputs)
       : (outputs as unknown as TC);
 
-    const result: NodeResult<TC> = Object.freeze({
+    const result: ParallelResult<TC> = Object.freeze({
       output: consolidated,
       succeeded,
       error: firstError,
       totalInputTokens,
       totalOutputTokens,
+      failed: Object.freeze([...failed].sort((a, b) => a[0] - b[0])),
     });
 
     await hooks?.onPatternComplete?.({

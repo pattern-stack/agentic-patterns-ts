@@ -32,6 +32,15 @@ export interface FanOutSpec<TIn, TItem, TOut, TC = TOut[]> {
   readonly maxConcurrency?: number;
 }
 
+/**
+ * FanOut's result extends {@link NodeResult} with a per-item failure channel —
+ * `[itemIndex, error]` for EVERY failed item, in item-index order. Empty when
+ * all items succeed. `error` stays the first failure; `failed` is the full list.
+ */
+export interface FanOutResult<TC> extends NodeResult<TC> {
+  readonly failed: ReadonlyArray<readonly [number, Error]>;
+}
+
 // ---------------------------------------------------------------------------
 // FanOut
 // ---------------------------------------------------------------------------
@@ -43,7 +52,7 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
     this.name = spec.name;
   }
 
-  async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TC>> {
+  async run(input: TIn, ctx: NodeRunContext): Promise<FanOutResult<TC>> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "FanOut";
     const parentSlots: SlotStore = ctx.slots ?? createSlotStore();
@@ -60,6 +69,7 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
     let totalOutputTokens = 0;
     let succeeded = true;
     let firstError: Error | undefined;
+    const failed: Array<readonly [number, Error]> = [];
 
     const executeOne = async (index: number): Promise<void> => {
       const item = items[index]!;
@@ -97,12 +107,14 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
           });
         } else {
           succeeded = false;
-          firstError ??= res.error;
+          const e = res.error ?? new Error(`FanOut item ${index} failed`);
+          firstError ??= e;
+          failed.push([index, e] as const);
           await hooks?.onStepError?.({
             type: "pattern.step.error",
             stepName,
             stepIndex: index,
-            error: res.error ?? new Error(`FanOut item ${index} failed`),
+            error: e,
             timestamp: new Date(),
           });
         }
@@ -113,6 +125,7 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
         succeeded = false;
         const e = err instanceof Error ? err : new Error(String(err));
         firstError ??= e;
+        failed.push([index, e] as const);
         await hooks?.onStepError?.({
           type: "pattern.step.error",
           stepName,
@@ -136,12 +149,13 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
       ? this.spec.consolidate(outputs)
       : (outputs as unknown as TC);
 
-    const result: NodeResult<TC> = Object.freeze({
+    const result: FanOutResult<TC> = Object.freeze({
       output: consolidated,
       succeeded,
       error: firstError,
       totalInputTokens,
       totalOutputTokens,
+      failed: Object.freeze([...failed].sort((a, b) => a[0] - b[0])),
     });
 
     await hooks?.onPatternComplete?.({

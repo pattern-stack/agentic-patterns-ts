@@ -55,12 +55,14 @@ export {
 export {
   type ParallelOpts,
   type ParallelBranch,
+  type ParallelResult,
   Parallel,
   runWithConcurrency,
 } from "./parallel.js";
 
 export {
   type FanOutSpec,
+  type FanOutResult,
   FanOut,
 } from "./fan-out.js";
 
