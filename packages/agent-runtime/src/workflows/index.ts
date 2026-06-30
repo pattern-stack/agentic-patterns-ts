@@ -75,6 +75,12 @@ export {
 } from "./node-tool.js";
 
 export {
+  type CoordinatorStepSpec,
+  CoordinatorStep,
+  withTeamCapability,
+} from "./coordinator-step.js";
+
+export {
   type AccumulateSpec,
   type AccumulateStepInput,
   Accumulate,

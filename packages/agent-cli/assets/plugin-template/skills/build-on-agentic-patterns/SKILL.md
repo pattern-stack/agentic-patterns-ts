@@ -1,7 +1,7 @@
 ---
 name: build-on-agentic-patterns
-description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), and treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
-when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", working in a repo that imports @agentic-patterns/core or @agentic-patterns/runtime.
+description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), and compose multiple steps/agents through the typed Node layer (AgentStep/FunctionStep, Sequential/Parallel/FanOut/Loop, Scratchpad, agent-as-tool, CoordinatorStep) — not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when wiring a multi-step workflow or a model-driven coordinator over subagents, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
+when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "compose a workflow / pipeline of steps", "make a coordinator that routes to subagents", "agent-as-a-tool", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", working in a repo that imports @agentic-patterns/core or @agentic-patterns/runtime.
 # --- SDLC metadata (documentation only; not consumed by the Claude Code runtime) ---
 status: active
 ---
@@ -147,6 +147,67 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 - **Hermetic harness first.** Implement the toolbox's backend interface (port/client) with an in-memory fake, build the agent over it, and run against a small local model (Ollama). No creds, repeatable, fast. This proves the *loop* — composition + tool dispatch + state mutation — before touching a real backend.
 - **Poke the tools with no LLM.** `ap tools list <id>` shows every tool an agent exposes; `ap tools call <id> <tool> --field=value …` invokes one directly. Prove the capability floor before involving the model.
 - **Benchmark is the gate, not eyeballing.** Any prompt/slot change runs a ground-truth suite old-vs-new on the same model. Small models magnify slot mistakes, so they're the better stress test: *strengthen the protocol (Manual/Playbook/Judgment) before upgrading the model.*
+
+## 6. Compose: the typed Node layer (multi-step & multi-agent)
+
+§0–5 build **one** agent. To run several steps or several agents as a typed, composable graph, use the **Node layer** in `@agentic-patterns/runtime` (the "PatternStack"). One contract underneath everything:
+
+> `Node<TIn, TOut>` — `run(input, ctx): Promise<NodeResult<TOut>>`. Typed object in, typed object out, plus a token rollup. **Every leaf AND every composite is a `Node`**, so they nest freely — that single contract is the whole point.
+
+**Leaves (do the work):**
+
+- `AgentStep<TIn, TOut>` — input → LLM → typed output. **Structured output is the default:** give it an `output` zod schema and it routes through `runStructured`; omit it (or pass `z.string()`) for the raw-text path. A leaf **never throws** — on failure it returns `{ succeeded:false, error }` so the composite is the single place that decides continue-vs-abort.
+- `FunctionStep<TIn, TOut>` — deterministic glue, no LLM: transforms, branch-prep, Scratchpad writes.
+
+**Composites (orchestrate statically — fixed shape, known order):**
+
+- `Sequential` — thread typed output node→node: `Sequential.start(a).then(b).build()`.
+- `Parallel` / `FanOut` — concurrent branches with **deterministic fan-in**: forks `join()` in INDEX order (not completion order), so merges are reproducible.
+- `Loop` — repeat a body until a predicate on the typed output holds (critique/revise, capped).
+- `Accumulate` — fold a stream of items into a running aggregate.
+
+**`Scratchpad`** — a run-scoped shared slot store (`slot({...})`, `createScratchpad()`). Pass it on `ctx.scratchpad`; steps `set`/`get` typed slots; `FanOut` branches read it from inside their forks. The name signals SHARED.
+
+### Agent-as-a-tool (let the model route)
+
+A static graph is deterministic. When you want an **LLM to decide** which sub-node to call, expose sub-nodes as tools:
+
+- `NodeToolbox` / `nodeTool` — wrap any `Node` as a callable tool. Its `parameters` IS the node's input schema (typed args down), the node's typed `output` returns inline (typed result up). **Call-and-return:** the caller stays in control; a failed sub-node returns `{ error }` instead of throwing.
+- `delegateTo(runner, [subagents])` — the "just pass subagents" sugar (ADK `sub_agents=[...]`): one tool per subagent, name = agent name, **description = the routing signal** (be specific — it is the router's API doc), input `{ task }`.
+
+### Coordinator (a model-driven coordinator that is itself a Node)
+
+`CoordinatorStep<TIn, TOut>` makes a model-driven coordinator a `Node` leaf:
+
+```ts
+const canvasAuthor = new CoordinatorStep({
+  name: "CanvasAuthor",
+  agent: canvasAuthorAgent,                 // a full CORE Agent (e.g. from coordinatorRole())
+  team: delegateTo(runner, [                // the hidden team it decomposes into
+    { agent: writer,  description: "drafts a canvas section from the brief" },
+    { agent: planner, description: "decomposes a template into sections" },
+    { agent: repair,  description: "fixes a section that failed validation" },
+  ]),
+  output: CanvasTemplate,                   // typed contract back to the caller
+  prompt: (req) => req.instruction,
+});
+// canvasAuthor is now a Node<AuthorRequest, CanvasTemplate>.
+```
+
+The mental model that makes this click: **a Coordinator IS the agent the user works with** (one "CanvasAuthor"); its subagents are how that single identity decomposes its *own* work, sealed inside. So a coordinator is a **leaf** — a black box `TIn→TOut` — even though the LLM routes among children internally. The engine never iterates those children; the model does, via tool calls. Encapsulation is the leaf property.
+
+Because it's a `Node`, it composes like any other: a coordinator can be a `Sequential` stage, a `FanOut` branch, or a sub-tool of **another** coordinator (recursion — a hierarchy of coordinators). *"ADK unifies on Agent; we unify on Node."*
+
+- `CoordinatorStep` takes a **core `Agent`** (not the minimal `AgentLike`), because the team is wired into its real `Role` so it is both *advertised* to the model and *executable*. The call-site just passes the agent — `withTeamCapability` does the wiring for you.
+- **Reframe for product graphs:** a generator stream is usually a **deterministic workflow** (writer/planner/repair = fixed `AgentStep`s), and only the *top* coordinator does dynamic routing. Don't make everything a coordinator.
+
+### Choosing the shape
+
+| You have | Use |
+|---|---|
+| Fixed steps, known order | `Sequential` / `FanOut` — deterministic, cheaper, debuggable |
+| LLM must pick among specialists | `CoordinatorStep` / `delegateTo` — call-and-return routing |
+| Concurrent peers, NO single owner | the async `AgencyRuntime` swarm — choreography, not orchestration; the one mechanism *outside* the Node type, so reach for it last |
 
 ## Deeper references
 
