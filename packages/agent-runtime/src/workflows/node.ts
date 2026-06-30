@@ -12,7 +12,7 @@
 
 import type { RunResult, RunnerProtocol, ToolExecutor } from "../runner/types.js";
 import type { PatternHooks } from "./base.js";
-import type { SlotStore } from "./slot.js";
+import type { Scratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // NodeRunContext
@@ -30,12 +30,12 @@ export interface NodeRunContext {
   readonly toolExecutor?: ToolExecutor;
   readonly traceId?: string;
   /**
-   * The shared scoped-slot store (the Backpack, §6/§7). OPTIONAL: when absent the
+   * The shared scoped-slot store (the Scratchpad, §6/§7). OPTIONAL: when absent the
    * engine lazily constructs an empty store at the top-level `run()` call. Existing
    * callers that pass `{ runner }` keep compiling and behave identically (they never
-   * touch slots).
+   * touch scratchpad).
    */
-  readonly slots?: SlotStore;
+  readonly scratchpad?: Scratchpad;
 }
 
 // ---------------------------------------------------------------------------

@@ -6,10 +6,10 @@
  * (the Bifrost gateway), exercising the paths that unit tests can't:
  *   - AgentRunner.runStructured (no-tools Output.object) against a real model
  *   - Sequential threading TYPED output node -> node
- *   - FanOut over a runtime list, concurrent, with consolidate + forked slots
+ *   - FanOut over a runtime list, concurrent, with consolidate + forked scratchpad
  *   - FunctionStep deterministic glue (incl. a slot WRITE)
  *   - Loop (critique/revise) with a predicate on typed output
- *   - Slot/Backpack: run-scoped write, read from inside forked FanOut branches
+ *   - Slot/Scratchpad: run-scoped write, read from inside forked FanOut branches
  *
  * Run (uses the dealbrain Bifrost creds; gemini/openai need no extra key):
  *   set -a; . /Users/dug/Projects/dealbrain/.env; set +a
@@ -26,7 +26,7 @@ import { FunctionStep } from "../src/workflows/function-step.js";
 import { Loop } from "../src/workflows/loop.js";
 import type { Node, NodeRunContext } from "../src/workflows/node.js";
 import { Sequential } from "../src/workflows/sequential.js";
-import { type SlotStore, createSlotStore, slot } from "../src/workflows/slot.js";
+import { type Scratchpad, createScratchpad, slot } from "../src/workflows/slot.js";
 
 // ---------------------------------------------------------------------------
 // Schemas (small; no Anthropic-unsupported keywords)
@@ -64,7 +64,7 @@ const writer = makeAgent(
 );
 const editor = makeAgent("editor", "You are a strict editor. Reply ONLY with the requested JSON.");
 
-// A run-scoped slot (the Backpack): the brief's topic, written once, read by the
+// A run-scoped slot (the Scratchpad): the brief's topic, written once, read by the
 // FanOut writers from inside their forked branch contexts.
 const briefSlot = slot<{ topic: string }>({
   key: "brief",
@@ -82,8 +82,8 @@ function buildWorkflow(): Node<{ topic: string }, Graded> {
       // 1. seed the slot (FunctionStep + slot WRITE)
       new FunctionStep<{ topic: string }, { topic: string }>({
         name: "seed",
-        fn: (input, slots) => {
-          slots.set(briefSlot, { topic: input.topic });
+        fn: (input, scratchpad) => {
+          scratchpad.set(briefSlot, { topic: input.topic });
           return input;
         },
       }),
@@ -107,8 +107,8 @@ function buildWorkflow(): Node<{ topic: string }, Graded> {
             name: "write-section",
             agent: writer,
             output: Section,
-            prompt: (title, slots) =>
-              `Write a 1-2 sentence body for the section titled "${title}" of a brief about "${slots.get(briefSlot).topic}". Echo the title.`,
+            prompt: (title, scratchpad) =>
+              `Write a 1-2 sentence body for the section titled "${title}" of a brief about "${scratchpad.get(briefSlot).topic}". Echo the title.`,
           }),
           consolidate: (sections) => ({ sections }),
         }),
@@ -176,7 +176,7 @@ async function makeRunner(): Promise<{ runner: AgentRunner; modelId: string }> {
 async function main() {
   const topic = process.env.SMOKE_TOPIC ?? "a TypeScript framework for composable LLM agents";
   const { runner, modelId } = await makeRunner();
-  const slots: SlotStore = createSlotStore();
+  const scratchpad: Scratchpad = createScratchpad();
   const workflow = buildWorkflow();
 
   console.log(
@@ -184,7 +184,7 @@ async function main() {
   );
 
   const t0 = Date.now();
-  const result = await workflow.run({ topic }, { runner, slots });
+  const result = await workflow.run({ topic }, { runner, scratchpad });
   const ms = Date.now() - t0;
 
   // ---- assertions ----
@@ -214,8 +214,8 @@ async function main() {
   ]);
   checks.push([
     "run-scoped slot was written + survived",
-    slots.get(briefSlot).topic === topic,
-    `slot.topic="${slots.get(briefSlot).topic}"`,
+    scratchpad.get(briefSlot).topic === topic,
+    `slot.topic="${scratchpad.get(briefSlot).topic}"`,
   ]);
   checks.push([
     "tokens were accounted",

@@ -12,7 +12,7 @@
 import type { PatternHooks } from "./base.js";
 import type { Consolidate } from "./consolidate.js";
 import type { Node, NodeOutcome, NodeResult, NodeRunContext } from "./node.js";
-import { type SlotStore, createSlotStore } from "./slot.js";
+import { type Scratchpad, createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -65,7 +65,7 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
   async run(input: TIn, ctx: NodeRunContext): Promise<ParallelResult<TC>> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "Parallel";
-    const parentSlots: SlotStore = ctx.slots ?? createSlotStore();
+    const parentSlots: Scratchpad = ctx.scratchpad ?? createScratchpad();
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",
@@ -79,10 +79,14 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
     let succeeded = true;
     let firstError: Error | undefined;
     const failed: Array<readonly [number, Error]> = [];
+    // Captured per-branch forks, merged into the parent in INDEX order after all
+    // branches settle — deterministic fan-in, not completion order.
+    const branchPads = new Array<Scratchpad | undefined>(this.branches.length);
 
     const executeOne = async (index: number): Promise<void> => {
       const branch = this.branches[index]!;
-      const branchCtx: NodeRunContext = { ...ctx, slots: parentSlots.fork() };
+      const branchCtx: NodeRunContext = { ...ctx, scratchpad: parentSlots.fork() };
+      branchPads[index] = branchCtx.scratchpad as Scratchpad;
 
       await hooks?.onStepStart?.({
         type: "pattern.step.start",
@@ -96,7 +100,6 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
         totalInputTokens += res.totalInputTokens;
         totalOutputTokens += res.totalOutputTokens;
         outputs[index] = res.output;
-        parentSlots.join(branchCtx.slots as SlotStore);
 
         if (res.succeeded) {
           const outcome: NodeOutcome<unknown> = {
@@ -151,6 +154,14 @@ export class Parallel<TIn, TBranch, TC = TBranch[]> implements Node<TIn, TC> {
       );
     } else {
       await Promise.all(this.branches.map((_, i) => executeOne(i)));
+    }
+
+    // Deterministic fan-in: merge each branch's forked scratchpad in INDEX order,
+    // so a slot's `merge` reducer combines partials identically every run,
+    // regardless of which branch finished first.
+    for (let i = 0; i < branchPads.length; i++) {
+      const pad = branchPads[i];
+      if (pad) parentSlots.join(pad);
     }
 
     const consolidated: TC = this.consolidate

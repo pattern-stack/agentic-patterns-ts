@@ -17,7 +17,7 @@ import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunOptions } from "../runner/types.js";
 import { applyStepModel } from "./base.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
-import { type SlotReader, createSlotStore } from "./slot.js";
+import { type ScratchpadReader, createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -47,9 +47,9 @@ export interface AgentStepSpec<TIn, TOut = string> {
 
   /**
    * Typed prompt builder — replaces `MessageTemplate`. Receives the typed input
-   * (NOT an untyped bag) and a read-only view of slots. Returns the user message.
+   * (NOT an untyped bag) and a read-only view of scratchpad. Returns the user message.
    */
-  readonly prompt: (input: TIn, slots: SlotReader) => string;
+  readonly prompt: (input: TIn, scratchpad: ScratchpadReader) => string;
 
   /**
    * Output schema → `runner.runStructured`. THIS IS THE DEFAULT. Omit (or pass
@@ -83,9 +83,9 @@ function isStringSchema(schema: ZodType<unknown>): boolean {
   return schema instanceof ZodString;
 }
 
-/** Read-only slot view; an empty ephemeral store when the ctx carries no slots. */
-function slotReader(slots: NodeRunContext["slots"]): SlotReader {
-  return (slots ?? createSlotStore()).reader();
+/** Read-only slot view; an empty ephemeral store when the ctx carries no scratchpad. */
+function slotReader(scratchpad: NodeRunContext["scratchpad"]): ScratchpadReader {
+  return (scratchpad ?? createScratchpad()).reader();
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
 
   async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TOut>> {
     const agent = applyStepModel(this.spec.agent, this.spec.model);
-    const message = this.spec.prompt(input, slotReader(ctx.slots));
+    const message = this.spec.prompt(input, slotReader(ctx.scratchpad));
     const opts: RunOptions = {
       toolExecutor: ctx.toolExecutor,
       maxIterations: this.spec.maxIterations,
