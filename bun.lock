@@ -12,7 +12,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -75,7 +75,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/provider": "^2.0.0",
