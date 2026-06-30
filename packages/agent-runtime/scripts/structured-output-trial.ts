@@ -81,11 +81,23 @@ async function runCase(route: string, model: unknown, withTools: boolean): Promi
     );
 
     if (obj === undefined) {
-      return { route, withTools, pass: false, toolCalled, detail: "no experimental_output returned" };
+      return {
+        route,
+        withTools,
+        pass: false,
+        toolCalled,
+        detail: "no experimental_output returned",
+      };
     }
     const parsed = Profile.safeParse(obj);
     if (!parsed.success) {
-      return { route, withTools, pass: false, toolCalled, detail: "output failed schema validation" };
+      return {
+        route,
+        withTools,
+        pass: false,
+        toolCalled,
+        detail: "output failed schema validation",
+      };
     }
     return { route, withTools, pass: true, toolCalled, detail: JSON.stringify(obj) };
   } catch (err) {
@@ -141,7 +153,9 @@ async function main() {
   const results: CaseResult[] = [];
   for (const c of cases) {
     for (const withTools of [false, true]) {
-      process.stdout.write(`· ${c.route.padEnd(38)} ${withTools ? "with-tools" : "no-tools  "} ... `);
+      process.stdout.write(
+        `· ${c.route.padEnd(38)} ${withTools ? "with-tools" : "no-tools  "} ... `,
+      );
       const r = await runCase(c.route, c.model, withTools);
       const toolTag = r.withTools ? (r.toolCalled ? " tool✓" : " tool✗") : "";
       console.log(r.pass ? `PASS${toolTag}` : `FAIL${toolTag} — ${r.detail}`);

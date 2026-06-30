@@ -75,7 +75,8 @@ async function main() {
     model,
     stopWhen: stepCountIs(6),
     tools: { lookup },
-    prompt: "Use the lookup tool for 'Dana Lee', then write a short plain-text summary of her record.",
+    prompt:
+      "Use the lookup tool for 'Dana Lee', then write a short plain-text summary of her record.",
   });
   // biome-ignore lint/suspicious/noExplicitAny: step shape varies
   const toolFired = ((t1 as any).steps ?? []).some((s: any) => (s.toolCalls?.length ?? 0) > 0);
