@@ -3,7 +3,7 @@
  * list, concurrently (DESIGN §6.4).
  *
  * Genuinely new: no map-over-data primitive exists in the legacy layer. Compute
- * `items = over(input, slots)`; run `step.run(item, branchCtx)` per item,
+ * `items = over(input, scratchpad)`; run `step.run(item, branchCtx)` per item,
  * concurrently (bounded). Branches are INDEPENDENT — no item sees another's
  * output (that is `Accumulate`'s job); independence is what licenses
  * concurrency. Each branch gets a forked branch-scoped slot store (§7.3).
@@ -14,7 +14,7 @@ import type { PatternHooks } from "./base.js";
 import type { Consolidate } from "./consolidate.js";
 import type { Node, NodeOutcome, NodeResult, NodeRunContext } from "./node.js";
 import { runWithConcurrency } from "./parallel.js";
-import { type SlotReader, type SlotStore, createSlotStore } from "./slot.js";
+import { type Scratchpad, type ScratchpadReader, createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Spec
@@ -22,8 +22,8 @@ import { type SlotReader, type SlotStore, createSlotStore } from "./slot.js";
 
 export interface FanOutSpec<TIn, TItem, TOut, TC = TOut[]> {
   readonly name?: string;
-  /** Produce the list at runtime from upstream input + slots. List is DATA, not steps. */
-  readonly over: (input: TIn, slots: SlotReader) => readonly TItem[];
+  /** Produce the list at runtime from upstream input + scratchpad. List is DATA, not steps. */
+  readonly over: (input: TIn, scratchpad: ScratchpadReader) => readonly TItem[];
   /** The operation as an uncalled VALUE; FanOut invokes it per item. Branches are INDEPENDENT. */
   readonly step: Node<TItem, TOut>;
   /** Reduce N item outputs into one. Omit → `TOut[]`. */
@@ -55,7 +55,7 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
   async run(input: TIn, ctx: NodeRunContext): Promise<FanOutResult<TC>> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "FanOut";
-    const parentSlots: SlotStore = ctx.slots ?? createSlotStore();
+    const parentSlots: Scratchpad = ctx.scratchpad ?? createScratchpad();
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",
@@ -70,11 +70,15 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
     let succeeded = true;
     let firstError: Error | undefined;
     const failed: Array<readonly [number, Error]> = [];
+    // Captured per-branch forks, merged into the parent in INDEX order after all
+    // branches settle — deterministic fan-in, not completion order.
+    const branchPads = new Array<Scratchpad | undefined>(items.length);
 
     const executeOne = async (index: number): Promise<void> => {
       const item = items[index]!;
       const stepName = `${this.spec.step.name ?? "item"}_${index}`;
-      const branchCtx: NodeRunContext = { ...ctx, slots: parentSlots.fork() };
+      const branchCtx: NodeRunContext = { ...ctx, scratchpad: parentSlots.fork() };
+      branchPads[index] = branchCtx.scratchpad as Scratchpad;
 
       await hooks?.onStepStart?.({
         type: "pattern.step.start",
@@ -88,7 +92,6 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
         totalInputTokens += res.totalInputTokens;
         totalOutputTokens += res.totalOutputTokens;
         outputs[index] = res.output;
-        parentSlots.join(branchCtx.slots as SlotStore);
 
         if (res.succeeded) {
           const outcome: NodeOutcome<unknown> = {
@@ -143,6 +146,14 @@ export class FanOut<TIn, TItem, TOut, TC = TOut[]> implements Node<TIn, TC> {
       );
     } else {
       await Promise.all(items.map((_, i) => executeOne(i)));
+    }
+
+    // Deterministic fan-in: merge each branch's forked scratchpad in INDEX order,
+    // so a slot's `merge` reducer combines partials identically every run,
+    // regardless of which branch finished first.
+    for (let i = 0; i < branchPads.length; i++) {
+      const pad = branchPads[i];
+      if (pad) parentSlots.join(pad);
     }
 
     const consolidated: TC = this.spec.consolidate

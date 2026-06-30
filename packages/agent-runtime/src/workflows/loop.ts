@@ -11,7 +11,7 @@
 
 import type { PatternHooks } from "./base.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
-import { createSlotStore } from "./slot.js";
+import { createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Spec + result
@@ -50,7 +50,7 @@ export class Loop<TState> implements Node<TState, TState> {
   async run(input: TState, ctx: NodeRunContext): Promise<LoopResult<TState>> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "Loop";
-    const childCtx: NodeRunContext = { ...ctx, slots: ctx.slots ?? createSlotStore() };
+    const childCtx: NodeRunContext = { ...ctx, scratchpad: ctx.scratchpad ?? createScratchpad() };
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",

@@ -11,7 +11,7 @@
 
 import type { PatternHooks } from "./base.js";
 import type { Node, NodeOutcome, NodeResult, NodeRunContext } from "./node.js";
-import { createSlotStore } from "./slot.js";
+import { createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Options
@@ -77,7 +77,7 @@ class SequentialNode<TIn, TCur> implements Node<TIn, TCur> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "Sequential";
     const continueOnError = this.opts.continueOnError ?? false;
-    const childCtx: NodeRunContext = { ...ctx, slots: ctx.slots ?? createSlotStore() };
+    const childCtx: NodeRunContext = { ...ctx, scratchpad: ctx.scratchpad ?? createScratchpad() };
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",

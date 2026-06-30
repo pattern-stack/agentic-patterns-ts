@@ -25,12 +25,12 @@ export type {
 
 export {
   type Slot,
-  type SlotReader,
-  type SlotAccess,
-  type SlotStore,
+  type ScratchpadReader,
+  type ScratchpadAccess,
+  type Scratchpad,
   slot,
-  DefaultSlotStore,
-  createSlotStore,
+  DefaultScratchpad,
+  createScratchpad,
 } from "./slot.js";
 
 export type { Consolidate } from "./consolidate.js";
@@ -65,6 +65,14 @@ export {
   type FanOutResult,
   FanOut,
 } from "./fan-out.js";
+
+export {
+  type NodeToolSpec,
+  type SubagentSpec,
+  nodeTool,
+  NodeToolbox,
+  delegateTo,
+} from "./node-tool.js";
 
 export {
   type AccumulateSpec,

@@ -10,7 +10,7 @@
 
 import type { PatternHooks } from "./base.js";
 import type { Node, NodeOutcome, NodeResult, NodeRunContext } from "./node.js";
-import { type SlotReader, createSlotStore } from "./slot.js";
+import { type ScratchpadReader, createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Spec
@@ -24,7 +24,7 @@ export interface AccumulateStepInput<TItem, TAcc> {
 
 export interface AccumulateSpec<TIn, TItem, TAcc> {
   readonly name?: string;
-  readonly over: (input: TIn, slots: SlotReader) => readonly TItem[];
+  readonly over: (input: TIn, scratchpad: ScratchpadReader) => readonly TItem[];
   readonly initial: (input: TIn) => TAcc;
   /** For EACH item, read prior accumulator + item → next accumulator. */
   readonly step: Node<AccumulateStepInput<TItem, TAcc>, TAcc>;
@@ -44,7 +44,7 @@ export class Accumulate<TIn, TItem, TAcc> implements Node<TIn, TAcc> {
   async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TAcc>> {
     const hooks: PatternHooks | undefined = ctx.hooks;
     const patternName = this.name ?? "Accumulate";
-    const childCtx: NodeRunContext = { ...ctx, slots: ctx.slots ?? createSlotStore() };
+    const childCtx: NodeRunContext = { ...ctx, scratchpad: ctx.scratchpad ?? createScratchpad() };
 
     await hooks?.onPatternStart?.({
       type: "pattern.start",
@@ -52,7 +52,7 @@ export class Accumulate<TIn, TItem, TAcc> implements Node<TIn, TAcc> {
       timestamp: new Date(),
     });
 
-    const items = this.spec.over(input, childCtx.slots!.reader());
+    const items = this.spec.over(input, childCtx.scratchpad!.reader());
     let acc: TAcc = this.spec.initial(input);
     let totalInputTokens = 0;
     let totalOutputTokens = 0;

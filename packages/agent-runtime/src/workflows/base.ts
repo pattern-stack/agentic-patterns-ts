@@ -121,7 +121,7 @@ export interface PatternHooks {
 
 /**
  * Options for the declarative-config `run()`. A structural subset of
- * {@link NodeRunContext} (its `slots` field is optional/engine-defaulted), so
+ * {@link NodeRunContext} (its `scratchpad` field is optional/engine-defaulted), so
  * any `PatternRunOptions` value is a valid `NodeRunContext`.
  */
 export interface PatternRunOptions {

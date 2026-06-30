@@ -2,8 +2,8 @@
  * `FunctionStep<TIn, TOut>` — the deterministic leaf node (DESIGN §5.2).
  *
  * input → async fn → typed output, with NO LLM call. Genuinely new: deterministic
- * glue (data fetch, join, consolidation) that may read AND write slots via the
- * `SlotAccess` it receives — the canonical "consolidate into a Backpack slot" path.
+ * glue (data fetch, join, consolidation) that may read AND write scratchpad via the
+ * `ScratchpadAccess` it receives — the canonical "consolidate into a Scratchpad slot" path.
  *
  * Failure contract is IDENTICAL to {@link AgentStep} (§5.3, Open-Q3): the leaf
  * ALWAYS catches and returns `{ succeeded: false, error }`; the composite decides
@@ -13,7 +13,7 @@
  */
 
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
-import { type SlotAccess, createSlotStore } from "./slot.js";
+import { type ScratchpadAccess, createScratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
 // Spec
@@ -21,17 +21,21 @@ import { type SlotAccess, createSlotStore } from "./slot.js";
 
 export interface FunctionStepSpec<TIn, TOut> {
   readonly name?: string;
-  /** Deterministic glue: data fetch, join, consolidation. May read/write slots. */
-  readonly fn: (input: TIn, slots: SlotAccess, ctx: NodeRunContext) => TOut | Promise<TOut>;
+  /** Deterministic glue: data fetch, join, consolidation. May read/write scratchpad. */
+  readonly fn: (
+    input: TIn,
+    scratchpad: ScratchpadAccess,
+    ctx: NodeRunContext,
+  ) => TOut | Promise<TOut>;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Read/write slot view; an empty ephemeral store when the ctx carries no slots. */
-function slotAccess(slots: NodeRunContext["slots"]): SlotAccess {
-  return slots ?? createSlotStore();
+/** Read/write slot view; an empty ephemeral store when the ctx carries no scratchpad. */
+function slotAccess(scratchpad: NodeRunContext["scratchpad"]): ScratchpadAccess {
+  return scratchpad ?? createScratchpad();
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +51,7 @@ export class FunctionStep<TIn, TOut> implements Node<TIn, TOut> {
 
   async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TOut>> {
     try {
-      const output = await this.spec.fn(input, slotAccess(ctx.slots), ctx);
+      const output = await this.spec.fn(input, slotAccess(ctx.scratchpad), ctx);
       return { output, succeeded: true, totalInputTokens: 0, totalOutputTokens: 0 };
     } catch (error) {
       return {
