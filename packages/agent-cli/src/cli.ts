@@ -19,6 +19,7 @@ import { runStatusCommand } from "./commands/status.js";
 import { runToolsCommand } from "./commands/tools.js";
 import { resolveProjectConfig } from "./helpers/config.js";
 import { discoverAgents } from "./helpers/discover.js";
+import { attachProvenance } from "./helpers/provenance.js";
 
 const USAGE = `
 ap — agentic patterns
@@ -124,7 +125,20 @@ async function main(): Promise<void> {
   const globs =
     explicitGlob ??
     (agentsDir ? ["**/agent.{ts,js,mjs}", "**/*.agent.{ts,js,mjs}"] : config.agents);
-  const { agents, errors } = await discoverAgents(discoveryRoot, globs);
+  const { agents: discovered, errors } = await discoverAgents(discoveryRoot, globs);
+  // Slot provenance (preset/library/local/inline chips) — ONLY for the
+  // playground, its sole consumer. Computing it dynamic-imports every library/
+  // sibling module (executing their top-level code), which no other command
+  // should ever pay for. Failure-isolated — attachProvenance warns and returns
+  // the agents untouched if it blows up.
+  const agents =
+    command === "playground"
+      ? await attachProvenance(
+          discovered,
+          discoveryRoot,
+          config.roles ? { libraryGlobs: config.roles } : {},
+        )
+      : discovered;
 
   switch (command) {
     case undefined: {

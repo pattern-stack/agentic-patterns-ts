@@ -75,7 +75,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/provider": "^2.0.0",
@@ -117,6 +117,7 @@
         "@agentic-patterns/runtime": "workspace:^",
         "hono": "^4.0.0",
         "zod": "^3.23.0",
+        "zod-to-json-schema": "^3.24.0",
       },
       "devDependencies": {
         "@hono/node-server": "^1.13.0",

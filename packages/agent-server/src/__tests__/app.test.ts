@@ -180,8 +180,22 @@ describe("GET /agents", () => {
     const app = createServer(makeConfig({ agents: [testRegistration] }));
     const res = await app.request("/agents");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { id: string; name: string; description: string }[];
-    expect(body).toEqual([{ id: "test-1", name: "Test Agent", description: "A test agent" }]);
+    const body = (await res.json()) as {
+      id: string;
+      name: string;
+      description: string;
+      role: { id: string; name: string } | null;
+      readiness: { ready: boolean; missing: string[] };
+    }[];
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({
+      id: "test-1",
+      name: "Test Agent",
+      description: "A test agent",
+    });
+    // §6 roster enrichment: role ref + readiness block.
+    expect(body[0]).toHaveProperty("role");
+    expect(body[0]).toHaveProperty("readiness");
   });
 
   it("defaults description to empty string", async () => {

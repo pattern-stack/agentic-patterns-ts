@@ -235,6 +235,77 @@ describe("Agent", () => {
     });
   });
 
+  describe("renderSections (sections with provenance)", () => {
+    it("joining section texts reproduces renderInitialPrompt exactly", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness: makeAwareness(),
+        mission: makeMission(),
+      });
+
+      const joined = agent
+        .renderSections()
+        .map((s) => s.text)
+        .join("\n\n");
+      expect(joined).toBe(agent.renderInitialPrompt());
+    });
+
+    it("attributes each section to role or instance", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness: makeAwareness(),
+        mission: makeMission(),
+      });
+
+      const sections = agent.renderSections();
+      expect(sections.map((s) => [s.name, s.source])).toEqual([
+        ["Identity", "role"],
+        ["Boundaries", "role"],
+        ["Capabilities", "role"],
+        ["Context", "instance"],
+        ["Mission", "instance"],
+        ["Methodology", "role"],
+      ]);
+    });
+
+    it("filters sections that render empty (mirrors renderInitial's filter)", () => {
+      // Bare role: no judgments -> Methodology renders "" and is filtered out.
+      const role = new RoleBuilder("Minimal")
+        .withPersona(new Persona({ identity: "a minimal agent", tone: "neutral" }))
+        .build();
+      const agent = new Agent({ role, mission: makeMission() });
+
+      const names = agent.renderSections().map((s) => s.name);
+      expect(names).not.toContain("Methodology");
+      // Invariant still holds with filtered sections.
+      const joined = agent
+        .renderSections()
+        .map((s) => s.text)
+        .join("\n\n");
+      expect(joined).toBe(agent.renderInitialPrompt());
+    });
+
+    it("keeps the Context section for empty background/awareness (awareness fallback text)", () => {
+      // Empty Awareness renders a fallback line, so ContextSection is non-empty
+      // and renderInitial includes it — renderSections must mirror that.
+      const agent = new Agent({ role: makeRole(), mission: makeMission() });
+
+      const context = agent.renderSections().find((s) => s.name === "Context");
+      expect(context).toBeDefined();
+      expect(context?.source).toBe("instance");
+      expect(context?.text).toContain("no external information sources");
+    });
+
+    it("every rendered section is non-empty", () => {
+      const agent = new Agent({ role: makeRole(), mission: makeMission() });
+      for (const section of agent.renderSections()) {
+        expect(section.text).not.toBe("");
+      }
+    });
+  });
+
   describe("renderContinuationPrompt (delta rendering)", () => {
     it("includes only state, mission, methodology", () => {
       const agent = new Agent({

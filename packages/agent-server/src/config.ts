@@ -22,6 +22,26 @@ export interface AgentRegistration {
   readonly id: string;
   readonly name: string;
   readonly description?: string;
+  /** Source file the agent was discovered from (threaded by the CLI). */
+  readonly file?: string;
+  /**
+   * Per-slot provenance blob, computed CLI-side at discovery time where
+   * module identity is available (see docs/playground-redesign.md §5).
+   * Joined onto composition payloads by `slotType` + `index` (array position;
+   * names may collide across preset/fork variants). Blobs from older CLIs
+   * lack `index` and fall back to a `name` join.
+   */
+  readonly provenance?: {
+    file: string;
+    slots: ReadonlyArray<{
+      slotType: string;
+      name: string;
+      /** Position in the role's slot array for this slotType (persona: 0). */
+      index?: number;
+      tier: string;
+      sourcePath?: string;
+    }>;
+  };
   readonly agent: AgentLike;
   readonly runner: Pick<RunnerProtocol, "run" | "stream"> & {
     run(agent: AgentLike, message: string, options?: Record<string, unknown>): Promise<RunResult>;
