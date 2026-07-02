@@ -90,7 +90,7 @@ describe("integration: single-agent end-to-end", () => {
     });
 
     const background = new Background({
-      team_context: { company: "Acme Research Corp" },
+      teamContext: { company: "Acme Research Corp" },
     });
 
     const awareness = new Awareness({
@@ -98,7 +98,7 @@ describe("integration: single-agent end-to-end", () => {
         {
           name: "statistics",
           description: "Statistical analysis domain",
-          access_method: "direct",
+          accessMethod: "direct",
         },
       ],
     });
@@ -123,9 +123,9 @@ describe("integration: single-agent end-to-end", () => {
     expect(agent.getModel()).toBe("test-model");
 
     // Verify prompt rendering
-    const systemPrompt = agent.getSystemPrompt();
+    const systemPrompt = agent.renderInitialPrompt();
     expect(systemPrompt).toContain("research assistant");
-    expect(systemPrompt).toContain("source-quality");
+    expect(systemPrompt).toContain("Prefer peer-reviewed sources");
 
     const initialPrompt = agent.renderInitialPrompt();
     expect(initialPrompt).toContain("Analyze the provided dataset");
@@ -190,7 +190,6 @@ describe("integration: single-agent end-to-end", () => {
       role: agent.role,
       getModel: () => agent.getModel(),
       getTools: () => [searchTool],
-      getSystemPrompt: () => agent.getSystemPrompt(),
       renderInitialPrompt: () => agent.renderInitialPrompt(),
     };
     const result = await runner.run(agentWithTools, "Analyze Q4 revenue trends.", { toolExecutor });
@@ -229,8 +228,8 @@ describe("integration: multi-agent end-to-end", () => {
       name: "sales-team",
       description: "Sales coordination team",
       agents: [
-        { role: "coordinator", is_coordinator: true, model: "test-model" },
-        { role: "researcher", is_coordinator: false, model: "test-model" },
+        { role: "coordinator", isCoordinator: true, model: "test-model" },
+        { role: "researcher", isCoordinator: false, model: "test-model" },
       ],
     });
 

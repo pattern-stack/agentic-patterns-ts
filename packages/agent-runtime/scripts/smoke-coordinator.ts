@@ -37,7 +37,6 @@ function calculator(): AgentLike {
     role: { name: "calculator" },
     getModel: () => process.env.SMOKE_MODEL ?? "gemini/gemini-2.5-flash",
     getTools: () => [],
-    getSystemPrompt: () => system,
     renderInitialPrompt: () => system,
   };
 }
@@ -49,7 +48,6 @@ function speller(): AgentLike {
     role: { name: "speller" },
     getModel: () => process.env.SMOKE_MODEL ?? "gemini/gemini-2.5-flash",
     getTools: () => [],
-    getSystemPrompt: () => system,
     renderInitialPrompt: () => system,
   };
 }
@@ -77,7 +75,7 @@ function tutorAgent(): Agent {
     role,
     mission: new Mission({
       objective: "answer the arithmetic question by delegating",
-      success_criteria: ["the answer comes from the calculator specialist"],
+      successCriteria: ["the answer comes from the calculator specialist"],
       constraints: ["never compute it yourself"],
     }),
   });

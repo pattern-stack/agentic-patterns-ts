@@ -25,9 +25,12 @@ import {
 import { Awareness } from "../atoms/awareness.js";
 import { Background } from "../atoms/background.js";
 import { Judgment } from "../atoms/judgment.js";
+import { Methodology } from "../atoms/methodology.js";
 import { Mission } from "../atoms/mission.js";
 import { Persona } from "../atoms/persona.js";
+import { Recovery } from "../atoms/recovery.js";
 import { Responsibility } from "../atoms/responsibility.js";
+import { Tone } from "../atoms/tone.js";
 import type { Capability } from "../molecules/capability.js";
 import { type Agent, AgentBuilder } from "./agent.js";
 import type { CapabilityResolutionContext, CapabilityResolver } from "./capability-resolver.js";
@@ -71,13 +74,24 @@ export function buildAgentFromConfig(
     return options.resolver.resolve(name, options.ctx);
   });
 
-  const role = new RoleBuilder(rt.name)
+  const roleBuilder = new RoleBuilder(rt.name)
     .withPersona(new Persona(rt.persona))
     .withJudgments(rt.judgments.map((j) => new Judgment(j)))
     .withResponsibilities(rt.responsibilities.map((r) => new Responsibility(r)))
     .withCapabilities(capabilities)
-    .withDefaultModel(rt.defaultModel)
-    .build();
+    .withDefaultModel(rt.defaultModel);
+
+  if (rt.tone) {
+    roleBuilder.withTone(new Tone(rt.tone));
+  }
+  if (rt.methodology) {
+    roleBuilder.withMethodology(new Methodology(rt.methodology));
+  }
+  if (rt.recovery) {
+    roleBuilder.withRecovery(new Recovery(rt.recovery));
+  }
+
+  const role = roleBuilder.build();
 
   const builder = new AgentBuilder(role)
     .withBackground(new Background(cfg.data.background))

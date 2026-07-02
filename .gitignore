@@ -14,3 +14,6 @@ demo/
 # Local session + QA artifacts (not source)
 **/.claude/.session/
 screenshots/
+
+# macOS Finder droppings
+.DS_Store

@@ -71,7 +71,6 @@ describe("RunnerProtocol", () => {
     const fakeAgent = {
       getModel: () => "test-model",
       getTools: () => [],
-      getSystemPrompt: () => "system",
       renderInitialPrompt: () => "initial",
       role: { name: "test" },
     };

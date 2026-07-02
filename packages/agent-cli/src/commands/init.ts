@@ -444,7 +444,7 @@ const role = new RoleBuilder("demo-assistant")
 
 const mission = new Mission({
   objective: "Demonstrate the @agentic-patterns/core building blocks end-to-end",
-  success_criteria: ["Greets users by name", "Uses the greet tool for every greeting"],
+  successCriteria: ["Greets users by name", "Uses the greet tool for every greeting"],
 });
 
 const agent = new AgentBuilder(role).withMission(mission).build();

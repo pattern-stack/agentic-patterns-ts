@@ -46,7 +46,8 @@
     "@agentic-patterns/core": "workspace:^",
     "@agentic-patterns/runtime": "workspace:^",
     "hono": "^4.0.0",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.24.0"
   },
   "devDependencies": {
     "@hono/node-server": "^1.13.0",

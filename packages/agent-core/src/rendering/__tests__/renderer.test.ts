@@ -31,7 +31,7 @@ function makeRenderer() {
   const judgment = new Judgment({
     domain: "code_quality",
     constraints: ["No direct DB access"],
-    escalation_triggers: ["Security vulnerability found"],
+    escalationTriggers: ["Security vulnerability found"],
     heuristics: ["Check edge cases"],
     examples: [
       {
@@ -43,14 +43,14 @@ function makeRenderer() {
     ],
   });
   const bg = new Background({
-    team_context: { team: "Platform" },
+    teamContext: { team: "Platform" },
   });
   const awareness = new Awareness({
-    domains: [{ name: "GitHub", description: "Repos", access_method: "API" }],
+    domains: [{ name: "GitHub", description: "Repos", accessMethod: "API" }],
   });
   const mission = new Mission({
     objective: "Review PR #42",
-    success_criteria: ["All issues flagged"],
+    successCriteria: ["All issues flagged"],
     constraints: ["Complete within 30 minutes"],
   });
 
@@ -98,7 +98,7 @@ describe("PromptRenderer", () => {
     const state = new State({
       iteration: 2,
       phase: Phase.EXECUTING,
-      last_action: "Reviewed main.ts",
+      lastAction: "Reviewed main.ts",
     });
     const result = renderer.renderContinuation(state);
 
@@ -139,7 +139,7 @@ describe("PromptRenderer", () => {
     const state = new State({
       iteration: 5,
       phase: Phase.FINISHING,
-      last_action: "Final review complete",
+      lastAction: "Final review complete",
     });
     expect(renderer.renderContinuation(state)).toMatchSnapshot();
   });

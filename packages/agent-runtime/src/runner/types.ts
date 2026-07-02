@@ -26,7 +26,6 @@ export interface AgentLike {
   readonly role: { readonly name: string };
   getModel(): string;
   getTools(): unknown[];
-  getSystemPrompt(): string;
   renderInitialPrompt(): string;
 }
 

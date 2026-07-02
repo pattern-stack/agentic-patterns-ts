@@ -494,7 +494,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
   ): SDKOptions {
     const sdkOpts: SDKOptions = {
       ...this._defaults,
-      systemPrompt: agent.getSystemPrompt(),
+      systemPrompt: agent.renderInitialPrompt(),
       model: mapModel(agent.getModel()) ?? this._defaults.model,
       maxTurns: options?.maxIterations ?? 10,
       permissionMode: "bypassPermissions",

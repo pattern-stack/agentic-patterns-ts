@@ -264,7 +264,7 @@ export class AgencyRuntime {
       address: addr,
       toolbox,
       runner: this._runner,
-      maxTurns: spec.max_turns,
+      maxTurns: spec.maxTurns,
     });
   }
 }

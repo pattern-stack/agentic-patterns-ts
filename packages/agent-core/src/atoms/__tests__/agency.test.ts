@@ -13,24 +13,28 @@ describe("TransportConfig", () => {
   it("renders nats transport", () => {
     const t = new TransportConfig({
       type: "nats",
-      nats_url: "nats://remote:4222",
+      natsUrl: "nats://remote:4222",
     });
     expect(t.toPrompt()).toBe("Transport: NATS (nats://remote:4222)");
+  });
+
+  it("rejects unknown transport types", () => {
+    expect(() => new TransportConfig({ type: "carrier_pigeon" as unknown as "nats" })).toThrow();
   });
 });
 
 describe("AgentSpec", () => {
   it("constructs with defaults", () => {
     const a = new AgentSpec({ role: "coder" });
-    expect(a.data.model).toBe("anthropic/claude-sonnet-4-20250514");
-    expect(a.data.max_turns).toBe(10);
-    expect(a.data.is_coordinator).toBe(false);
+    expect(a.data.model).toBe("claude-sonnet-4-20250514");
+    expect(a.data.maxTurns).toBe(10);
+    expect(a.data.isCoordinator).toBe(false);
   });
 
   it("toPrompt() renders correctly", () => {
     const a = new AgentSpec({
       role: "reviewer",
-      is_coordinator: true,
+      isCoordinator: true,
       capabilities: ["code_review", "linting"],
     });
     const prompt = a.toPrompt();
@@ -55,11 +59,7 @@ describe("Agency", () => {
   const validAgency = {
     name: "dev-team",
     description: "Development team",
-    agents: [
-      { role: "coordinator", is_coordinator: true },
-      { role: "coder" },
-      { role: "reviewer" },
-    ],
+    agents: [{ role: "coordinator", isCoordinator: true }, { role: "coder" }, { role: "reviewer" }],
   };
 
   it("constructs valid agency", () => {
@@ -95,8 +95,8 @@ describe("Agency", () => {
         new Agency({
           name: "team",
           agents: [
-            { role: "a", is_coordinator: true },
-            { role: "b", is_coordinator: true },
+            { role: "a", isCoordinator: true },
+            { role: "b", isCoordinator: true },
           ],
         }),
     ).toThrow("exactly one coordinator");
@@ -107,7 +107,7 @@ describe("Agency", () => {
       () =>
         new Agency({
           name: "team",
-          agents: [{ role: "coder", is_coordinator: true }, { role: "coder" }],
+          agents: [{ role: "coder", isCoordinator: true }, { role: "coder" }],
         }),
     ).toThrow("unique");
   });
@@ -126,7 +126,7 @@ describe("Agency", () => {
 describe("AgencyDeployment", () => {
   const validAgency = {
     name: "team",
-    agents: [{ role: "lead", is_coordinator: true }],
+    agents: [{ role: "lead", isCoordinator: true }],
   };
 
   it("renders basic deployment", () => {
@@ -138,7 +138,7 @@ describe("AgencyDeployment", () => {
     const d = new AgencyDeployment({
       agency: validAgency,
       isolated: true,
-      resource_profile: "heavy",
+      resourceProfile: "heavy",
     });
     expect(d.toPrompt()).toBe("- team (profile: heavy) [isolated]");
   });
@@ -147,11 +147,11 @@ describe("AgencyDeployment", () => {
 describe("Roster", () => {
   const agency1 = {
     name: "team-a",
-    agents: [{ role: "lead", is_coordinator: true }],
+    agents: [{ role: "lead", isCoordinator: true }],
   };
   const agency2 = {
     name: "team-b",
-    agents: [{ role: "lead", is_coordinator: true }],
+    agents: [{ role: "lead", isCoordinator: true }],
   };
 
   it("constructs valid roster", () => {
@@ -191,7 +191,7 @@ describe("Roster", () => {
   it("toPrompt() renders roster", () => {
     const r = new Roster({
       name: "my-roster",
-      workspace_id: "ws-123",
+      workspaceId: "ws-123",
       agencies: [{ agency: agency1 }],
     });
     const prompt = r.toPrompt();
@@ -201,8 +201,8 @@ describe("Roster", () => {
     expect(prompt).toContain("Transport: NATS");
   });
 
-  it("defaults inter_agency_transport to nats", () => {
+  it("defaults interAgencyTransport to nats", () => {
     const r = new Roster({ name: "r" });
-    expect(r.data.inter_agency_transport.type).toBe("nats");
+    expect(r.data.interAgencyTransport.type).toBe("nats");
   });
 });

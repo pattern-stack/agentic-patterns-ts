@@ -6,7 +6,6 @@ import type { AgentRegistration, ServerConfig } from "../config.js";
 const mockAgent = {
   getModel: () => "test-model",
   getTools: () => [],
-  getSystemPrompt: () => "You are a test agent.",
   renderInitialPrompt: () => "Test prompt",
   role: { name: "TestAgent" },
 };
@@ -176,12 +175,20 @@ describe("GET /agents", () => {
     expect(body).toEqual([]);
   });
 
-  it("returns agent summaries", async () => {
+  it("returns agent summaries with role ref and readiness", async () => {
     const app = createServer(makeConfig({ agents: [testRegistration] }));
     const res = await app.request("/agents");
     expect(res.status).toBe(200);
     const body = (await res.json()) as { id: string; name: string; description: string }[];
-    expect(body).toEqual([{ id: "test-1", name: "Test Agent", description: "A test agent" }]);
+    expect(body).toEqual([
+      {
+        id: "test-1",
+        name: "Test Agent",
+        description: "A test agent",
+        role: { id: "testagent", name: "TestAgent" },
+        readiness: { ready: true, missing: [] },
+      },
+    ]);
   });
 
   it("defaults description to empty string", async () => {

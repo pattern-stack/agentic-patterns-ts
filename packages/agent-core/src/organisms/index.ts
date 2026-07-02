@@ -6,6 +6,7 @@ export {
   AgentBuilder,
   AgentSchema,
   type AgentData,
+  type AgentPromptSectionData,
 } from "./agent.js";
 export type {
   CapabilityResolver,

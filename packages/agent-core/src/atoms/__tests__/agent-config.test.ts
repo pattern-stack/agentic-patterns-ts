@@ -20,6 +20,21 @@ describe("RoleTemplateConfigSchema", () => {
     expect(parsed.defaultModel).toBe("claude-sonnet-4-20250514");
     expect(parsed.source).toBe("custom");
     expect(parsed.archetype).toBeNull();
+    expect(parsed.tone).toBeNull();
+    expect(parsed.methodology).toBeNull();
+    expect(parsed.recovery).toBeNull();
+  });
+
+  it("accepts tone, methodology, and recovery", () => {
+    const parsed = RoleTemplateConfigSchema.parse({
+      ...minimalRoleTemplate,
+      tone: { name: "direct", prompt: "Be concise." },
+      methodology: { name: "thorough", prompt: "Be systematic.", checklist: ["step 1"] },
+      recovery: { name: "retry", prompt: "Try again.", maxAttempts: 2 },
+    });
+    expect(parsed.tone?.name).toBe("direct");
+    expect(parsed.methodology?.checklist).toEqual(["step 1"]);
+    expect(parsed.recovery?.maxAttempts).toBe(2);
   });
 
   it("rejects an unknown source", () => {
@@ -37,7 +52,7 @@ describe("AgentConfig", () => {
     });
     expect(cfg.data.capabilities).toEqual([]);
     expect(cfg.data.model).toBeNull();
-    expect(cfg.data.background.team_context).toEqual({});
+    expect(cfg.data.background.teamContext).toEqual({});
     expect(cfg.data.awareness.domains).toEqual([]);
   });
 
@@ -79,6 +94,22 @@ describe("AgentConfig", () => {
     expect(prompt).toContain("Capabilities: task-management");
     expect(prompt).toContain("a project manager");
     expect(prompt).toContain("Keep the backlog healthy");
+  });
+
+  it("toPrompt renders tone, methodology, and recovery when present", () => {
+    const cfg = new AgentConfig({
+      roleTemplate: {
+        ...minimalRoleTemplate,
+        tone: { name: "direct", prompt: "Be concise." },
+        methodology: { name: "thorough", prompt: "Be systematic." },
+        recovery: { name: "retry", prompt: "Try again." },
+      },
+      mission: { objective: "x" },
+    });
+    const prompt = cfg.toPrompt();
+    expect(prompt).toContain("Be concise.");
+    expect(prompt).toContain("Be systematic.");
+    expect(prompt).toContain("Try again.");
   });
 
   it("requires a mission objective", () => {

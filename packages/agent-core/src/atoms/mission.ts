@@ -100,11 +100,11 @@ export function renderSchemaForPrompt(schema: ZodTypeAny | Record<string, unknow
 
 export const MissionSchema = z.object({
   objective: z.string().min(1),
-  success_criteria: z.array(z.string()).default([]),
+  successCriteria: z.array(z.string()).default([]),
   constraints: z.array(z.string()).default([]),
   rationale: z.string().default(""),
-  output_schema: z.unknown().optional(),
-  strict_output: z.boolean().default(false),
+  outputSchema: z.unknown().optional(),
+  strictOutput: z.boolean().default(false),
 });
 
 export type MissionData = z.infer<typeof MissionSchema>;
@@ -117,31 +117,45 @@ export class Mission extends AgenticModel<typeof MissionSchema.shape> {
     super(MissionSchema, data);
   }
 
+  /**
+   * Render the Mission block.
+   *
+   * This is the single formatting source for the mission — MissionSection
+   * delegates here.
+   *
+   * When `outputSchema` is set and `strictOutput` is false, the rendered
+   * schema (via `renderSchemaForPrompt`) is appended so the model is guided
+   * toward the expected JSON output. Prompt injection is the only mechanism
+   * `outputSchema` has — no runner consumes it natively.
+   */
   toPrompt(): string {
-    const lines: string[] = ["## Current Mission", "", this.data.objective];
-    if (this.data.success_criteria.length > 0) {
-      lines.push("\n**Success criteria:**");
-      for (const c of this.data.success_criteria) {
+    const lines: string[] = ["## Mission", "", "### Objective", "", this.data.objective];
+
+    if (this.data.successCriteria.length > 0) {
+      lines.push("", "### Success Criteria", "");
+      for (const c of this.data.successCriteria) {
         lines.push(`- ${c}`);
       }
     }
+
     if (this.data.constraints.length > 0) {
-      lines.push("\n**Constraints:**");
+      lines.push("", "### Constraints", "");
       for (const c of this.data.constraints) {
         lines.push(`- ${c}`);
       }
     }
+
     if (this.data.rationale) {
-      lines.push(`\n**Rationale:** ${this.data.rationale}`);
+      lines.push("", "### Rationale", "", this.data.rationale);
     }
 
-    // Inject schema into prompt when strict_output is false
-    if (this.data.output_schema != null && !this.data.strict_output) {
+    // Inject the schema into the prompt when strictOutput is false.
+    if (this.data.outputSchema != null && !this.data.strictOutput) {
       const schemaPrompt = renderSchemaForPrompt(
-        this.data.output_schema as ZodTypeAny | Record<string, unknown>,
+        this.data.outputSchema as ZodTypeAny | Record<string, unknown>,
       );
       if (schemaPrompt) {
-        lines.push(`\n${schemaPrompt}`);
+        lines.push("", schemaPrompt);
       }
     }
 
@@ -151,7 +165,7 @@ export class Mission extends AgenticModel<typeof MissionSchema.shape> {
   /** Add success criteria to this mission. */
   withCriteria(criteria: string[]): Mission {
     return this.replace({
-      success_criteria: [...this.data.success_criteria, ...criteria],
+      successCriteria: [...this.data.successCriteria, ...criteria],
     });
   }
 

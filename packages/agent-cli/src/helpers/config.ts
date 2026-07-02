@@ -17,6 +17,11 @@ export interface ProjectConfig {
   readonly root: string;
   /** Glob(s) for agent file discovery. Default: `["agents/**\/agent.{ts,js,mjs}"]`. */
   readonly agents: readonly string[];
+  /**
+   * Glob(s) for role LIBRARY module enumeration (provenance's "configured
+   * glob", docs/playground-redesign.md §5). Undefined → provenance default.
+   */
+  readonly roles?: readonly string[];
   /** Default port for `playground`. */
   readonly port: number;
   /** Whether the project package.json has an `agentic` block. */
@@ -26,6 +31,7 @@ export interface ProjectConfig {
 interface PackageManifest {
   agentic?: {
     agents?: string | string[];
+    roles?: string | string[];
     port?: number;
   };
 }
@@ -87,12 +93,13 @@ export function resolveProjectConfig(from: string = process.cwd()): ProjectConfi
   }
 
   const agents = normalizeGlobs(manifest.agentic?.agents) ?? DEFAULT_AGENT_GLOBS;
+  const roles = normalizeGlobs(manifest.agentic?.roles);
   const envPort = process.env.PORT;
   const port =
     manifest.agentic?.port ??
     (envPort !== undefined ? Number.parseInt(envPort, 10) : DEFAULT_DASHBOARD_PORT);
 
-  return { root, agents, port, hasManifest };
+  return { root, agents, ...(roles ? { roles } : {}), port, hasManifest };
 }
 
 function normalizeGlobs(value: string | string[] | undefined): readonly string[] | undefined {

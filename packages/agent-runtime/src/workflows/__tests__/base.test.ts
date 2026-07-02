@@ -31,7 +31,6 @@ describe("applyStepModel", () => {
       role: { name: "a" },
       getModel: () => "base",
       getTools: () => [],
-      getSystemPrompt: () => "sys",
       renderInitialPrompt: () => "init",
     };
     expect(applyStepModel(a, undefined)).toBe(a);
@@ -43,13 +42,11 @@ describe("applyStepModel", () => {
       role: { name: "a" },
       getModel: () => "base",
       getTools: () => tools,
-      getSystemPrompt: () => "sys",
       renderInitialPrompt: () => "init",
     };
     const view = applyStepModel(a, "override-model");
     expect(view.getModel()).toBe("override-model");
     expect(view.getTools()).toBe(tools);
-    expect(view.getSystemPrompt()).toBe("sys");
     expect(view.renderInitialPrompt()).toBe("init");
     expect(view.role.name).toBe("a");
     expect(a.getModel()).toBe("base");

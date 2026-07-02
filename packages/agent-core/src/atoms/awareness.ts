@@ -9,7 +9,7 @@ import { AgenticModel } from "./base.js";
 export const AwarenessDomainSchema = z.object({
   name: z.string(),
   description: z.string(),
-  access_method: z.string(),
+  accessMethod: z.string(),
 });
 
 export type AwarenessDomainData = z.infer<typeof AwarenessDomainSchema>;
@@ -23,13 +23,13 @@ export class AwarenessDomain extends AgenticModel<typeof AwarenessDomainSchema.s
   }
 
   toPrompt(): string {
-    return `- **${this.data.name}**: ${this.data.description} (via ${this.data.access_method})`;
+    return `- **${this.data.name}**: ${this.data.description} (via ${this.data.accessMethod})`;
   }
 }
 
 export const AwarenessSchema = z.object({
   domains: z.array(AwarenessDomainSchema).default([]),
-  exploration_capabilities: z.array(z.string()).default([]),
+  explorationCapabilities: z.array(z.string()).default([]),
 });
 
 export type AwarenessData = z.infer<typeof AwarenessSchema>;
@@ -66,8 +66,8 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
       const domain = new AwarenessDomain(d);
       lines.push(domain.toPrompt());
     }
-    if (this.data.exploration_capabilities.length > 0) {
-      lines.push(`\nMethods: ${this.data.exploration_capabilities.join(", ")}`);
+    if (this.data.explorationCapabilities.length > 0) {
+      lines.push(`\nMethods: ${this.data.explorationCapabilities.join(", ")}`);
     }
     return lines.join("\n");
   }
@@ -89,7 +89,7 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
   /** Add exploration capabilities to this awareness. */
   withCapabilities(capabilities: string[]): Awareness {
     return this.replace({
-      exploration_capabilities: [...this.data.exploration_capabilities, ...capabilities],
+      explorationCapabilities: [...this.data.explorationCapabilities, ...capabilities],
     });
   }
 }

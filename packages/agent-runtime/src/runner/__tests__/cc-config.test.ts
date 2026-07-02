@@ -59,7 +59,6 @@ function makeAgent(): AgentLikeForBridge {
     role: { name: "test-agent", capabilities: [] },
     getModel: () => "claude-sonnet-4-6",
     getTools: () => [],
-    getSystemPrompt: () => "Custom framework prompt.",
     renderInitialPrompt: () => "Custom framework prompt.",
   };
 }

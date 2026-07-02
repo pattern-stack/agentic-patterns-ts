@@ -15,7 +15,6 @@ function subagent(name: string): AgentLike {
     role: { name },
     getModel: () => "mock",
     getTools: () => [],
-    getSystemPrompt: () => `you are ${name}`,
     renderInitialPrompt: () => `you are ${name}`,
   };
 }
@@ -37,7 +36,7 @@ function coordinatorAgent(): Agent {
     role,
     mission: new Mission({
       objective: "author a canvas template",
-      success_criteria: ["valid template"],
+      successCriteria: ["valid template"],
       constraints: [],
     }),
   });

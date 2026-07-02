@@ -4,10 +4,13 @@ import { z } from "zod";
 import { Awareness } from "../../atoms/awareness.js";
 import { Background } from "../../atoms/background.js";
 import { Judgment } from "../../atoms/judgment.js";
+import { Methodology } from "../../atoms/methodology.js";
 import { Mission } from "../../atoms/mission.js";
 import { Persona } from "../../atoms/persona.js";
+import { Recovery } from "../../atoms/recovery.js";
 import { Responsibility } from "../../atoms/responsibility.js";
 import { Phase, State } from "../../atoms/state.js";
+import { Tone } from "../../atoms/tone.js";
 import { Capability } from "../../molecules/capability.js";
 import { TextManual } from "../../molecules/manual.js";
 import { type ToolDefinition, Toolbox } from "../../molecules/toolbox.js";
@@ -38,7 +41,7 @@ function makeRole(): Role {
   const judgment = new Judgment({
     domain: "code_quality",
     constraints: ["No direct DB access"],
-    escalation_triggers: ["Security vulnerability found"],
+    escalationTriggers: ["Security vulnerability found"],
     heuristics: ["Check edge cases"],
     examples: [
       {
@@ -69,21 +72,21 @@ function makeRole(): Role {
 function makeMission(): Mission {
   return new Mission({
     objective: "Review PR #42",
-    success_criteria: ["All issues flagged", "No false positives"],
+    successCriteria: ["All issues flagged", "No false positives"],
     constraints: ["Complete within 30 minutes"],
   });
 }
 
 function makeBackground(): Background {
   return new Background({
-    team_context: { team: "Platform", sprint: "Q1-S3" },
-    project_context: { name: "agentic-patterns" },
+    teamContext: { team: "Platform", sprint: "Q1-S3" },
+    projectContext: { name: "agentic-patterns" },
   });
 }
 
 function makeAwareness(): Awareness {
   return new Awareness({
-    domains: [{ name: "GitHub", description: "Repos and PRs", access_method: "API" }],
+    domains: [{ name: "GitHub", description: "Repos and PRs", accessMethod: "API" }],
   });
 }
 
@@ -171,7 +174,7 @@ describe("Agent", () => {
     });
   });
 
-  describe("getSystemPrompt (inline rendering)", () => {
+  describe("toPrompt (delegates to renderInitialPrompt)", () => {
     it("includes role, background, awareness, and mission", () => {
       const agent = new Agent({
         role: makeRole(),
@@ -180,19 +183,19 @@ describe("Agent", () => {
         mission: makeMission(),
       });
 
-      const prompt = agent.getSystemPrompt();
-      expect(prompt).toContain("# Code Reviewer");
+      const prompt = agent.toPrompt();
+      expect(prompt).toContain("## Identity");
       expect(prompt).toContain("## Team Context");
       expect(prompt).toContain("## Available Information Sources");
-      expect(prompt).toContain("## Current Mission");
+      expect(prompt).toContain("## Mission");
     });
 
-    it("toPrompt is alias for getSystemPrompt", () => {
+    it("toPrompt is alias for renderInitialPrompt", () => {
       const agent = new Agent({
         role: makeRole(),
         mission: makeMission(),
       });
-      expect(agent.toPrompt()).toBe(agent.getSystemPrompt());
+      expect(agent.toPrompt()).toBe(agent.renderInitialPrompt());
     });
 
     it("omits empty background", () => {
@@ -200,9 +203,50 @@ describe("Agent", () => {
         role: makeRole(),
         mission: makeMission(),
       });
-      const prompt = agent.getSystemPrompt();
+      const prompt = agent.toPrompt();
       // Background with no data produces empty string, should not add extra sections
       expect(prompt).not.toContain("## Team Context");
+    });
+
+    it("includes role tone/methodology/recovery", () => {
+      const role = new RoleBuilder("Code Reviewer")
+        .withPersona(
+          new Persona({
+            identity: "a code review specialist",
+            tone: "professional",
+          }),
+        )
+        .withTone(new Tone({ name: "direct", prompt: "Be blunt and specific." }))
+        .withMethodology(
+          new Methodology({
+            name: "checklist-review",
+            prompt: "Work through the review checklist in order.",
+            checklist: ["Read the diff twice"],
+          }),
+        )
+        .withRecovery(
+          new Recovery({ name: "retry", prompt: "Retry the failing step once.", maxAttempts: 2 }),
+        )
+        .build();
+
+      const prompt = new Agent({ role, mission: makeMission() }).toPrompt();
+      expect(prompt).toContain("Be blunt and specific.");
+      expect(prompt).toContain("Work through the review checklist in order.");
+      expect(prompt).toContain("Retry the failing step once.");
+    });
+
+    it("injects the mission outputSchema when strictOutput is false", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        mission: new Mission({
+          objective: "Extract data",
+          outputSchema: { title: "Extraction", properties: { name: { type: "string" } } },
+          strictOutput: false,
+        }),
+      });
+      const prompt = agent.toPrompt();
+      expect(prompt).toContain("**Required Output Format:**");
+      expect(prompt).toContain("`Extraction`");
     });
   });
 
@@ -233,6 +277,111 @@ describe("Agent", () => {
       });
       expect(agent.renderInitialPrompt()).toMatchSnapshot();
     });
+
+    it("passes role tone/methodology/recovery through to the sections", () => {
+      const role = new RoleBuilder("Code Reviewer")
+        .withPersona(
+          new Persona({
+            identity: "a code review specialist",
+            tone: "professional",
+          }),
+        )
+        .withTone(new Tone({ name: "direct", prompt: "Be blunt and specific." }))
+        .withMethodology(
+          new Methodology({
+            name: "checklist-review",
+            prompt: "Work through the review checklist in order.",
+            checklist: ["Read the diff twice"],
+          }),
+        )
+        .withRecovery(
+          new Recovery({ name: "retry", prompt: "Retry the failing step once.", maxAttempts: 2 }),
+        )
+        .build();
+
+      const prompt = new Agent({ role, mission: makeMission() }).renderInitialPrompt();
+      expect(prompt).toContain("Be blunt and specific.");
+      expect(prompt).toContain("Work through the review checklist in order.");
+      expect(prompt).toContain("Retry the failing step once.");
+    });
+  });
+
+  describe("renderSections (sections with provenance)", () => {
+    it("joining section texts reproduces renderInitialPrompt exactly", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness: makeAwareness(),
+        mission: makeMission(),
+      });
+
+      const joined = agent
+        .renderSections()
+        .map((s) => s.text)
+        .join("\n\n");
+      expect(joined).toBe(agent.renderInitialPrompt());
+    });
+
+    it("attributes each section to role or instance", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness: makeAwareness(),
+        mission: makeMission(),
+      });
+
+      const sections = agent.renderSections();
+      expect(sections.map((s) => [s.name, s.source])).toEqual([
+        ["Identity", "role"],
+        ["Boundaries", "role"],
+        ["Capabilities", "role"],
+        ["Context", "instance"],
+        ["Mission", "instance"],
+        ["Methodology", "role"],
+      ]);
+    });
+
+    it("filters sections that render empty (mirrors renderInitial's filter)", () => {
+      // Bare role: no judgments/recovery -> Boundaries renders "", no methodology
+      // and no judgments with heuristics -> Methodology renders "".
+      const role = new RoleBuilder("Minimal")
+        .withPersona(new Persona({ identity: "a minimal agent", tone: "neutral" }))
+        .build();
+      const agent = new Agent({ role, mission: makeMission() });
+
+      const names = agent.renderSections().map((s) => s.name);
+      expect(names).not.toContain("Boundaries");
+      // Invariant still holds with filtered sections
+      const joined = agent
+        .renderSections()
+        .map((s) => s.text)
+        .join("\n\n");
+      expect(joined).toBe(agent.renderInitialPrompt());
+    });
+
+    it("keeps the Context section for empty background/awareness (awareness fallback text)", () => {
+      // Empty Awareness renders a fallback line, so ContextSection is non-empty
+      // and renderInitial includes it — renderSections must mirror that.
+      const agent = new Agent({
+        role: makeRole(),
+        mission: makeMission(),
+      });
+
+      const context = agent.renderSections().find((s) => s.name === "Context");
+      expect(context).toBeDefined();
+      expect(context!.source).toBe("instance");
+      expect(context!.text).toContain("no external information sources");
+    });
+
+    it("every rendered section is non-empty", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        mission: makeMission(),
+      });
+      for (const section of agent.renderSections()) {
+        expect(section.text).not.toBe("");
+      }
+    });
   });
 
   describe("renderContinuationPrompt (delta rendering)", () => {
@@ -247,7 +396,7 @@ describe("Agent", () => {
       const state = new State({
         iteration: 3,
         phase: Phase.EXECUTING,
-        last_action: "Reviewed utils.ts",
+        lastAction: "Reviewed utils.ts",
       });
 
       const prompt = agent.renderContinuationPrompt(state);
@@ -271,7 +420,7 @@ describe("Agent", () => {
       const state = new State({
         iteration: 5,
         phase: Phase.FINISHING,
-        last_action: "Final review complete",
+        lastAction: "Final review complete",
       });
       expect(agent.renderContinuationPrompt(state)).toMatchSnapshot();
     });
@@ -334,7 +483,7 @@ describe("Integration: atoms -> molecules -> organisms", () => {
       domain: "infrastructure",
       heuristics: ["Prefer managed services", "Automate everything"],
       constraints: ["Never store secrets in code"],
-      escalation_triggers: ["Production outage"],
+      escalationTriggers: ["Production outage"],
     });
     const responsibility = new Responsibility({
       key: "deploy",
@@ -343,13 +492,13 @@ describe("Integration: atoms -> molecules -> organisms", () => {
     });
     const mission = new Mission({
       objective: "Set up staging environment",
-      success_criteria: ["All services running", "Monitoring enabled"],
+      successCriteria: ["All services running", "Monitoring enabled"],
     });
     const background = new Background({
-      project_context: { cloud: "AWS", region: "us-east-1" },
+      projectContext: { cloud: "AWS", region: "us-east-1" },
     });
     const awareness = new Awareness({
-      domains: [{ name: "AWS Console", description: "Cloud resources", access_method: "SDK" }],
+      domains: [{ name: "AWS Console", description: "Cloud resources", accessMethod: "SDK" }],
     });
 
     // Molecules
@@ -371,11 +520,10 @@ describe("Integration: atoms -> molecules -> organisms", () => {
       .withMission(mission)
       .build();
 
-    // Verify inline rendering
-    const systemPrompt = agent.getSystemPrompt();
-    expect(systemPrompt).toContain("# DevOps Engineer");
+    // Verify prompt content
+    const systemPrompt = agent.toPrompt();
     expect(systemPrompt).toContain("a DevOps engineer");
-    expect(systemPrompt).toContain("## Current Mission");
+    expect(systemPrompt).toContain("## Mission");
     expect(systemPrompt).toContain("Set up staging environment");
 
     // Verify structured rendering

@@ -24,7 +24,6 @@ function makeAgent(): AgentLike {
     role: { name: "test-agent" },
     getModel: () => AGENT_DECLARED_MODEL,
     getTools: () => [],
-    getSystemPrompt: () => "system",
     renderInitialPrompt: () => "system",
   };
 }

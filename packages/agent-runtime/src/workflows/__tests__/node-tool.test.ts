@@ -60,7 +60,6 @@ describe("delegateTo (just pass subagents)", () => {
       role: { name },
       getModel: () => "mock",
       getTools: () => [],
-      getSystemPrompt: () => `you are ${name}`,
       renderInitialPrompt: () => `you are ${name}`,
     };
   }

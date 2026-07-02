@@ -19,7 +19,7 @@ export const ROUTING = new Judgment({
     "Do not skip prerequisite steps (e.g., classification before description)",
     "Route to at most one specialist per step — do not fan out unless explicitly needed",
   ],
-  escalation_triggers: [
+  escalationTriggers: [
     "All available specialists reject the request",
     "The request requires capabilities no specialist has",
   ],
@@ -46,7 +46,7 @@ export const QUALITY_REVIEW = new Judgment({
     "Quality review checks structure, not domain correctness",
     "Never silently accept output that fails structural checks",
   ],
-  escalation_triggers: [
+  escalationTriggers: [
     "Specialist output is unparseable after retry",
     "Output consistently fails quality checks",
   ],
@@ -74,7 +74,7 @@ export const INTENT_CLASSIFICATION = new Judgment({
     "If no extension matches, say so — do not attempt to handle it directly",
     "Respect the user's explicit extension targeting if provided",
   ],
-  escalation_triggers: [
+  escalationTriggers: [
     "User expresses frustration with routing",
     "The same request has been misrouted twice",
   ],
@@ -104,7 +104,7 @@ export const RETRIEVAL_STRATEGY = new Judgment({
     "Organize results by the dimensions the requester asked for, not by search query",
     "Return a coverage assessment — what was found vs what was requested",
   ],
-  escalation_triggers: [
+  escalationTriggers: [
     "Critical dimension has zero evidence after multiple query strategies",
     "Search tools return errors or timeouts repeatedly",
   ],
@@ -140,7 +140,7 @@ export const EVIDENCE_QUALITY = new Judgment({
     "Score 0 for dimensions with no evidence, not 'unknown'",
     "Distinguish between 'not mentioned' (gap) and 'mentioned negatively' (risk)",
   ],
-  escalation_triggers: [
+  escalationTriggers: [
     "Critical dimension has zero evidence",
     "Evidence is contradictory across sources",
   ],

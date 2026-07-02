@@ -8,6 +8,7 @@ import { corsMiddleware } from "./middleware/cors.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { adminRoutes } from "./routes/admin.js";
 import { agentRoutes } from "./routes/agents.js";
+import { compositionRoutes } from "./routes/composition.js";
 import { type ConversationEntry, conversationRoutes } from "./routes/conversations.js";
 import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
@@ -30,6 +31,7 @@ export function createServer(config: ServerConfig): Hono {
   // Routes
   app.route("/", healthRoutes());
   app.route("/", agentRoutes(config.agents));
+  app.route("/", compositionRoutes(config.agents));
   app.route("/", conversationRoutes(config.agents, conversations, config.eventBus));
   app.route("/", adminRoutes(config));
   app.route("/", hookRoutes(config.eventBus));

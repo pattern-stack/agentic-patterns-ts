@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { Awareness } from "../../atoms/awareness.js";
 import { Background } from "../../atoms/background.js";
 import { Judgment } from "../../atoms/judgment.js";
+import { Methodology } from "../../atoms/methodology.js";
 import { Mission } from "../../atoms/mission.js";
 import { Persona } from "../../atoms/persona.js";
+import { Recovery } from "../../atoms/recovery.js";
 import { Responsibility } from "../../atoms/responsibility.js";
 import { Phase, State } from "../../atoms/state.js";
 import { Tone } from "../../atoms/tone.js";
@@ -40,7 +42,7 @@ describe("IdentitySection", () => {
       name: "Professional",
       prompt: "Be formal and precise.",
       examples: [["Good", "I recommend..."]],
-      anti_patterns: ["Hey there!"],
+      antiPatterns: ["Hey there!"],
     });
     const section = new IdentitySection(persona, [], tone);
     const result = section.render();
@@ -104,7 +106,7 @@ describe("BoundariesSection", () => {
     const judgment = new Judgment({
       domain: "security",
       constraints: ["Never expose secrets", "No SQL injection"],
-      escalation_triggers: ["Unknown vulnerability type"],
+      escalationTriggers: ["Unknown vulnerability type"],
     });
     const section = new BoundariesSection([judgment]);
     const result = section.render();
@@ -122,7 +124,7 @@ describe("BoundariesSection", () => {
     });
     const j2 = new Judgment({
       domain: "compliance",
-      escalation_triggers: ["Legal review needed"],
+      escalationTriggers: ["Legal review needed"],
     });
     const section = new BoundariesSection([j1, j2]);
     const result = section.render();
@@ -130,22 +132,43 @@ describe("BoundariesSection", () => {
     expect(result).toContain("- Legal review needed");
   });
 
-  it("renders just heading with empty judgments", () => {
+  it("renders empty with empty judgments", () => {
     const section = new BoundariesSection([]);
-    expect(section.render()).toBe("## Boundaries");
+    expect(section.render()).toBe("");
   });
 
-  it("renders just heading with judgments that have no constraints or triggers", () => {
+  it("renders empty with judgments that have no constraints or triggers", () => {
     const j = new Judgment({ domain: "testing", heuristics: ["Test first"] });
     const section = new BoundariesSection([j]);
-    expect(section.render()).toBe("## Boundaries");
+    expect(section.render()).toBe("");
+  });
+
+  it("renders a Recovery subsection after the escalation block", () => {
+    const judgment = new Judgment({
+      domain: "security",
+      escalationTriggers: ["Data breach"],
+    });
+    const recovery = new Recovery({ name: "retry", prompt: "Try again.", maxAttempts: 2 });
+    const section = new BoundariesSection([judgment], recovery);
+    const result = section.render();
+    expect(result.indexOf("### Escalate When")).toBeLessThan(result.indexOf("### Recovery"));
+    expect(result).toContain("Try again.\nMax attempts before escalating: 2");
+  });
+
+  it("renders recovery even when judgments contribute nothing", () => {
+    const recovery = new Recovery({ name: "retry", prompt: "Try again." });
+    const section = new BoundariesSection([], recovery);
+    const result = section.render();
+    expect(result).toContain("## Boundaries");
+    expect(result).toContain("### Recovery");
+    expect(result).toContain("Try again.");
   });
 
   it("snapshot: boundaries section", () => {
     const judgment = new Judgment({
       domain: "security",
       constraints: ["Never expose API keys", "No direct DB access"],
-      escalation_triggers: ["Potential data breach", "Compliance violation"],
+      escalationTriggers: ["Potential data breach", "Compliance violation"],
     });
     const section = new BoundariesSection([judgment]);
     expect(section.render()).toMatchSnapshot();
@@ -155,7 +178,7 @@ describe("BoundariesSection", () => {
 describe("ContextSection", () => {
   it("renders background", () => {
     const bg = new Background({
-      team_context: { team: "Platform" },
+      teamContext: { team: "Platform" },
     });
     const section = new ContextSection(bg);
     const result = section.render();
@@ -165,7 +188,7 @@ describe("ContextSection", () => {
 
   it("renders awareness", () => {
     const awareness = new Awareness({
-      domains: [{ name: "GitHub", description: "Code repos", access_method: "API" }],
+      domains: [{ name: "GitHub", description: "Code repos", accessMethod: "API" }],
     });
     const section = new ContextSection(undefined, awareness);
     const result = section.render();
@@ -200,7 +223,7 @@ describe("MissionSection", () => {
   it("renders success criteria and constraints", () => {
     const mission = new Mission({
       objective: "Build feature X",
-      success_criteria: ["All tests pass", "No regressions"],
+      successCriteria: ["All tests pass", "No regressions"],
       constraints: ["Use existing APIs only"],
     });
     const section = new MissionSection(mission);
@@ -227,10 +250,21 @@ describe("MissionSection", () => {
     expect(section.render()).toBe("");
   });
 
+  it("renders the outputSchema when strictOutput is false (single prompt path)", () => {
+    const mission = new Mission({
+      objective: "Extract data",
+      outputSchema: { title: "Extraction", properties: { name: { type: "string" } } },
+      strictOutput: false,
+    });
+    const section = new MissionSection(mission);
+    expect(section.render()).toContain("**Required Output Format:**");
+    expect(section.render()).toContain("`Extraction`");
+  });
+
   it("snapshot: full mission section", () => {
     const mission = new Mission({
       objective: "Implement the rendering layer for TypeScript port",
-      success_criteria: ["All sections render correctly", "Snapshot tests pass"],
+      successCriteria: ["All sections render correctly", "Snapshot tests pass"],
       constraints: ["Match Python output exactly"],
       rationale: "Required for agent prompt composition",
     });
@@ -296,6 +330,28 @@ describe("MethodologySection", () => {
     expect(section.render()).toBe("");
   });
 
+  it("renders a Methodology as the first block under the heading", () => {
+    const methodology = new Methodology({
+      name: "thorough",
+      prompt: "Be systematic.",
+      checklist: ["step 1"],
+    });
+    const judgment = new Judgment({
+      domain: "code_review",
+      heuristics: ["Check edge cases"],
+    });
+    const section = new MethodologySection([judgment], methodology);
+    const result = section.render();
+    expect(result.indexOf("Be systematic.")).toBeLessThan(result.indexOf("### Code Review"));
+    expect(result.startsWith("## Methodology\n\nBe systematic.")).toBe(true);
+  });
+
+  it("renders heading + methodology with empty judgments", () => {
+    const methodology = new Methodology({ name: "quick", prompt: "Move fast." });
+    const section = new MethodologySection([], methodology);
+    expect(section.render()).toBe("## Methodology\n\nMove fast.");
+  });
+
   it("snapshot: methodology section", () => {
     const judgment = new Judgment({
       domain: "code_quality",
@@ -319,7 +375,7 @@ describe("StateSection", () => {
     const state = new State({
       iteration: 3,
       phase: Phase.EXECUTING,
-      last_action: "Reviewed file.ts",
+      lastAction: "Reviewed file.ts",
     });
     const section = new StateSection(state);
     const result = section.render();

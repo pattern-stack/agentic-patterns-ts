@@ -1,9 +1,15 @@
 /**
  * Agent listing routes.
+ *
+ * GET /agents is the instance roster (docs/playground-redesign.md §6): each
+ * row carries a `role` ref linking up into the identity catalog (ids match
+ * GET /roles) and a `readiness` block — can this instance be exercised right
+ * now, i.e. does a model resolve (role default or instance override).
  */
 
 import { Hono } from "hono";
 import type { AgentRegistration } from "../config.js";
+import { buildRoleEntries } from "./composition.js";
 
 /* Structural view of an agent's declared composition — read without importing the
  * core classes, so any AgentLike (or a looser registration) introspects safely. */
@@ -24,11 +30,25 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
   const app = new Hono();
 
   app.get("/agents", (c) => {
-    const summaries = agents.map((a) => ({
-      id: a.id,
-      name: a.name,
-      description: a.description ?? "",
-    }));
+    const roleEntries = buildRoleEntries(agents);
+    const summaries = agents.map((a) => {
+      const introspect = a.agent as unknown as AgentIntrospect;
+      const roleEntry = roleEntries.find((e) => e.members.includes(a));
+      let model: string | undefined;
+      try {
+        model = typeof introspect.getModel === "function" ? introspect.getModel() : undefined;
+      } catch {
+        model = undefined; // getModel throwing IS the unready signal
+      }
+      const missing = model ? [] : ["model"];
+      return {
+        id: a.id,
+        name: a.name,
+        description: a.description ?? "",
+        role: roleEntry ? { id: roleEntry.id, name: roleEntry.role.name ?? "role" } : null,
+        readiness: { ready: missing.length === 0, missing },
+      };
+    });
     return c.json(summaries);
   });
 

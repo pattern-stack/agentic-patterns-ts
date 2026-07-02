@@ -118,7 +118,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
    ```
 5. **Judgment + Persona** (`roles/`) — decision rules and identity as named exports. **Don't start from zero:** `@agentic-patterns/runtime` ships preset judgments (`RETRIEVAL_STRATEGY`, `EVIDENCE_QUALITY`, `ROUTING`, `QUALITY_REVIEW`, …), responsibilities, and whole roles (`retrievalRole`, `analystRole`, `coordinatorRole`) — clone or compose those before authoring new ones.
 6. **Role** — `new RoleBuilder(name).withPersona(p).withJudgment(j).withCapability(c).withDefaultModel(id).build()`. Requires a persona.
-7. **Mission** — thin: `new Mission({ objective, success_criteria, /* grounding rendered from a context AgenticModel */ })`. No protocol text.
+7. **Mission** — thin: `new Mission({ objective, successCriteria, /* grounding rendered from a context AgenticModel */ })`. No protocol text.
 8. **Agent** — `new AgentBuilder(role).withMission(m).withModel(id).build()`. Requires a mission. **This built Agent is what your `agents/<name>/agent.ts` exports** (§0).
 9. **Run** — `ap playground` / `ap run` wire the bus + exporter + executor for you. When driving `AgentRunner` directly, wire **the executor** yourself:
    ```ts

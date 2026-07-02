@@ -172,7 +172,6 @@ export function applyStepModel(agent: AgentLike, model: string | undefined): Age
     role: agent.role,
     getModel: () => model,
     getTools: () => agent.getTools(),
-    getSystemPrompt: () => agent.getSystemPrompt(),
     renderInitialPrompt: () => agent.renderInitialPrompt(),
   };
 }

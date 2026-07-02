@@ -107,7 +107,7 @@ function buildMathAgent() {
 
   const mission = new Mission({
     objective: "Help users with math calculations using the provided tools",
-    success_criteria: ["Correct answers", "Tools used appropriately"],
+    successCriteria: ["Correct answers", "Tools used appropriately"],
   });
 
   return new AgentBuilder(role).withMission(mission).build();
@@ -127,7 +127,7 @@ describe.skipIf(shouldSkip)("ClaudeCodeRunner integration", () => {
       expect(agent.role.name).toBe("math-assistant");
       expect(agent.getModel()).toBe("sonnet");
       expect(agent.getTools().map((t) => t.name)).toEqual(["add", "multiply"]);
-      expect(agent.getSystemPrompt().length).toBeGreaterThan(100);
+      expect(agent.renderInitialPrompt().length).toBeGreaterThan(100);
 
       // Set up event bus to capture events
       const events: AgentEvent[] = [];
@@ -209,9 +209,9 @@ describe("ClaudeCodeRunner unit (no SDK)", () => {
     expect(agent.getTools()[1]!.name).toBe("multiply");
 
     // System prompt includes all primitives
-    const prompt = agent.getSystemPrompt();
+    const prompt = agent.renderInitialPrompt();
     expect(prompt).toContain("math assistant");
-    expect(prompt).toContain("mathematics");
+    expect(prompt).toContain("Use the provided tools for all calculations");
     expect(prompt).toContain("Perform Calculations");
   });
 

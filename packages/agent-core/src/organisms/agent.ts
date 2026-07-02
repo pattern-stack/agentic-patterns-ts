@@ -25,6 +25,20 @@ import {
 } from "../rendering/index.js";
 import { type Role, RoleSchema } from "./role.js";
 
+/**
+ * One rendered prompt section with provenance.
+ *
+ * `source` says which side of the Agent product contributed the section:
+ * - "role" — identity/boundaries/capabilities/methodology come from the Role
+ * - "instance" — context/mission come from the instantiation (Background,
+ *   Awareness, Mission)
+ */
+export interface AgentPromptSectionData {
+  name: string;
+  source: "role" | "instance";
+  text: string;
+}
+
 export const AgentSchema = z.object({
   role: RoleSchema,
   background: BackgroundSchema.default({}),
@@ -91,38 +105,8 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
     );
   }
 
-  /**
-   * Generate full system prompt with runtime context (inline rendering).
-   *
-   * Sections:
-   * 1. Role system prompt (identity, responsibilities, judgments, guidance, tools)
-   * 2. Background (team context, project context, conventions, current state)
-   * 3. Awareness (available information sources)
-   * 4. Mission (current objective)
-   */
-  getSystemPrompt(): string {
-    const sections: string[] = [this.role.renderSystemPrompt()];
-
-    // Background
-    const backgroundPrompt = this.background.toPrompt();
-    if (backgroundPrompt) {
-      sections.push(backgroundPrompt);
-    }
-
-    // Awareness
-    const awarenessPrompt = this.awareness.toPrompt();
-    if (awarenessPrompt) {
-      sections.push(awarenessPrompt);
-    }
-
-    // Mission
-    sections.push(this.mission.toPrompt());
-
-    return sections.join("\n\n");
-  }
-
   toPrompt(): string {
-    return this.getSystemPrompt();
+    return this.renderInitialPrompt();
   }
 
   /**
@@ -131,8 +115,31 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
    * Includes all sections. Use when agent has no conversation history.
    */
   renderInitialPrompt(): string {
+    return this.renderSections()
+      .map((section) => section.text)
+      .join("\n\n");
+  }
+
+  /**
+   * Render the initial prompt as ordered sections with provenance.
+   *
+   * Mirrors PromptRenderer.renderInitial() exactly — same section order,
+   * same non-empty filtering — so joining the texts with "\n\n" reproduces
+   * renderInitialPrompt() verbatim (renderInitialPrompt delegates here).
+   */
+  renderSections(): AgentPromptSectionData[] {
     const renderer = this._buildRenderer();
-    return renderer.renderInitial();
+    const sections: Array<[{ name: string; render(): string }, "role" | "instance"]> = [
+      [renderer.identity, "role"],
+      [renderer.boundaries, "role"],
+      [renderer.capabilities, "role"],
+      [renderer.context, "instance"],
+      [renderer.mission, "instance"],
+      [renderer.methodology, "role"],
+    ];
+    return sections
+      .map(([section, source]) => ({ name: section.name, source, text: section.render() }))
+      .filter((section) => section.text !== "");
   }
 
   /**
@@ -151,12 +158,12 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
    */
   private _buildRenderer(): PromptRenderer {
     return new PromptRenderer(
-      new IdentitySection(this.role.persona, [...this.role.responsibilities]),
-      new BoundariesSection([...this.role.judgments]),
+      new IdentitySection(this.role.persona, [...this.role.responsibilities], this.role.tone),
+      new BoundariesSection([...this.role.judgments], this.role.recovery),
       new CapabilitiesSection([...this.role.capabilities]),
       new ContextSection(this.background, this.awareness),
       new MissionSection(this.mission),
-      new MethodologySection([...this.role.judgments]),
+      new MethodologySection([...this.role.judgments], this.role.methodology),
     );
   }
 }

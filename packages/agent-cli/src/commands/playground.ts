@@ -101,6 +101,8 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     name: reg.name,
     description: reg.description,
     agent: reg.agent,
+    file: reg.file,
+    provenance: reg.provenance,
     runner,
   }));
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
@@ -202,7 +204,7 @@ function resolveDashboardDir(): string | null {
  * Known API route prefixes — any GET that matches one of these is never
  * rewritten to `index.html`. Keep in sync with `createServer()` routes.
  */
-const API_PREFIXES = ["/agents", "/conversations", "/admin", "/health"];
+const API_PREFIXES = ["/agents", "/roles", "/capabilities", "/conversations", "/admin", "/health"];
 
 function isApiPath(pathname: string): boolean {
   return API_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
