@@ -41,6 +41,7 @@ import {
   isModelResolver,
 } from "../providers/model-resolver.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
+import { guardOpenObjectSchemas } from "./schema-guard.js";
 import type {
   AgentLike,
   RunOptions,
@@ -651,6 +652,13 @@ export class AgentRunner implements RunnerProtocol {
     schema: ZodType<T>,
     options?: RunOptions,
   ): Promise<StructuredRunResult<T>> {
+    // Fail LOUD before any LLM call: open-object schemas (z.record /
+    // .passthrough() / .catchall() / z.map) silently decode to {} on
+    // schema-subset providers (Gemini responseSchema, OpenAI strict).
+    // See schema-guard.ts; RunOptions.allowOpenObjectSchemas downgrades
+    // the error to a once-per-schema warning.
+    guardOpenObjectSchemas(schema, options?.allowOpenObjectSchemas);
+
     if (options?.eventBus) {
       this._eventBus = options.eventBus;
     }

@@ -5,6 +5,11 @@ export {
 } from "./agent-runner.js";
 export type { AgentLike } from "./agent-runner.js";
 export { convertHistory } from "./message-utils.js";
+export {
+  OpenObjectSchemaError,
+  collectOpenObjectPaths,
+  guardOpenObjectSchemas,
+} from "./schema-guard.js";
 export type {
   RunResult,
   StructuredRunResult,

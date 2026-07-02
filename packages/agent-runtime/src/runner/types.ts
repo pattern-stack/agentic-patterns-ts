@@ -114,6 +114,17 @@ export interface RunOptions {
   traceId?: string;
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
+  /**
+   * Allow open-object nodes (z.record / .passthrough() / .catchall() / z.map)
+   * in a `runStructured` schema. Default `false`: the runner THROWS before any
+   * LLM call, because schema-subset providers silently decode open objects to
+   * `{}` (Gemini's responseSchema conversion drops `additionalProperties`;
+   * OpenAI strict mode prohibits open maps). Set `true` only if your provider
+   * genuinely supports open objects — the guard then warns once per schema
+   * instead. Portable remedy: carry free-form objects as a JSON-encoded string
+   * field and decode after parsing (the wire-seam pattern).
+   */
+  allowOpenObjectSchemas?: boolean;
 }
 
 // ---------------------------------------------------------------------------
