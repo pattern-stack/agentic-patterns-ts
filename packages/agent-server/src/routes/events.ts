@@ -39,6 +39,11 @@ export function eventRoutes(eventStore: EventStore | undefined, eventBus?: Agent
     let published = 0;
     for (const ev of list) {
       if (ev && typeof ev === "object" && typeof (ev as { type?: unknown }).type === "string") {
+        // JSON has no Date type — rehydrate `timestamp` to a real Date so the
+        // SSE formatter and exporters treat forwarded events like in-process ones.
+        const rec = ev as Record<string, unknown>;
+        const t = rec.timestamp ? new Date(rec.timestamp as string) : new Date();
+        rec.timestamp = Number.isNaN(t.getTime()) ? new Date() : t;
         await eventBus.publish(ev as Parameters<AgentEventBus["publish"]>[0]);
         published += 1;
       }

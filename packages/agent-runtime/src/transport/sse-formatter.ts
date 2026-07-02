@@ -264,10 +264,17 @@ export class SSEFormatter {
   format(event: AgentEvent): string | null {
     const mapping = toSSEMapping(event);
     if (!mapping) return null;
+    // Events forwarded over HTTP (cross-process) arrive as JSON — `timestamp` is
+    // a string or absent, not a Date. Coerce defensively so a forwarded event
+    // never throws here (the bus would silently swallow it → dead SSE stream).
+    const ts =
+      event.timestamp instanceof Date
+        ? event.timestamp
+        : new Date((event.timestamp as unknown as string) ?? Date.now());
     const enriched = {
       ...mapping.payload,
       traceId: event.traceId,
-      timestamp: event.timestamp.toISOString(),
+      timestamp: (Number.isNaN(ts.getTime()) ? new Date() : ts).toISOString(),
     };
     return `event: ${mapping.name}\ndata: ${JSON.stringify(enriched)}\n\n`;
   }

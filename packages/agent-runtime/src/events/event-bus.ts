@@ -131,8 +131,11 @@ export class EventBus {
       try {
         const r = entry.handler(processed);
         results.push(r instanceof Promise ? await r : r);
-      } catch (_err) {
-        // Continue executing other handlers (matches Python behavior)
+      } catch (err) {
+        // Continue executing other handlers (matches Python behavior), but surface
+        // the failure — a silently-swallowed handler throw is near-impossible to
+        // debug (e.g. an exporter dying on one event → a permanently empty stream).
+        console.warn(`[EventBus] handler for "${processed.type}" threw:`, err);
       }
     }
 

@@ -213,7 +213,22 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     const matchedEnv = provider.envVars.find((v) => process.env[v]);
     if (matchedEnv) {
       const resolved = resolveModelId(provider, modelId, tier);
-      const model = await provider.load(resolved);
+      let model: LanguageModelV2;
+      try {
+        model = await provider.load(resolved);
+      } catch (err) {
+        // The provider has a key in env but its `@ai-sdk/*` package isn't
+        // installed (a common case: OPENAI_API_KEY present only for embeddings,
+        // while the LLM provider is something else). Skip it and fall through
+        // to the next available provider instead of hard-failing the whole run.
+        if (verbose) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(
+            `[createRunner] skipping ${name} (env ${matchedEnv}): ${msg}\n`,
+          );
+        }
+        continue;
+      }
       return log(verbose, {
         runner: new AgentRunner(model, opts.eventBus),
         reason: `using ${name} (env ${matchedEnv}, model=${resolved})`,

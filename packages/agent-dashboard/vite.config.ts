@@ -29,16 +29,21 @@ const htmlNavBypass = (
   return null;
 };
 
+// API server to proxy to — override with API_PROXY when the server runs off :3456.
+const apiTarget = process.env.API_PROXY ?? "http://localhost:3456";
+
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Default off Vite's 5173 (commonly taken). Override with DASHBOARD_PORT.
+    port: Number(process.env.DASHBOARD_PORT ?? 5273),
     proxy: {
-      "/admin": { target: "http://localhost:3456", bypass: htmlNavBypass },
-      "/conversations": { target: "http://localhost:3456", bypass: htmlNavBypass },
-      "/messages": { target: "http://localhost:3456", bypass: htmlNavBypass },
-      "/agents": { target: "http://localhost:3456", bypass: htmlNavBypass },
-      "/hooks": { target: "http://localhost:3456", bypass: htmlNavBypass },
-      "/health": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/admin": { target: apiTarget, bypass: htmlNavBypass },
+      "/conversations": { target: apiTarget, bypass: htmlNavBypass },
+      "/messages": { target: apiTarget, bypass: htmlNavBypass },
+      "/agents": { target: apiTarget, bypass: htmlNavBypass },
+      "/hooks": { target: apiTarget, bypass: htmlNavBypass },
+      "/health": { target: apiTarget, bypass: htmlNavBypass },
     },
   },
 });
