@@ -36,6 +36,18 @@ export const AgentSchema = z.object({
 export type AgentData = z.infer<typeof AgentSchema>;
 
 /**
+ * One rendered section of the initial system prompt, tagged with whether it
+ * comes from the reusable Role (`"role"`) or the situated instance
+ * (`"instance"` — background/awareness/mission). Consumed by introspection
+ * surfaces (the Playground lens) to attribute prompt text back to its source.
+ */
+export interface AgentPromptSectionData {
+  readonly name: string;
+  readonly source: "role" | "instance";
+  readonly text: string;
+}
+
+/**
  * Instantiated agent entity.
  *
  * Agent = Role x Background x Awareness x Mission
@@ -131,8 +143,32 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
    * Includes all sections. Use when agent has no conversation history.
    */
   renderInitialPrompt(): string {
+    return this.renderSections()
+      .map((section) => section.text)
+      .join("\n\n");
+  }
+
+  /**
+   * Render the initial prompt as attributed sections instead of a joined
+   * string. Mirrors the exact section set, order, and empty-filtering of
+   * {@link renderInitialPrompt} (which delegates here), so the invariant
+   * `renderSections().map(s => s.text).join("\n\n") === renderInitialPrompt()`
+   * holds by construction. Section `source` marks role- vs instance-derived
+   * content for the Playground lens.
+   */
+  renderSections(): AgentPromptSectionData[] {
     const renderer = this._buildRenderer();
-    return renderer.renderInitial();
+    const sections: Array<[{ name: string; render(): string }, "role" | "instance"]> = [
+      [renderer.identity, "role"],
+      [renderer.boundaries, "role"],
+      [renderer.capabilities, "role"],
+      [renderer.context, "instance"],
+      [renderer.mission, "instance"],
+      [renderer.methodology, "role"],
+    ];
+    return sections
+      .map(([section, source]) => ({ name: section.name, source, text: section.render() }))
+      .filter((section) => section.text !== "");
   }
 
   /**

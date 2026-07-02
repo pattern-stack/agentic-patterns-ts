@@ -30,12 +30,15 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { glob } from "tinyglobby";
 import { register } from "tsx/esm/api";
+import type { AgentProvenance } from "./provenance.js";
 
 // Register tsx as the ESM loader globally — once per process. After this,
 // Node's regular dynamic import() handles `.ts` files transparently AND
 // resolves bare specifiers from the importing file's location like normal.
+// Exported for provenance.ts, which dynamic-imports library/local modules
+// through the same loader.
 let _tsxRegistered = false;
-function ensureTsxRegistered(): void {
+export function ensureTsxRegistered(): void {
   if (_tsxRegistered) return;
   register();
   _tsxRegistered = true;
@@ -50,6 +53,8 @@ export interface DiscoveredAgent {
   readonly agent: any;
   /** Absolute path to the source file (for `ap agents` rendering). */
   readonly file: string;
+  /** Per-slot provenance (preset/library/local/inline), attached post-discovery. */
+  readonly provenance?: AgentProvenance;
 }
 
 interface RegistrationWrapper {
