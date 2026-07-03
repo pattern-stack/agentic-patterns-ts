@@ -33,6 +33,16 @@ export {
   createScratchpad,
 } from "./slot.js";
 
+export {
+  type DepKey,
+  type DepReader,
+  type DepsBuilder,
+  DepRegistry,
+  MissingDependencyError,
+  depKey,
+  provideDeps,
+} from "./deps.js";
+
 export type { Consolidate } from "./consolidate.js";
 
 export {

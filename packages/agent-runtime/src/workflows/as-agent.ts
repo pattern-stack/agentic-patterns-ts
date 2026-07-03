@@ -22,6 +22,7 @@ import type { AgentEvent } from "../events/types.js";
 import { createEvent } from "../events/types.js";
 import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunOptions, RunResult, RunnerProtocol } from "../runner/types.js";
+import type { DepReader } from "./deps.js";
 import type { Node, NodeRunContext } from "./node.js";
 import { createScratchpad } from "./slot.js";
 
@@ -58,6 +59,13 @@ export type PromoteOptions<TIn, TOut> = {
   readonly role: RoleInput;
   readonly model?: string;
   readonly renderOut?: (out: TOut) => string;
+  /**
+   * Deps bound at promotion time — `NodeBackedRunner.run()` sets these on the
+   * `NodeRunContext` it builds, so every nested leaf in the promoted pipeline
+   * reads them with no closures. Per-request deps (a different registry per
+   * chat turn via `RunOptions`) is deliberately deferred (mirrors #97).
+   */
+  readonly deps?: DepReader;
 } & (TIn extends string
   ? { readonly coerceIn?: (message: string) => TIn }
   : { readonly coerceIn: (message: string) => TIn });
@@ -72,6 +80,8 @@ export interface PromotedAgent<TIn, TOut> extends AgentLike {
   readonly __promotedNode: Node<TIn, TOut>;
   readonly coerceIn: (message: string) => TIn;
   readonly renderOut: (out: TOut) => string;
+  /** Deps bound at promotion time (see {@link PromoteOptions.deps}). */
+  readonly deps?: DepReader;
 }
 
 const DEFAULT_MODEL = "sonnet";
@@ -119,6 +129,7 @@ export function asAgent<TIn, TOut>(
     __promotedNode: node,
     coerceIn,
     renderOut,
+    deps: opts.deps,
   };
 
   return Object.freeze(promoted);
@@ -169,6 +180,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       toolExecutor: options?.toolExecutor,
       traceId: options?.traceId,
       scratchpad: createScratchpad(),
+      deps: agent.deps,
     };
 
     const input = agent.coerceIn(message);

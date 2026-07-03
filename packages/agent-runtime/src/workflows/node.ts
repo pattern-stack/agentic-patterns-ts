@@ -12,6 +12,7 @@
 
 import type { RunResult, RunnerProtocol, ToolExecutor } from "../runner/types.js";
 import type { PatternHooks } from "./base.js";
+import type { DepReader } from "./deps.js";
 import type { Scratchpad } from "./slot.js";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,14 @@ export interface NodeRunContext {
    * touch scratchpad).
    */
   readonly scratchpad?: Scratchpad;
+  /**
+   * User-supplied dependencies (clients, resolvers, loggers), keyed by
+   * `DepKey<T>` (`deps.ts`). OPTIONAL: injected once at the root and shared by
+   * reference across the whole node tree (combinators carry it via
+   * `{ ...ctx }`). Existing callers that pass `{ runner }` keep compiling and
+   * behave identically (they never read deps).
+   */
+  readonly deps?: DepReader;
 }
 
 // ---------------------------------------------------------------------------
