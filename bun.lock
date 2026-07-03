@@ -12,7 +12,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -38,7 +38,7 @@
     },
     "packages/agent-core": {
       "name": "@agentic-patterns/core",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "zod": "^3.23.0",
         "zod-to-json-schema": "^3.24.0",
@@ -75,7 +75,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.6.2",
+      "version": "0.7.0",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/provider": "^2.0.0",
@@ -111,7 +111,7 @@
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@agentic-patterns/runtime": "workspace:^",
@@ -630,7 +630,7 @@
 
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
-    "electron-to-chromium": ["electron-to-chromium@1.5.384", "", {}, "sha512-g6KAKY1vkYsADvSPWvdJsuYT0ixdcu6lUtD9P/wJKGBEDlZVXh2AX42j1mPqqaQPDluWjara9ziQ7xqAeXCt5A=="],
+    "electron-to-chromium": ["electron-to-chromium@1.5.385", "", {}, "sha512-78sa/M08MNAYHQfjoWMvOlKQqZ0ElhSm/L5HNUc96VZ3b+KvDVnngFm8sYQy0XrhTRgAhggHr5abA7yTvRdo4Q=="],
 
     "emoji-regex": ["emoji-regex@8.0.0", "", {}, "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="],
 
@@ -942,7 +942,7 @@
 
     "negotiator": ["negotiator@1.0.0", "", {}, "sha512-8Ofs/AUQh8MaEcrlq5xOX0CQ9ypTF5dl78mjlMNfOK08fzpgTHQRQPBxcPlEtIw0yRpws+Zo/3r+5WRby7u3Gg=="],
 
-    "node-abi": ["node-abi@3.93.0", "", { "dependencies": { "semver": "^7.3.5" } }, "sha512-Cu6yUpX5Iavugm8BeX7c0wgU9CvOqfd1yM6A1d2q2ZMjym7GjpASv2GdRcTq3Fx+Sb5OgBkEEpw4VnAbY6Y5RA=="],
+    "node-abi": ["node-abi@3.94.0", "", { "dependencies": { "semver": "^7.3.5" } }, "sha512-W5ZNO5KRPB5TkYmGVD9F6YqhsglXJzE6etpbmT+f6EQElhiX/UTG551cnsRGvLG3fyZEg9HwaDmNmj5nwJ4z9g=="],
 
     "node-releases": ["node-releases@2.0.50", "", {}, "sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg=="],
 
