@@ -85,11 +85,34 @@ function isAgentShape(x: unknown): boolean {
   );
 }
 
-/** A registration wrapper is `{ agent: <Agent-shaped>, … }` (not an Agent itself). */
+/**
+ * Structural `AgentLike` check — recognizes a promoted `Node` (`asAgent()`,
+ * `@agentic-patterns/runtime` `workflows/as-agent.ts`) alongside a full core
+ * Agent. Same duck-type rationale as {@link isAgentShape}: `instanceof` is
+ * unreliable across the built-`dist/` module boundary. `role:{name}` plus
+ * `getModel`/`getSystemPrompt`/`renderInitialPrompt` all being functions is a
+ * fingerprint distinctive enough not to collide with a full core Agent (which
+ * ALSO satisfies this — the two checks are non-exclusive, deliberately) or a
+ * random object.
+ */
+export function isAgentLikeShape(x: unknown): boolean {
+  if (!x || typeof x !== "object") return false;
+  const a = x as Record<string, unknown>;
+  return (
+    typeof a.role === "object" &&
+    a.role !== null &&
+    typeof (a.role as Record<string, unknown>).name === "string" &&
+    typeof a.getModel === "function" &&
+    typeof a.getSystemPrompt === "function" &&
+    typeof a.renderInitialPrompt === "function"
+  );
+}
+
+/** A registration wrapper is `{ agent: <Agent- or AgentLike-shaped>, … }` (not an Agent itself). */
 function asWrapper(x: unknown): RegistrationWrapper | null {
   if (!x || typeof x !== "object") return null;
   const w = x as RegistrationWrapper;
-  return isAgentShape(w.agent) ? w : null;
+  return isAgentShape(w.agent) || isAgentLikeShape(w.agent) ? w : null;
 }
 
 /**
@@ -131,7 +154,7 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
     if (!value || typeof value !== "object") continue;
 
     const wrapper = asWrapper(value);
-    const isAgent = wrapper === null && isAgentShape(value);
+    const isAgent = wrapper === null && (isAgentShape(value) || isAgentLikeShape(value));
     if (!wrapper && !isAgent) continue; // not an agent, not a registration → skip
 
     const agent = wrapper ? wrapper.agent : value;

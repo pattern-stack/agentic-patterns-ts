@@ -11,9 +11,11 @@
 
 import {
   Conversation,
+  NodeBackedRunner,
   createRunner,
   createToolboxExecutor,
   getAgentEventBus,
+  isPromotedAgent,
 } from "@agentic-patterns/runtime";
 import type { AgentEvent } from "@agentic-patterns/runtime";
 import { isCancel, text } from "@clack/prompts";
@@ -47,7 +49,10 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
   }
 
   const eventBus = getAgentEventBus();
-  const { runner } = await createRunner({ eventBus, verbose: false });
+  const { runner: llmRunner } = await createRunner({ eventBus, verbose: false });
+  // A promoted registration (asAgent()) runs its node instead of LLM-looping;
+  // the shared LLM runner still drives any nested AgentSteps as its inner runner.
+  const runner = isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner) : llmRunner;
 
   const conversation = new Conversation(reg.agent, runner, {
     toolExecutor: createToolboxExecutor(reg.agent),

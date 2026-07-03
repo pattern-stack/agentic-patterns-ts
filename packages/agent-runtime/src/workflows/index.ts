@@ -42,6 +42,15 @@ export {
 } from "./agent-step.js";
 
 export {
+  type RoleInput,
+  type PromoteOptions,
+  type PromotedAgent,
+  asAgent,
+  isPromotedAgent,
+  NodeBackedRunner,
+} from "./as-agent.js";
+
+export {
   type FunctionStepSpec,
   FunctionStep,
 } from "./function-step.js";
