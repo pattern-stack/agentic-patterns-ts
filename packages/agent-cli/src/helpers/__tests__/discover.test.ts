@@ -10,7 +10,12 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { discoverAgents, inferIdentity, loadAgentsFromFile } from "../discover.js";
+import {
+  discoverAgents,
+  inferIdentity,
+  isAgentLikeShape,
+  loadAgentsFromFile,
+} from "../discover.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FX = path.join(HERE, "__fixtures__");
@@ -53,6 +58,55 @@ describe("loadAgentsFromFile — accepted export shapes", () => {
     // `boom` throws if called — its presence must not break discovery.
     const found = await loadAgentsFromFile(path.join(agents, "safe/agent.mjs"), FX);
     expect(found.map((a) => a.id)).toEqual(["safe"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AgentLike discoverability (isAgentLikeShape / asAgent() promotion, issue #97)
+// ---------------------------------------------------------------------------
+
+describe("isAgentLikeShape", () => {
+  it("accepts an AgentLike-shaped object (role.name + getModel/getSystemPrompt/renderInitialPrompt)", () => {
+    expect(
+      isAgentLikeShape({
+        role: { name: "Pipe" },
+        getModel: () => "sonnet",
+        getSystemPrompt: () => "",
+        renderInitialPrompt: () => "",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a bare { role: { name } } with no methods", () => {
+    expect(isAgentLikeShape({ role: { name: "just-a-name" } })).toBe(false);
+  });
+
+  it("rejects non-objects", () => {
+    expect(isAgentLikeShape(null)).toBe(false);
+    expect(isAgentLikeShape(42)).toBe(false);
+  });
+});
+
+describe("loadAgentsFromFile — AgentLike (promoted-Node) discoverability", () => {
+  it("a promoted-shaped direct export is discovered via isAgentLikeShape", async () => {
+    const [a] = await loadAgentsFromFile(path.join(agents, "promoted/agent.mjs"), FX);
+    expect(a).toMatchObject({ id: "promoted" });
+    expect(a?.agent.role.name).toBe("Promoted Pipe");
+  });
+
+  it("a promoted-shaped agent inside a registration wrapper is discovered", async () => {
+    const [a] = await loadAgentsFromFile(path.join(agents, "promoted-wrapped/agent.mjs"), FX);
+    expect(a).toMatchObject({ id: "wrapped-promoted", name: "Wrapped Promoted" });
+  });
+
+  it("no regression — a full core Agent (isAgentShape) still discovers unchanged", async () => {
+    const [a] = await loadAgentsFromFile(path.join(agents, "calc/agent.mjs"), FX);
+    expect(a).toMatchObject({ id: "calc", name: "Calc" });
+  });
+
+  it("negative case — an object satisfying neither shape is skipped, siblings still found", async () => {
+    const found = await loadAgentsFromFile(path.join(agents, "near-miss/agent.mjs"), FX);
+    expect(found.map((a) => a.id)).toEqual(["real"]);
   });
 });
 

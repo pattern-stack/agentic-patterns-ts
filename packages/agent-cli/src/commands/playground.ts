@@ -22,10 +22,12 @@ import {
   AgentEventBus,
   InMemoryAdminService,
   InMemoryEventCollector,
+  NodeBackedRunner,
   SQLiteExporter,
   SSEExporter,
   createRunner,
   createToolboxExecutor,
+  isPromotedAgent,
   loadEventStore,
 } from "@agentic-patterns/runtime";
 import type { EventStore } from "@agentic-patterns/runtime";
@@ -90,12 +92,14 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     tier: (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet",
     verbose: false,
   });
-  const { runner } = selection;
+  const { runner: llmRunner } = selection;
 
   // -------------------------------------------------------------------------
   // 3. Attach runner to each registration
   // -------------------------------------------------------------------------
 
+  // A promoted registration (asAgent()) runs its node instead of LLM-looping;
+  // the shared LLM runner still drives any nested AgentSteps as its inner runner.
   const registrations: AgentRegistration[] = opts.agents.map((reg) => ({
     id: reg.id,
     name: reg.name,
@@ -103,7 +107,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     agent: reg.agent,
     file: reg.file,
     provenance: reg.provenance,
-    runner,
+    runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner) : llmRunner,
   }));
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
   // the conversation route already builds executors per request.
