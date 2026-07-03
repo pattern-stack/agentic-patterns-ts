@@ -100,6 +100,10 @@ export {
   type LoopExitReason,
   type LoopResult,
   Loop,
+  type AccumulatingLoopSpec,
+  type AccumulatingLoopStepInput,
+  type AccumulatingLoopResult,
+  AccumulatingLoop,
 } from "./loop.js";
 
 export {
