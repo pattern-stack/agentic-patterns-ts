@@ -31,6 +31,15 @@ export interface NodeRunContext {
   readonly toolExecutor?: ToolExecutor;
   readonly traceId?: string;
   /**
+   * The invoking tool call's span id, when this node is being run as a
+   * sub-workflow (agent-as-tool / CoordinatorStep / a promoted pipeline)
+   * (#102). Nests this node's `agent.tool.*` events under the parent call's
+   * span so nested sub-agent activity is attributable in Live/Tools/Graph
+   * views instead of forming an orphan trace. OPTIONAL / engine-defaulted:
+   * absent → today's behavior (no nesting), preserving the back-compat hinge.
+   */
+  readonly parentSpanId?: string;
+  /**
    * The shared scoped-slot store (the Scratchpad, §6/§7). OPTIONAL: when absent the
    * engine lazily constructs an empty store at the top-level `run()` call. Existing
    * callers that pass `{ runner }` keep compiling and behave identically (they never

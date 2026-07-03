@@ -19,7 +19,7 @@
  * gate-allow regression test in agent-runner.test.ts) will be bypassed.
  */
 
-import type { ToolSchema } from "@agentic-patterns/core";
+import type { ToolExecutionContext, ToolSchema } from "@agentic-patterns/core";
 import type { LanguageModelV2 } from "@ai-sdk/provider";
 import {
   type ModelMessage,
@@ -182,6 +182,48 @@ export class AgentRunner implements RunnerProtocol {
       this.eventBus.unsubscribe("agent.tool.rejected", onRejected);
     }
     return !blocked;
+  }
+
+  /**
+   * Build the bus-bound {@link ToolExecutionContext} handed to `toolExecutor.execute`
+   * at each dispatch site (#102). Single adapter so the three call sites don't drift.
+   *
+   * `parentSpanId` reuses the invoking tool call's own span id (`tcSpanId`, the
+   * `spanId` stamped on that call's `agent.tool.start`) as the nesting anchor —
+   * NOT a separate field. A tool call's span IS the parent span for anything it
+   * spawns (a nested sub-agent's events, or this ctx's own `emit` progress
+   * pings); do not "fix" this into a distinct `parentToolCallId`-derived span.
+   */
+  private buildToolCtx(a: {
+    traceId: string;
+    runId: string;
+    parentToolCallId: string;
+    parentSpanId: string;
+  }): ToolExecutionContext {
+    return {
+      runId: a.runId,
+      traceId: a.traceId,
+      parentToolCallId: a.parentToolCallId,
+      // Channel B (secondary): a non-agent tool's only progress-reporting path.
+      // Fire-and-forget — never let a tool author await bus/gate plumbing, and
+      // never let a publish failure surface into the tool's own execution.
+      emit: (e) => {
+        void this.eventBus
+          .publish(
+            createEvent("agent.tool.progress", {
+              traceId: a.traceId,
+              runId: a.runId,
+              parentSpanId: a.parentSpanId,
+              toolCallId: a.parentToolCallId,
+              statusText: typeof e.data?.statusText === "string" ? e.data.statusText : e.type,
+              progress: typeof e.data?.progress === "number" ? e.data.progress : undefined,
+            }),
+          )
+          .catch(() => {
+            // Swallow — emit is a best-effort sink (#99's non-throw contract).
+          });
+      },
+    };
   }
 
   /**
@@ -469,6 +511,12 @@ export class AgentRunner implements RunnerProtocol {
               toolResult = await toolExecutor.execute(
                 tc.toolName,
                 tc.input as Record<string, unknown>,
+                this.buildToolCtx({
+                  traceId: effectiveTraceId,
+                  runId,
+                  parentToolCallId: tc.toolCallId,
+                  parentSpanId: tcSpanId,
+                }),
               );
             } else {
               toolResult = { error: "No tool executor configured" };
@@ -612,7 +660,16 @@ export class AgentRunner implements RunnerProtocol {
           let errorMsg: string | undefined;
           try {
             if (toolExecutor) {
-              toolResult = await toolExecutor.execute(toolName, args);
+              toolResult = await toolExecutor.execute(
+                toolName,
+                args,
+                this.buildToolCtx({
+                  traceId: ctx.traceId,
+                  runId: ctx.runId,
+                  parentToolCallId: intent.toolCallId,
+                  parentSpanId: tcSpanId,
+                }),
+              );
             } else {
               toolResult = { error: "No tool executor configured" };
               errorMsg = "No tool executor configured";
@@ -1214,7 +1271,16 @@ export class AgentRunner implements RunnerProtocol {
 
         try {
           if (toolExecutor) {
-            toolResult = await toolExecutor.execute(tc.toolName, tc.args);
+            toolResult = await toolExecutor.execute(
+              tc.toolName,
+              tc.args,
+              this.buildToolCtx({
+                traceId: effectiveTraceId,
+                runId,
+                parentToolCallId: tc.toolCallId,
+                parentSpanId: tcSpanId,
+              }),
+            );
           } else {
             toolResult = { error: "No tool executor configured" };
             errorMsg = "No tool executor configured";

@@ -106,6 +106,7 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
       toolExecutor: ctx.toolExecutor,
       maxIterations: this.spec.maxIterations,
       traceId: ctx.traceId,
+      parentSpanId: ctx.parentSpanId,
     };
 
     try {

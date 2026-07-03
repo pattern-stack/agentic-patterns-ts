@@ -179,6 +179,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       runner: this.inner,
       toolExecutor: options?.toolExecutor,
       traceId: options?.traceId,
+      parentSpanId: options?.parentSpanId,
       scratchpad: createScratchpad(),
       deps: agent.deps,
     };
