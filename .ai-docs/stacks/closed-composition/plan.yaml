@@ -1,0 +1,141 @@
+plan:
+  slug: closed-composition
+  summary: Close the Agent/Node composition asymmetry — add asAgent(), Node DI, tool-exec context, eval, retry, and loop-accumulator so a chain of agents is itself an agent
+  milestone: closed-composition
+
+  epic_title: "Closed composition — Agent as a projection of Node"
+  epic_body: |
+    The framework has two top-level runnable shapes that never unify: `Agent`
+    (conversational, identity-bearing, discoverable, eval-able) and `Node<TIn,TOut>`
+    (the typed composition primitive). The bridge is one-directional — `AgentStep`
+    turns an Agent into a Node, but nothing turns a Node back into an Agent. So a
+    composed pipeline can execute but cannot be talked to, discovered, or eval'd.
+    Every sprawl file in the consumer repo (canvas-workstation `query-surface/workflow/`)
+    traces back to this one asymmetry: `playground.ts` (496 lines) hand-wraps a Node
+    as a chat Agent; `structured-retry.ts` re-implements retry; `escalate.ts`
+    hand-rolls Loop-with-merge; deps arrive by closure everywhere.
+
+    This stack lands the keystone (`asAgent()` — promote any Node to an `AgentLike`)
+    plus the five follow-ons the design doc sequences behind it: Node dependency
+    injection through `NodeRunContext`, tool-execution context so nested sub-agents
+    emit onto the parent event bus, a first-class eval primitive over both Agent and
+    Node, Node-native bounded retry, and Loop-with-accumulator. Design + diagnosis:
+    `docs/closed-composition.md`. Non-goals: do not rewrite `Node`; keep the Role
+    algebra/lens/provenance; no ADK-style loose shared-dict state.
+
+issues:
+  - key: "97"
+    key_original: asagent-adapter
+    title: "asAgent(): promote any Node<TIn,TOut> to an AgentLike (keystone)"
+    depends_on: []
+    parallel_with: ["98", "99", "100", "101"]
+    labels: []
+    description: |
+      Add `asAgent(node, { role, coerceIn, renderOut })` to runtime workflows: wraps a
+      Node with a Role identity and synthesizes the `AgentLike` surface (`role`,
+      `getModel()`, `renderInitialPrompt()`, ...) per `runner/types.ts:25`. Model the
+      reverse of `agent-step.ts`. Discovery (`discover.ts` `isAgentShape`) and server
+      must pick up a promoted pipeline with no new machinery — verify, don't rebuild.
+
+      Acceptance:
+      - `Sequential(...).build()` promoted via `asAgent({ role })` is discoverable by `ap` CLI, chattable via server/playground, and runnable by AgentRunner
+      - Typed coercion seams: message→TIn and TOut→message are explicit options with sane string defaults
+      - Unit tests cover promotion of Sequential + AgentStep round-trip (Agent→Node→Agent)
+
+  - key: "98"
+    key_original: node-di
+    title: "Node dependency injection — user-dep channel on NodeRunContext"
+    depends_on: []
+    parallel_with: ["97"]
+    labels: []
+    description: |
+      `NodeRunContext` (`workflows/node.ts`) carries framework infra (runner, hooks,
+      toolExecutor, scratchpad) but no user-dependency channel — so consumer builders
+      thread deps (clients, resolvers, logs) by closure. Add a typed deps channel that
+      flows through composition (Sequential/Parallel/FanOut/Loop/CoordinatorStep) to
+      every leaf.
+
+      Acceptance:
+      - A dep injected at run() root is readable inside a nested FunctionStep/AgentStep without closures
+      - Type-safe access pattern documented; existing Node implementations unaffected (additive)
+
+  - key: "99"
+    key_original: tool-exec-core
+    title: "core: optional ToolExecutionContext on ToolDefinition.execute"
+    depends_on: []
+    parallel_with: ["97", "102"]
+    labels: []
+    description: |
+      Add an optional context param to `ToolDefinition.execute` in
+      `agent-core/src/molecules/toolbox.ts`: `{ emit, runId, traceId, parentToolCallId }`.
+      Core stays vendor-neutral — `emit` is a minimal event-sink interface, not
+      runtime's `AgentEventBus`. Backward compatible: existing executes ignore it.
+
+      Acceptance:
+      - `Toolbox.execute(name, args, ctx?)` passes ctx through; omitting ctx keeps all existing tests green
+      - Sink type defined in core with no runtime import
+
+  - key: "102"
+    key_original: tool-exec-runtime
+    title: "runtime: thread eventBus into tool execution; child→parent bus propagation"
+    depends_on: ["99"]
+    parallel_with: []
+    labels: []
+    description: |
+      Thread the run's `eventBus` from `agent-runner.ts` → `toolbox-executor.ts` →
+      `toolbox.execute(name, args, ctx)`. Fix the general case: `node-tool.ts` and
+      `coordinator-step.ts` currently have no child→parent bus propagation — nested
+      sub-agents (pipeline, CoordinatorStep, agent-as-tool) must emit onto the parent
+      bus so their tool calls surface in chat/Live/Tools/Graph.
+
+      Acceptance:
+      - A sub-agent invoked via agent-as-tool or CoordinatorStep emits events visible on the parent run's bus
+      - Playground shows nested tool calls for a promoted pipeline (manual verify + event-level unit test)
+
+  - key: "103"
+    key_original: eval-primitive
+    title: "First-class eval — typed cases-in/scores-out over Agent and Node"
+    depends_on: ["97"]
+    parallel_with: []
+    labels: []
+    description: |
+      A typed-contract eval primitive that runs on both `Agent` and `Node` (cases in,
+      scores out), promoting canvas-workstation's `__bench__/eval-*.ts` pattern into
+      the framework. Because asAgent closes composition, one eval surface covers
+      individual agents and whole chains uniformly — the "tune each against individual
+      evals" ask, made native.
+
+      Acceptance:
+      - Eval runs against a bare Node, a bare Agent, and an asAgent-promoted pipeline with the same API
+      - Case/score types are Zod-schema'd per project convention; results consumable programmatically
+
+  - key: "100"
+    key_original: node-retry
+    title: "Node-native bounded retry"
+    depends_on: []
+    parallel_with: ["97", "101"]
+    labels: []
+    description: |
+      A retry combinator/wrapper for any `Node`: bounded attempts, predicate on
+      failure/NodeResult, optional backoff. Deletes the consumer's
+      `structured-retry.ts` (whose own header says "UPSTREAM ... deletes this file").
+
+      Acceptance:
+      - Retry wraps any Node; retries on thrown error or failed NodeResult per predicate; respects max attempts
+      - canvas-workstation structured-retry.ts use case reproducible with the primitive (test mirrors it)
+
+  - key: "101"
+    key_original: loop-accumulator
+    title: "Loop-with-accumulator — fold state between iterations"
+    depends_on: []
+    parallel_with: ["97", "100"]
+    labels: []
+    description: |
+      Loop currently has no way to fold/merge state across iterations (Scratchpad
+      exists for FanOut merges — give Loop the same). Add an accumulator seam:
+      initial value + per-iteration merge, exposed to the loop body and returned on
+      exit. Halves the consumer's hand-rolled `escalate.ts` (260 lines).
+
+      Acceptance:
+      - Loop supports init + fold(acc, iterationResult) and exposes acc to the condition/body
+      - escalate.ts merge pattern reproducible with the primitive (test mirrors it)
