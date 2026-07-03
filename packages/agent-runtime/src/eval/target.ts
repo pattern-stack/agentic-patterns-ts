@@ -75,13 +75,22 @@ export function resolveEvalTarget<TIn, TOut>(
   }
   if (isAgentLikeShape(target)) {
     // Bare-Agent adapter is string-in only in v1 (spec § Decisions #3 / Open
-    // questions): wrap in the existing AgentStep bridge with `prompt: (i) =>
-    // String(i)`. A non-string TIn agent eval needs a custom prompt builder —
-    // deferred (`promptFor?` extension, not v1).
+    // questions): wrap in the existing AgentStep bridge. A non-string TIn
+    // agent eval needs a custom prompt builder — deferred (`promptFor?`
+    // extension, not v1). FAIL LOUD on non-string input rather than silently
+    // stringifying an object to "[object Object]" (a poisoned, garbage eval
+    // case that would otherwise look like a normal run).
     const node = new AgentStep<string, string>({
       name: target.role.name,
       agent: target,
-      prompt: (input) => String(input),
+      prompt: (input) => {
+        if (typeof input !== "string") {
+          throw new Error(
+            `Eval agent target requires string input (got ${typeof input}); wrap non-string pipelines via asAgent or use a Node target.`,
+          );
+        }
+        return input;
+      },
     });
     return { node: node as unknown as Node<TIn, TOut>, kind: "agent" };
   }

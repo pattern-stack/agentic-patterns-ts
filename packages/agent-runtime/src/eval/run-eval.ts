@@ -19,7 +19,13 @@ import type { PatternHooks } from "../workflows/base.js";
 import { createScratchpad } from "../workflows/slot.js";
 import type { Scorer } from "./scorer.js";
 import { type EvalTarget, resolveEvalTarget } from "./target.js";
-import type { EvalCase, EvalReport, EvalResult, Score } from "./types.js";
+import {
+  type EvalCase,
+  EvalCaseSchema,
+  type EvalReport,
+  type EvalResult,
+  type Score,
+} from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Spec / context
@@ -157,6 +163,19 @@ export async function runEval<TIn, TOut, TExpected = unknown>(
   spec: EvalSpec<TIn, TOut, TExpected>,
   ctx: EvalRunContext,
 ): Promise<EvalReport<TIn, TOut, TExpected>> {
+  // Validate every case ENVELOPE (id/tags — input/expected stay z.unknown()
+  // passthrough, the caller owns those shapes) up front, before any node runs.
+  // A malformed case must fail fast at the boundary — reject the whole
+  // runEval() call — rather than flow bad keys into onResult/the report.
+  for (let i = 0; i < spec.cases.length; i++) {
+    const parsed = EvalCaseSchema.safeParse(spec.cases[i]);
+    if (!parsed.success) {
+      throw new Error(
+        `runEval: invalid case envelope at index ${i} (id=${String((spec.cases[i] as { id?: unknown } | undefined)?.id)}): ${parsed.error.message}`,
+      );
+    }
+  }
+
   const { node, kind } = resolveEvalTarget(spec.target);
 
   const agg = newAggregate();
