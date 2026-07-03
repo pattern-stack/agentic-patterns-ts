@@ -103,6 +103,18 @@ export {
 } from "./loop.js";
 
 export {
+  type RetryFailure,
+  type RetryPredicate,
+  type RetryBackoff,
+  type RetrySpec,
+  type RetryExitReason,
+  type RetryResult,
+  Retry,
+  retry,
+  computeDelay,
+} from "./retry.js";
+
+export {
   buildWorkflowFromConfig,
   compileMessageTemplate,
   type BuildWorkflowOptions,
