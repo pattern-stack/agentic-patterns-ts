@@ -247,7 +247,11 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
     expect(result.response).toBe("outer done");
     expect(leafToolRan).toBe(true);
 
-    // The outer's own tool.start for calling "child".
+    // The outer's own tool.start for calling "child" — the RESOLVED span the
+    // child run should nest under (its `spanId`, not the `toolCallId` string
+    // in isolation — #102 fix: `agent.tool.start` is stamped with
+    // `spanId: toolCallId`, so these coincide, but the test must prove the
+    // JOIN resolves to a real span rather than baking in the string).
     const outerToolStart = captured.find(
       (e) =>
         e.type === "agent.tool.start" && (e as { toolCallId: string }).toolCallId === "outer-tc-1",
@@ -256,17 +260,14 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
     const outerTraceId = outerToolStart?.traceId;
 
     // The child run's root event (message.start) — one hop of ancestry: its
-    // parentSpanId IS the outer's invoking `toolCallId` ("outer-tc-1"), NOT a
-    // freshly-generated spanId. Per #102 Decision §3 (Gate-1 confirmed): the
-    // ToolExecutionContext exposes only `parentToolCallId` (never a bus-level
-    // spanId — core stays vendor-neutral), and node-tool.ts reuses THAT as the
-    // nesting anchor — the tool call's id IS its parent span for this purpose.
+    // parentSpanId resolves to the outer's invoking tool call's ACTUAL spanId
+    // (not a string literal baked into the test).
     const childMessageStart = captured.find(
       (e) => e.type === "agent.message.start" && (e as { agentName: string }).agentName === "child",
     );
     expect(childMessageStart).toBeDefined();
     expect(childMessageStart?.traceId).toBe(outerTraceId);
-    expect(childMessageStart?.parentSpanId).toBe("outer-tc-1");
+    expect(childMessageStart?.parentSpanId).toBe(outerToolStart?.spanId);
     const childRootSpanId = childMessageStart?.spanId;
 
     // The child's OWN tool.start/tool.end (for "leaf_tool") — NOT an orphan
@@ -294,5 +295,20 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
     expect(childIterStart).toBeDefined();
     expect(childIterStart?.parentSpanId).toBe(childRootSpanId);
     expect(childToolStart?.parentSpanId).toBe(childIterStart?.spanId);
+
+    // Reconstruction assertion: build a spanId-keyed map of EVERY captured
+    // event (mirroring how a real span exporter, e.g. otel.ts, resolves
+    // parentage — `_spans.get(event.parentSpanId)`) and assert every event
+    // with a `parentSpanId` resolves to a KNOWN span in the whole trace. No
+    // orphan roots anywhere in the nested tree.
+    const spansById = new Map(captured.map((e) => [e.spanId, e]));
+    for (const e of captured) {
+      if (e.parentSpanId !== undefined) {
+        expect(
+          spansById.has(e.parentSpanId),
+          `event ${e.type} (spanId=${e.spanId}) has parentSpanId=${e.parentSpanId} which resolves to no captured span — orphan root`,
+        ).toBe(true);
+      }
+    }
   });
 });
