@@ -33,10 +33,12 @@ export function useAdminData<T>(path: string, intervalMs = 5000): UseAdminDataRe
     mountedRef.current = true;
     setLoading(true);
     load();
-    const id = setInterval(load, intervalMs);
+    // intervalMs <= 0 → one-shot fetch (static data, e.g. the BUILD-door
+    // composition views); positive → poll on that cadence.
+    const id = intervalMs > 0 ? setInterval(load, intervalMs) : undefined;
     return () => {
       mountedRef.current = false;
-      clearInterval(id);
+      if (id !== undefined) clearInterval(id);
     };
   }, [load, intervalMs]);
 
