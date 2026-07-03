@@ -298,7 +298,7 @@ result.exitReason;     // "exit_phrase" | "max_exchanges" | "error"
 result.exchangeCount;  // number of exchanges completed
 ```
 
-Integrates with `ConversationStoreProtocol` for persistence via `MemoryStore`.
+Integrates with `ConversationStore` for persistence via `InMemoryConversationStore`.
 
 ### Transport (`src/transport/`)
 
@@ -338,10 +338,10 @@ await runtime.stop();
 Conversation state management with structured persistence.
 
 ```typescript
-import { Conversation, MemoryStore } from "@agentic-patterns/runtime";
+import { Conversation, InMemoryConversationStore } from "@agentic-patterns/runtime";
 
 // In-memory persistence
-const store = new MemoryStore();
+const store = new InMemoryConversationStore();
 
 const convo = new Conversation("conv-123", "agent-name", { store });
 convo.addExchange({
@@ -354,11 +354,11 @@ convo.addExchange({
 });
 ```
 
-`ConversationStoreProtocol` provides full CRUD for conversations, messages, and message parts:
+`ConversationStore` provides full CRUD for conversations, messages, and message parts:
 - `createConversation()`, `getConversation()`, `updateConversation()`
 - `addMessage()`, `getMessages()`, `getMessageParts()`
 
-`MemoryStore` is the built-in in-memory implementation. Implement `ConversationStoreProtocol` for database-backed persistence.
+`InMemoryConversationStore` is the built-in in-memory implementation. Implement `ConversationStore` for database-backed persistence.
 
 ### Exporters (`src/exporters/`)
 

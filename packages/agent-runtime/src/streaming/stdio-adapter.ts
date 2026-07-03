@@ -8,8 +8,8 @@
 
 import * as readline from "node:readline";
 import {
-  type ConversationStoreProtocol,
-  MemoryStore,
+  type ConversationStore,
+  InMemoryConversationStore,
   type StoredConversation,
 } from "../conversation/store.js";
 import type { AgentEvent } from "../events/types.js";
@@ -50,18 +50,18 @@ export class StdioAdapter {
   private _agents: AgentLike[];
   private _agentMap: Map<string, AgentLike>;
   private _runner: RunnerProtocol;
-  private _store: ConversationStoreProtocol;
+  private _store: ConversationStore;
   private _conversations = new Map<string, StoredConversation>();
 
   constructor(opts: {
     agents: AgentLike[];
     runner: RunnerProtocol;
-    store?: ConversationStoreProtocol;
+    store?: ConversationStore;
   }) {
     this._agents = opts.agents;
     this._agentMap = new Map(opts.agents.map((a) => [a.role.name, a]));
     this._runner = opts.runner;
-    this._store = opts.store ?? new MemoryStore();
+    this._store = opts.store ?? new InMemoryConversationStore();
   }
 
   /** Start reading JSON-RPC from stdin, writing to stdout. */

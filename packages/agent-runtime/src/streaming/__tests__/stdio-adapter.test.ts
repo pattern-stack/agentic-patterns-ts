@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryStore } from "../../conversation/store.js";
+import { InMemoryConversationStore } from "../../conversation/store.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import type { AgentLike, RunnerProtocol } from "../../runner/types.js";
 import { StdioAdapter } from "../stdio-adapter.js";
@@ -21,7 +21,7 @@ function makeAgent(name: string): AgentLike {
 function makeAdapter(opts?: {
   agents?: AgentLike[];
   runner?: RunnerProtocol;
-  store?: MemoryStore;
+  store?: InMemoryConversationStore;
 }) {
   const agents = opts?.agents ?? [makeAgent("agent-1")];
   const runner =
@@ -53,7 +53,7 @@ describe("StdioAdapter", () => {
     });
 
     it("createConversation creates a new conversation", async () => {
-      const store = new MemoryStore();
+      const store = new InMemoryConversationStore();
       const adapter = makeAdapter({ store });
 
       const res = await adapter.handleRequest({
@@ -85,7 +85,7 @@ describe("StdioAdapter", () => {
 
     it("sendMessage streams events as notifications", async () => {
       const runner = new MockRunner().addResponse("*", { content: "Hello!" });
-      const store = new MemoryStore();
+      const store = new InMemoryConversationStore();
       const adapter = makeAdapter({ runner: runner as RunnerProtocol, store });
 
       // Create conversation first
@@ -116,7 +116,7 @@ describe("StdioAdapter", () => {
     });
 
     it("listConversations returns conversations created via adapter", async () => {
-      const store = new MemoryStore();
+      const store = new InMemoryConversationStore();
       const adapter = makeAdapter({ store });
 
       // Create a conversation through the adapter so it tracks the ID
@@ -137,7 +137,7 @@ describe("StdioAdapter", () => {
     });
 
     it("getConversation returns a specific conversation", async () => {
-      const store = new MemoryStore();
+      const store = new InMemoryConversationStore();
       const adapter = makeAdapter({ store });
 
       // Create via adapter

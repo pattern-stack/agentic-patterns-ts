@@ -1,5 +1,5 @@
 /**
- * ConversationStoreProtocol — structured persistence for conversations.
+ * ConversationStore — structured persistence for conversations.
  *
  * Ported from Python: systems/stores/base.py
  */
@@ -56,7 +56,7 @@ export interface StoredMessagePart {
 // ---------------------------------------------------------------------------
 
 /** Structured conversation persistence protocol. */
-export interface ConversationStoreProtocol {
+export interface ConversationStore {
   createConversation(agentName: string, model: string): Promise<StoredConversation>;
 
   getConversation(conversationId: string): Promise<StoredConversation | null>;
@@ -87,11 +87,11 @@ export interface ConversationStoreProtocol {
 }
 
 // ---------------------------------------------------------------------------
-// MemoryStore
+// InMemoryConversationStore
 // ---------------------------------------------------------------------------
 
-/** In-memory implementation of ConversationStoreProtocol. */
-export class MemoryStore implements ConversationStoreProtocol {
+/** In-memory implementation of ConversationStore. */
+export class InMemoryConversationStore implements ConversationStore {
   private _conversations = new Map<string, StoredConversation>();
   private _messages = new Map<string, StoredMessage[]>();
   private _parts = new Map<string, StoredMessagePart[]>();

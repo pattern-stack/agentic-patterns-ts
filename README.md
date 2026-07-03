@@ -343,7 +343,7 @@ Capability = Toolbox + Manual + Playbook
 | 8 | runtime | `src/transport/` | InProcessTransport, MessagingToolbox |
 | 9 | runtime | `src/runtime/` | AgentNode, AgencyRuntime |
 | 10 | runtime | `src/workflows/` | Sequential, Parallel, TaskLoop, EvaluatorLoop, RetryLoop, ConversationLoop |
-| 11 | runtime | `src/conversation/` | Conversation, ConversationStoreProtocol, MemoryStore |
+| 11 | runtime | `src/conversation/` | Conversation, ConversationStore, InMemoryConversationStore |
 | 12 | runtime | `src/exporters/` | Console, Langfuse, OpenTelemetry |
 | 13 | runtime | `src/presets/` | Pre-built roles, judgments, responsibilities |
 

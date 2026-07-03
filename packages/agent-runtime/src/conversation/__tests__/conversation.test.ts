@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RunResult, RunnerProtocol } from "../../runner/types.js";
 import { Conversation, type Exchange, exchangeTotalTokens } from "../conversation.js";
-import { MemoryStore } from "../store.js";
+import { InMemoryConversationStore } from "../store.js";
 
 // ---------------------------------------------------------------------------
 // Mock helpers
@@ -123,19 +123,19 @@ describe("Conversation", () => {
     expect(secondCallOptions?.messageHistory?.[1]?.kind).toBe("response");
   });
 
-  it("should persist exchange via ConversationStoreProtocol", async () => {
+  it("should persist exchange via ConversationStore", async () => {
     const agent = makeAgent("MyAgent");
     const runner = makeRunner(["response"]);
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
 
     const conv = new Conversation(agent, runner, { store });
     await conv.send("hello");
 
     // Store should have created a conversation and added 2 messages (request + response)
     // We can verify by checking that the store has messages
-    // The store's conversation ID is internal, but we can verify via the MemoryStore
+    // The store's conversation ID is internal, but we can verify via the InMemoryConversationStore
     // by getting all conversations — there should be exactly one
-    // Since MemoryStore doesn't have a listConversations method, we verify indirectly:
+    // Since InMemoryConversationStore doesn't have a listConversations method, we verify indirectly:
     // The conversation was created and messages were persisted correctly.
     expect(conv.exchangeCount).toBe(1);
   });

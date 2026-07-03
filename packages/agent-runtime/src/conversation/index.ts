@@ -7,9 +7,9 @@ export {
   type ToolCallRecord,
 } from "./conversation.js";
 
-export { MemoryStore } from "./store.js";
+export { InMemoryConversationStore } from "./store.js";
 export type {
-  ConversationStoreProtocol,
+  ConversationStore,
   StoredConversation,
   StoredMessage,
   StoredMessagePart,
