@@ -1,3 +1,6 @@
+task_management: github    # tracker adapter
+repo: pattern-stack/agentic-patterns-ts
+
 language: typescript
 runtime: node              # Node.js >= 20, bun monorepo
 bundler: tsup              # ESM + CJS dual output
@@ -6,3 +9,19 @@ linter: biome              # Format + lint in one tool
 schema_lib: zod            # Schema validation and type inference
 quality_profile: strict
 commit_style: conventional
+
+# === Per-phase model policy ===
+# Resolved at spawn time (same channel as gate1_default): the spawner passes
+# `model: <value>` over each agent's frontmatter default. Aliases: fable | opus
+# | sonnet | haiku (or a full model ID). Unset a key to use the agent's default.
+#   Fable  — orchestration + planning + spec authoring
+#   Opus   — review, critique, validation
+#   Sonnet — implementation
+phase_models:
+  understander: fable
+  planner:      fable
+  specifier:    fable
+  coordinator:  opus
+  reviewer:     opus
+  validator:    opus
+  implementer:  sonnet
