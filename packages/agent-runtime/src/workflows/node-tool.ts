@@ -14,6 +14,7 @@ import { type ZodType, type ZodTypeAny, z } from "zod";
 import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunnerProtocol } from "../runner/types.js";
 import { AgentStep } from "./agent-step.js";
+import type { DepReader } from "./deps.js";
 import type { Node } from "./node.js";
 import { type Scratchpad, createScratchpad } from "./slot.js";
 
@@ -36,6 +37,14 @@ export function nodeTool<TIn>(
   spec: NodeToolSpec<TIn>,
   runner: RunnerProtocol,
   scratchpad?: Scratchpad,
+  /**
+   * Explicit dependency injection for the wrapped node. `nodeTool` re-roots
+   * the context (it's a root builder, not a spread site), so parent deps do
+   * NOT automatically flow across this tool-execution boundary — pass them
+   * here if the wrapped node needs them. Automatic parent→child propagation
+   * across the agent-as-tool seam is scoped to #99/#102.
+   */
+  deps?: DepReader,
 ): ToolDefinition {
   return {
     description: spec.description,
@@ -46,6 +55,7 @@ export function nodeTool<TIn>(
       const result = await spec.node.run(input, {
         runner,
         scratchpad: scratchpad ?? createScratchpad(),
+        deps,
       });
       if (!result.succeeded) {
         return { error: result.error?.message ?? "sub-workflow failed" };
@@ -75,6 +85,8 @@ export class NodeToolbox extends Toolbox {
     runner: RunnerProtocol;
     /** Shared slot store across calls; a fresh one is minted per call when omitted. */
     scratchpad?: Scratchpad;
+    /** Explicit dependency injection forwarded to every wrapped node's `nodeTool()` call. */
+    deps?: DepReader;
     // biome-ignore lint/suspicious/noExplicitAny: heterogeneous tool registry (per-tool typed at the spec)
     tools: Record<string, NodeToolSpec<any>>;
   }) {
@@ -84,7 +96,7 @@ export class NodeToolbox extends Toolbox {
     this.tools = Object.fromEntries(
       Object.entries(opts.tools).map(([toolName, spec]) => [
         toolName,
-        nodeTool(spec, opts.runner, opts.scratchpad),
+        nodeTool(spec, opts.runner, opts.scratchpad, opts.deps),
       ]),
     );
   }
@@ -123,7 +135,7 @@ export interface SubagentSpec {
 export function delegateTo(
   runner: RunnerProtocol,
   subagents: ReadonlyArray<SubagentSpec>,
-  opts?: { name?: string; description?: string; scratchpad?: Scratchpad },
+  opts?: { name?: string; description?: string; scratchpad?: Scratchpad; deps?: DepReader },
 ): NodeToolbox {
   const tools: Record<string, NodeToolSpec<{ task: string }>> = {};
   for (const sub of subagents) {
@@ -146,6 +158,7 @@ export function delegateTo(
     description: opts?.description ?? "Delegate a task to the right specialist subagent.",
     runner,
     scratchpad: opts?.scratchpad,
+    deps: opts?.deps,
     tools,
   });
 }
