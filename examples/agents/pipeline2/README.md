@@ -23,11 +23,18 @@ agent — `asAgent()` promotion is what makes that true.
 
 ## The hierarchy this example maps onto
 
+Built **inside out** — read top-to-bottom as construction order, NOT as
+nesting (the outermost thing `ap` actually sees is the promoted `Agent` at
+the bottom; the `Role` at the top is the innermost primitive it's built from):
+
 ```
 Role (Persona + Judgment + Responsibility)      subagents/curator.ts
-  └─ Subagent (curatorAgent, an AgentStep leaf)  subagents/curator.ts  (live mode only)
-      └─ SequentialAgent (fetch → curate → respond)   agent.ts
-          └─ Agent (asAgent() promotion)              agent.ts (default export)
+  built into ↓
+Subagent (curatorAgent, an AgentStep leaf)      subagents/curator.ts  (live mode only)
+  nested in ↓
+SequentialAgent (fetch → curate → respond)      agent.ts
+  promoted to ↓
+Agent (asAgent() promotion)                     agent.ts (default export — what `ap` discovers)
 ```
 
 `Role x Mission` composition (the same primitives any top-level agent uses)
@@ -42,7 +49,7 @@ builds the `curate` subagent. `agent.ts` wires that subagent into a
 |---|---|
 | `agent.ts` | `Sequential` + `.then()` typed seams; `FunctionStep` (fetch, respond); `retry()`; `provideDeps()`; `asAgent()` promotion + default export (the discoverable agent) |
 | `deps.ts` | `depKey` — the DI channel for the in-memory tip catalog, read via `ctx.deps` with no closures |
-| `subagents/curator.ts` | `slot`/Scratchpad-adjacent `AgentStep` leaf: a real `RoleBuilder`/`AgentBuilder` agent, live-gated behind `AP_EXAMPLE_LIVE`, with a deterministic `FunctionStep` fallback |
+| `subagents/curator.ts` | `AgentStep` leaf built from a real `RoleBuilder`/`AgentBuilder` agent, live-gated behind `AP_EXAMPLE_LIVE`, with a deterministic `FunctionStep` fallback (no `slot`/Scratchpad here — that lives in `agent.ts`) |
 | `README.md` | this file |
 
 ## Primitive-by-primitive map

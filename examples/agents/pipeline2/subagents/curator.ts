@@ -65,6 +65,9 @@ function buildCuratorAgent() {
 
 /** Deterministic fallback used when `AP_EXAMPLE_LIVE` is unset — no model call. */
 function fallbackCurate(tips: readonly Tip[]): string {
+  if (tips.length === 0) {
+    return "No tips matched that topic — try `testing` or `typescript`.";
+  }
   return tips
     .slice(0, 3)
     .map((t) => `• ${t.text}`)

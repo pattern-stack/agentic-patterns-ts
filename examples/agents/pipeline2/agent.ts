@@ -7,13 +7,17 @@
  *   AP_EXAMPLE_LIVE=1 ap playground examples   # live: curate is a real AgentStep
  *
  * Hierarchy this example demonstrates end to end (see README.md for the
- * primitive-by-primitive map):
+ * primitive-by-primitive map). Built INSIDE OUT — read bottom-up, the
+ * direction construction actually happens in:
  *
  *   Role (Persona+Judgment+Responsibility, subagents/curator.ts)
- *     -> Subagent (curatorAgent, wrapped as an AgentStep leaf, live mode only)
- *       -> SequentialAgent (this file: fetch -> curate -> respond)
- *         -> Agent (asAgent() below promotes the pipeline itself, so `ap`
- *            discovers and chats with it exactly like a hand-written agent)
+ *     built into -> Subagent (curatorAgent, wrapped as an AgentStep leaf, live mode only)
+ *       nested in -> SequentialAgent (this file: fetch -> curate -> respond)
+ *         promoted to -> Agent (asAgent() below promotes the pipeline itself, so
+ *            `ap` discovers and chats with it exactly like a hand-written agent)
+ *
+ * i.e. the OUTERMOST thing `ap` sees is the promoted Agent; the Role is the
+ * INNERMOST primitive it's built from — not the other way around.
  *
  * This is the "shop window": pipeline wiring + promotion only. The domain
  * data + DI key live in `deps.ts`; the one LLM leaf lives in
@@ -53,10 +57,16 @@ const fetchTips = new FunctionStep<string, Tip[]>({
     if (scratchpad.get(attemptSlot) === 1) {
       throw new Error("catalog cold — transient");
     }
-    const catalog = ctx.deps?.get(catalogKey);
-    if (!catalog) {
-      throw new Error("catalog dep not provided");
+    // `ctx.deps` is only OPTIONAL because a bare node can be `.run()` directly
+    // without going through `asAgent()`'s promotion (which is what actually
+    // binds it) — that "no deps at all" case is distinct from "deps were
+    // bound but this key wasn't", so it gets its own explicit guard here.
+    if (!ctx.deps) {
+      throw new Error("no deps bound — run this pipeline via the asAgent()-promoted export");
     }
+    // `DepReader.get()` never returns undefined: it throws `MissingDependencyError`
+    // if `catalogKey` was never provided via `provideDeps()` — no truthy-guard needed.
+    const catalog = ctx.deps.get(catalogKey);
     return catalog.query(topic);
   },
 });
