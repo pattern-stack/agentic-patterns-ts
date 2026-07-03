@@ -374,6 +374,35 @@ describe("AgentRunner.stream()", () => {
 
     const convEnd = events.find((e) => e.type === "agent.conversation.end");
     expect(convEnd).toBeDefined();
+
+    // #117: max-iterations now yields a terminal message.complete before
+    // conversation.end (previously silent on this path).
+    const types = eventTypes(events);
+    const completeIdx = types.indexOf("agent.message.complete");
+    const convEndIdx = types.indexOf("agent.conversation.end");
+    expect(completeIdx).toBeGreaterThan(-1);
+    expect(convEndIdx).toBeGreaterThan(completeIdx);
+
+    const complete = events.find((e) => e.type === "agent.message.complete");
+    expect((complete as { finishReason?: string }).finishReason).toBe("max_iterations");
+  });
+
+  // #117: message.start now carries systemPrompt + agentConfig on stream(),
+  // for parity with run()/runStructured() (previously agentName only).
+  it("stamps systemPrompt + agentConfig on message.start", async () => {
+    const model = new MockLanguageModelV2({
+      doStream: streamFrom([...textParts("Hi"), finishPart("stop", 5, 2)]),
+    });
+
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent();
+
+    const events = await collectStream(runner.stream(agent, "Hi"));
+    const start = events.find((e) => e.type === "agent.message.start");
+
+    expect((start as { systemPrompt?: string }).systemPrompt).toBe("You are a helpful assistant.");
+    expect((start as { agentConfig?: { role: string } }).agentConfig?.role).toBe("test-agent");
   });
 
   // ---------------------------------------------------------------------------

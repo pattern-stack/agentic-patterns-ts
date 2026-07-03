@@ -263,6 +263,34 @@ describe("AgentRunner", () => {
       expect(result.toolCallsCount).toBe(3);
       expect(result.response).toBe("");
     });
+
+    // #117: the max-iterations exit now emits a terminal message.complete
+    // (previously silent) — a bus-finish hook has nothing to finalize on
+    // otherwise and the run row would stay 'running' forever.
+    it("should emit a terminal message.complete with finishReason max_iterations", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult({ toolCallId: "tc-loop", toolName: "infinite_tool", input: {} }, 5, 3),
+      });
+
+      const toolSchema = z.object({});
+      const tools = [ToolSchema.fromZod("infinite_tool", "Never stops", toolSchema)];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const executor = makeToolExecutor(async () => "still going");
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+
+      await runner.run(agent, "Go!", { toolExecutor: executor, maxIterations: 3 });
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect(complete).toBeDefined();
+      expect((complete as { content: string }).content).toBe("");
+      expect((complete as { finishReason?: string }).finishReason).toBe("max_iterations");
+      expect((complete as { inputTokens: number }).inputTokens).toBe(15); // 5 * 3
+      expect((complete as { outputTokens: number }).outputTokens).toBe(9); // 3 * 3
+    });
   });
 
   describe("parallel tool execution", () => {
@@ -332,6 +360,29 @@ describe("AgentRunner", () => {
         "agent.iteration.end",
         "agent.message.complete",
       ]);
+    });
+
+    // #117: message.start now carries the rendered system prompt (no other
+    // event does), and message.complete carries the authoritative finishReason.
+    it("should stamp systemPrompt on message.start and finishReason on message.complete", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult("Done!", 10, 5),
+      });
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const agent = makeAgent();
+      const runner = new AgentRunner(model, bus);
+
+      await runner.run(agent, "Hello");
+
+      const start = events.find((e) => e.type === "agent.message.start");
+      expect((start as { systemPrompt?: string }).systemPrompt).toBe(
+        "You are a helpful assistant.",
+      );
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect((complete as { finishReason?: string }).finishReason).toBe("stop");
     });
 
     it("should emit tool events for tool calls", async () => {
@@ -753,6 +804,32 @@ describe("AgentRunner", () => {
       expect(result.object).toEqual({ weather: "sunny" });
       expect(capturedCtx).toHaveLength(1);
       expect(capturedCtx[0]?.host).toBe(sentinelHost);
+    });
+  });
+
+  // #117: message.start now carries systemPrompt (mirroring run()), and
+  // message.complete carries the authoritative finishReason.
+  describe("runStructured() event stamping (#117)", () => {
+    it("stamps systemPrompt on message.start and finishReason on message.complete", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
+      });
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const agent = makeAgent();
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ ok: z.boolean() });
+
+      await runner.runStructured(agent, "Hello", schema);
+
+      const start = events.find((e) => e.type === "agent.message.start");
+      expect((start as { systemPrompt?: string }).systemPrompt).toBe(
+        "You are a helpful assistant.",
+      );
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect((complete as { finishReason?: string }).finishReason).toBe("stop");
     });
   });
 });

@@ -85,14 +85,56 @@ CREATE INDEX IF NOT EXISTS idx_events_cc_session ON events(cc_session_id, timest
 CREATE INDEX IF NOT EXISTS idx_events_trace ON events(trace_id, timestamp) WHERE trace_id IS NOT NULL;
 `;
 
-const TARGET_SCHEMA_VERSION = 1;
+/**
+ * v2 — adds the `runs` table (#117 RunStore): one row per run, folded from
+ * the bus's message.start/llm.end/tool.end/iteration.end/message.complete
+ * lifecycle. Purely additive — a v1 events-only DB migrates in place and
+ * `EventStore`/`RunStore` stay interchangeable on the same file.
+ *
+ * Downgrade caveat (accepted, not fixed): a v2 DB opened by a pre-#117
+ * runtime's `EventStore` throws the version-mismatch error below (its
+ * `TARGET_SCHEMA_VERSION` is still 1). These DBs are retention-pruned dev
+ * telemetry, and `EventStore`/`RunStore` ship in lockstep in one package.
+ */
+const SCHEMA_V2 = `
+CREATE TABLE IF NOT EXISTS runs (
+  run_id TEXT PRIMARY KEY,
+  trace_id TEXT,
+  ts_start TEXT NOT NULL,
+  ts_end TEXT,
+  agent_name TEXT,
+  model TEXT,
+  system_prompt TEXT,
+  agent_config TEXT,
+  final_answer TEXT,
+  tool_calls INTEGER,
+  iterations INTEGER,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  finish_reason TEXT,
+  elapsed_ms INTEGER,
+  status TEXT NOT NULL,
+  error TEXT,
+  step_metrics TEXT,
+  metadata TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_runs_ts_start ON runs(ts_start);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_trace ON runs(trace_id) WHERE trace_id IS NOT NULL;
+`;
+
+const TARGET_SCHEMA_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
 
 export class EventStore {
-  private readonly _db: Database;
+  // protected (not private): RunStore extends EventStore literally — same
+  // SQLite file, same handle — and prepares its own `runs` statements against
+  // this._db in its constructor.
+  protected readonly _db: Database;
   private readonly _appendStmt: Statement;
   private readonly _recentStmt: Statement;
   private readonly _sessionEventsStmt: Statement;
@@ -254,7 +296,10 @@ export class EventStore {
       version = 1;
     }
 
-    // future: if (version < 2) { ... apply v2 migration ... ; version = 2; }
+    if (version < 2) {
+      this._db.exec(SCHEMA_V2);
+      version = 2;
+    }
 
     if (version !== TARGET_SCHEMA_VERSION) {
       throw new Error(
