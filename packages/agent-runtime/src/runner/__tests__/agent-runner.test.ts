@@ -629,4 +629,130 @@ describe("AgentRunner", () => {
       expect(result.toolCallsCount).toBe(1);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // #124 — `RunOptions.host` relay onto every `ToolExecutionContext` a
+  // dispatch site builds. `buildToolCtx` is the single copy site; each
+  // dispatch path (run()'s manual loop, runStructured()'s SDK-driven
+  // convertExecutableTools loop, stream() — covered in
+  // agent-runner-stream.test.ts) only relays `options.host` unchanged.
+  // ---------------------------------------------------------------------------
+  describe("RunOptions.host relay (#124)", () => {
+    it("run(): ctx.host === options.host on the dispatched tool call", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-host-1", toolName: "get_weather", input: { city: "NYC" } },
+              10,
+              5,
+            );
+          }
+          return textResult("sunny", 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const sentinelHost = { scratchpad: "fake-scratchpad-marker" };
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { weather: "sunny" };
+        },
+      };
+
+      const runner = new AgentRunner(model);
+      await runner.run(agent, "weather?", { toolExecutor: executor, host: sentinelHost });
+
+      expect(capturedCtx).toHaveLength(1);
+      expect(capturedCtx[0]?.host).toBe(sentinelHost);
+    });
+
+    it("run(): omitting options.host yields ctx.host === undefined (no accidental default)", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-host-2", toolName: "get_weather", input: { city: "NYC" } },
+              10,
+              5,
+            );
+          }
+          return textResult("sunny", 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { weather: "sunny" };
+        },
+      };
+
+      const runner = new AgentRunner(model);
+      await runner.run(agent, "weather?", { toolExecutor: executor });
+
+      expect(capturedCtx).toHaveLength(1);
+      expect(capturedCtx[0]?.host).toBeUndefined();
+    });
+
+    it("runStructured() (capable model → convertExecutableTools): ctx.host === options.host on the dispatched tool call", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              {
+                toolCallId: "tc-host-structured-1",
+                toolName: "get_weather",
+                input: { city: "NYC" },
+              },
+              10,
+              5,
+            );
+          }
+          return textResult(JSON.stringify({ weather: "sunny" }), 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const sentinelHost = { scratchpad: "fake-scratchpad-marker" };
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { weather: "sunny" };
+        },
+      };
+
+      const runner = new AgentRunner(model);
+      const schema = z.object({ weather: z.string() });
+      const result = await runner.runStructured(agent, "weather?", schema, {
+        toolExecutor: executor,
+        host: sentinelHost,
+      });
+
+      expect(result.object).toEqual({ weather: "sunny" });
+      expect(capturedCtx).toHaveLength(1);
+      expect(capturedCtx[0]?.host).toBe(sentinelHost);
+    });
+  });
 });

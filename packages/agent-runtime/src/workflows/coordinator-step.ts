@@ -21,6 +21,7 @@
 import { Agent, Capability, Role } from "@agentic-patterns/core";
 import type { ZodType } from "zod";
 import { createToolboxExecutor } from "../runner/toolbox-executor.js";
+import type { RunnerProtocol } from "../runner/types.js";
 import { AgentStep } from "./agent-step.js";
 import type { NodeToolbox } from "./node-tool.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
@@ -96,6 +97,9 @@ export interface CoordinatorStepSpec<TIn, TOut> {
   /** Per-step model override. Defaults to the agent's model. */
   readonly model?: string;
 
+  /** Per-node runner override (#116). Forwarded into the internal `AgentStep` leaf. */
+  readonly runner?: RunnerProtocol;
+
   /** Tool-loop budget for the routing turns. */
   readonly maxIterations?: number;
 }
@@ -128,6 +132,7 @@ export class CoordinatorStep<TIn, TOut> implements Node<TIn, TOut> {
       output: this.spec.output,
       prompt: this.spec.prompt,
       model: this.spec.model,
+      runner: this.spec.runner,
       maxIterations: this.spec.maxIterations,
     });
     return leaf.run(input, { ...ctx, toolExecutor });

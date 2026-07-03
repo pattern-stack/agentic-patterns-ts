@@ -209,11 +209,13 @@ export class AgentRunner implements RunnerProtocol {
     runId: string;
     parentToolCallId: string;
     parentSpanId: string;
+    host?: unknown;
   }): ToolExecutionContext {
     return {
       runId: a.runId,
       traceId: a.traceId,
       parentToolCallId: a.parentToolCallId,
+      host: a.host, // #124 — the single copy site
       // Channel B (secondary): a non-agent tool's only progress-reporting path.
       // Fire-and-forget — never let a tool author await bus/gate plumbing, and
       // never let a publish failure (sync OR async) surface into the tool's
@@ -543,6 +545,7 @@ export class AgentRunner implements RunnerProtocol {
                   runId,
                   parentToolCallId: tc.toolCallId,
                   parentSpanId: tcSpanId,
+                  host: options?.host,
                 }),
               );
             } else {
@@ -644,7 +647,7 @@ export class AgentRunner implements RunnerProtocol {
   private convertExecutableTools(
     agent: AgentLike,
     toolExecutor: ToolExecutor | undefined,
-    ctx: { traceId: string; runId: string; parentSpanId: string },
+    ctx: { traceId: string; runId: string; parentSpanId: string; host?: unknown },
   ): ToolSet {
     const agentTools = agent.getTools() as ToolSchema[];
     if (agentTools.length === 0) return {};
@@ -699,6 +702,7 @@ export class AgentRunner implements RunnerProtocol {
                   runId: ctx.runId,
                   parentToolCallId: intent.toolCallId,
                   parentSpanId: tcSpanId,
+                  host: ctx.host,
                 }),
               );
             } else {
@@ -808,6 +812,7 @@ export class AgentRunner implements RunnerProtocol {
         traceId: effectiveTraceId,
         runId,
         parentSpanId: rootSpanId,
+        host: options?.host,
       });
       const result = await generateText({
         model,
@@ -1314,6 +1319,7 @@ export class AgentRunner implements RunnerProtocol {
                 runId,
                 parentToolCallId: tc.toolCallId,
                 parentSpanId: tcSpanId,
+                host: options?.host,
               }),
             );
           } else {
