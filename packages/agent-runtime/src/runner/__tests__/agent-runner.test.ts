@@ -3,6 +3,7 @@
  */
 
 import { ToolSchema } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@agentic-patterns/core";
 import type { LanguageModelV2Content } from "@ai-sdk/provider";
 import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -540,6 +541,92 @@ describe("AgentRunner", () => {
       expect(error.name).toBe("ToolCallBlocked");
       expect(error.message).toBe("Tool call 'my_tool' blocked: Unsafe operation");
       expect(error).toBeInstanceOf(Error);
+    });
+  });
+
+  describe("ToolExecutionContext threading (#102, m.a)", () => {
+    it("builds a correlated ctx for each dispatched tool call", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-correlated-1", toolName: "get_weather", input: { city: "NYC" } },
+              10,
+              5,
+            );
+          }
+          return textResult("It's sunny.", 5, 5);
+        },
+      });
+
+      const weatherSchema = z.object({ city: z.string() });
+      const tools = [ToolSchema.fromZod("get_weather", "Get weather", weatherSchema)];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { weather: "sunny" };
+        },
+      };
+
+      const bus = new AgentEventBus();
+      const progressEvents: AgentEvent[] = [];
+      bus.subscribe("agent.tool.progress", (e) => progressEvents.push(e as AgentEvent));
+
+      const runner = new AgentRunner(model, bus);
+      await runner.run(agent, "weather?", { toolExecutor: executor, traceId: "trace-abc" });
+
+      expect(capturedCtx).toHaveLength(1);
+      expect(capturedCtx[0]?.traceId).toBe("trace-abc");
+      expect(capturedCtx[0]?.runId).toBeTruthy();
+      expect(capturedCtx[0]?.parentToolCallId).toBe("tc-correlated-1");
+
+      // Channel B: ctx.emit publishes a real, correlated agent.tool.progress event.
+      capturedCtx[0]?.emit?.({ type: "progress", data: { statusText: "halfway" } });
+      await Promise.resolve(); // let the fire-and-forget publish settle
+      expect(progressEvents).toHaveLength(1);
+      const progress = progressEvents[0] as unknown as {
+        toolCallId: string;
+        statusText: string;
+        traceId: string;
+      };
+      expect(progress.toolCallId).toBe("tc-correlated-1");
+      expect(progress.statusText).toBe("halfway");
+      expect(progress.traceId).toBe("trace-abc");
+    });
+
+    it("execute(name, args) with no toolExecutor ctx support still works (backward compat)", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-legacy-1", toolName: "get_weather", input: { city: "LA" } },
+              10,
+              5,
+            );
+          }
+          return textResult("It's cloudy.", 5, 5);
+        },
+      });
+      const weatherSchema = z.object({ city: z.string() });
+      const tools = [ToolSchema.fromZod("get_weather", "Get weather", weatherSchema)];
+      const agent = makeAgent({ getTools: () => tools });
+
+      // Legacy 2-arg-only executor — ignores the 3rd ctx arg entirely.
+      const legacyExecutor: ToolExecutor = {
+        execute: async (_name, args) => ({ weather: "cloudy", city: args.city }),
+      };
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "weather?", { toolExecutor: legacyExecutor });
+
+      expect(result.toolCallsCount).toBe(1);
     });
   });
 });

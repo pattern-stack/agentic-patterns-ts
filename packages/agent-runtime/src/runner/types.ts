@@ -4,6 +4,7 @@
  * Ported from Python: systems/runners/base.py
  */
 
+import type { ToolExecutionContext } from "@agentic-patterns/core";
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
@@ -70,9 +71,17 @@ export type StructuredRunResult<T> = RunResult & {
  *
  * Implementations handle the actual tool execution logic.
  * The runner calls execute() for each tool call from the LLM.
+ *
+ * `ctx` is an optional {@link ToolExecutionContext} (event sink + correlation
+ * ids) — a trailing optional param, so every existing `execute(name, args)`
+ * implementation and caller stays assignment-compatible (#102).
  */
 export interface ToolExecutor {
-  execute(name: string, args: Record<string, unknown>): Promise<unknown>;
+  execute(
+    name: string,
+    args: Record<string, unknown>,
+    ctx?: ToolExecutionContext,
+  ): Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------

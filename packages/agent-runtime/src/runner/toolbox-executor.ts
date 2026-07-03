@@ -28,13 +28,17 @@
  * newly defined here.)
  */
 
+import type { ToolExecutionContext } from "@agentic-patterns/core";
 import type { ToolExecutor } from "./types.js";
 
 /** Minimal shape — matches what Agent.role.capabilities[].toolbox exposes. */
 interface ToolboxLike {
   readonly name: string;
-  execute(name: string, args: unknown): Promise<unknown>;
-  readonly tools: Record<string, { execute: (args: Record<string, unknown>) => Promise<unknown> }>;
+  execute(name: string, args: unknown, ctx?: ToolExecutionContext): Promise<unknown>;
+  readonly tools: Record<
+    string,
+    { execute: (args: Record<string, unknown>, ctx?: ToolExecutionContext) => Promise<unknown> }
+  >;
 }
 
 /** Minimal shape — matches what Capability.playbook exposes. */
@@ -116,14 +120,19 @@ export function createToolboxExecutor(agent: AgentWithCapabilities): ToolExecuto
   }
 
   return {
-    async execute(name: string, args: Record<string, unknown>): Promise<unknown> {
+    async execute(
+      name: string,
+      args: Record<string, unknown>,
+      ctx?: ToolExecutionContext,
+    ): Promise<unknown> {
       // Toolbox tools win on name collision — check toolLookup first.
       const tb = toolLookup.get(name);
       if (tb) {
-        return tb.execute(stripPrefix(name), args);
+        return tb.execute(stripPrefix(name), args, ctx);
       }
       // Plays route through playbook.execute, which returns an { error }
-      // envelope rather than throwing.
+      // envelope rather than throwing. Plays are NOT threaded a ctx — #99
+      // scoped Playbook.execute OUT (see file docstring).
       const pb = playLookup.get(name);
       if (pb) {
         return pb.execute(stripPrefix(name), args);

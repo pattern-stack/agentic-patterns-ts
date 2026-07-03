@@ -19,7 +19,7 @@
  * gate-allow regression test in agent-runner.test.ts) will be bypassed.
  */
 
-import type { ToolSchema } from "@agentic-patterns/core";
+import type { ToolExecutionContext, ToolSchema } from "@agentic-patterns/core";
 import type { LanguageModelV2 } from "@ai-sdk/provider";
 import {
   type ModelMessage,
@@ -182,6 +182,68 @@ export class AgentRunner implements RunnerProtocol {
       this.eventBus.unsubscribe("agent.tool.rejected", onRejected);
     }
     return !blocked;
+  }
+
+  /**
+   * Build the bus-bound {@link ToolExecutionContext} handed to `toolExecutor.execute`
+   * at each dispatch site (#102). Single adapter so the three call sites don't drift.
+   *
+   * `parentSpanId` reuses the invoking tool call's own span id (`tcSpanId`, the
+   * `spanId` stamped on that call's `agent.tool.start`) as the nesting anchor —
+   * NOT a separate field. A tool call's span IS the parent span for anything it
+   * spawns (a nested sub-agent's events, or this ctx's own `emit` progress
+   * pings); do not "fix" this into a distinct `parentToolCallId`-derived span.
+   *
+   * INVARIANT (deliberate, load-bearing): `agent.tool.start` is stamped with
+   * `spanId: toolCallId` at every dispatch site — NOT a freshly-generated id.
+   * `node-tool.ts` anchors a nested sub-agent's root span at `parentSpanId ===
+   * parentToolCallId` (this ctx's `parentToolCallId`, above), and real span
+   * consumers (`exporters/otel.ts`, `exporters/langfuse.ts`) resolve parentage
+   * strictly by matching `parentSpanId` against a KNOWN `event.spanId`. Unless
+   * `tcSpanId === toolCallId` holds, the child resolves to no such span and
+   * becomes an orphan root in every exporter. Do not "fix" this back to a
+   * generated spanId — `toolCallId` IS the tool call's span id by design.
+   */
+  private buildToolCtx(a: {
+    traceId: string;
+    runId: string;
+    parentToolCallId: string;
+    parentSpanId: string;
+  }): ToolExecutionContext {
+    return {
+      runId: a.runId,
+      traceId: a.traceId,
+      parentToolCallId: a.parentToolCallId,
+      // Channel B (secondary): a non-agent tool's only progress-reporting path.
+      // Fire-and-forget — never let a tool author await bus/gate plumbing, and
+      // never let a publish failure (sync OR async) surface into the tool's
+      // own execution; the whole body is guarded, not just the promise, since
+      // `createEvent`/`publish` could throw synchronously before returning a
+      // promise to `.catch()`. NOTE: because it's fire-and-forget, a progress
+      // event may settle AFTER the tool's own `agent.tool.end` — there is no
+      // ordering guarantee between Channel B and the tool's own lifecycle.
+      emit: (e) => {
+        try {
+          void this.eventBus
+            .publish(
+              createEvent("agent.tool.progress", {
+                traceId: a.traceId,
+                runId: a.runId,
+                parentSpanId: a.parentSpanId,
+                toolCallId: a.parentToolCallId,
+                statusText: typeof e.data?.statusText === "string" ? e.data.statusText : e.type,
+                progress: typeof e.data?.progress === "number" ? e.data.progress : undefined,
+              }),
+            )
+            .catch(() => {
+              // Swallow — emit is a best-effort sink (#99's non-throw contract).
+            });
+        } catch {
+          // Swallow a SYNCHRONOUS throw too (e.g. from createEvent) — same
+          // non-throw contract as the async catch above.
+        }
+      },
+    };
   }
 
   /**
@@ -450,6 +512,13 @@ export class AgentRunner implements RunnerProtocol {
       const toolResults = await Promise.all(
         resultToolCalls.map(async (tc) => {
           const tcStart = createEvent("agent.tool.start", {
+            // #102 fix (Gate 2.5 blocker): stamp the tool call's OWN spanId
+            // with its toolCallId (not a fresh generateId()). node-tool.ts
+            // anchors a nested sub-agent's root at `parentSpanId ===
+            // parentToolCallId`; span exporters (otel.ts, langfuse.ts) key
+            // strictly by `event.spanId`, so unless `tcSpanId === toolCallId`
+            // the child resolves to no known span and becomes an orphan root.
+            spanId: tc.toolCallId,
             traceId: effectiveTraceId,
             runId,
             parentSpanId: iterSpanId,
@@ -469,6 +538,12 @@ export class AgentRunner implements RunnerProtocol {
               toolResult = await toolExecutor.execute(
                 tc.toolName,
                 tc.input as Record<string, unknown>,
+                this.buildToolCtx({
+                  traceId: effectiveTraceId,
+                  runId,
+                  parentToolCallId: tc.toolCallId,
+                  parentSpanId: tcSpanId,
+                }),
               );
             } else {
               toolResult = { error: "No tool executor configured" };
@@ -597,6 +672,10 @@ export class AgentRunner implements RunnerProtocol {
           }
 
           const tcStart = createEvent("agent.tool.start", {
+            // #102 fix: see the sibling dispatch site's comment — stamp
+            // spanId with the toolCallId so span exporters can resolve a
+            // nested sub-agent's `parentSpanId === parentToolCallId` anchor.
+            spanId: intent.toolCallId,
             traceId: ctx.traceId,
             runId: ctx.runId,
             parentSpanId: ctx.parentSpanId,
@@ -612,7 +691,16 @@ export class AgentRunner implements RunnerProtocol {
           let errorMsg: string | undefined;
           try {
             if (toolExecutor) {
-              toolResult = await toolExecutor.execute(toolName, args);
+              toolResult = await toolExecutor.execute(
+                toolName,
+                args,
+                this.buildToolCtx({
+                  traceId: ctx.traceId,
+                  runId: ctx.runId,
+                  parentToolCallId: intent.toolCallId,
+                  parentSpanId: tcSpanId,
+                }),
+              );
             } else {
               toolResult = { error: "No tool executor configured" };
               errorMsg = "No tool executor configured";
@@ -1197,6 +1285,10 @@ export class AgentRunner implements RunnerProtocol {
         }
 
         const tcStart = createEvent("agent.tool.start", {
+          // #102 fix: see the first dispatch site's comment — stamp spanId
+          // with the toolCallId so span exporters can resolve a nested
+          // sub-agent's `parentSpanId === parentToolCallId` anchor.
+          spanId: tc.toolCallId,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: iterSpanId,
@@ -1214,7 +1306,16 @@ export class AgentRunner implements RunnerProtocol {
 
         try {
           if (toolExecutor) {
-            toolResult = await toolExecutor.execute(tc.toolName, tc.args);
+            toolResult = await toolExecutor.execute(
+              tc.toolName,
+              tc.args,
+              this.buildToolCtx({
+                traceId: effectiveTraceId,
+                runId,
+                parentToolCallId: tc.toolCallId,
+                parentSpanId: tcSpanId,
+              }),
+            );
           } else {
             toolResult = { error: "No tool executor configured" };
             errorMsg = "No tool executor configured";

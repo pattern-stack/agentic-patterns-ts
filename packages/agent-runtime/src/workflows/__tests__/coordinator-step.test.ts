@@ -1,9 +1,16 @@
 import { Agent, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
+import type { ZodType } from "zod";
 import { z } from "zod";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import { createToolboxExecutor } from "../../runner/toolbox-executor.js";
+import type {
+  RunOptions,
+  RunResult,
+  RunnerProtocol,
+  StructuredRunResult,
+} from "../../runner/types.js";
 import { CoordinatorStep, withTeamCapability } from "../coordinator-step.js";
 import { delegateTo } from "../node-tool.js";
 
@@ -115,5 +122,74 @@ describe("CoordinatorStep", () => {
     const result = await author.run({ instruction: "go" }, { runner });
     expect(result.succeeded).toBe(false);
     expect(result.error).toBeInstanceOf(Error);
+  });
+
+  // ---------------------------------------------------------------------------
+  // #102 (m.b) — CoordinatorStep needs NO source change: correlation flows
+  // purely through `leaf.run(input, { ...ctx, toolExecutor })`'s existing
+  // spread, which already carries `traceId`/`parentSpanId` (#102 File-level
+  // plan: "Verify unchanged"). This test documents and proves that.
+  // ---------------------------------------------------------------------------
+  it("forwards ctx.traceId/parentSpanId into the underlying AgentStep's RunOptions via the existing spread (#102, no source change)", async () => {
+    const captured: RunOptions[] = [];
+
+    // A runner stub that records the RunOptions it was called with, so we can
+    // assert traceId/parentSpanId reached AgentStep's runner.runStructured
+    // call — without needing a real model or the 2-tier structured-output path.
+    const recordingRunner: RunnerProtocol = {
+      async run(_agent: AgentLike, _message: string, options?: RunOptions): Promise<RunResult> {
+        if (options) captured.push(options);
+        return {
+          response: "unused",
+          inputTokens: 0,
+          outputTokens: 0,
+          toolCallsCount: 0,
+          iterations: 1,
+          finishReason: "stop",
+        };
+      },
+      async runStructured<T>(
+        _agent: AgentLike,
+        _message: string,
+        _schema: ZodType<T>,
+        options?: RunOptions,
+      ): Promise<StructuredRunResult<T>> {
+        if (options) captured.push(options);
+        const object = { title: "T", sections: [] } as unknown as T;
+        return {
+          response: JSON.stringify(object),
+          inputTokens: 0,
+          outputTokens: 0,
+          toolCallsCount: 0,
+          iterations: 1,
+          finishReason: "stop",
+          object,
+        };
+      },
+    };
+
+    const team = delegateTo(recordingRunner, [
+      { agent: subagent("writer"), description: "drafts a section" },
+    ]);
+
+    const author = new CoordinatorStep<{ instruction: string }, z.infer<typeof Template>>({
+      name: "CanvasAuthor",
+      agent: coordinatorAgent(),
+      team,
+      output: Template,
+      prompt: (input) => input.instruction,
+    });
+
+    await author.run(
+      { instruction: "build the onboarding canvas" },
+      { runner: recordingRunner, traceId: "outer-trace", parentSpanId: "outer-span" },
+    );
+
+    // The coordinator's OWN AgentStep call (the runStructured routing turn)
+    // inherited traceId/parentSpanId — proving the `{ ...ctx, toolExecutor }`
+    // spread in coordinator-step.ts forwards the new #102 fields unmodified.
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured[0]?.traceId).toBe("outer-trace");
+    expect(captured[0]?.parentSpanId).toBe("outer-span");
   });
 });

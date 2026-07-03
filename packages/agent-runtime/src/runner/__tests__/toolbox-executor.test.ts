@@ -1,3 +1,4 @@
+import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
 import { createToolboxExecutor } from "../toolbox-executor.js";
 
@@ -54,6 +55,27 @@ function makeAgent(capabilities: unknown[]) {
   return { role: { name: "TestAgent", capabilities } } as Parameters<
     typeof createToolboxExecutor
   >[0];
+}
+
+/** A toolbox whose single tool records the `ctx` it received (#102). */
+function makeCtxRecordingToolbox(name: string, toolName: string) {
+  const received: (ToolExecutionContext | undefined)[] = [];
+  const toolbox = {
+    name,
+    tools: {
+      [toolName]: {
+        execute: async (args: Record<string, unknown>, ctx?: ToolExecutionContext) => {
+          received.push(ctx);
+          ctx?.emit?.({ type: "progress", data: { statusText: "x" } });
+          return { ok: true, args };
+        },
+      },
+    },
+    async execute(tn: string, args: unknown, ctx?: ToolExecutionContext) {
+      return this.tools[tn]!.execute(args as Record<string, unknown>, ctx);
+    },
+  };
+  return { toolbox, received };
 }
 
 // A capability named "deal-evidence" with a `search` tool and `gather_evidence`
@@ -170,5 +192,46 @@ describe("createToolboxExecutor — playbook play dispatch", () => {
     await expect(executor.execute("ping", {})).resolves.toBe("pong");
     // No play keys registered → unknown play still throws not-found.
     await expect(executor.execute("ghost", {})).rejects.toThrow(/not found/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #102 — ToolExecutionContext forwarding
+// ---------------------------------------------------------------------------
+
+describe("createToolboxExecutor — ToolExecutionContext forwarding (#102)", () => {
+  it("forwards ctx to a toolbox tool's execute (m.a)", async () => {
+    const { toolbox, received } = makeCtxRecordingToolbox("ctx-toolbox", "recordCtx");
+    const cap = { name: "ctx-cap", toolbox };
+    const executor = createToolboxExecutor(makeAgent([cap]));
+
+    const events: unknown[] = [];
+    const ctx: ToolExecutionContext = {
+      runId: "run-1",
+      traceId: "trace-1",
+      parentToolCallId: "tc-1",
+      emit: (e) => events.push(e),
+    };
+
+    const out = await executor.execute("recordCtx", { foo: "bar" }, ctx);
+    expect(out).toEqual({ ok: true, args: { foo: "bar" } });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.runId).toBe("run-1");
+    expect(received[0]?.traceId).toBe("trace-1");
+    expect(received[0]?.parentToolCallId).toBe("tc-1");
+
+    // The tool's ctx.emit(...) call reached the ctx we handed in.
+    expect(events).toEqual([{ type: "progress", data: { statusText: "x" } }]);
+  });
+
+  it("backward compat: execute(name, args) with no ctx still dispatches (m.a)", async () => {
+    const { toolbox, received } = makeCtxRecordingToolbox("ctx-toolbox", "recordCtx");
+    const cap = { name: "ctx-cap", toolbox };
+    const executor = createToolboxExecutor(makeAgent([cap]));
+
+    const out = await executor.execute("recordCtx", { foo: "baz" });
+    expect(out).toEqual({ ok: true, args: { foo: "baz" } });
+    expect(received).toEqual([undefined]);
   });
 });

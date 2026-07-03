@@ -1,5 +1,9 @@
+import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
+import { AgentEventBus } from "../../events/agent-event-bus.js";
+import type { AgentEvent } from "../../events/types.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
+import { AgentRunner } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import { AgentStep } from "../agent-step.js";
 import { NodeBackedRunner, asAgent, isPromotedAgent } from "../as-agent.js";
@@ -237,5 +241,94 @@ describe("asAgent", () => {
     const pipeline = new FunctionStep<string, string>({ fn: (s) => s });
     const promoted = asAgent(pipeline, { role: { name: "T" } });
     expect(promoted.getTools()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #102 (m.b) — promoted-pipeline nesting: NodeBackedRunner forwards
+// options.traceId/parentSpanId into the inner AgentStep's run, so a promoted
+// pipeline invoked as a sub-workflow (the playground acceptance path) roots
+// its nested spans under the invoking call instead of an orphan trace.
+// ---------------------------------------------------------------------------
+
+describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
+  it("forwards options.traceId/parentSpanId into the inner AgentStep's events", async () => {
+    const model = new MockLanguageModelV2({
+      doGenerate: async () => ({
+        content: [{ type: "text" as const, text: "inner done" }],
+        finishReason: "stop" as const,
+        usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        warnings: [],
+      }),
+    });
+
+    const bus = new AgentEventBus();
+    const inner = new AgentRunner(model, bus);
+
+    const innerAgent: AgentLike = {
+      role: { name: "inner-agent" },
+      getModel: () => "mock-model",
+      getTools: () => [],
+      getSystemPrompt: () => "you are the inner agent",
+      renderInitialPrompt: () => "you are the inner agent",
+    };
+
+    const pipeline = new AgentStep<string, string>({
+      name: "single",
+      agent: innerAgent,
+      prompt: (input) => input,
+    });
+
+    const promoted = asAgent(pipeline, { role: { name: "Pipe" } });
+    const runner = new NodeBackedRunner(inner);
+
+    const captured: AgentEvent[] = [];
+    bus.subscribe("agent.message.start", (e) => captured.push(e as AgentEvent));
+
+    const result = await runner.run(promoted, "hello", {
+      traceId: "parent-trace",
+      parentSpanId: "invoking-tool-call-id",
+    });
+
+    expect(result.response).toBe("inner done");
+    expect(captured).toHaveLength(1);
+    // The inner AgentStep's run() joins the parent trace (not a fresh one)…
+    expect(captured[0]?.traceId).toBe("parent-trace");
+    // …and its root span nests directly under the invoking call.
+    expect(captured[0]?.parentSpanId).toBe("invoking-tool-call-id");
+  });
+
+  it("without options.traceId/parentSpanId, the inner run behaves as before (no forced nesting)", async () => {
+    const model = new MockLanguageModelV2({
+      doGenerate: async () => ({
+        content: [{ type: "text" as const, text: "inner done" }],
+        finishReason: "stop" as const,
+        usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        warnings: [],
+      }),
+    });
+
+    const bus = new AgentEventBus();
+    const inner = new AgentRunner(model, bus);
+
+    const innerAgent: AgentLike = {
+      role: { name: "inner-agent" },
+      getModel: () => "mock-model",
+      getTools: () => [],
+      getSystemPrompt: () => "you are the inner agent",
+      renderInitialPrompt: () => "you are the inner agent",
+    };
+
+    const pipeline = new AgentStep<string, string>({ agent: innerAgent, prompt: (i) => i });
+    const promoted = asAgent(pipeline, { role: { name: "Pipe" } });
+    const runner = new NodeBackedRunner(inner);
+
+    const captured: AgentEvent[] = [];
+    bus.subscribe("agent.message.start", (e) => captured.push(e as AgentEvent));
+
+    await runner.run(promoted, "hello");
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.parentSpanId).toBeUndefined();
   });
 });

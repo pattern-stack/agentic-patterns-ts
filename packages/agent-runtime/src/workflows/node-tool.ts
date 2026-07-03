@@ -9,7 +9,7 @@
  * conversational handoff/transfer (where the sub-agent takes over the turn) —
  * that is a separate, heavier Conversation-level construct.
  */
-import { type ToolDefinition, Toolbox } from "@agentic-patterns/core";
+import { type ToolDefinition, type ToolExecutionContext, Toolbox } from "@agentic-patterns/core";
 import { type ZodType, type ZodTypeAny, z } from "zod";
 import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunnerProtocol } from "../runner/types.js";
@@ -50,12 +50,16 @@ export function nodeTool<TIn>(
     description: spec.description,
     parameters: spec.parameters,
     returns: spec.returns,
-    execute: async (args: Record<string, unknown>) => {
+    execute: async (args: Record<string, unknown>, ctx?: ToolExecutionContext) => {
       const input = spec.parameters.parse(args);
       const result = await spec.node.run(input, {
         runner,
         scratchpad: scratchpad ?? createScratchpad(),
         deps,
+        // #102: join the parent trace and nest under the invoking call's span
+        // so this sub-workflow's tool activity is attributable, not orphaned.
+        traceId: ctx?.traceId,
+        parentSpanId: ctx?.parentToolCallId,
       });
       if (!result.succeeded) {
         return { error: result.error?.message ?? "sub-workflow failed" };
