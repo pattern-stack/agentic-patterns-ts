@@ -1,7 +1,7 @@
 {
   "name": "@agentic-patterns/runtime",
-  "version": "0.6.2",
-  "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
+  "version": "0.7.0",
+  "description": "Agent execution runtime \u2014 runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
   "type": "module",
   "repository": {
