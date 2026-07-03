@@ -1,0 +1,10 @@
+{
+  "name": "@agentic-patterns/examples-agents",
+  "private": true,
+  "type": "module",
+  "description": "Workspace member so dogfood agent examples under examples/agents/ resolve @agentic-patterns/* as real deps (bun install symlinks) and load as ESM — required for `ap playground examples` to run them.",
+  "dependencies": {
+    "@agentic-patterns/core": "workspace:^",
+    "@agentic-patterns/runtime": "workspace:^"
+  }
+}

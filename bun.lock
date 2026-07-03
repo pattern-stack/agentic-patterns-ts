@@ -10,6 +10,13 @@
         "typescript": "^5.7.0",
       },
     },
+    "examples/agents": {
+      "name": "@agentic-patterns/examples-agents",
+      "dependencies": {
+        "@agentic-patterns/core": "workspace:^",
+        "@agentic-patterns/runtime": "workspace:^",
+      },
+    },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
       "version": "0.6.0",
@@ -139,6 +146,8 @@
     "@agentic-patterns/core": ["@agentic-patterns/core@workspace:packages/agent-core"],
 
     "@agentic-patterns/dashboard": ["@agentic-patterns/dashboard@workspace:packages/agent-dashboard"],
+
+    "@agentic-patterns/examples-agents": ["@agentic-patterns/examples-agents@workspace:examples/agents"],
 
     "@agentic-patterns/runtime": ["@agentic-patterns/runtime@workspace:packages/agent-runtime"],
 
