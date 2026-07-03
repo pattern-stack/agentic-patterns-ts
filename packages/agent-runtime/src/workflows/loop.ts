@@ -128,3 +128,143 @@ export class Loop<TState> implements Node<TState, TState> {
     return result;
   }
 }
+
+// ---------------------------------------------------------------------------
+// AccumulatingLoop
+// ---------------------------------------------------------------------------
+
+/**
+ * `AccumulatingLoop<TState, TAcc>` — `Loop` plus a typed accumulator seam
+ * (DESIGN #101). A sibling combinator, NOT an overload of `Loop<TState>`:
+ * the body must read `acc` (a second threaded channel), and the output type
+ * flips from `TState` to `TAcc`. Co-located here to reuse `LoopExitReason`
+ * and the loop family's iteration semantics; `Loop` itself is unchanged.
+ *
+ * Field order/naming echoes `Accumulate`'s `{ acc, item, index }` vocabulary
+ * so the two fold primitives read as a matched pair (see spec §Positioning).
+ */
+
+/** Field order echoes `Accumulate`'s `AccumulateStepInput { acc, item, index }`. */
+export interface AccumulatingLoopStepInput<TState, TAcc> {
+  readonly acc: TAcc;
+  /** Replaces `Accumulate`'s `item` — the threaded loop state, not a list draw. */
+  readonly state: TState;
+  /** Loop-family name for `Accumulate`'s `index`. */
+  readonly iteration: number;
+}
+
+export interface AccumulatingLoopSpec<TState, TAcc> {
+  readonly name?: string;
+  /** Body reads BOTH the threaded state and the current accumulator. */
+  readonly body: Node<AccumulatingLoopStepInput<TState, TAcc>, TState>;
+  /** Seed the accumulator once from the loop input. */
+  readonly initial: (input: TState) => TAcc;
+  /** Fold this iteration's body output into the accumulator. MUST return a new value. */
+  readonly fold: (acc: TAcc, output: TState, iteration: number) => TAcc;
+  /** Continue-predicate — sees the folded accumulator, latest state, and iteration index. */
+  readonly until: (acc: TAcc, state: TState, iteration: number) => boolean;
+  /** REQUIRED safety cap (positive integer). */
+  readonly maxIterations: number;
+}
+
+export interface AccumulatingLoopResult<TState, TAcc> extends NodeResult<TAcc> {
+  /** `output` is the accumulator; `state` is the last body output, for callers who want it. */
+  readonly state: TState;
+  readonly iterations: number;
+  /** Reused from `Loop` — same three exit reasons. */
+  readonly exitReason: LoopExitReason;
+}
+
+export class AccumulatingLoop<TState, TAcc> implements Node<TState, TAcc> {
+  readonly name?: string;
+
+  constructor(private readonly spec: AccumulatingLoopSpec<TState, TAcc>) {
+    if (!Number.isInteger(spec.maxIterations) || spec.maxIterations < 1) {
+      throw new Error("AccumulatingLoop requires a positive integer `maxIterations`.");
+    }
+    this.name = spec.name;
+  }
+
+  async run(input: TState, ctx: NodeRunContext): Promise<AccumulatingLoopResult<TState, TAcc>> {
+    const hooks: PatternHooks | undefined = ctx.hooks;
+    const patternName = this.name ?? "AccumulatingLoop";
+    const childCtx: NodeRunContext = { ...ctx, scratchpad: ctx.scratchpad ?? createScratchpad() };
+
+    await hooks?.onPatternStart?.({
+      type: "pattern.start",
+      patternName,
+      timestamp: new Date(),
+    });
+
+    let state: TState = input;
+    let acc: TAcc = Object.freeze(this.spec.initial(input));
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let succeeded = true;
+    let error: Error | undefined;
+    let iterations = 0;
+    let exitReason: LoopExitReason = "max_iterations";
+
+    for (let i = 0; i < this.spec.maxIterations; i++) {
+      iterations = i + 1;
+
+      await hooks?.onIterationStart?.({
+        type: "pattern.iteration.start",
+        iteration: i,
+        timestamp: new Date(),
+      });
+
+      const res = await this.spec.body.run({ acc, state, iteration: i }, childCtx);
+      totalInputTokens += res.totalInputTokens;
+      totalOutputTokens += res.totalOutputTokens;
+
+      if (!res.succeeded) {
+        // Body failed — stop. Do NOT fold the failed output or evaluate the
+        // predicate on it. `acc`/`state` stay LAST-GOOD (Loop parity).
+        succeeded = false;
+        error = res.error;
+        exitReason = "error";
+        await hooks?.onIterationComplete?.({
+          type: "pattern.iteration.complete",
+          iteration: i,
+          timestamp: new Date(),
+        });
+        break;
+      }
+
+      state = res.output;
+      acc = Object.freeze(this.spec.fold(acc, state, i));
+
+      await hooks?.onIterationComplete?.({
+        type: "pattern.iteration.complete",
+        iteration: i,
+        timestamp: new Date(),
+      });
+
+      if (this.spec.until(acc, state, i)) {
+        exitReason = "predicate_met";
+        break;
+      }
+    }
+
+    const result: AccumulatingLoopResult<TState, TAcc> = Object.freeze({
+      output: acc,
+      state,
+      succeeded,
+      error,
+      totalInputTokens,
+      totalOutputTokens,
+      iterations,
+      exitReason,
+    });
+
+    await hooks?.onPatternComplete?.({
+      type: "pattern.complete",
+      patternName,
+      result,
+      timestamp: new Date(),
+    });
+
+    return result;
+  }
+}
