@@ -198,7 +198,9 @@ function mdTable(lines: string[], start: number): { html: string; next: number }
     for (let c = 0; c < header.length; c++) t += `<td${al(c)}>${mdInline(r[c] || "")}</td>`;
     t += "</tr>";
   }
-  return { html: `${t}</tbody></table>`, next: i };
+  // Wrap in a horizontally-scrollable container so wide tables never overflow
+  // the message column (they scroll inside their own box instead).
+  return { html: `<div class="md-table-wrap">${t}</tbody></table></div>`, next: i };
 }
 
 function mdBlocks(text: string): string {

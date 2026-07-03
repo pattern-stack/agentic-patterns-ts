@@ -408,3 +408,47 @@
   font-size: var(--fz-small);
   text-align: center;
 }
+
+/* ── markdown tables ────────────────────────────────────────────────────────
+   The md() renderer emits <div class="md-table-wrap"><table class="md-table">.
+   Without these the cells collapse and overlap. The wrap scrolls horizontally
+   so a wide table never pushes the message column. */
+.chat-root .md-table-wrap {
+  overflow-x: auto;
+  margin: 10px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.chat-root .md-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.chat-root .md-table th,
+.chat-root .md-table td {
+  padding: 7px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+.chat-root .md-table th:last-child,
+.chat-root .md-table td:last-child {
+  border-right: none;
+}
+.chat-root .md-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.chat-root .md-table th {
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--bg-inset);
+  color: var(--fg-default);
+}
+.chat-root .md-table td {
+  color: var(--fg-muted);
+}
+.chat-root .md-table tbody tr:hover td {
+  background: var(--bg-surface-hover);
+}
