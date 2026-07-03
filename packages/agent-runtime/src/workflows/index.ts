@@ -133,3 +133,5 @@ export {
   compileMessageTemplate,
   type BuildWorkflowOptions,
 } from "./build-workflow-from-config.js";
+
+export { withRunner } from "./with-runner.js";

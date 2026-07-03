@@ -134,6 +134,13 @@ export interface RunOptions {
    * field and decode after parsing (the wire-seam pattern).
    */
   allowOpenObjectSchemas?: boolean;
+  /**
+   * Opaque host payload copied verbatim onto every `ToolExecutionContext`
+   * this run's tool dispatches build (`buildToolCtx`). The runner never
+   * reads it. The workflow layer uses it to carry `{ scratchpad, deps }`
+   * across the agent-as-tool seam (#124).
+   */
+  host?: unknown;
 }
 
 // ---------------------------------------------------------------------------

@@ -38,11 +38,9 @@ export function nodeTool<TIn>(
   runner: RunnerProtocol,
   scratchpad?: Scratchpad,
   /**
-   * Explicit dependency injection for the wrapped node. `nodeTool` re-roots
-   * the context (it's a root builder, not a spread site), so parent deps do
-   * NOT automatically flow across this tool-execution boundary — pass them
-   * here if the wrapped node needs them. Automatic parent→child propagation
-   * across the agent-as-tool seam is scoped to #99/#102.
+   * Explicit dependency injection for the wrapped node. Fallback when the
+   * live caller context carries no `host.deps` (e.g. no `host` at all, or a
+   * host that only threads scratchpad) — see the `host` narrowing below.
    */
   deps?: DepReader,
 ): ToolDefinition {
@@ -52,10 +50,15 @@ export function nodeTool<TIn>(
     returns: spec.returns,
     execute: async (args: Record<string, unknown>, ctx?: ToolExecutionContext) => {
       const input = spec.parameters.parse(args);
+      // #124: prefer the LIVE caller context (delivered via the host passthrough)
+      // over the construction-time closure. FORK, don't alias: run-scoped slots
+      // share through the fork; branch-scoped slots stay isolated per (possibly
+      // parallel) tool call. join()/merge-back is OFF for v1.
+      const host = ctx?.host as { scratchpad?: Scratchpad; deps?: DepReader } | undefined;
       const result = await spec.node.run(input, {
         runner,
-        scratchpad: scratchpad ?? createScratchpad(),
-        deps,
+        scratchpad: host?.scratchpad ? host.scratchpad.fork() : (scratchpad ?? createScratchpad()),
+        deps: host?.deps ?? deps,
         // #102: join the parent trace and nest under the invoking call's span
         // so this sub-workflow's tool activity is attributable, not orphaned.
         traceId: ctx?.traceId,

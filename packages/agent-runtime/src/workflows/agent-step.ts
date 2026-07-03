@@ -14,7 +14,7 @@
 
 import { ZodString, type ZodType } from "zod";
 import type { AgentLike } from "../runner/agent-runner.js";
-import type { RunOptions } from "../runner/types.js";
+import type { RunOptions, RunnerProtocol } from "../runner/types.js";
 import { applyStepModel } from "./base.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
 import { type ScratchpadReader, createScratchpad } from "./slot.js";
@@ -62,6 +62,14 @@ export interface AgentStepSpec<TIn, TOut = string> {
   readonly model?: string;
 
   /**
+   * Per-node runner override (#116). v1: a concrete RunnerProtocol — the
+   * declared form of the ctx-rewriting closure hack. Resolution:
+   * `spec.runner ?? ctx.runner`. NOTE: the structured-output guard checks
+   * the RESOLVED runner; an override without `runStructured` fails loud.
+   */
+  readonly runner?: RunnerProtocol;
+
+  /**
    * System prompt. Default = `agent.renderInitialPrompt()` (the renderer the runner
    * already uses). Override with a string, or `null` to omit entirely.
    *
@@ -101,20 +109,22 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
 
   async run(input: TIn, ctx: NodeRunContext): Promise<NodeResult<TOut>> {
     const agent = applyStepModel(this.spec.agent, this.spec.model);
+    const runner = this.spec.runner ?? ctx.runner; // #116
     const message = this.spec.prompt(input, slotReader(ctx.scratchpad));
     const opts: RunOptions = {
       toolExecutor: ctx.toolExecutor,
       maxIterations: this.spec.maxIterations,
       traceId: ctx.traceId,
       parentSpanId: ctx.parentSpanId,
+      host: { scratchpad: ctx.scratchpad, deps: ctx.deps }, // #124
     };
 
     try {
       if (this.spec.output && !isStringSchema(this.spec.output)) {
-        if (!ctx.runner.runStructured) {
+        if (!runner.runStructured) {
           throw new StructuredOutputUnsupported(this.name);
         }
-        const r = await ctx.runner.runStructured(agent, message, this.spec.output, opts);
+        const r = await runner.runStructured(agent, message, this.spec.output, opts);
         return {
           output: r.object,
           succeeded: true,
@@ -124,7 +134,7 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
       }
 
       // String special case — identical to today's executeStep path (generateText).
-      const r = await ctx.runner.run(agent, message, opts);
+      const r = await runner.run(agent, message, opts);
       return {
         output: r.response as TOut,
         succeeded: true,

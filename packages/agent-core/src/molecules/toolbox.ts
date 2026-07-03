@@ -34,6 +34,15 @@ export interface ToolExecutionContext {
   readonly traceId?: string;
   /** The tool-call id of the invoking tool, so children nest under their parent. */
   readonly parentToolCallId?: string;
+  /**
+   * Host-declared opaque passthrough — core NEVER interprets it (same
+   * philosophy as `emit`: core declares the slot, the host wires the meaning).
+   * The host copies its `RunOptions.host` here per tool call; a consumer that
+   * knows the host narrows it itself (e.g. runtime's `nodeTool` reads
+   * `{ scratchpad, deps }` to propagate run context across the
+   * agent-as-tool seam, #124).
+   */
+  readonly host?: unknown;
 }
 
 /**

@@ -375,4 +375,48 @@ describe("AgentRunner.stream()", () => {
     const convEnd = events.find((e) => e.type === "agent.conversation.end");
     expect(convEnd).toBeDefined();
   });
+
+  // ---------------------------------------------------------------------------
+  // #124 — `RunOptions.host` relay onto the `ToolExecutionContext` stream()'s
+  // dispatch site builds (the 3rd of 3 `buildToolCtx` dispatch sites).
+  // ---------------------------------------------------------------------------
+  it("relays RunOptions.host onto the dispatched tool call's ToolExecutionContext (#124)", async () => {
+    let callCount = 0;
+    const model = new MockLanguageModelV2({
+      doStream: async () => {
+        callCount++;
+        if (callCount === 1) {
+          return streamFrom([
+            toolCallPart("tc-host-stream-1", "weather", { city: "SF" }),
+            finishPart("tool-calls", 10, 5),
+          ])();
+        }
+        return streamFrom([...textParts("Sunny"), finishPart("stop", 20, 10)])();
+      },
+    });
+
+    const weatherSchema = z.object({ city: z.string() });
+    const tools = [ToolSchema.fromZod("weather", "Get weather", weatherSchema)];
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent({ getTools: () => tools });
+
+    const sentinelHost = { scratchpad: "fake-scratchpad-marker" };
+    const capturedCtx: Array<{ host?: unknown } | undefined> = [];
+
+    await collectStream(
+      runner.stream(agent, "weather?", {
+        toolExecutor: {
+          execute: async (_name, _args, ctx) => {
+            capturedCtx.push(ctx);
+            return { forecast: "sunny" };
+          },
+        },
+        host: sentinelHost,
+      }),
+    );
+
+    expect(capturedCtx).toHaveLength(1);
+    expect(capturedCtx[0]?.host).toBe(sentinelHost);
+  });
 });
