@@ -23,4 +23,5 @@ export type { EventStoreOptions, PersistedEvent, SessionSummary } from "../stora
  */
 export type { Scratchpad as ScratchpadStore } from "../workflows/slot.js";
 
-// #117 adds: RunStore (one-row-per-run aggregate, extends EventStore substrate).
+export { RunStore } from "../storage/run-store.js";
+export type { RunMeta, RunOutcome, RunRow, RunStats, RunSummary } from "../storage/run-store.js";

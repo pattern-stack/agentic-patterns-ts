@@ -1,14 +1,16 @@
 /**
- * Optional-dep loader for the SQLite-backed `EventStore`.
+ * Optional-dep loader for the SQLite-backed `EventStore` (and `RunStore`,
+ * which extends it).
  *
  * `better-sqlite3` is declared as an optional peer dep on @agentic-patterns/runtime
  * so library consumers don't pay the native-binary cost unless they want
  * durable telemetry. Callers (typically the `ap playground` CLI) invoke
- * `loadEventStore()` to wire one up if available, and fall back to an
- * in-memory-only setup otherwise.
+ * `loadEventStore()` / `loadRunStore()` to wire one up if available, and fall
+ * back to an in-memory-only setup otherwise.
  */
 
 import type { EventStore, EventStoreOptions } from "./event-store.js";
+import type { RunStore } from "./run-store.js";
 
 /** Inputs for {@link loadEventStore}. The `Database` field is auto-resolved. */
 export type LoadEventStoreOptions = Omit<EventStoreOptions, "Database">;
@@ -61,6 +63,60 @@ export async function loadEventStore(opts: LoadEventStoreOptions): Promise<LoadE
     return {
       unavailable: true,
       reason: `EventStore init failed: ${(err as Error).message ?? "unknown"}`,
+    };
+  }
+}
+
+/** Result of {@link loadRunStore}: store + diagnostic info. */
+export interface LoadRunStoreResult {
+  /** Live store if better-sqlite3 was resolvable. */
+  store?: RunStore;
+  /** True when the optional dep is missing or initialization failed. */
+  unavailable: boolean;
+  /** Human-readable reason; surfaced in the CLI banner. */
+  reason: string;
+}
+
+/**
+ * Attempt to instantiate a {@link RunStore} backed by SQLite. Exact mirror of
+ * {@link loadEventStore} — same optional-dep dance, `RunStore` instead of
+ * `EventStore`.
+ *
+ * Returns `{ unavailable: true }` with a reason if better-sqlite3 cannot be
+ * loaded. The caller decides whether that's fatal or a soft degradation
+ * (default: soft).
+ */
+export async function loadRunStore(opts: LoadEventStoreOptions): Promise<LoadRunStoreResult> {
+  let Database: unknown;
+  try {
+    const mod = await import("better-sqlite3");
+    Database = (mod as { default?: unknown }).default ?? mod;
+  } catch (err) {
+    return {
+      unavailable: true,
+      reason: `better-sqlite3 not installed (${(err as Error).message ?? "unknown"})`,
+    };
+  }
+
+  if (typeof Database !== "function") {
+    return {
+      unavailable: true,
+      reason: "better-sqlite3 module did not expose a constructor",
+    };
+  }
+
+  const { RunStore } = await import("./run-store.js");
+  try {
+    const store = new RunStore({
+      ...opts,
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
+      Database: Database as any,
+    });
+    return { store, unavailable: false, reason: `connected to ${opts.path}` };
+  } catch (err) {
+    return {
+      unavailable: true,
+      reason: `RunStore init failed: ${(err as Error).message ?? "unknown"}`,
     };
   }
 }

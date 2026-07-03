@@ -44,6 +44,8 @@ export interface MessageStartEvent extends BaseEvent {
   readonly type: "agent.message.start";
   readonly agentName: string;
   readonly agentConfig?: Record<string, unknown>;
+  /** #117: the rendered system prompt (agent.renderInitialPrompt()) — no other event carries it. */
+  readonly systemPrompt?: string;
 }
 
 export interface MessageChunkEvent extends BaseEvent {
@@ -58,6 +60,8 @@ export interface MessageCompleteEvent extends BaseEvent {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly model: string;
+  /** #117: authoritative run finish reason ("stop" | "max_iterations" | …). */
+  readonly finishReason?: string;
 }
 
 // ---------------------------------------------------------------------------

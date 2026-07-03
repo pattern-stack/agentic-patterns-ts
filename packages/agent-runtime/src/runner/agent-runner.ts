@@ -300,6 +300,10 @@ export class AgentRunner implements RunnerProtocol {
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
 
+    // #117: hoisted above the start event (was after it) so message.start can
+    // stamp systemPrompt — renderInitialPrompt() is a pure render, hoisting is safe.
+    const system = agent.renderInitialPrompt();
+
     // Emit message start event (root of the trace)
     const startEvent = createEvent("agent.message.start", {
       traceId: effectiveTraceId,
@@ -311,6 +315,7 @@ export class AgentRunner implements RunnerProtocol {
         model: modelName,
         tools: agentTools.map((t) => t.name),
       },
+      systemPrompt: system,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -325,9 +330,6 @@ export class AgentRunner implements RunnerProtocol {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let totalToolCalls = 0;
-
-    // Get system prompt
-    const system = agent.renderInitialPrompt();
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       // Emit iteration start
@@ -480,6 +482,7 @@ export class AgentRunner implements RunnerProtocol {
             inputTokens: totalInputTokens,
             outputTokens: totalOutputTokens,
             model: modelName,
+            finishReason: result.finishReason ?? "stop",
           }),
         );
 
@@ -622,7 +625,24 @@ export class AgentRunner implements RunnerProtocol {
       );
     }
 
-    // Max iterations exceeded
+    // Max iterations exceeded — #117: emit a terminal message.complete (the
+    // loop above only ever emits it on the !hasToolCalls early return; without
+    // this, a bus-finish hook like RunStoreExporter has no terminal event to
+    // finalize on and the run row stays 'running' forever).
+    await this.emit(
+      createEvent("agent.message.complete", {
+        traceId: effectiveTraceId,
+        runId,
+        spanId: rootSpanId,
+        parentSpanId: rootSpanId,
+        content: "",
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        model: modelName,
+        finishReason: "max_iterations",
+      }),
+    );
+
     return {
       response: "",
       inputTokens: totalInputTokens,
@@ -776,6 +796,7 @@ export class AgentRunner implements RunnerProtocol {
         model: modelName,
         tools: agentTools.map((t) => t.name),
       },
+      systemPrompt: system,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -913,6 +934,7 @@ export class AgentRunner implements RunnerProtocol {
         inputTokens: totalInputTokens,
         outputTokens: totalOutputTokens,
         model: modelName,
+        finishReason,
       }),
     );
 
@@ -948,7 +970,10 @@ export class AgentRunner implements RunnerProtocol {
 
     const model = await this._resolver.resolve(agent.getModel());
     const modelName = model.modelId;
-    const agentTools = agent.getTools();
+    // AgentLike.getTools() returns unknown[] at the protocol boundary; cast
+    // per the run()/runStructured() precedent — #117 needs `.name` for
+    // agentConfig.tools (parity with the other two paths).
+    const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
 
@@ -980,6 +1005,13 @@ export class AgentRunner implements RunnerProtocol {
       runId,
       parentSpanId: options?.parentSpanId,
       agentName: agent.role.name,
+      // #117: parity with run()/runStructured(), which already carry agentConfig.
+      agentConfig: {
+        role: agent.role.name,
+        model: modelName,
+        tools: agentTools.map((t) => t.name),
+      },
+      systemPrompt: system,
     });
     const rootSpanId = msgStart.spanId;
     await this.emit(msgStart);
@@ -1236,6 +1268,7 @@ export class AgentRunner implements RunnerProtocol {
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
           model: modelName,
+          finishReason: stepFinishReason,
         });
         await this.emit(msgComplete);
         yield msgComplete;
@@ -1390,7 +1423,24 @@ export class AgentRunner implements RunnerProtocol {
       yield iterEnd;
     }
 
-    // Max iterations reached
+    // Max iterations reached — #117: emit + yield a terminal message.complete
+    // before conversation.end (mirrors run()'s max-iterations emission; without
+    // it a bus-finish hook like RunStoreExporter never sees a terminal event
+    // for this path and the run row stays 'running' forever).
+    const msgComplete = createEvent("agent.message.complete", {
+      traceId: effectiveTraceId,
+      runId,
+      spanId: rootSpanId,
+      parentSpanId: rootSpanId,
+      content: fullText,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+      model: modelName,
+      finishReason: "max_iterations",
+    });
+    await this.emit(msgComplete);
+    yield msgComplete;
+
     const convEnd = createEvent("agent.conversation.end", {
       traceId: effectiveTraceId,
       runId,
