@@ -143,7 +143,9 @@ describe("AccumulatingLoop", () => {
           return state + 1;
         },
       }),
-      initial: () => Object.freeze({ items: [] as number[] }),
+      // The combinator itself guarantees the seed is frozen (Object.freeze(initial(input))) —
+      // no manual freeze needed here; the assertion below proves iteration 0 already sees it frozen.
+      initial: () => ({ items: [] as number[] }),
       fold: (acc, output) => Object.freeze({ items: [...acc.items, output] }),
       until: (acc) => acc.items.length >= 2,
       maxIterations: 10,
@@ -242,31 +244,40 @@ describe("AccumulatingLoop", () => {
       readonly supplements: readonly number[];
     }
 
+    /**
+     * `scenario` renders the gap-check's decision from the CURRENT pool (`acc`) —
+     * exactly the load-bearing requirement under test: the body reads `acc`, not
+     * a closure-scripted script, to decide what to do next.
+     */
     function makeLoop(
-      decisions: readonly (Decision | "throw")[],
+      scenario: (acc: Pool, iteration: number) => Decision | "throw",
     ): AccumulatingLoop<Decision, Pool> {
-      let call = 0;
       return new AccumulatingLoop<Decision, Pool>({
         name: "escalate-mirror",
         body: new FunctionStep<AccumulatingLoopStepInput<Decision, Pool>, Decision>({
           name: "gap-check",
-          fn: () => {
-            const next = decisions[call];
-            call += 1;
+          fn: ({ acc, iteration }) => {
+            const next = scenario(acc, iteration);
             if (next === "throw") throw new Error("navigate failed");
-            return next as Decision;
+            return next;
           },
         }),
-        initial: () => Object.freeze({ items: [] as number[] }),
+        initial: () => ({ items: [] as number[] }),
         fold: (acc, output) => Object.freeze({ items: [...acc.items, ...output.supplements] }),
-        until: (_acc, state) => state.done,
+        // escalate's real predicate: `decision.done || supplements.length === 0`.
+        until: (_acc, state) => state.done || state.supplements.length === 0,
         maxIterations: 2,
       });
     }
 
     it("done on iteration 1 -> predicate_met, one body run, acc = first merge", async () => {
       const runner = new MockRunner();
-      const loop = makeLoop([{ done: true, supplements: [1, 2] }]);
+      // Gap-check reads the current (empty) pool and decides it's already complete
+      // in one pass: emits the full batch and marks done.
+      const loop = makeLoop((acc) => ({
+        done: acc.items.length + 2 >= 2,
+        supplements: acc.items.length < 2 ? [1, 2] : [],
+      }));
 
       const result = await loop.run({ done: false, supplements: [] }, { runner });
       expect(result.exitReason).toBe("predicate_met");
@@ -277,10 +288,15 @@ describe("AccumulatingLoop", () => {
 
     it("not-done -> escalate -> re-check -> cap at 2 -> max_iterations, folds the capped iteration", async () => {
       const runner = new MockRunner();
-      const loop = makeLoop([
-        { done: false, supplements: [1] },
-        { done: false, supplements: [2, 3] },
-      ]);
+      // Gap-check renders its decision from `acc.items.length` each pass — supplements
+      // keep coming while the pool is below target (3); never reaches done before the cap.
+      const loop = makeLoop((acc) => {
+        if (acc.items.length < 3) {
+          const supplements = acc.items.length === 0 ? [1] : [2, 3];
+          return { done: false, supplements };
+        }
+        return { done: true, supplements: [] };
+      });
 
       const result = await loop.run({ done: false, supplements: [] }, { runner });
       expect(result.exitReason).toBe("max_iterations");
@@ -295,7 +311,13 @@ describe("AccumulatingLoop", () => {
 
     it("body failure mid-loop -> error, acc = last-good pool", async () => {
       const runner = new MockRunner();
-      const loop = makeLoop([{ done: false, supplements: [1] }, "throw"]);
+      // Iteration 0 (first pass) reads the empty pool and emits [1]; iteration 1
+      // (second pass) throws before it can read/fold anything further.
+      const loop = makeLoop((acc, iteration) => {
+        if (iteration === 1) return "throw";
+        if (acc.items.length < 3) return { done: false, supplements: [1] };
+        return { done: true, supplements: [] };
+      });
 
       const result = await loop.run({ done: false, supplements: [] }, { runner });
       expect(result.exitReason).toBe("error");

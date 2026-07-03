@@ -197,7 +197,7 @@ export class AccumulatingLoop<TState, TAcc> implements Node<TState, TAcc> {
     });
 
     let state: TState = input;
-    let acc: TAcc = this.spec.initial(input);
+    let acc: TAcc = Object.freeze(this.spec.initial(input));
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let succeeded = true;
