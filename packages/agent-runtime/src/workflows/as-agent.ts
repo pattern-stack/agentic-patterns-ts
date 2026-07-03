@@ -36,6 +36,15 @@ function isFullRole(role: RoleInput): role is Role {
   return typeof (role as Role).renderSystemPrompt === "function";
 }
 
+/** One-line descriptor for a minimal (non-`Role`) `RoleInput`, folding in `description` when given. */
+function minimalRoleDescriptor(
+  node: Node<unknown, unknown>,
+  role: { description?: string },
+): string {
+  const base = `Promoted pipeline: ${node.name ?? "pipeline"}`;
+  return role.description ? `${base} — ${role.description}` : base;
+}
+
 // ---------------------------------------------------------------------------
 // Options
 // ---------------------------------------------------------------------------
@@ -68,7 +77,11 @@ export interface PromotedAgent<TIn, TOut> extends AgentLike {
 const DEFAULT_MODEL = "sonnet";
 
 function defaultRenderOut<TOut>(out: TOut): string {
-  return typeof out === "string" ? out : JSON.stringify(out, null, 2);
+  if (typeof out === "string") return out;
+  // JSON.stringify(undefined) returns the JS value `undefined`, not a string
+  // (e.g. a failed node's `output`) — always fall back to String() so this
+  // never violates RunResult.response's `string` contract.
+  return JSON.stringify(out, null, 2) ?? String(out);
 }
 
 function defaultCoerceIn<TIn>(message: string): TIn {
@@ -92,13 +105,16 @@ export function asAgent<TIn, TOut>(
 
   const systemPrompt = isFullRole(role)
     ? role.renderSystemPrompt()
-    : `Promoted pipeline: ${node.name ?? "pipeline"}`;
+    : minimalRoleDescriptor(node, role);
 
   const promoted: PromotedAgent<TIn, TOut> = {
     role: { name: roleName },
     getModel: () => model,
     getTools: () => [],
     getSystemPrompt: () => systemPrompt,
+    // A promoted pipeline has no separate "initial prompt" render (unlike a
+    // core Agent, whose renderInitialPrompt() can differ from its system
+    // prompt) — deliberately alias getSystemPrompt() here.
     renderInitialPrompt: () => systemPrompt,
     __promotedNode: node,
     coerceIn,
@@ -109,14 +125,18 @@ export function asAgent<TIn, TOut>(
 }
 
 /**
- * Structural check for a {@link PromotedAgent} — presence of `__promotedNode`
- * plus the `AgentLike` surface.
+ * Structural check for a {@link PromotedAgent} — `__promotedNode` must itself
+ * look like a `Node` (a `run` function), not merely be present, plus the
+ * `AgentLike` surface.
  */
 export function isPromotedAgent(x: unknown): x is PromotedAgent<unknown, unknown> {
   if (!x || typeof x !== "object") return false;
   const a = x as Record<string, unknown>;
+  const node = a.__promotedNode as Record<string, unknown> | undefined;
   return (
-    "__promotedNode" in a &&
+    !!node &&
+    typeof node === "object" &&
+    typeof node.run === "function" &&
     typeof a.coerceIn === "function" &&
     typeof a.renderOut === "function" &&
     typeof a.getModel === "function" &&
@@ -154,8 +174,18 @@ export class NodeBackedRunner implements RunnerProtocol {
     const input = agent.coerceIn(message);
     const result = await agent.__promotedNode.run(input, ctx);
 
+    // A failed node's `output` is typically `undefined` (the AgentStep/
+    // FunctionStep failure shape) — rendering that would silently violate
+    // RunResult.response's `string` contract and drop the error from the
+    // visible response (SSE chat would show an empty message). Surface the
+    // error message instead; fall back to the rendered output only if the
+    // node somehow failed without one.
+    const response = result.succeeded
+      ? agent.renderOut(result.output)
+      : (result.error?.message ?? agent.renderOut(result.output));
+
     return {
-      response: agent.renderOut(result.output),
+      response,
       inputTokens: result.totalInputTokens,
       outputTokens: result.totalOutputTokens,
       toolCallsCount: 0,

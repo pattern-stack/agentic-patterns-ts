@@ -26,11 +26,13 @@ function makeAgent(name = "test-agent"): AgentLike {
 // ---------------------------------------------------------------------------
 
 describe("asAgent", () => {
-  it("promotes a Sequential pipeline and runs it via NodeBackedRunner", async () => {
+  it("promotes a Sequential pipeline and runs it via NodeBackedRunner, in order", async () => {
+    // Non-commutative fixtures (append "-A" then "-B") so a wrong execution
+    // order would produce a different, observably wrong string.
     const pipeline = Sequential.start(
-      new FunctionStep<string, string>({ name: "upper", fn: (s) => s.toUpperCase() }),
+      new FunctionStep<string, string>({ name: "appendA", fn: (s) => `${s}-A` }),
     )
-      .then(new FunctionStep<string, string>({ name: "exclaim", fn: (s) => `${s}!` }))
+      .then(new FunctionStep<string, string>({ name: "appendB", fn: (s) => `${s}-B` }))
       .build("pipe");
 
     const promoted = asAgent(pipeline, { role: { name: "Pipe" } });
@@ -41,7 +43,7 @@ describe("asAgent", () => {
     const runner = new NodeBackedRunner(inner);
     const result = await runner.run(promoted, "hello");
 
-    expect(result.response).toBe("HELLO!");
+    expect(result.response).toBe("hello-A-B");
     expect(result.finishReason).toBe("stop");
     expect(result.toolCallsCount).toBe(0);
     expect(result.iterations).toBe(1);
@@ -73,6 +75,16 @@ describe("asAgent", () => {
     expect(isPromotedAgent(null)).toBe(false);
     expect(isPromotedAgent(42)).toBe(false);
     expect(isPromotedAgent({})).toBe(false);
+  });
+
+  it("isPromotedAgent rejects a __promotedNode that isn't Node-shaped (key present, no .run)", () => {
+    const fake = {
+      ...makeAgent("fake"),
+      __promotedNode: { name: "not-a-node" }, // no `run` — must NOT pass
+      coerceIn: (m: string) => m,
+      renderOut: (o: string) => o,
+    };
+    expect(isPromotedAgent(fake)).toBe(false);
   });
 
   // -------------------------------------------------------------------------
@@ -139,11 +151,13 @@ describe("asAgent", () => {
   // Failure mapping
   // -------------------------------------------------------------------------
 
-  it("maps a failed node result to finishReason: error without throwing", async () => {
+  it("maps a failed node result to finishReason: error, surfacing the error in a string response", async () => {
+    // The real AgentStep/FunctionStep failure shape: `output: undefined`, not
+    // `""` — this is what actually breaks a naive `renderOut(result.output)`.
     const failing: Node<string, string> = {
       name: "boom",
       run: async () => ({
-        output: "",
+        output: undefined as unknown as string,
         succeeded: false,
         error: new Error("boom"),
         totalInputTokens: 0,
@@ -153,7 +167,10 @@ describe("asAgent", () => {
     const promoted = asAgent(failing, { role: { name: "Failing" } });
     const runner = new NodeBackedRunner(new MockRunner());
     const result = await runner.run(promoted, "go");
+
     expect(result.finishReason).toBe("error");
+    expect(typeof result.response).toBe("string");
+    expect(result.response).toContain("boom");
   });
 
   // -------------------------------------------------------------------------
@@ -196,6 +213,15 @@ describe("asAgent", () => {
     const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });
     const promoted = asAgent(pipeline, { role: { name: "Minimal" } });
     expect(promoted.getSystemPrompt()).toContain("Promoted pipeline");
+  });
+
+  it("threads a minimal role's description into the descriptor", () => {
+    const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });
+    const promoted = asAgent(pipeline, {
+      role: { name: "Minimal", description: "does the thing" },
+    });
+    expect(promoted.getSystemPrompt()).toContain("does the thing");
+    expect(promoted.renderInitialPrompt()).toBe(promoted.getSystemPrompt());
   });
 
   it("defaults getModel() to a sensible tier string, overridable via opts.model", () => {
