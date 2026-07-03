@@ -22,6 +22,7 @@ export function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [maxIterations, setMaxIterations] = useState(10); // matches the runner default
+  const [railOpen, setRailOpen] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +96,32 @@ export function ChatPage() {
             }
           />
         </div>
-        <AgentUniverse agentId={selectedId} />
+        <div style={{ display: "flex", alignItems: "stretch", flex: "none" }}>
+          <button
+            type="button"
+            onClick={() => setRailOpen((v) => !v)}
+            title={railOpen ? "Collapse panel" : "Show panel"}
+            aria-label={railOpen ? "Collapse panel" : "Show panel"}
+            style={{
+              flex: "none",
+              width: 20,
+              border: "1px solid var(--border)",
+              borderRight: railOpen ? "none" : "1px solid var(--border)",
+              borderRadius: railOpen ? "8px 0 0 8px" : 8,
+              background: "var(--bg-surface)",
+              color: "var(--fg-muted)",
+              cursor: "pointer",
+              fontSize: 12,
+              lineHeight: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            {railOpen ? "›" : "‹"}
+          </button>
+          {railOpen && <AgentUniverse agentId={selectedId} />}
+        </div>
       </div>
     </div>
   );
