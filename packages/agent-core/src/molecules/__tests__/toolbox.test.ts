@@ -125,6 +125,16 @@ describe("Toolbox", () => {
       expect(probeToolbox.receivedCtx).toBeUndefined();
     });
 
+    it("does not throw when ctx omits emit — optional chain is safe on an absent sink", async () => {
+      const probeToolbox = new ProbeToolbox();
+      const ctx: ToolExecutionContext = { runId: "x" };
+
+      const result = await probeToolbox.execute("probe", { a: 1 }, ctx);
+
+      expect(result).toEqual({ a: 1 });
+      expect(probeToolbox.receivedCtx).toBe(ctx);
+    });
+
     it("still succeeds when a legacy (1-arg) tool is invoked with a context", async () => {
       const probeToolbox = new ProbeToolbox();
       const ctx: ToolExecutionContext = { runId: "run-2" };
@@ -162,6 +172,17 @@ describe("Toolbox", () => {
 
       expect(legacyDef.description).toBe("legacy");
       expect(ctxAwareDef.description).toBe("ctx-aware");
+
+      const badDef: ToolDefinition = {
+        description: "bad",
+        parameters: z.object({}),
+        // @ts-expect-error — ctx must be ToolExecutionContext | undefined, not a string.
+        execute: async (args, ctx: string) => {
+          void ctx;
+          return args;
+        },
+      };
+      expect(badDef.description).toBe("bad");
     });
   });
 });

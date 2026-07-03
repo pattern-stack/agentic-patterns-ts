@@ -27,7 +27,15 @@ export interface ToolEvent {
  * AgentEventBus. The host wires it to whatever bus/exporter it runs.
  */
 export interface ToolExecutionContext {
-  /** Fire-and-forget event sink. Host bridges to its bus; core never awaits it. */
+  /**
+   * Fire-and-forget event sink. Host bridges to its bus; core never awaits it.
+   *
+   * Contract: implementations MUST NOT throw. Tools call `ctx?.emit?.(...)`
+   * synchronously inside `execute`, so a throwing `emit` would abort tool
+   * execution — core cannot insulate this. A host's `emit` must swallow its
+   * own sink/bus errors internally, e.g. a bus adapter should be
+   * `(e) => void safePublish(e)` where `safePublish` catches synchronously.
+   */
   readonly emit?: (event: ToolEvent) => void;
   /** Correlates emitted events to the enclosing run. */
   readonly runId?: string;
