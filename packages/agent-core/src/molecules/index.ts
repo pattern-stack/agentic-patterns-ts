@@ -4,7 +4,7 @@ export { ToolSchema } from "./tool-schema.js";
 export type { OpenAIFunctionDef, ClaudeFunctionDef, VercelAIToolDef } from "./tool-schema.js";
 
 export { Toolbox } from "./toolbox.js";
-export type { ToolDefinition } from "./toolbox.js";
+export type { ToolDefinition, ToolEvent, ToolExecutionContext } from "./toolbox.js";
 
 export {
   ManualSection,
