@@ -16,7 +16,7 @@ import type {
   RunnerProtocol,
   ToolExecutor,
 } from "../runner/types.js";
-import type { ConversationStoreProtocol } from "./store.js";
+import type { ConversationStore } from "./store.js";
 
 // ---------------------------------------------------------------------------
 // Exchange
@@ -68,7 +68,7 @@ export class Conversation {
   readonly agent: AgentLike;
   readonly runner: RunnerProtocol;
 
-  private _store: ConversationStoreProtocol | undefined;
+  private _store: ConversationStore | undefined;
   private _storeConversationId: string | undefined;
   private _toolExecutor: ToolExecutor | undefined;
   private _state: Record<string, unknown>;
@@ -80,7 +80,7 @@ export class Conversation {
     runner: RunnerProtocol,
     options?: {
       id?: string;
-      store?: ConversationStoreProtocol;
+      store?: ConversationStore;
       toolExecutor?: ToolExecutor;
       state?: Record<string, unknown>;
       history?: Exchange[];

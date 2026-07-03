@@ -60,7 +60,7 @@ export interface SSEExporterLike {
 }
 
 /**
- * Conversation store interface — structural typing for ConversationStoreProtocol.
+ * Conversation store interface — structural typing for ConversationStore.
  */
 export interface ConversationStoreLike {
   get(id: string): Promise<unknown>;

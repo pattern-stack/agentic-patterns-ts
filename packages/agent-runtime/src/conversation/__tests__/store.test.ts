@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MemoryStore } from "../store.js";
+import { InMemoryConversationStore } from "../store.js";
 
-describe("MemoryStore", () => {
+describe("InMemoryConversationStore", () => {
   it("should create a conversation with correct fields", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("TestAgent", "gpt-4");
 
     expect(conv.id).toBeTruthy();
@@ -15,13 +15,13 @@ describe("MemoryStore", () => {
   });
 
   it("should return null for unknown conversation", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const result = await store.getConversation("nonexistent");
     expect(result).toBeNull();
   });
 
   it("should get a stored conversation", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const created = await store.createConversation("Agent", "model");
     const fetched = await store.getConversation(created.id);
 
@@ -31,7 +31,7 @@ describe("MemoryStore", () => {
   });
 
   it("should update conversation metadata", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     const updated = await store.updateConversation(conv.id, {
@@ -43,7 +43,7 @@ describe("MemoryStore", () => {
   });
 
   it("should merge metadata on update", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     await store.updateConversation(conv.id, { a: 1 });
@@ -53,14 +53,14 @@ describe("MemoryStore", () => {
   });
 
   it("should throw on update of unknown conversation", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     await expect(store.updateConversation("nonexistent", {})).rejects.toThrow(
       "Conversation not found",
     );
   });
 
   it("should add a message with parts", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     const msg = await store.addMessage(conv.id, "request", [
@@ -78,7 +78,7 @@ describe("MemoryStore", () => {
   });
 
   it("should store message options", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     const msg = await store.addMessage(conv.id, "response", [{ type: "text", content: "Hi" }], {
@@ -93,7 +93,7 @@ describe("MemoryStore", () => {
   });
 
   it("should default token counts to 0", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     const msg = await store.addMessage(conv.id, "request", [{ type: "text", content: "test" }]);
@@ -103,14 +103,14 @@ describe("MemoryStore", () => {
   });
 
   it("should throw on addMessage for unknown conversation", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     await expect(store.addMessage("nonexistent", "request", [])).rejects.toThrow(
       "Conversation not found",
     );
   });
 
   it("should get all messages for a conversation", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     await store.addMessage(conv.id, "request", [{ type: "text", content: "msg1" }]);
@@ -123,7 +123,7 @@ describe("MemoryStore", () => {
   });
 
   it("should get messages with limit (returns last N)", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     await store.addMessage(conv.id, "request", [{ type: "text", content: "first" }]);
@@ -137,13 +137,13 @@ describe("MemoryStore", () => {
   });
 
   it("should return empty array for unknown conversation messages", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const msgs = await store.getMessages("nonexistent");
     expect(msgs).toEqual([]);
   });
 
   it("should get message parts", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const conv = await store.createConversation("Agent", "model");
 
     const msg = await store.addMessage(conv.id, "request", [
@@ -159,13 +159,13 @@ describe("MemoryStore", () => {
   });
 
   it("should return empty array for unknown message parts", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
     const parts = await store.getMessageParts("nonexistent");
     expect(parts).toEqual([]);
   });
 
   it("should support full CRUD flow", async () => {
-    const store = new MemoryStore();
+    const store = new InMemoryConversationStore();
 
     // Create
     const conv = await store.createConversation("CRUDAgent", "gpt-4");
