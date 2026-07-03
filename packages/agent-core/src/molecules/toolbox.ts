@@ -10,6 +10,33 @@ import type { ZodTypeAny } from "zod";
 import { ToolSchema } from "./tool-schema.js";
 
 /**
+ * A minimal, vendor-neutral event a tool may emit during execution.
+ * Deliberately NOT runtime's BaseEvent: no traceId/runId/spanId/timestamp —
+ * those correlation fields live on ToolExecutionContext and are stamped by the
+ * host (runtime) when it bridges to a real event bus. Keeps core decoupled.
+ */
+export interface ToolEvent {
+  readonly type: string;
+  readonly data?: Record<string, unknown>;
+}
+
+/**
+ * Optional execution context handed to a tool's `execute`. Every field is
+ * optional: a tool that ignores it, or a caller that omits it, is fully valid
+ * (backward compatible). `emit` is a minimal fire-and-forget sink — NOT an
+ * AgentEventBus. The host wires it to whatever bus/exporter it runs.
+ */
+export interface ToolExecutionContext {
+  /** Fire-and-forget event sink. Host bridges to its bus; core never awaits it. */
+  readonly emit?: (event: ToolEvent) => void;
+  /** Correlates emitted events to the enclosing run. */
+  readonly runId?: string;
+  readonly traceId?: string;
+  /** The tool-call id of the invoking tool, so children nest under their parent. */
+  readonly parentToolCallId?: string;
+}
+
+/**
  * A single tool definition: description, Zod parameters schema, and execute fn.
  *
  * Note: `execute` uses `unknown` for args because Zod `.parse()` handles
@@ -26,7 +53,12 @@ export interface ToolDefinition {
    * future output validation. Omit it and consumers simply get no return shape.
    */
   returns?: ZodTypeAny;
-  execute: (args: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * Executes the tool. `ctx` is an optional execution context (event sink +
+   * correlation ids) supplied by the host; existing implementations that
+   * ignore it remain valid (assignment-compatible trailing optional param).
+   */
+  execute: (args: Record<string, unknown>, ctx?: ToolExecutionContext) => Promise<unknown>;
 }
 
 /**
@@ -55,14 +87,17 @@ export abstract class Toolbox {
   /**
    * Execute a tool by name, validating args via Zod.
    *
+   * `ctx` is an optional execution context (event sink + correlation ids)
+   * forwarded verbatim to the tool's `execute`; never validated or inspected.
+   *
    * @throws Error if the tool name is unknown.
    */
-  async execute(name: string, args: unknown): Promise<unknown> {
+  async execute(name: string, args: unknown, ctx?: ToolExecutionContext): Promise<unknown> {
     const tool = this.tools[name];
     if (!tool) {
       throw new Error(`Unknown tool: ${name}`);
     }
     const parsed = tool.parameters.parse(args) as Record<string, unknown>;
-    return tool.execute(parsed);
+    return tool.execute(parsed, ctx);
   }
 }
