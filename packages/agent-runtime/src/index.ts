@@ -8,6 +8,7 @@ export * from "./conversation/index.js";
 export * from "./exporters/index.js";
 export * from "./presets/index.js";
 export * from "./workflows/index.js";
+export * from "./eval/index.js";
 export * from "./admin/index.js";
 export * from "./streaming/index.js";
 export * from "./providers/index.js";
