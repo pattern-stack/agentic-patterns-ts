@@ -10,6 +10,7 @@
  */
 
 import type {
+  EvalCaseDetailResponse,
   EvalCaseRow,
   EvalRunDetailResponse,
   EvalRunRow,
@@ -116,6 +117,26 @@ export async function fetchEvalCases(
 
   const body = (await res.json()) as EvalCasesResponse;
   return { kind: "ok", data: body.cases };
+}
+
+/**
+ * GET /eval/sets/:id/cases/:caseId — the case + its cross-run history.
+ * Mirrors `fetchEvalRunDetail`'s 503/404 discrimination: `not-found` when the
+ * set or case is unknown, `unconfigured` on 503, throw on other non-2xx.
+ */
+export async function fetchEvalCaseDetail(
+  setId: string,
+  caseId: string,
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<EvalCaseDetailResponse> | { kind: "not-found" }> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/sets/${setId}/cases/${encodeURIComponent(caseId)}`);
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.status === 404) return { kind: "not-found" };
+  if (!res.ok) throw new Error(`fetchEvalCaseDetail: HTTP ${res.status}`);
+
+  const body = (await res.json()) as EvalCaseDetailResponse;
+  return { kind: "ok", data: body };
 }
 
 export interface SplitAggregateFilters {

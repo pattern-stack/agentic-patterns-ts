@@ -13,6 +13,7 @@ import { AgentLensPage } from "./pages/build/AgentLensPage";
 import { AgentsRosterPage } from "./pages/build/AgentsRosterPage";
 import { CapabilitiesPage } from "./pages/build/CapabilitiesPage";
 import { RolesPage } from "./pages/build/RolesPage";
+import { EvalCaseDetailPage } from "./pages/eval/EvalCaseDetailPage";
 import { EvalComparePage } from "./pages/eval/EvalComparePage";
 import { EvalRunDetailPage } from "./pages/eval/EvalRunDetailPage";
 import { EvalRunsPage } from "./pages/eval/EvalRunsPage";
@@ -45,6 +46,7 @@ export function App() {
           <Route path="/eval" element={<EvalRunsPage />} />
           <Route path="/eval/sets" element={<EvalSetsPage />} />
           <Route path="/eval/sets/:id" element={<EvalSetDetailPage />} />
+          <Route path="/eval/sets/:id/cases/:caseId" element={<EvalCaseDetailPage />} />
           <Route path="/eval/runs/:id" element={<EvalRunDetailPage />} />
           <Route path="/eval/compare/:aId/:bId" element={<EvalComparePage />} />
         </Routes>

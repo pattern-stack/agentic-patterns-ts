@@ -7,7 +7,7 @@
  * former is a superstring.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalCaseRow, EvalRunRow, EvalSetSummary, SplitAggregate } from "../api/types";
