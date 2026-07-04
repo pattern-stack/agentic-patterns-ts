@@ -19,6 +19,7 @@ import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
 import { type EvalRunFilters, fetchEvalRuns, filterRuns } from "../../lib/evalApi";
+import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
 
 // pages never share code (playground-redesign.md) — lifted from ConversationsPage as-is.
 function shortId(id: string): string {
@@ -68,9 +69,11 @@ export function EvalRunsPage() {
   const [sortKey, setSortKey] = useState("tsStart");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filters, setFilters] = useState<EvalRunFilters>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
+    setSelected(new Set());
     try {
       const result = await fetchEvalRuns({ limit: 200 });
       setState(
@@ -125,6 +128,29 @@ export function EvalRunsPage() {
     });
     return sortDir === "asc" ? cmp : -cmp;
   });
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else if (next.size < 2) {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleCompare = () => {
+    // A = the older run by tsStart — the default read is A = baseline,
+    // B = candidate, so "regressions" means what it says.
+    const [runA, runB] = runs
+      .filter((r) => selected.has(r.id))
+      .sort((a, b) => new Date(a.tsStart).getTime() - new Date(b.tsStart).getTime());
+    if (runA && runB) {
+      navigate(`/eval/compare/${runA.id}/${runB.id}`);
+    }
+  };
 
   return (
     <div>
@@ -240,6 +266,34 @@ export function EvalRunsPage() {
             )}
           </div>
 
+          <SplitAggregatesPanel
+            filters={{ set: filters.set, target: filters.target, variant: filters.variant }}
+          />
+
+          {selected.size > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 14px",
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+              }}
+            >
+              <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+                {selected.size} of 2 selected
+              </span>
+              <Button size="sm" disabled={selected.size !== 2} onClick={handleCompare}>
+                Compare
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                Clear
+              </Button>
+            </div>
+          )}
+
           {filtered.length === 0 ? (
             <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
               No runs match the current filters.
@@ -248,6 +302,23 @@ export function EvalRunsPage() {
             <Card padded={false}>
               <DataTable<EvalRunRow>
                 columns={[
+                  {
+                    key: "select",
+                    header: "",
+                    render: (row) => {
+                      const isSelected = selected.has(row.id);
+                      return (
+                        <input
+                          type="checkbox"
+                          aria-label={`select run ${row.id} for compare`}
+                          checked={isSelected}
+                          disabled={!isSelected && selected.size >= 2}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleSelect(row.id)}
+                        />
+                      );
+                    },
+                  },
                   {
                     key: "id",
                     header: "Run",

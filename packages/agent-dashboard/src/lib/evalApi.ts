@@ -9,7 +9,13 @@
  * — pages render the standard error Card for those.
  */
 
-import type { EvalCaseRow, EvalRunDetailResponse, EvalRunRow, EvalSplit } from "../api/types";
+import type {
+  EvalCaseRow,
+  EvalRunDetailResponse,
+  EvalRunRow,
+  EvalSplit,
+  SplitAggregate,
+} from "../api/types";
 
 export type EvalFetch<T> = { kind: "ok"; data: T } | { kind: "unconfigured" };
 
@@ -20,6 +26,10 @@ interface EvalRunsResponse {
 interface EvalCasesResponse {
   setId: string;
   cases: EvalCaseRow[];
+}
+
+interface SplitAggregatesResponse {
+  aggregates: SplitAggregate[];
 }
 
 export interface FetchEvalRunsOptions {
@@ -74,6 +84,33 @@ export async function fetchEvalCases(
 
   const body = (await res.json()) as EvalCasesResponse;
   return { kind: "ok", data: body.cases };
+}
+
+export interface SplitAggregateFilters {
+  set?: string;
+  target?: string;
+  variant?: string;
+}
+
+/** GET /eval/aggregates/splits — the store-wide per-split pass-rate rollup. */
+export async function fetchSplitAggregates(
+  filters: SplitAggregateFilters = {},
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<SplitAggregate[]>> {
+  const params = new URLSearchParams();
+  if (filters.set) params.set("set", filters.set);
+  if (filters.target) params.set("target", filters.target);
+  if (filters.variant) params.set("variant", filters.variant);
+
+  const base = opts.baseUrl ?? "";
+  const url = `${base}/eval/aggregates/splits${params.size ? `?${params}` : ""}`;
+
+  const res = await fetch(url);
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (!res.ok) throw new Error(`fetchSplitAggregates: HTTP ${res.status}`);
+
+  const body = (await res.json()) as SplitAggregatesResponse;
+  return { kind: "ok", data: body.aggregates };
 }
 
 export interface EvalRunFilters {
