@@ -1,6 +1,6 @@
 /**
  * Eval REST endpoints — read routes (#136) + the write route + live stream
- * (#139, E5c).
+ * (#139, E5c) + capture-from-session (#140, E5d).
  *
  * Reads serve #132's `EvalStore` query surface straight through — no
  * parallel DTOs (the `routes/events.ts` precedent). `POST /eval/runs`
@@ -10,6 +10,10 @@
  * /eval/runs/:id/stream` is an attachable SSE view over an in-process live-run
  * registry (fire-and-poll — Decision 2): the persisted rows are the source of
  * truth, the stream is a convenience any client can attach to at any time.
+ * `POST /eval/cases/from-session` reads one exchange out of a live
+ * conversation in the in-process registry `app.ts` already hands to
+ * `conversationRoutes`, and upserts it into the case bank — #140's Decision
+ * 1-5.
  *
  * Handed in via `ServerConfig.evalStore`/`evalExecution`; both absent -> 503
  * with a friendly hint, exactly like the event routes.
@@ -37,12 +41,16 @@ import {
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration, EvalExecutionConfig } from "../config.js";
+import type { ConversationEntry } from "./conversations.js";
 
 export interface EvalRoutesOptions {
   readonly evalStore: EvalStore | undefined;
   readonly agents: AgentRegistration[];
   readonly eventBus: AgentEventBus;
   readonly evalExecution?: EvalExecutionConfig;
+  /** The live in-process conversation registry `app.ts` hands `conversationRoutes`
+   *  too — absent (older embedders) means capture-from-session 404s every request. */
+  readonly conversations?: ReadonlyMap<string, ConversationEntry>;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +63,31 @@ interface LaunchEvalRunBody {
   variant?: string;
   split?: EvalSplit;
   allowTest?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// POST /eval/cases/from-session (#140) — request / response shapes
+// ---------------------------------------------------------------------------
+
+interface CaptureFromSessionBody {
+  conversationId: string;
+  setId: string;
+  exchange?: number;
+  expected?: string;
+  split?: EvalSplit;
+  tags?: string[];
+  caseId?: string;
+  createSet?: { name?: string; description?: string };
+}
+
+interface CaptureFromSessionResponse {
+  setId: string;
+  caseId: string;
+  created: boolean;
+  input: string;
+  expected: string;
+  tags: string[];
+  split: EvalSplit;
 }
 
 /** SSE broadcast message — mirrors Hono's `writeSSE()` argument shape. */
@@ -73,7 +106,7 @@ interface LiveEvalRun {
 }
 
 export function evalRoutes(opts: EvalRoutesOptions): Hono {
-  const { evalStore, agents, eventBus, evalExecution } = opts;
+  const { evalStore, agents, eventBus, evalExecution, conversations } = opts;
   const app = new Hono();
 
   // A run started in THIS process; a run seeded/being-written by another
@@ -308,6 +341,148 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
   });
 
   // ---------------------------------------------------------------------------
+  // POST /eval/cases/from-session (#140, E5d) — capture a live exchange as a case
+  // ---------------------------------------------------------------------------
+
+  app.post("/eval/cases/from-session", async (c) => {
+    // ---- parse body ---------------------------------------------------------
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    const body = (raw ?? {}) as Partial<CaptureFromSessionBody> & Record<string, unknown>;
+
+    if (typeof body.conversationId !== "string" || body.conversationId.length === 0) {
+      return c.json({ error: "conversationId is required" }, 400);
+    }
+    if (typeof body.setId !== "string" || body.setId.length === 0) {
+      return c.json({ error: "setId is required" }, 400);
+    }
+
+    const rawExchange = body.exchange;
+    if (
+      rawExchange !== undefined &&
+      (typeof rawExchange !== "number" || !Number.isInteger(rawExchange) || rawExchange < 1)
+    ) {
+      return c.json({ error: "invalid exchange — expected a 1-based exchange number" }, 400);
+    }
+
+    if (body.expected !== undefined && typeof body.expected !== "string") {
+      return c.json({ error: "expected must be a string" }, 400);
+    }
+
+    if (body.tags !== undefined && !isStringArray(body.tags)) {
+      return c.json({ error: "tags must be an array of strings" }, 400);
+    }
+
+    const rawSplit = body.split;
+    if (rawSplit !== undefined && typeof rawSplit !== "string") {
+      return c.json(
+        { error: `invalid split "${String(rawSplit)}" — expected train | dev | test` },
+        400,
+      );
+    }
+    const splitResult = parseSplit(rawSplit as string | undefined);
+    if (splitResult.error) {
+      return c.json({ error: splitResult.error }, 400);
+    }
+
+    if (
+      body.caseId !== undefined &&
+      (typeof body.caseId !== "string" || body.caseId.length === 0)
+    ) {
+      return c.json({ error: "caseId must be a non-empty string" }, 400);
+    }
+
+    // ---- persistence presence ------------------------------------------------
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+
+    // ---- resolve the live conversation (Decision 1) ---------------------------
+    const conversationId = body.conversationId;
+    const entry = conversations?.get(conversationId);
+    if (!entry) {
+      return c.json(
+        {
+          error: `conversation "${conversationId}" not found`,
+          hint: "capture reads live conversations in this server process — start one in Chat",
+        },
+        404,
+      );
+    }
+
+    const history = entry.conversation.history;
+    if (history.length === 0) {
+      return c.json({ error: "conversation has no completed exchanges yet" }, 400);
+    }
+
+    // ---- resolve the exchange (Decision 2 — default: the first) ----------------
+    const exchange =
+      rawExchange === undefined ? history[0] : history.find((e) => e.number === rawExchange);
+    if (!exchange) {
+      return c.json(
+        {
+          error: `exchange ${rawExchange} not found in conversation "${conversationId}" (has ${history.length})`,
+        },
+        404,
+      );
+    }
+
+    // ---- resolve the set (Decision 4 — explicit createSet opt-in) --------------
+    const setId = body.setId;
+    const setExists = evalStore.listEvalSets().some((s) => s.id === setId);
+    if (!setExists) {
+      const createSet = body.createSet;
+      if (createSet === undefined || createSet === null) {
+        return c.json(
+          {
+            error: `eval set "${setId}" not found`,
+            hint: 'retry with "createSet": {"name": …} to create it',
+          },
+          404,
+        );
+      }
+      evalStore.upsertEvalSet({
+        id: setId,
+        name: typeof createSet === "object" ? createSet.name : undefined,
+        description: typeof createSet === "object" ? createSet.description : undefined,
+      });
+    }
+
+    // ---- map the exchange -> StoredEvalCase (Decision 2/3/5) --------------------
+    const caseId =
+      typeof body.caseId === "string" && body.caseId.length > 0
+        ? body.caseId
+        : deriveCaseId(conversationId, exchange.number);
+    const expected = body.expected ?? exchange.assistant;
+    const split = splitResult.value ?? "train";
+    const tags = body.tags ?? ["captured", `agent:${entry.agentId}`];
+
+    const created = !evalStore.listEvalCases(setId).some((r) => r.caseId === caseId);
+    evalStore.upsertEvalCase(setId, {
+      caseId,
+      input: exchange.user,
+      expected,
+      tags,
+      split,
+    });
+
+    const response: CaptureFromSessionResponse = {
+      setId,
+      caseId,
+      created,
+      input: exchange.user,
+      expected,
+      tags,
+      split,
+    };
+    return c.json(response, created ? 201 : 200);
+  });
+
+  // ---------------------------------------------------------------------------
   // GET /eval/runs/:id/stream (#139) — attachable SSE view over the live registry
   // ---------------------------------------------------------------------------
 
@@ -417,6 +592,16 @@ function notConfigured(c: Context): Response {
     },
     503,
   );
+}
+
+/** Deterministic caseId — capturing the same exchange twice targets the same
+ *  `(setId, caseId)` row (#140 Decision 3, upsert idempotence). */
+function deriveCaseId(conversationId: string, exchangeNumber: number): string {
+  return `session-${conversationId}-${exchangeNumber}`;
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
 }
 
 /** Mirrors `notConfigured`'s shape — `ServerConfig.evalExecution` absent. */
