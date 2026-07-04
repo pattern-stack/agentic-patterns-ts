@@ -18,9 +18,11 @@ import { runPlaygroundCommand } from "./commands/playground.js";
 import { runRunCommand } from "./commands/run.js";
 import { runStatusCommand } from "./commands/status.js";
 import { runToolsCommand } from "./commands/tools.js";
-import { resolveProjectConfig } from "./helpers/config.js";
+import { runUpdateCommand } from "./commands/update.js";
+import { findProjectRoot, resolveProjectConfig } from "./helpers/config.js";
 import { discoverAgents } from "./helpers/discover.js";
 import { attachProvenance } from "./helpers/provenance.js";
+import { notifyIfOutdated } from "./helpers/versions.js";
 
 const USAGE = `
 ap — agentic patterns
@@ -42,6 +44,8 @@ Commands:
   init [<dir>]                    scaffold a new agent project
   claude-skill [<name>]           install the bundled Claude Code skill(s)
                                     into .claude/skills (standalone)
+  update [--check]                update @agentic-patterns/* deps to latest
+                                    (--check: report only, exit 1 if behind)
   config                          show env detection status
   config set                      interactive .env editor
 
@@ -110,6 +114,8 @@ async function main(): Promise<void> {
       judge: { type: "boolean" },
       "judge-model": { type: "string" },
       "judge-thresholds": { type: "string" },
+      check: { type: "boolean" },
+      "dry-run": { type: "boolean" },
     },
     allowPositionals: true,
     strict: false,
@@ -144,6 +150,13 @@ async function main(): Promise<void> {
       global: Boolean(values.global),
       targetDir: values.dir ? String(values.dir) : undefined,
     });
+    return;
+  }
+
+  // `update` operates on the project's package.json + npm; it needs the project
+  // root but NOT agent discovery, so dispatch it before project context.
+  if (command === "update") {
+    await runUpdateCommand({ check: Boolean(values.check || values["dry-run"]) });
     return;
   }
 
@@ -264,8 +277,18 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`\x1b[31merror:\x1b[0m ${msg}\n`);
-  process.exit(1);
-});
+main()
+  .then(async () => {
+    // Passive out-of-date notice, printed AFTER the command's own output.
+    // Skipped for `update` (redundant) and `init` (fresh project). Cached
+    // ~24h on disk and fully failure-isolated — never blocks or breaks a run.
+    const cmd = process.argv.slice(2).find((a) => !a.startsWith("-"));
+    if (cmd === "update" || cmd === "init") return;
+    const root = findProjectRoot();
+    if (root) await notifyIfOutdated(root);
+  })
+  .catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`\x1b[31merror:\x1b[0m ${msg}\n`);
+    process.exit(1);
+  });
