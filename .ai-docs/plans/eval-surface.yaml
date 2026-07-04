@@ -1,0 +1,350 @@
+# eval-surface — issue-stack plan (Gate 0, awaiting approval)
+#
+# Source of truth: docs/eval-surface.md (updated 2026-07-04, re-anchored on shipped
+# store-family substrate). Load-bearing decision honored throughout (doc Update note,
+# §3 E1/E2, §4, §12, §16.1):
+#   - EvalStore extends RunStore extends EventStore — ONE SQLite file, each layer adds tables,
+#     mirroring the shipped `class RunStore extends EventStore` (storage/run-store.ts:124).
+#   - Each eval case's execution IS a RunStore run (inherited startRun/finishRun — run-store.ts
+#     names runEval as a manual producer — or a bus with RunStoreExporter, exporters/run-store.ts:80).
+#   - eval_result ANNOTATES a run by run_id; it does NOT re-store tokens/trace/output/status/error.
+#   - variant/split ride RunStore's `metadata` JSON slot; E2 fuses trace + run capture.
+#
+# All file:line anchors below were re-verified at origin/main 1e1fbec (contains 4a3211e,
+# runtime@0.8.0) and are still (verify at impl). Known drift from the doc's 1975ec3 anchors:
+#   cli.ts dispatch is now :149 (was :143) · ServerConfig.eventStore is config.ts:95 (was :88) ·
+#   EventStream lives at components/organisms/EventStream.tsx (was components/).
+#
+# DECISION FLAGGED FOR REVIEW (mirrors shipped precedent over the doc's pre-update phrasing):
+#   §12 still says "EvalStore interface / InMemory+Sqlite impls", but shipped RunStore is a
+#   single concrete SQLite-backed class (run-store.ts:124) and its tests use `:memory:`
+#   (storage/__tests__/run-store.test.ts:47). This plan follows the shipped pattern: concrete
+#   `class EvalStore extends RunStore`, tests via `:memory:` — no separate InMemoryEvalStore.
+#
+# Out of scope (doc §13 scope fences — carried verbatim):
+#   - NOT a rewrite of #103: the engine ships as-is; only additive edit is E2's eventBus? field.
+#   - NO agent "version" primitive: variant is an eval-store label; Agent/AgentConfig gain nothing.
+#   - NO new @agentic-patterns/eval package: store → agent-runtime/stores, routes → agent-server,
+#     tab → agent-dashboard.
+#   - Judge (E6) decoupled and LAST — not gated on the rest of the stack.
+#   - Consumer gold stays in the consumer (canvas-workstation); framework ships loaders + discipline.
+#   - Stretch (v1 lens.ts rule_ignored/rule_absent scorer) — explicitly NOT in this stack (§11).
+
+plan:
+  slug: eval-surface
+  summary: Wire the shipped #103 eval engine into a full surface — EvalStore-on-RunStore persistence, trace capture, case banks/splits, ap eval CLI, the playground Eval tab, and (last) the LLM judge.
+  milestone: eval-surface
+
+  epic_title: "Eval surface — persist, run, review evals in the playground (fast-follows to #103)"
+  epic_body: |
+    #103 shipped the eval engine (`runEval`, `resolveEvalTarget`, `Scorer` — in-memory,
+    programmatic-only; zero hits in server/cli/dashboard). This stack ships the four
+    deferred items + a review UI, per the LOCKED design in `docs/eval-surface.md`
+    (re-anchored 2026-07-04 on the shipped store-family substrate: #118 `stores/` barrel,
+    #117 `RunStore`, runtime@0.8.0, main @ 4a3211e).
+
+    Load-bearing decision (doc §16.1, resolved): `EvalStore extends RunStore extends
+    EventStore` — one SQLite file, each layer adds tables. Each eval case's execution IS
+    a RunStore run; `eval_result` annotates it by `run_id` (no duplication of tokens/
+    trace/output/status); `variant`/`split` ride RunStore's `metadata` JSON slot; trace
+    and run capture fuse via `RunStoreExporter` on the eval bus.
+
+    Epic 1 is the doc's thinnest end-to-end slice: store + trace capture + case banks +
+    `ap eval` + a read-only Eval tab = "run `ap eval`, review it in the playground."
+    Epic 2 deepens the review surface (A/B compare, run-from-UI, capture-from-session)
+    and lands the LLM judge LAST (§13: decoupled by design).
+
+    Scope fences (§13): no #103 rewrite (only additive `eventBus?`); no agent "version"
+    primitive (variant is a store label); no new `@agentic-patterns/eval` package;
+    consumer gold banks stay in canvas-workstation.
+
+  stack:
+    base: main
+
+issues:
+  # ─── Epic 1 · core loop — the thinnest end-to-end slice (doc §12) ───────────
+
+  - key: eval-store
+    title: "feat(runtime): EvalStore extends RunStore — eval_set/eval_case/eval_run/eval_result on the shared SQLite file (E1)"
+    size: M
+    doc: "eval-surface.md §3(E1), §4, §12, §16.1"
+    depends_on: []
+    parallel_with: [eval-trace-capture, eval-case-banks]
+    labels: []
+    key_files:
+      - "packages/agent-runtime/src/storage/run-store.ts:124 — class RunStore extends EventStore; the class to extend (verify at impl)"
+      - "packages/agent-runtime/src/storage/run-store.ts:211,227 — inherited startRun/finishRun; runs row carries tokens/trace_id/status/final_answer (verify at impl)"
+      - "packages/agent-runtime/src/storage/event-store.ts:290 — _migrate() PRAGMA user_version pattern to follow (verify at impl)"
+      - "packages/agent-runtime/src/stores/index.ts:26 — barrel export site, beside RunStore (verify at impl)"
+      - "packages/agent-runtime/src/eval/run-eval.ts:46 — EvalSpec.onResult, the persistence seam (verify at impl)"
+      - "packages/agent-runtime/src/storage/__tests__/run-store.test.ts:47 — `:memory:` test pattern (verify at impl)"
+      - "NEW packages/agent-runtime/src/storage/eval-store.ts"
+    description: |
+      New `class EvalStore extends RunStore` (concrete, mirroring shipped run-store.ts:124 —
+      NOT interface+impls; tests use `:memory:`). Adds ONLY the case-bank + suite-run +
+      annotation tables (doc §4 schema): `eval_set`, `eval_case` (split column), `eval_run`
+      (SUITE-level: set/target/variant/split/model/git_sha), `eval_result` (eval_run_id,
+      case_id, run_id → runs.run_id, scores_json, pass). Per-case tokens/trace/output/status
+      live on the inherited `runs` row and are JOINed in, never duplicated. variant/split
+      also stamped into the run's `metadata` slot. Query surface for the two views that
+      matter: A/B compare (same set, two variants) and split aggregates. Export via
+      `stores/` barrel per #118 naming law. Migration via `PRAGMA user_version`.
+
+      Acceptance:
+      - One SQLite file serves events + runs + eval tables; a v2 runs-only DB migrates in place.
+      - Persisting a case result via onResult → startRun/finishRun + eval_result lands run_id join.
+      - eval_result stores ONLY scores_json/pass/case linkage — join test proves no duplication.
+      - A/B and per-split aggregate queries covered by `:memory:` tests.
+
+  - key: eval-trace-capture
+    title: "feat(runtime): eval trace + run capture fused — eventBus on EvalRunContext, per-case traceId, RunStoreExporter (E2)"
+    size: S
+    doc: "eval-surface.md §3(E2), §5"
+    depends_on: []
+    parallel_with: [eval-store, eval-case-banks]
+    labels: []
+    key_files:
+      - "packages/agent-runtime/src/eval/run-eval.ts:34 — EvalRunContext (add readonly eventBus?) (verify at impl)"
+      - "packages/agent-runtime/src/eval/run-eval.ts:162 — runEval per-case loop; mint traceId, thread bus into node.run (verify at impl)"
+      - "packages/agent-runtime/src/eval/types.ts — EvalResult (stamp traceId) (verify at impl)"
+      - "packages/agent-runtime/src/exporters/run-store.ts:80 — RunStoreExporter to attach to the eval bus (verify at impl)"
+    description: |
+      The ONLY engine edit in the stack (§13): add `readonly eventBus?: AgentEventBus` to
+      `EvalRunContext`; in `runEval`, per case mint a traceId (e.g. `${runId}:${case.id}`),
+      pass bus + traceId into the NodeRunContext, and stamp traceId onto EvalResult. With
+      `RunStoreExporter` attached to that bus, each case yields an EventStore trace AND a
+      RunStore `runs` row for free — one lever, both records. No bus → behavior unchanged.
+
+      Acceptance:
+      - eventBus is optional; existing runEval callers compile and behave identically.
+      - With a bus attached, each case emits trace events keyed by its traceId.
+      - With RunStoreExporter on the bus, each case lands a runs row (test via :memory: RunStore).
+      - EvalResult carries traceId when a bus is present.
+
+  - key: eval-case-banks
+    title: "feat(runtime): case banks + splits — EvalCase.split, jsonl/gold loaders, held-out test guard (E3)"
+    size: S
+    doc: "eval-surface.md §3(E3), §7"
+    depends_on: []
+    parallel_with: [eval-store, eval-trace-capture]
+    labels: []
+    key_files:
+      - "packages/agent-runtime/src/eval/types.ts — EvalCase Zod schema (add optional split) (verify at impl)"
+      - "NEW packages/agent-runtime/src/eval/case-bank.ts (or loaders.ts) — jsonl/gold loaders + split filter + guard"
+      - "Reference: ~/retrieval-agent-2.0/canvas-workstation/src/query-surface/eval/{gold,split-discipline}.ts (promote the idea, not the inverted names)"
+    description: |
+      ML-standard split names on the framework primitive: `train` / `dev` / `test` (§7 —
+      fixes the consumer's inverted test/validate naming; consumer aliases at its own loader
+      seam, out of scope here). `split` is a first-class optional field on EvalCase. Ship
+      jsonl + gold-file loaders and a split filter; the held-out `test` split refuses to run
+      without an explicit opt-in flag. File-first authoring (§16.4); the optional eval_case
+      mirror is eval-store's table, populated later via capture/mirror — not here.
+
+      Acceptance:
+      - EvalCase accepts split: train|dev|test; absent split behaves as before.
+      - loadCasesJsonl/loadGold produce EvalCase[]; malformed rows fail with case-addressed errors.
+      - Selecting split=test without the explicit opt-in throws the guard error.
+
+  - key: eval-cli
+    title: "feat(cli): ap eval — run a suite from the CLI, persisted to EvalStore, gate exit code (E4)"
+    size: M
+    doc: "eval-surface.md §3(E4), §10, §12"
+    depends_on: [eval-store, eval-case-banks]
+    parallel_with: []
+    labels: []
+    key_files:
+      - "packages/agent-cli/src/cli.ts:149 — bin dispatch switch (doc said :143; drifted) (verify at impl)"
+      - "packages/agent-cli/src/commands/playground.ts:71 — shared AgentEventBus boot pattern to mirror (verify at impl)"
+      - "packages/agent-cli/src/helpers/discover.ts — agent discovery to reuse (verify at impl)"
+      - "NEW packages/agent-cli/src/commands/eval.ts"
+    description: |
+      New `ap eval <agents-dir> --set <path|id> [--target <id>] [--variant <label>]
+      [--split train|dev|test] [--db <path>]` (§10; --judge arrives with eval-judge).
+      Discover targets (reuse discover.ts + createRunner), load the set (eval-case-banks),
+      run `runEval` with an EvalStore-backed onResult, print aggregate + gate, exit non-zero
+      on gate failure (CI-friendly). Held-out `test` refuses without the opt-in flag. If
+      eval-trace-capture has landed, attach the shared bus + RunStoreExporter here (§5.3)
+      so CLI runs land traces + run rows; otherwise a 2-line follow-up wire.
+
+      Acceptance:
+      - `ap eval dir --set bank.jsonl` runs the suite and persists eval_run + eval_result rows.
+      - --variant lands on eval_run AND the runs' metadata slot; --split filters cases.
+      - Gate failure exits non-zero; aggregate printout shows per-split pass rates.
+
+  - key: eval-server-api
+    title: "feat(server): eval read routes + evalStore config seam + SPA /eval prefix fix (E5 substrate)"
+    size: S
+    doc: "eval-surface.md §8 (read endpoints + gotcha)"
+    depends_on: [eval-store]
+    parallel_with: [eval-cli]
+    labels: []
+    key_files:
+      - "packages/agent-server/src/app.ts:32-37 — route-group mounts; add one line (verify at impl)"
+      - "packages/agent-server/src/config.ts:95 — ServerConfig.eventStore; add optional evalStore beside it (doc said :88; drifted) (verify at impl)"
+      - "packages/agent-cli/src/commands/playground.ts:211 — API_PREFIXES allowlist; ADD /eval or the SPA fallback swallows it (verify at impl)"
+      - "NEW packages/agent-server/src/routes/eval.ts"
+    description: |
+      Read-only server surface: GET /eval/sets (+ per-split counts), GET /eval/sets/:id/cases,
+      GET /eval/runs (filter by set/target/variant/split), GET /eval/runs/:id (per-case
+      results JOINed with their runs rows + summary). Thread optional `evalStore` through
+      ServerConfig exactly like eventStore. Must-fix gotcha (§8): add `/eval` to the
+      playground SPA fallback's API_PREFIXES or every route 200s index.html. Write routes
+      (POST runs / capture) come later (eval-run-from-ui, eval-capture-session).
+
+      Acceptance:
+      - All four GETs serve EvalStore data; absent evalStore → routes absent or 503, matching eventStore precedent.
+      - /eval/runs/:id includes joined run fields (tokens, trace_id, status, final_answer) per case.
+      - ap playground serves /eval/* as API, not SPA fallback (regression test on API_PREFIXES).
+
+  - key: eval-tab-readonly
+    title: "feat(dashboard): Eval tab — read-only review: run history, per-case pass/fail, actual-vs-expected, trace drill-down (E5a)"
+    size: M
+    doc: "eval-surface.md §3(E5), §9 (read-only subset), §12 thinnest slice"
+    depends_on: [eval-server-api, eval-cli, eval-trace-capture]
+    parallel_with: []
+    labels: []
+    key_files:
+      - "packages/agent-dashboard/src/components/templates/AppShell.tsx:5 — navGroups; new Evaluate entry (verify at impl)"
+      - "packages/agent-dashboard/src/App.tsx:23-35 — route table; add /eval (verify at impl)"
+      - "packages/agent-dashboard/src/components/organisms/EventStream.tsx — reuse for drill-down (doc said components/; drifted) (verify at impl)"
+      - "packages/agent-dashboard/src/hooks/useEventStream.ts + graph/trace-from-events.ts — trace replay reuse (verify at impl)"
+      - "NEW packages/agent-dashboard/src/pages/EvalPage.tsx"
+    description: |
+      The milestone closer: review CLI-run suites in the playground. One nav entry +
+      /eval route + EvalPage: set/run history list (filter by set/target/variant/split),
+      run detail with per-case pass/fail table, side-by-side actual-vs-expected on failures
+      (ADK's best idea), and per-case trajectory drill-down — the existing EventStream/
+      trace-from-events filtered by the case's trace_id (free via eval-trace-capture).
+      Read-only: no run-from-UI, no A/B, no capture (epic 2). Dashboard is Vite-built into
+      agent-cli assets at package build — no runtime dep. If the drill-down embed balloons,
+      shear it into a follow-up PR rather than growing this one.
+
+      Acceptance:
+      - `ap eval` → open playground → the run appears; per-case rows show pass/fail + scores.
+      - Failing case expands to actual vs expected side-by-side.
+      - Case row links to its trace view (trace_id-filtered EventStream renders events).
+
+  # ─── Epic 2 · review depth + judge ──────────────────────────────────────────
+
+  - key: eval-ab-compare
+    title: "feat(dashboard): A/B compare + split-aware aggregates — variant bake-off and the overfit gap (E5b)"
+    size: M
+    doc: "eval-surface.md §6, §7, §9 (compare + aggregates)"
+    depends_on: [eval-tab-readonly]
+    parallel_with: [eval-run-from-ui, eval-capture-session]
+    labels: []
+    key_files:
+      - "packages/agent-dashboard/src/pages/EvalPage.tsx — extend (created in eval-tab-readonly)"
+      - "packages/agent-server/src/routes/eval.ts — compare/aggregate reads if not expressible client-side (verify at impl)"
+      - "Reference: ~/retrieval-agent-2.0/canvas-workstation/.eval/viz.ts — rollup-by-arm/mode + per-run drawer; port aggregation into live React"
+    description: |
+      The two analytics views the schema was keyed for (§4): A/B compare — two eval_runs of
+      the same set, different variant, aligned per case (regression + version bake-off in one
+      view; §6's "sub agents in/out against the exact same prompts") — and split-aware
+      aggregates: train/dev/test rollup with the overfit read (train-vs-test gap) as a chart
+      instead of a guess (§7). Port viz.ts aggregation over GET /eval/runs. Variant stays a
+      free label with git_sha/model provenance alongside (§16.2 proposal).
+
+      Acceptance:
+      - Two runs (same set, variants A/B) render aligned per-case diff + delta summary.
+      - Per-split pass-rate rollup renders; train-vs-test gap visible for a split-tagged set.
+      - Cases missing from one run degrade gracefully (shown as not-run, not errors).
+
+  - key: eval-run-from-ui
+    title: "feat(server+dashboard): run evals from the playground — POST /eval/runs + SSE live progress (E5c)"
+    size: M
+    doc: "eval-surface.md §8 (POST + stream), §9 (run controls)"
+    depends_on: [eval-tab-readonly]
+    parallel_with: [eval-ab-compare, eval-capture-session]
+    labels: []
+    key_files:
+      - "packages/agent-server/src/routes/eval.ts — add POST /eval/runs + GET /eval/runs/:id/stream"
+      - "packages/agent-server/src/routes/conversations.ts:79 — streamSSE pattern to copy (verify at impl)"
+      - "packages/agent-server/src/app.ts:35 — conversationRoutes gets config.agents; eval routes need the same for target resolution (verify at impl)"
+      - "packages/agent-dashboard/src/pages/EvalPage.tsx — set/target/variant/split picker + progress"
+    description: |
+      Close the loop in the UI: POST /eval/runs `{setId, targetId, variant, split}` resolves
+      the target from the server's registered agents (same seam conversationRoutes uses),
+      runs `runEval` server-side with the EvalStore onResult + shared bus, and GET
+      /eval/runs/:id/stream streams per-case progress via streamSSE (copy conversations.ts).
+      EvalPage grows the run launcher (§9 bullet 1) with live progress. Held-out `test`
+      split keeps its guard server-side too.
+
+      Acceptance:
+      - Launching from the UI persists the same rows as `ap eval` (store parity test).
+      - SSE stream emits per-case completion; UI progress updates live; page reload mid-run recovers.
+      - split=test refused without the explicit opt-in (server-side guard, not just UI).
+
+  - key: eval-capture-session
+    title: "feat(server+dashboard): capture-from-session — a live conversation becomes an EvalCase (E5d)"
+    size: S
+    doc: "eval-surface.md §8 (POST /eval/cases/from-session), §9 (capture bullet)"
+    depends_on: [eval-tab-readonly]
+    parallel_with: [eval-ab-compare, eval-run-from-ui]
+    labels: []
+    key_files:
+      - "packages/agent-server/src/routes/eval.ts — add POST /eval/cases/from-session"
+      - "packages/agent-server/src/routes/conversations.ts — ConversationEntry shape to map into EvalCase input/expected (verify at impl)"
+      - "packages/agent-dashboard/src/pages/ConversationDetailPage.tsx — the capture affordance lives on the conversation view (verify at impl)"
+    description: |
+      ADK's lowest-friction way to grow a gold set (§9): "Add current conversation as an
+      eval case." POST /eval/cases/from-session maps a conversation (input = first user
+      message / configured slice; expected = seeded from the actual answer, editable) into
+      an eval_case row in a chosen set — the eval_case table's purpose (§16.4: file-first
+      authoring, DB mirror for UI browse). Captured cases default split=train. Dashboard
+      button on the conversation detail view + captured cases browsable via the existing
+      GET /eval/sets/:id/cases.
+
+      Acceptance:
+      - Capture from a live conversation lands an eval_case row (set, split=train default).
+      - Captured case is visible in the Eval tab's case browser and runnable by eval-run-from-ui.
+      - Capturing the same session twice is idempotent or clearly versioned (no silent dup).
+
+  - key: eval-judge
+    title: "feat(runtime): LLM-judge scorer — set-membership + 5-axis rubric, injected judge model, config thresholds (E6, LAST)"
+    size: M
+    doc: "eval-surface.md §3(E6), §11, §13"
+    depends_on: [eval-store, eval-cli]
+    parallel_with: []
+    labels: []
+    key_files:
+      - "packages/agent-runtime/src/eval/scorer.ts — Scorer contract (already async, judge-ready) (verify at impl)"
+      - "NEW packages/agent-runtime/src/eval/scorers/judge.ts (+ set-membership.ts)"
+      - "packages/agent-cli/src/commands/eval.ts — wire --judge flag (created in eval-cli)"
+      - "Reference: ~/Projects/retrieval-agent/packages/benchmarks/agent-eval/grade.ts — the 5-axis rubric + set-membership check to promote"
+    description: |
+      Deliberately last (§3, §13): promote v1 grade.ts as built-in async Scorers. Two graders:
+      set-membership (deterministic, no model — cited-id P/R/F1 vs expected ids; pass =
+      recall ≥ 0.6 ∧ precision ≥ 0.4) and the 5-axis rubric via an injected judge model
+      (accuracy/completeness/grounding/hazard-avoidance/calibration, 0-5 each + boolean pass;
+      "just a scorer that calls a runner" — no vendor hardcoding). Config-driven thresholds
+      (ADK-style score ≥ threshold). MUST fix on port: the v1 8-char-prefix-vs-full-UUID
+      citation-match bug (§11). Judge axes land in scores_json beside mechanical metrics —
+      no schema change (§4). v1 lens.ts is a named non-goal.
+
+      Acceptance:
+      - setMembership scorer passes/fails per the P/R thresholds; prefix-vs-UUID bug has a regression test.
+      - judge scorer runs against an injected runner/model; axes + pass land in scores_json.
+      - `ap eval --judge` gates on judge thresholds; without --judge behavior is unchanged.
+
+# ─── Epics (stack_topology: per_epic — 10 issues > canvas cap of 8 per stack) ──
+stack_topology: per_epic
+epics:
+  - key: core-loop
+    title: "Eval surface · Epic 1 — the core loop (run `ap eval`, review it in the playground)"
+    body: |
+      The doc's thinnest end-to-end slice (§12): EvalStore-on-RunStore (E1) + fused
+      trace/run capture (E2, S-sized — the read-only tab's drill-down depends on it) +
+      case banks/splits (E3) + `ap eval` (E4) + the read-only Eval tab (E5a). Every
+      issue ships standalone value; E1/E2/E3 are parallel roots.
+    issues: [eval-store, eval-trace-capture, eval-case-banks, eval-cli, eval-server-api, eval-tab-readonly]
+    stack_base: main
+  - key: review-depth
+    title: "Eval surface · Epic 2 — review depth + the judge"
+    body: |
+      Deepen the review surface on the shipped core loop: A/B compare + split aggregates
+      (the two views the §4 schema was keyed for), run-from-UI with SSE progress,
+      capture-from-session; then the LLM judge LAST (§13 — decoupled by design). The
+      three E5 extensions are mutually parallel.
+    issues: [eval-ab-compare, eval-run-from-ui, eval-capture-session, eval-judge]
+    stack_base: eval-tab-readonly
