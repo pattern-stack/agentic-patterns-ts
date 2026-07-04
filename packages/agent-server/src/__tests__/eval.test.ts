@@ -33,12 +33,7 @@ function mkApp(store: EvalStore | undefined): Hono {
 }
 
 /** app.request with a JSON body + method — the write-route test idiom. */
-async function reqJson(
-  app: Hono,
-  method: string,
-  path: string,
-  body: unknown,
-): Promise<Response> {
+async function reqJson(app: Hono, method: string, path: string, body: unknown): Promise<Response> {
   return app.request(path, {
     method,
     headers: { "Content-Type": "application/json" },
