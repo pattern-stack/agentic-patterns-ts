@@ -35,6 +35,16 @@ export interface SetMembershipArgs<TIn = unknown, TOut = unknown, TExpected = un
 export interface SetMembershipOptions<TIn = unknown, TOut = unknown, TExpected = unknown> {
   /** Score name. Default "set-membership". */
   name?: string;
+  /**
+   * Which of the three computed metrics becomes the headline `Score.value`.
+   * Default `"f1"` (back-compatible). All three (`recall`/`precision`/`f1`)
+   * are always in `Score.detail` regardless — `metric` only picks the scalar
+   * a consumer reads without digging into `detail`. Use `"recall"` when recall
+   * is the objective (e.g. retrieval gather) and F1 would fold in precision
+   * you're grading separately, or on a precision-flattering benchmark where
+   * F1-as-headline misleads. The `passed` gate stays recall∧precision either way.
+   */
+  metric?: "f1" | "recall" | "precision";
   /** Pass requires recall ≥ this. Default 0.6 (doc §11). */
   recall?: number;
   /** Pass requires precision ≥ this. Default 0.4 (doc §11). */
@@ -121,6 +131,7 @@ export function setMembership<TIn = unknown, TOut = unknown, TExpected = unknown
   opts?: SetMembershipOptions<TIn, TOut, TExpected>,
 ): Scorer<TIn, TOut, TExpected> {
   const name = opts?.name ?? "set-membership";
+  const metric = opts?.metric ?? "f1";
   const recallThreshold = opts?.recall ?? 0.6;
   const precisionThreshold = opts?.precision ?? 0.4;
   const resolveExpectedIds = opts?.expectedIds ?? defaultExpectedIds;
@@ -169,6 +180,7 @@ export function setMembership<TIn = unknown, TOut = unknown, TExpected = unknown
       detail.prefixSuspects = prefixSuspects;
     }
 
-    return { name, value: f1, passed, detail };
+    const value = metric === "recall" ? recall : metric === "precision" ? precision : f1;
+    return { name, value, passed, detail };
   };
 }
