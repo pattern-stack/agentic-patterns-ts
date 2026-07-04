@@ -12,6 +12,7 @@ import { parseArgs } from "node:util";
 import { runAgentsCommand } from "./commands/agents.js";
 import { runClaudeSkillCommand } from "./commands/claude-skill.js";
 import { runConfigSetCommand, runConfigStatusCommand } from "./commands/config.js";
+import { runEvalCommand } from "./commands/eval.js";
 import { type Provider, runInitCommand } from "./commands/init.js";
 import { runPlaygroundCommand } from "./commands/playground.js";
 import { runRunCommand } from "./commands/run.js";
@@ -36,6 +37,8 @@ Commands:
   playground [<dir>]              launch UI environment (server + dashboard);
                                     point <dir> at an agents root to discover
                                     every child agent recursively
+  eval [<dir>] --set <path|id>    run a case bank suite against one agent,
+                                    persist to EvalStore, gate exit code
   init [<dir>]                    scaffold a new agent project
   claude-skill [<name>]           install the bundled Claude Code skill(s)
                                     into .claude/skills (standalone)
@@ -56,6 +59,20 @@ Options:
                                     monorepo (dogfooding before publish)
   --global                        (claude-skill) install into ~/.claude/skills
   --dir <path>                    (claude-skill) project root (default cwd)
+
+Eval options:
+  --set <path|id>                 (eval, required) jsonl case bank file, or a
+                                    stored set id (requires persistence)
+  --target <id>                   (eval) agent id; required when >1 discovered
+  --variant <label>                (eval) free A/B label -> eval_run.variant
+  --split <train|dev|test>        (eval) filter cases to one split
+  --allow-test                    (eval) opt in to running the held-out "test"
+                                    split deliberately
+  --gold <path>                   (eval) gold overlay file (file --set only)
+  --db <path>                     (eval) SQLite file (default: the playground's
+                                    events.db — AP_DB_PATH or XDG state)
+
+Eval exit codes: 0 gate pass · 1 gate failure · 2 usage/config error
 `;
 
 async function main(): Promise<void> {
@@ -73,6 +90,13 @@ async function main(): Promise<void> {
       link: { type: "boolean" },
       global: { type: "boolean" },
       dir: { type: "string" },
+      set: { type: "string" },
+      target: { type: "string" },
+      variant: { type: "string" },
+      split: { type: "string" },
+      "allow-test": { type: "boolean" },
+      gold: { type: "string" },
+      db: { type: "string" },
     },
     allowPositionals: true,
     strict: false,
@@ -117,7 +141,7 @@ async function main(): Promise<void> {
   // treats <dir> AS the agents root and recursively finds every child agent
   // (`<domain>/agents/<name>/agent.ts` at any depth). Falls back to the project
   // root + the configured/`--agents` glob.
-  const dirPositional = command === "playground" ? positionals[1] : undefined;
+  const dirPositional = command === "playground" || command === "eval" ? positionals[1] : undefined;
   const agentsDir = values["agents-dir"] ? String(values["agents-dir"]) : dirPositional;
   const explicitGlob = values.agents ? [String(values.agents)] : undefined;
 
@@ -184,6 +208,20 @@ async function main(): Promise<void> {
         port,
         noDashboard: Boolean(values["no-dashboard"]),
         open: !values["no-open"],
+      });
+      return;
+    }
+
+    case "eval": {
+      await runEvalCommand({
+        agents,
+        set: values.set ? String(values.set) : undefined,
+        gold: values.gold ? String(values.gold) : undefined,
+        target: values.target ? String(values.target) : undefined,
+        variant: values.variant ? String(values.variant) : undefined,
+        split: values.split ? String(values.split) : undefined,
+        allowTest: Boolean(values["allow-test"]),
+        db: values.db ? String(values.db) : undefined,
       });
       return;
     }
