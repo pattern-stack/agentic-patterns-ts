@@ -75,6 +75,18 @@ export function evalRoutes(evalStore: EvalStore | undefined): Hono {
     return c.json({ run, results, summary: summarize(results) });
   });
 
+  app.get("/eval/aggregates/splits", (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    const aggregates = evalStore.splitAggregates({
+      setId: c.req.query("set"),
+      targetId: c.req.query("target"),
+      variant: c.req.query("variant"),
+    });
+    return c.json({ aggregates });
+  });
+
   return app;
 }
 

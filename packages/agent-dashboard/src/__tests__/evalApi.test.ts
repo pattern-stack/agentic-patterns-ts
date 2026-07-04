@@ -4,8 +4,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EvalRunDetailResponse, EvalRunRow } from "../api/types";
-import { fetchEvalRunDetail, fetchEvalRuns, filterRuns, safeParseAnswer } from "../lib/evalApi";
+import type { EvalRunDetailResponse, EvalRunRow, SplitAggregate } from "../api/types";
+import {
+  fetchEvalRunDetail,
+  fetchEvalRuns,
+  fetchSplitAggregates,
+  filterRuns,
+  safeParseAnswer,
+} from "../lib/evalApi";
 
 const originalFetch = globalThis.fetch;
 
@@ -137,6 +143,70 @@ describe("fetchEvalRunDetail", () => {
     );
     const result = await fetchEvalRunDetail("run-1");
     expect(result).toEqual({ kind: "unconfigured" });
+  });
+});
+
+describe("fetchSplitAggregates", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("unwraps { aggregates: [...] } on 200", async () => {
+    const aggregates: SplitAggregate[] = [
+      { split: "train", results: 4, passed: 2, failed: 1, passRate: 2 / 3 },
+      { split: "test", results: 2, passed: 1, failed: 1, passRate: 0.5 },
+    ];
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(200, { aggregates }),
+    );
+
+    const result = await fetchSplitAggregates();
+    expect(result).toEqual({ kind: "ok", data: aggregates });
+  });
+
+  it("returns { kind: 'unconfigured' } on 503", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(503, { error: "persistence not configured" }),
+    );
+    const result = await fetchSplitAggregates();
+    expect(result).toEqual({ kind: "unconfigured" });
+  });
+
+  it("throws for unexpected non-OK responses", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(500, { error: "boom" }),
+    );
+    await expect(fetchSplitAggregates()).rejects.toThrow(/HTTP 500/);
+  });
+
+  it("serializes set/target/variant as query params and omits empties", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(200, { aggregates: [] }),
+    );
+
+    await fetchSplitAggregates({ set: "bank", target: "dealbrain/curator" });
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const url = call?.[0] as string;
+    expect(url).toContain("/eval/aggregates/splits");
+    expect(url).toContain("set=bank");
+    expect(url).toContain(`target=${encodeURIComponent("dealbrain/curator")}`);
+    expect(url).not.toContain("variant=");
+  });
+
+  it("sends no query string when all filters are omitted", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(200, { aggregates: [] }),
+    );
+
+    await fetchSplitAggregates();
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const url = call?.[0] as string;
+    expect(url).toBe("/eval/aggregates/splits");
   });
 });
 

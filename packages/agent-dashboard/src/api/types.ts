@@ -208,3 +208,16 @@ export interface EvalRunDetailResponse {
   results: JoinedEvalResultRow[];
   summary: EvalRunSummary;
 }
+
+/**
+ * Row returned by `GET /eval/aggregates/splits` — mirror of `EvalStore`'s
+ * `SplitAggregate` (`eval-store.ts:168-174`). Per-split rollup across *all*
+ * matching `eval_result` rows in the store, not just the runs-table window.
+ */
+export interface SplitAggregate {
+  split: EvalSplit | null; // null = untagged bucket
+  results: number;
+  passed: number;
+  failed: number;
+  passRate: number | null; // null when no result carried a pass verdict
+}

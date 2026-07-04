@@ -149,7 +149,7 @@ type TraceState =
   | { kind: "loaded"; events: StreamEvent[] }
   | { kind: "error"; message: string };
 
-function TraceSection({ traceId }: { traceId: string | null }) {
+export function TraceSection({ traceId }: { traceId: string | null }) {
   const [state, setState] = useState<TraceState>({ kind: "idle" });
 
   if (traceId === null) {

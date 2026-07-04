@@ -385,13 +385,102 @@ describe("eval routes", () => {
 
   it("returns 503 with a hint on every route when no store is configured", async () => {
     const app = mkApp(undefined);
-    for (const path of ["/eval/sets", "/eval/sets/bank/cases", "/eval/runs", "/eval/runs/x"]) {
+    for (const path of [
+      "/eval/sets",
+      "/eval/sets/bank/cases",
+      "/eval/runs",
+      "/eval/runs/x",
+      "/eval/aggregates/splits",
+    ]) {
       const res = await app.request(path);
       expect(res.status).toBe(503);
       const body = (await res.json()) as { error: string; hint: string };
       expect(body.error).toBe("persistence not configured");
       expect(body.hint).toMatch(/AP_PERSISTENCE/);
     }
+  });
+
+  describe("GET /eval/aggregates/splits", () => {
+    it("rolls up per-split pass rates across runs, case-split winning over the run label", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/aggregates/splits");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        aggregates: Array<{
+          split: string | null;
+          results: number;
+          passed: number;
+          failed: number;
+          passRate: number | null;
+        }>;
+      };
+      const bySplit = new Map(body.aggregates.map((a) => [a.split, a]));
+
+      // dev: only run A's case-01 (case-level split "dev" matches the run label).
+      expect(bySplit.get("dev")).toEqual({
+        split: "dev",
+        results: 1,
+        passed: 1,
+        failed: 0,
+        passRate: 1,
+      });
+
+      // train: run A's case-02 (fail) + case-03 (ungated, banked "train" though
+      // run A is labeled "dev" — case-level split wins over the run label) +
+      // run B's case-02 (pass, banked "train") + case-04 (pass, untagged in the
+      // bank — COALESCE falls back to run B's "train" label).
+      const train = bySplit.get("train");
+      expect(train?.results).toBe(4);
+      expect(train?.passed).toBe(2);
+      expect(train?.failed).toBe(1);
+      expect(train?.passRate).toBeCloseTo(2 / 3);
+
+      // run C (other-bank/test) recorded no eval_result rows, so it contributes
+      // no bucket at all.
+      expect(bySplit.has("test")).toBe(false);
+    });
+
+    it("narrows by ?variant=", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/aggregates/splits?variant=b");
+      const body = (await res.json()) as {
+        aggregates: Array<{
+          split: string | null;
+          results: number;
+          passed: number;
+          failed: number;
+          passRate: number | null;
+        }>;
+      };
+      expect(body.aggregates).toEqual([
+        { split: "train", results: 2, passed: 2, failed: 0, passRate: 1 },
+      ]);
+    });
+
+    it("narrows by ?set= and ?target=", async () => {
+      const app = mkApp(store);
+      const res = await app.request(
+        `/eval/aggregates/splits?set=bank&target=${encodeURIComponent("dealbrain/curator")}`,
+      );
+      const body = (await res.json()) as { aggregates: unknown[] };
+      expect(body.aggregates).toHaveLength(2);
+    });
+
+    it("200s with an empty array for a set/variant with no recorded results", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/aggregates/splits?set=other-bank");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { aggregates: unknown[] };
+      expect(body.aggregates).toEqual([]);
+    });
+
+    it("200s with an empty array for an unknown filter value (narrowing, not a lookup)", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/aggregates/splits?variant=does-not-exist");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { aggregates: unknown[] };
+      expect(body.aggregates).toEqual([]);
+    });
   });
 
   describe("config threading (createServer)", () => {
