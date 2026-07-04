@@ -9,7 +9,7 @@
  * tests (the `app.test.ts:143` `makeConfig` idiom).
  */
 
-import { EvalStore } from "@agentic-patterns/runtime";
+import { AgentEventBus, EvalStore } from "@agentic-patterns/runtime";
 import type { EvalRunRow, JoinedEvalResultRow } from "@agentic-patterns/runtime";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
@@ -20,7 +20,15 @@ import { evalRoutes } from "../routes/eval.js";
 
 function mkApp(store: EvalStore | undefined): Hono {
   const app = new Hono();
-  app.route("/", evalRoutes(store));
+  app.route(
+    "/",
+    evalRoutes({
+      evalStore: store,
+      agents: [],
+      eventBus: new AgentEventBus(),
+      evalExecution: undefined,
+    }),
+  );
   return app;
 }
 
