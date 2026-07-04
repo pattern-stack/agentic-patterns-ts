@@ -10,6 +10,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { agentRoutes } from "./routes/agents.js";
 import { compositionRoutes } from "./routes/composition.js";
 import { type ConversationEntry, conversationRoutes } from "./routes/conversations.js";
+import { evalRoutes } from "./routes/eval.js";
 import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
 import { hookRoutes } from "./routes/hooks.js";
@@ -36,6 +37,7 @@ export function createServer(config: ServerConfig): Hono {
   app.route("/", adminRoutes(config));
   app.route("/", hookRoutes(config.eventBus));
   app.route("/", eventRoutes(config.eventStore, config.eventBus));
+  app.route("/", evalRoutes(config.evalStore));
 
   return app;
 }
