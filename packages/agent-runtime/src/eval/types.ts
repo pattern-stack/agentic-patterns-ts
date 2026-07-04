@@ -82,6 +82,10 @@ export interface EvalResult<TIn, TOut, TExpected = unknown> {
   readonly scores: readonly Score[];
   readonly succeeded: boolean; // node execution succeeded
   readonly error?: string; // error message when it did not
+  /** NEW (#133): per-case trace id — present iff `EvalRunContext.eventBus` was set.
+   *  Joins this case to its EventStore trace and its RunStore `runs` row(s)
+   *  (`runs.trace_id`; a multi-leaf composite yields several rows, one trace). */
+  readonly traceId?: string;
   readonly inputTokens: number;
   readonly outputTokens: number;
 }
@@ -92,6 +96,7 @@ export const EvalResultSchema = z.object({
   scores: z.array(ScoreSchema).readonly(),
   succeeded: z.boolean(),
   error: z.string().optional(),
+  traceId: z.string().optional(), // NEW (#133)
   inputTokens: z.number(),
   outputTokens: z.number(),
 });

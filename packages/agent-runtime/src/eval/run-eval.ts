@@ -14,7 +14,9 @@
  * ADDITIVE: new file.
  */
 
-import type { RunnerProtocol, ToolExecutor } from "../runner/types.js";
+import { generateId } from "ai";
+import type { AgentEventBus } from "../events/agent-event-bus.js";
+import type { RunOptions, RunnerProtocol, ToolExecutor } from "../runner/types.js";
 import type { PatternHooks } from "../workflows/base.js";
 import { createScratchpad } from "../workflows/slot.js";
 import type { Scorer } from "./scorer.js";
@@ -35,7 +37,56 @@ export interface EvalRunContext {
   readonly runner: RunnerProtocol; // INJECTED — MockRunner in tests
   readonly hooks?: PatternHooks;
   readonly toolExecutor?: ToolExecutor;
+  /** Suite-level trace base. With `eventBus` set, per-case ids are `${traceId}:${case.id}`
+   *  (base minted via generateId() when absent); without a bus it threads to every
+   *  node.run unchanged, exactly as before #133. E4 passes the eval_run id here. */
   readonly traceId?: string;
+  /**
+   * NEW (#133, doc §5): observability bus for eval runs. When set, runEval mints a
+   * per-case traceId, delivers bus + traceId into each LLM leaf's RunOptions (via a
+   * per-case runner wrapper — AgentRunner honors RunOptions.eventBus), and stamps the
+   * traceId onto the EvalResult. Attach a RunStoreExporter to this bus and each case
+   * also lands RunStore `runs` row(s) — the E2 fusion. Absent → byte-identical to
+   * pre-#133 behavior. NOTE: AgentRunner rebinds its instance bus to a per-call
+   * RunOptions.eventBus (agent-runner.ts:283) — pass the runner's own shared bus
+   * (the playground pattern) unless you intend that redirect.
+   */
+  readonly eventBus?: AgentEventBus;
+}
+
+// ---------------------------------------------------------------------------
+// Bus delivery — per-case runner wrapper
+// ---------------------------------------------------------------------------
+
+/** Per-case runner wrapper: injects the eval bus + case traceId into RunOptions.
+ *  Preserves absence of optional protocol methods (AgentStep's
+ *  StructuredOutputUnsupported check must still fire). Not exported. */
+function withEvalBus(
+  runner: RunnerProtocol,
+  eventBus: AgentEventBus,
+  caseTraceId: string,
+): RunnerProtocol {
+  const opts = (o?: RunOptions): RunOptions => ({
+    ...o,
+    eventBus,
+    traceId: o?.traceId ?? caseTraceId,
+  });
+  const wrapped: {
+    run: RunnerProtocol["run"];
+    runStructured?: RunnerProtocol["runStructured"];
+    stream?: RunnerProtocol["stream"];
+  } = {
+    run: (agent, message, o) => runner.run(agent, message, opts(o)),
+  };
+  if (runner.runStructured) {
+    wrapped.runStructured = (agent, message, schema, o) =>
+      // biome/TS: non-null is safe — guarded one line up
+      runner.runStructured!(agent, message, schema, opts(o));
+  }
+  if (runner.stream) {
+    wrapped.stream = (agent, message, o) => runner.stream!(agent, message, opts(o));
+  }
+  return wrapped;
 }
 
 export interface EvalSpec<TIn, TOut, TExpected = unknown> {
@@ -181,12 +232,16 @@ export async function runEval<TIn, TOut, TExpected = unknown>(
   const agg = newAggregate();
   const results: EvalResult<TIn, TOut, TExpected>[] = [];
 
+  const bus = ctx.eventBus;
+  const traceBase = bus ? (ctx.traceId ?? generateId()) : undefined;
+
   for (const evalCase of spec.cases) {
+    const caseTraceId = traceBase === undefined ? undefined : `${traceBase}:${evalCase.id}`;
     const nodeCtx = {
-      runner: ctx.runner,
+      runner: bus && caseTraceId ? withEvalBus(ctx.runner, bus, caseTraceId) : ctx.runner,
       hooks: ctx.hooks,
       toolExecutor: ctx.toolExecutor,
-      traceId: ctx.traceId,
+      traceId: caseTraceId ?? ctx.traceId,
       scratchpad: createScratchpad(),
     };
 
@@ -220,6 +275,7 @@ export async function runEval<TIn, TOut, TExpected = unknown>(
       scores,
       succeeded: nodeResult.succeeded,
       error: nodeResult.succeeded ? undefined : (nodeResult.error?.message ?? "unknown error"),
+      ...(caseTraceId === undefined ? {} : { traceId: caseTraceId }),
       inputTokens: nodeResult.totalInputTokens,
       outputTokens: nodeResult.totalOutputTokens,
     };
