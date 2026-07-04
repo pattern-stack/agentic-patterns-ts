@@ -63,6 +63,21 @@ export function eventRoutes(eventStore: EventStore | undefined, eventBus?: Agent
     return c.json({ events: rows });
   });
 
+  app.get("/admin/events/trace/:id", (c) => {
+    if (!eventStore) {
+      return c.json(
+        {
+          error: "persistence not configured",
+          hint: "start `ap playground` with AP_PERSISTENCE != 0 to enable historical event queries",
+        },
+        503,
+      );
+    }
+    const traceId = c.req.param("id");
+    const events = eventStore.eventsForTrace(traceId);
+    return c.json({ traceId, events });
+  });
+
   app.get("/admin/claude-code/sessions", (c) => {
     if (!eventStore) {
       return c.json(

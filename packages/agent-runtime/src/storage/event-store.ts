@@ -211,6 +211,7 @@ export class EventStore {
   protected readonly _db: Database;
   private readonly _appendStmt: Statement;
   private readonly _recentStmt: Statement;
+  private readonly _traceEventsStmt: Statement;
   private readonly _sessionEventsStmt: Statement;
   private readonly _sessionListStmt: Statement;
   private readonly _deleteByDateStmt: Statement;
@@ -237,6 +238,12 @@ export class EventStore {
         AND (@type  IS NULL OR type = @type)
       ORDER BY timestamp DESC
       LIMIT @limit
+    `);
+
+    this._traceEventsStmt = this._db.prepare(`
+      SELECT * FROM events
+      WHERE trace_id = ?
+      ORDER BY timestamp ASC, id ASC
     `);
 
     this._sessionEventsStmt = this._db.prepare(`
@@ -306,6 +313,12 @@ export class EventStore {
       type: opts.type ?? null,
       limit: opts.limit ?? 1000,
     }) as RawRow[];
+    return rows.map(rowToPersisted);
+  }
+
+  /** All events for one trace, ASC by timestamp — the full history of a single run. */
+  eventsForTrace(traceId: string): PersistedEvent[] {
+    const rows = this._traceEventsStmt.all(traceId) as RawRow[];
     return rows.map(rowToPersisted);
   }
 

@@ -77,6 +77,26 @@ describe("EventStore", () => {
     expect(recent.map((r) => r.spanId)).toEqual(["new"]);
   });
 
+  it("returns all events for a trace, ASC by timestamp", () => {
+    const t1 = new Date("2026-05-11T18:00:00Z");
+    const t2 = new Date("2026-05-11T18:00:01Z");
+    const t3 = new Date("2026-05-11T18:00:02Z");
+    store.append(mkEvent({ traceId: "trace-A", spanId: "a-1", timestamp: t1 }));
+    store.append(
+      mkEvent({ traceId: "trace-A", spanId: "a-2", type: "agent.tool.start", timestamp: t2 }),
+    );
+    store.append(mkEvent({ traceId: "trace-B", spanId: "b-1", timestamp: t3 }));
+
+    const traceA = store.eventsForTrace("trace-A");
+    expect(traceA.map((e) => e.spanId)).toEqual(["a-1", "a-2"]);
+    expect(traceA.every((e) => e.traceId === "trace-A")).toBe(true);
+  });
+
+  it("returns an empty array for an unknown trace", () => {
+    store.append(mkEvent({ traceId: "trace-A" }));
+    expect(store.eventsForTrace("does-not-exist")).toEqual([]);
+  });
+
   it("denormalizes Claude Code hook fields", () => {
     store.append(mkClaudeCodeHook("sess-A", "SessionStart"));
     store.append(mkClaudeCodeHook("sess-A", "PreToolUse"));
