@@ -32,6 +32,23 @@ function mkApp(store: EvalStore | undefined): Hono {
   return app;
 }
 
+/** app.request with a JSON body + method — the write-route test idiom. */
+async function reqJson(
+  app: Hono,
+  method: string,
+  path: string,
+  body: unknown,
+): Promise<Response> {
+  return app.request(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+const postJson = (app: Hono, path: string, body: unknown) => reqJson(app, "POST", path, body);
+const patchJson = (app: Hono, path: string, body: unknown) => reqJson(app, "PATCH", path, body);
+const putJson = (app: Hono, path: string, body: unknown) => reqJson(app, "PUT", path, body);
+
 interface SeedResultOptions {
   inputTokens: number;
   outputTokens: number;
@@ -489,6 +506,196 @@ describe("eval routes", () => {
       const body = (await res.json()) as { aggregates: unknown[] };
       expect(body.aggregates).toEqual([]);
     });
+  });
+
+  describe("GET /eval/sets/:id/cases/:caseId", () => {
+    it("returns the case plus its cross-run history, newest-first, joined through runs", async () => {
+      const app = mkApp(store);
+      // case-02 was evaluated in run A (fail) then run B (pass).
+      const res = await app.request("/eval/sets/bank/cases/case-02");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        case: { caseId: string; input: unknown; expected: unknown; split: string | null };
+        history: Array<{
+          evalRunId: string;
+          variant: string | null;
+          pass: boolean | null;
+          finalAnswer: string | null;
+          runStatus: string;
+        }>;
+      };
+      expect(body.case.caseId).toBe("case-02");
+      expect(body.case.input).toBe("3+3?");
+      expect(body.case.split).toBe("train");
+      expect(body.history.map((h) => h.evalRunId)).toEqual([runBId, runAId]); // newest first
+      expect(body.history[0]?.variant).toBe("b");
+      expect(body.history[0]?.pass).toBe(true);
+      expect(body.history[0]?.finalAnswer).toBe('"6"'); // joined through runs
+      expect(body.history[1]?.pass).toBe(false);
+    });
+
+    it("returns an empty history for a banked case that was never run", async () => {
+      store.upsertEvalCase("bank", { caseId: "case-05", input: "6+6?", expected: "12" });
+      const app = mkApp(store);
+      const res = await app.request("/eval/sets/bank/cases/case-05");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { history: unknown[] };
+      expect(body.history).toEqual([]);
+    });
+
+    it("404s for an unknown set", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/sets/nope/cases/case-01");
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error: string }).error).toBe('eval set "nope" not found');
+    });
+
+    it("404s for an unknown case in a known set", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/sets/bank/cases/no-such");
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error: string }).error).toBe(
+        'case "no-such" not found in set "bank"',
+      );
+    });
+  });
+
+  describe("POST /eval/sets", () => {
+    it("creates a new set (201) and updates an existing one (200)", async () => {
+      const app = mkApp(store);
+      const created = await postJson(app, "/eval/sets", {
+        id: "fresh",
+        name: "Fresh",
+        description: "new bank",
+      });
+      expect(created.status).toBe(201);
+      const cBody = (await created.json()) as { set: { id: string; name: string } };
+      expect(cBody.set.id).toBe("fresh");
+      expect(cBody.set.name).toBe("Fresh");
+
+      const updated = await postJson(app, "/eval/sets", { id: "bank", name: "Renamed" });
+      expect(updated.status).toBe(200);
+      expect(((await updated.json()) as { set: { name: string } }).set.name).toBe("Renamed");
+    });
+
+    it("400s when id is missing", async () => {
+      const app = mkApp(store);
+      const res = await postJson(app, "/eval/sets", { name: "no id" });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe("id is required");
+    });
+
+    it("400s when name is not a string", async () => {
+      const app = mkApp(store);
+      const res = await postJson(app, "/eval/sets", { id: "x", name: 42 });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("PATCH /eval/sets/:id", () => {
+    it("edits name, preserving description when omitted", async () => {
+      const app = mkApp(store);
+      const res = await patchJson(app, "/eval/sets/bank", { name: "Bank Renamed" });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { set: { name: string; description: string } };
+      expect(body.set.name).toBe("Bank Renamed");
+      expect(body.set.description).toBe("smoke bank"); // untouched
+    });
+
+    it("404s for an unknown set", async () => {
+      const app = mkApp(store);
+      const res = await patchJson(app, "/eval/sets/nope", { name: "x" });
+      expect(res.status).toBe(404);
+    });
+
+    it("400s on a non-string name", async () => {
+      const app = mkApp(store);
+      const res = await patchJson(app, "/eval/sets/bank", { name: 7 });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe("PUT /eval/sets/:id/cases/:caseId", () => {
+    it("creates a case (201) then updates it (200), round-tripping through the cases list", async () => {
+      const app = mkApp(store);
+      const created = await putJson(app, "/eval/sets/bank/cases/new-case", {
+        input: "9+9?",
+        expected: "18",
+        tags: ["added"],
+        split: "dev",
+      });
+      expect(created.status).toBe(201);
+      const cBody = (await created.json()) as {
+        case: { caseId: string; input: unknown; split: string | null };
+      };
+      expect(cBody.case.caseId).toBe("new-case");
+      expect(cBody.case.input).toBe("9+9?");
+      expect(cBody.case.split).toBe("dev");
+
+      const updated = await putJson(app, "/eval/sets/bank/cases/new-case", {
+        input: "9+9?",
+        expected: "eighteen",
+      });
+      expect(updated.status).toBe(200);
+      expect(((await updated.json()) as { case: { expected: unknown } }).case.expected).toBe(
+        "eighteen",
+      );
+
+      // Confirm it lands in the bank listing.
+      const list = await app.request("/eval/sets/bank/cases");
+      const listBody = (await list.json()) as { cases: Array<{ caseId: string }> };
+      expect(listBody.cases.some((c) => c.caseId === "new-case")).toBe(true);
+    });
+
+    it("400s when input is absent", async () => {
+      const app = mkApp(store);
+      const res = await putJson(app, "/eval/sets/bank/cases/x", { expected: "y" });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe('"input" is required');
+    });
+
+    it("400s on non-string-array tags and on a bad split", async () => {
+      const app = mkApp(store);
+      const badTags = await putJson(app, "/eval/sets/bank/cases/x", { input: "a", tags: [1, 2] });
+      expect(badTags.status).toBe(400);
+      const badSplit = await putJson(app, "/eval/sets/bank/cases/x", { input: "a", split: "nope" });
+      expect(badSplit.status).toBe(400);
+    });
+
+    it("404s for an unknown set", async () => {
+      const app = mkApp(store);
+      const res = await putJson(app, "/eval/sets/nope/cases/x", { input: "a" });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("DELETE /eval/sets/:id/cases/:caseId", () => {
+    it("deletes a case (200) — a subsequent case-detail GET 404s", async () => {
+      const app = mkApp(store);
+      const del = await app.request("/eval/sets/bank/cases/case-01", { method: "DELETE" });
+      expect(del.status).toBe(200);
+      expect(((await del.json()) as { deleted: boolean }).deleted).toBe(true);
+
+      const after = await app.request("/eval/sets/bank/cases/case-01");
+      expect(after.status).toBe(404);
+    });
+
+    it("404s for an unknown set and an unknown case", async () => {
+      const app = mkApp(store);
+      expect((await app.request("/eval/sets/nope/cases/x", { method: "DELETE" })).status).toBe(404);
+      expect(
+        (await app.request("/eval/sets/bank/cases/no-such", { method: "DELETE" })).status,
+      ).toBe(404);
+    });
+  });
+
+  it("503s on the write + case-detail routes when no store is configured", async () => {
+    const app = mkApp(undefined);
+    expect((await postJson(app, "/eval/sets", { id: "x" })).status).toBe(503);
+    expect((await patchJson(app, "/eval/sets/x", { name: "y" })).status).toBe(503);
+    expect((await putJson(app, "/eval/sets/x/cases/y", { input: "a" })).status).toBe(503);
+    expect((await app.request("/eval/sets/x/cases/y", { method: "DELETE" })).status).toBe(503);
+    expect((await app.request("/eval/sets/x/cases/y")).status).toBe(503);
   });
 
   describe("config threading (createServer)", () => {

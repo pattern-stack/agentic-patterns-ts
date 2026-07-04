@@ -66,6 +66,23 @@ interface LaunchEvalRunBody {
 }
 
 // ---------------------------------------------------------------------------
+// Set / case write routes — request shapes
+// ---------------------------------------------------------------------------
+
+interface SetWriteBody {
+  id: string;
+  name?: string | null;
+  description?: string | null;
+}
+
+interface CaseWriteBody {
+  input: unknown;
+  expected?: unknown;
+  tags?: string[];
+  split?: EvalSplit;
+}
+
+// ---------------------------------------------------------------------------
 // POST /eval/cases/from-session (#140) — request / response shapes
 // ---------------------------------------------------------------------------
 
@@ -187,6 +204,174 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
       variant: c.req.query("variant"),
     });
     return c.json({ aggregates });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /eval/sets/:id/cases/:caseId — one case + its cross-run history
+  // ---------------------------------------------------------------------------
+
+  app.get("/eval/sets/:id/cases/:caseId", (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    const id = c.req.param("id");
+    const caseId = c.req.param("caseId");
+    if (!evalStore.listEvalSets().some((s) => s.id === id)) {
+      return c.json({ error: `eval set "${id}" not found` }, 404);
+    }
+    const caseRow = evalStore.listEvalCases(id).find((r) => r.caseId === caseId);
+    if (!caseRow) {
+      return c.json({ error: `case "${caseId}" not found in set "${id}"` }, 404);
+    }
+    const history = evalStore.caseResultHistory(id, caseId);
+    return c.json({ case: caseRow, history });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Set / case write routes — create/edit/delete (hand-validated, the
+  // POST /eval/runs precedent — no zod in routes). `upsertEvalSet` /
+  // `upsertEvalCase` already exist on the store; only delete is new (#WI-1).
+  // ---------------------------------------------------------------------------
+
+  app.post("/eval/sets", async (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    const body = (raw ?? {}) as Partial<SetWriteBody> & Record<string, unknown>;
+
+    if (typeof body.id !== "string" || body.id.length === 0) {
+      return c.json({ error: "id is required" }, 400);
+    }
+    if (body.name !== undefined && body.name !== null && typeof body.name !== "string") {
+      return c.json({ error: "name must be a string" }, 400);
+    }
+    if (
+      body.description !== undefined &&
+      body.description !== null &&
+      typeof body.description !== "string"
+    ) {
+      return c.json({ error: "description must be a string" }, 400);
+    }
+
+    const existed = evalStore.listEvalSets().some((s) => s.id === body.id);
+    evalStore.upsertEvalSet({
+      id: body.id,
+      name: body.name ?? undefined,
+      description: body.description ?? undefined,
+    });
+    const set = evalStore.listEvalSets().find((s) => s.id === body.id);
+    return c.json({ set }, existed ? 200 : 201);
+  });
+
+  app.patch("/eval/sets/:id", async (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    const id = c.req.param("id");
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    const body = (raw ?? {}) as Partial<SetWriteBody> & Record<string, unknown>;
+
+    if (body.name !== undefined && body.name !== null && typeof body.name !== "string") {
+      return c.json({ error: "name must be a string" }, 400);
+    }
+    if (
+      body.description !== undefined &&
+      body.description !== null &&
+      typeof body.description !== "string"
+    ) {
+      return c.json({ error: "description must be a string" }, 400);
+    }
+
+    const current = evalStore.listEvalSets().find((s) => s.id === id);
+    if (!current) {
+      return c.json({ error: `eval set "${id}" not found` }, 404);
+    }
+
+    // Overlay only the keys present in the body; absent keys keep the current
+    // value (upsert's ON CONFLICT preserves created_ts).
+    const name = body.name !== undefined ? (body.name ?? undefined) : (current.name ?? undefined);
+    const description =
+      body.description !== undefined
+        ? (body.description ?? undefined)
+        : (current.description ?? undefined);
+    evalStore.upsertEvalSet({ id, name, description });
+    const set = evalStore.listEvalSets().find((s) => s.id === id);
+    return c.json({ set }, 200);
+  });
+
+  app.put("/eval/sets/:id/cases/:caseId", async (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    const id = c.req.param("id");
+    const caseId = c.req.param("caseId");
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+    const body = (raw ?? {}) as Partial<CaseWriteBody> & Record<string, unknown>;
+
+    if (!Object.hasOwn(body, "input")) {
+      return c.json({ error: '"input" is required' }, 400);
+    }
+    if (body.tags !== undefined && !isStringArray(body.tags)) {
+      return c.json({ error: "tags must be an array of strings" }, 400);
+    }
+    const rawSplit = body.split;
+    if (rawSplit !== undefined && typeof rawSplit !== "string") {
+      return c.json(
+        { error: `invalid split "${String(rawSplit)}" — expected train | dev | test` },
+        400,
+      );
+    }
+    const splitResult = parseSplit(rawSplit as string | undefined);
+    if (splitResult.error) {
+      return c.json({ error: splitResult.error }, 400);
+    }
+
+    if (!evalStore.listEvalSets().some((s) => s.id === id)) {
+      return c.json({ error: `eval set "${id}" not found` }, 404);
+    }
+
+    const created = !evalStore.listEvalCases(id).some((r) => r.caseId === caseId);
+    evalStore.upsertEvalCase(id, {
+      caseId,
+      input: body.input,
+      expected: body.expected,
+      tags: body.tags,
+      split: splitResult.value,
+    });
+    const caseRow = evalStore.listEvalCases(id).find((r) => r.caseId === caseId);
+    return c.json({ case: caseRow }, created ? 201 : 200);
+  });
+
+  app.delete("/eval/sets/:id/cases/:caseId", (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    const id = c.req.param("id");
+    const caseId = c.req.param("caseId");
+    if (!evalStore.listEvalSets().some((s) => s.id === id)) {
+      return c.json({ error: `eval set "${id}" not found` }, 404);
+    }
+    const deleted = evalStore.deleteEvalCase(id, caseId);
+    if (!deleted) {
+      return c.json({ error: `case "${caseId}" not found in set "${id}"` }, 404);
+    }
+    return c.json({ deleted: true, caseId }, 200);
   });
 
   // ---------------------------------------------------------------------------
