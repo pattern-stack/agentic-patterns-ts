@@ -25,3 +25,20 @@ export type { Scratchpad as ScratchpadStore } from "../workflows/slot.js";
 
 export { RunStore } from "../storage/run-store.js";
 export type { RunMeta, RunOutcome, RunRow, RunStats, RunSummary } from "../storage/run-store.js";
+
+export { derivePass, EvalStore } from "../storage/eval-store.js";
+export type {
+  EvalCaseRow,
+  EvalComparison,
+  EvalComparisonRow,
+  EvalResultRecord,
+  EvalRunMeta,
+  EvalRunRow,
+  EvalScoreLike,
+  EvalSetMeta,
+  EvalSetSummary,
+  EvalSplit,
+  JoinedEvalResultRow,
+  SplitAggregate,
+  StoredEvalCase,
+} from "../storage/eval-store.js";

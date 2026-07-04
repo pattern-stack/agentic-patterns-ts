@@ -124,7 +124,81 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_trace ON runs(trace_id) WHERE trace_id IS NOT NULL;
 `;
 
-const TARGET_SCHEMA_VERSION = 2;
+/**
+ * v3 — adds the eval annotation layer (#132 EvalStore): `eval_set` / `eval_case`
+ * (the optional case-bank mirror), `eval_run` (one row per SUITE invocation —
+ * NOT per case), and `eval_result` (one row per case outcome, annotating a
+ * RunStore run by `run_id` — tokens/trace_id/final answer/status all live on
+ * the `runs` row and are JOINed in, never duplicated here). Purely additive —
+ * a v2 (events+runs) DB migrates in place and `EventStore`/`RunStore`/
+ * `EvalStore` stay interchangeable on the same file.
+ *
+ * No hard `FOREIGN KEY (run_id) REFERENCES runs(run_id)`: `foreign_keys = ON`
+ * is live (see constructor), and a hard FK would make insert ordering
+ * load-bearing (the run row would have to exist before the eval_result row),
+ * breaking annotate-later flows (e.g. bus-driven runs landing asynchronously
+ * via `RunStoreExporter`). `run_id` is a plain indexed TEXT column — the join
+ * is by convention, matching how `runs.trace_id` references `events` without
+ * an FK.
+ *
+ * Downgrade caveat (accepted, same as v2's): a v3 DB opened by a pre-#132
+ * runtime throws the version-mismatch error below (its `TARGET_SCHEMA_VERSION`
+ * is still 2). Dev telemetry, single-package lockstep — accepted, not fixed.
+ */
+const SCHEMA_V3 = `
+-- a named suite of cases (optional; cases may stay file-loaded)
+CREATE TABLE IF NOT EXISTS eval_set (
+  id          TEXT PRIMARY KEY,
+  name        TEXT,
+  description TEXT,
+  created_ts  TEXT NOT NULL
+);
+
+-- the case-bank mirror (optional persistence — enables UI browse/authoring)
+CREATE TABLE IF NOT EXISTS eval_case (
+  set_id        TEXT NOT NULL,
+  case_id       TEXT NOT NULL,
+  input_json    TEXT,
+  expected_json TEXT,
+  tags_json     TEXT,
+  split         TEXT,              -- 'train' | 'dev' | 'test' (enforced at the API, not DDL)
+  PRIMARY KEY (set_id, case_id)
+);
+
+-- SUITE-level: one invocation of a (target, variant) over a set/split.
+-- NOT per-case — each case's execution is a RunStore runs row (eval_result.run_id).
+CREATE TABLE IF NOT EXISTS eval_run (
+  id        TEXT PRIMARY KEY,
+  ts_start  TEXT NOT NULL,
+  ts_end    TEXT,
+  set_id    TEXT,
+  target_id TEXT,
+  variant   TEXT,                  -- the A/B label; free string, provenance beside it
+  split     TEXT,                  -- run-level split filter label (NULL = all splits)
+  model     TEXT,
+  git_sha   TEXT,
+  status    TEXT NOT NULL          -- 'running' | 'ok' | 'error'
+);
+
+-- per-case outcome — ANNOTATES a RunStore run. run_id -> runs.run_id (same file).
+-- Tokens/trace_id/final answer/finish_reason/status/error live on the runs row,
+-- JOINed in — NOT duplicated here. No hard FK: insert order must not be
+-- load-bearing (foreign_keys=ON is live; bus-driven runs land asynchronously).
+CREATE TABLE IF NOT EXISTS eval_result (
+  eval_run_id TEXT NOT NULL,
+  case_id     TEXT NOT NULL,
+  run_id      TEXT,                -- -> runs.run_id
+  scores_json TEXT,                -- the engine's heterogeneous Score[]
+  pass        INTEGER,             -- 1 | 0 | NULL (NULL = no gating scorer ran)
+  PRIMARY KEY (eval_run_id, case_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_run_set    ON eval_run(set_id, variant);
+CREATE INDEX IF NOT EXISTS idx_eval_run_ts     ON eval_run(ts_start);
+CREATE INDEX IF NOT EXISTS idx_eval_result_run ON eval_result(run_id) WHERE run_id IS NOT NULL;
+`;
+
+const TARGET_SCHEMA_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -299,6 +373,11 @@ export class EventStore {
     if (version < 2) {
       this._db.exec(SCHEMA_V2);
       version = 2;
+    }
+
+    if (version < 3) {
+      this._db.exec(SCHEMA_V3);
+      version = 3;
     }
 
     if (version !== TARGET_SCHEMA_VERSION) {
