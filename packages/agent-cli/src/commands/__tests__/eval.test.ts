@@ -791,3 +791,124 @@ describe("ap eval — trace-event capture (SQLiteExporter + shared bus)", () => 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 16. --judge wiring (E6/#141)
+// ---------------------------------------------------------------------------
+
+/** Verdict JSON matching a MockResponse `content` — the judge's canned rubric. */
+function verdictJson(pass: boolean): string {
+  return JSON.stringify({
+    pass,
+    axes: { accuracy: 2, completeness: 2, grounding: 2, hazardAvoidance: 2, calibration: 2 },
+    notes: "canned verdict",
+  });
+}
+
+describe("ap eval — T-CLI1 (--judge wiring)", () => {
+  it("adds judge scores to per-case + aggregate output; failing verdict exits 1; judge call uses --judge-model", async () => {
+    const bank = writeJsonl("bank.jsonl", [
+      { id: "c1", input: "capital of France?", expected: "Paris" },
+    ]);
+    // Two triggers on ONE injected runner (the SAME runner the CLI hands to both
+    // the target node and judgeScorer, per spec § Decisions #2): the judge's
+    // prompt always ends in this footer; the target's raw case-input does not.
+    const runner = new MockRunner()
+      .addResponse("Score each axis 0-5", {
+        content: verdictJson(false),
+        inputTokens: 10,
+        outputTokens: 5,
+      })
+      .addResponse("*", { content: "Paris" });
+    const target = makeAgentLikeTarget("judge-target");
+
+    await runSafely(
+      runEvalCommand({
+        agents: [target],
+        set: bank,
+        db: dbPath(),
+        judge: true,
+        judgeModel: "x",
+        runner,
+      }),
+    );
+
+    const out = joined(h.stdout);
+    expect(out).toContain("judge");
+    expect(process.exitCode).toBe(1); // failing verdict ⇒ gate FAIL
+
+    const judgeCall = runner.callHistory.find((c) => c.agentName === "eval-judge");
+    expect(judgeCall?.model).toBe("x");
+  });
+});
+
+describe("ap eval — T-CLI2 (byte-identical without --judge)", () => {
+  it("no judge/set-membership names or banner line appear without the flag", async () => {
+    const bank = writeJsonl("bank.jsonl", [{ id: "c1", input: "hello", expected: "hello" }]);
+    const target = makeEchoTarget();
+
+    await runSafely(
+      runEvalCommand({ agents: [target], set: bank, db: dbPath(), runner: new MockRunner() }),
+    );
+
+    const out = joined(h.stdout);
+    expect(out).toContain("exact-match");
+    expect(out).not.toContain("judge");
+    expect(out).not.toContain("set-membership");
+  });
+});
+
+describe("ap eval — T-CLI3 (--judge flag validation)", () => {
+  it("--judge-thresholds accuracy=9 (out of 0-5 range) exits 2", async () => {
+    const bank = writeJsonl("bank.jsonl", [{ id: "c1", input: "hi" }]);
+    const target = makeEchoTarget();
+
+    await runSafely(
+      runEvalCommand({
+        agents: [target],
+        set: bank,
+        judge: true,
+        judgeThresholds: "accuracy=9",
+        runner: new MockRunner(),
+      }),
+    );
+
+    expect(h.exits).toEqual([2]);
+    expect(joined(h.stderr)).toContain("--judge-thresholds");
+  });
+
+  it('--judge-thresholds "bogus" (malformed entry, no "=") exits 2', async () => {
+    const bank = writeJsonl("bank.jsonl", [{ id: "c1", input: "hi" }]);
+    const target = makeEchoTarget();
+
+    await runSafely(
+      runEvalCommand({
+        agents: [target],
+        set: bank,
+        judge: true,
+        judgeThresholds: "bogus",
+        runner: new MockRunner(),
+      }),
+    );
+
+    expect(h.exits).toEqual([2]);
+    expect(joined(h.stderr)).toContain("--judge-thresholds");
+  });
+
+  it("--judge-model without --judge exits 2", async () => {
+    const bank = writeJsonl("bank.jsonl", [{ id: "c1", input: "hi" }]);
+    const target = makeEchoTarget();
+
+    await runSafely(
+      runEvalCommand({
+        agents: [target],
+        set: bank,
+        judgeModel: "x",
+        runner: new MockRunner(),
+      }),
+    );
+
+    expect(h.exits).toEqual([2]);
+    expect(joined(h.stderr)).toContain("--judge");
+  });
+});

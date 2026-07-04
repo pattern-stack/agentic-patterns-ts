@@ -71,6 +71,16 @@ Eval options:
   --gold <path>                   (eval) gold overlay file (file --set only)
   --db <path>                     (eval) SQLite file (default: the playground's
                                     events.db — AP_DB_PATH or XDG state)
+  --judge                         (eval) add answer-quality graders: the
+                                    deterministic set-membership scorer + the
+                                    LLM judge (5-axis rubric) on the same runner
+  --judge-model <id>               (eval) judge model id (default: AGENT_MODEL
+                                    or the AGENT_TIER tier); honored when the
+                                    runner resolves per-agent models
+  --judge-thresholds <list>        (eval) comma list axis=n (0-5), axes:
+                                    accuracy|completeness|grounding|
+                                    hazard-avoidance|calibration|mean
+                                    e.g. accuracy=3,grounding=3,mean=3.5
 
 Eval exit codes: 0 gate pass · 1 gate failure · 2 usage/config error
 `;
@@ -97,6 +107,9 @@ async function main(): Promise<void> {
       "allow-test": { type: "boolean" },
       gold: { type: "string" },
       db: { type: "string" },
+      judge: { type: "boolean" },
+      "judge-model": { type: "string" },
+      "judge-thresholds": { type: "string" },
     },
     allowPositionals: true,
     strict: false,
@@ -222,6 +235,11 @@ async function main(): Promise<void> {
         split: values.split ? String(values.split) : undefined,
         allowTest: Boolean(values["allow-test"]),
         db: values.db ? String(values.db) : undefined,
+        judge: Boolean(values.judge),
+        judgeModel: values["judge-model"] ? String(values["judge-model"]) : undefined,
+        judgeThresholds: values["judge-thresholds"]
+          ? String(values["judge-thresholds"])
+          : undefined,
       });
       return;
     }

@@ -13,8 +13,11 @@
  * per-split pass rates, and exits non-zero on gate failure (CI-friendly).
  *
  * Exit-code taxonomy: 0 gate pass · 1 gate failure (`process.exitCode`) ·
- * 2 usage/config error (`process.exit`). No `--judge` (E6/#141) — the scorer
- * seam is ready; this ships only the expected-gated exact-match default.
+ * 2 usage/config error (`process.exit`). `--judge` (E6/#141) appends the
+ * deterministic set-membership scorer + the LLM judge (5-axis rubric) on the
+ * SAME runner; without `--judge` the scorer array construction is untouched
+ * (byte-identical behavior — spec `.ai-docs/stacks/eval-surface/specs/141.md`
+ * acceptance #3).
  */
 
 import { execSync } from "node:child_process";
@@ -27,6 +30,7 @@ import {
   EvalSplitSchema,
   type EvalStore,
   HeldOutSplitError,
+  JUDGE_AXES,
   SQLiteExporter,
   assertSplitSelectable,
   createEvalResultRecorder,
@@ -34,10 +38,12 @@ import {
   derivePass,
   exactMatch,
   filterBySplit,
+  judgeScorer,
   loadCasesJsonl,
   loadEvalStore,
   loadGold,
   runEval,
+  setMembership,
 } from "@agentic-patterns/runtime";
 import type {
   EvalCase,
@@ -45,6 +51,8 @@ import type {
   EvalReport,
   EvalResult,
   EvalSplit,
+  JudgeAxis,
+  JudgeThresholds,
   RunnerProtocol,
   Scorer,
 } from "@agentic-patterns/runtime";
@@ -72,8 +80,71 @@ export interface EvalCommandOptions {
   allowTest?: boolean;
   /** --db: SQLite path; default resolveDbPath() (helpers/db.ts). */
   db?: string;
+  /**
+   * --judge: append the deterministic set-membership scorer + the LLM judge
+   * (5-axis rubric) on the SAME runner. Without it, scorer construction is
+   * untouched (byte-identical behavior).
+   */
+  judge?: boolean;
+  /** --judge-model: judge model id. Default: AGENT_MODEL ?? tier (eval.ts:233). */
+  judgeModel?: string;
+  /** --judge-thresholds: comma list `axis=n` (0-5); axes: the five kebab axis names or `mean`. */
+  judgeThresholds?: string;
   /** Test seam — injected runner skips createRunner(). Default: createRunner({eventBus,…}). */
   runner?: RunnerProtocol;
+}
+
+// ---------------------------------------------------------------------------
+// --judge-thresholds parsing
+// ---------------------------------------------------------------------------
+
+/** `hazardAvoidance` -> `hazard-avoidance`; CLI axis names are kebab-case,
+ *  `JudgeThresholds` keys are camelCase (single-sourced from `JUDGE_AXES`). */
+function toKebabAxis(axis: JudgeAxis): string {
+  return axis.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
+}
+
+const KEBAB_TO_AXIS: Record<string, JudgeAxis> = Object.fromEntries(
+  JUDGE_AXES.map((axis) => [toKebabAxis(axis), axis]),
+);
+
+const JUDGE_THRESHOLD_AXES_TEXT = `${JUDGE_AXES.map(toKebabAxis).join("|")}|mean`;
+
+/** `accuracy=3,grounding=3,mean=3.5` → `{accuracy: 3, grounding: 3, mean: 3.5}`. Exits 2 on any malformed entry. */
+function parseJudgeThresholds(raw: string): JudgeThresholds {
+  const thresholds: JudgeThresholds = {};
+  for (const entry of raw.split(",")) {
+    const trimmed = entry.trim();
+    if (trimmed.length === 0) continue;
+
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) {
+      errExit2(
+        `error: invalid --judge-thresholds entry "${trimmed}" — expected axis=n (${JUDGE_THRESHOLD_AXES_TEXT})`,
+      );
+    }
+    const key = trimmed.slice(0, eq).trim();
+    const valueRaw = trimmed.slice(eq + 1).trim();
+    const value = Number(valueRaw);
+    if (!Number.isFinite(value) || value < 0 || value > 5) {
+      errExit2(
+        `error: invalid --judge-thresholds value "${valueRaw}" for "${key}" — expected a number 0-5`,
+      );
+    }
+
+    if (key === "mean") {
+      thresholds.mean = value;
+      continue;
+    }
+    const axis = KEBAB_TO_AXIS[key];
+    if (!axis) {
+      errExit2(
+        `error: unknown --judge-thresholds axis "${key}" — expected one of ${JUDGE_THRESHOLD_AXES_TEXT}`,
+      );
+    }
+    thresholds[axis] = value;
+  }
+  return thresholds;
 }
 
 /** Exit codes: 0 gate pass · 1 gate failure (process.exitCode) · 2 usage/config (process.exit). */
@@ -108,6 +179,18 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
       throw error;
     }
   }
+
+  // --judge-model / --judge-thresholds without --judge is a silent no-op that
+  // hides typos — refuse it. --judge-thresholds is parsed HERE (before any
+  // file/store/runner work) so a malformed list exits 2 immediately.
+  const judgeEnabled = opts.judge === true;
+  if (!judgeEnabled && (opts.judgeModel !== undefined || opts.judgeThresholds !== undefined)) {
+    errExit2("error: --judge-model / --judge-thresholds require --judge");
+  }
+  const judgeThresholds: JudgeThresholds =
+    judgeEnabled && opts.judgeThresholds !== undefined
+      ? parseJudgeThresholds(opts.judgeThresholds)
+      : {};
 
   // -------------------------------------------------------------------------
   // Step 2 — resolve target. `reg.agent` is the eval target handed to runEval
@@ -246,6 +329,13 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
     gitSha,
   });
 
+  const judgeModel = opts.judgeModel ?? model;
+  const judgeBannerLine = judgeEnabled
+    ? `on — model ${judgeModel}  thresholds ${
+        Object.keys(judgeThresholds).length > 0 ? JSON.stringify(judgeThresholds) : "(defaults)"
+      }`
+    : undefined;
+
   printBanner({
     setId,
     targetId,
@@ -254,17 +344,31 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
     storageLine:
       store && evalRunId !== undefined ? `${dbPath} (eval run ${evalRunId})` : persistence.banner,
     runnerBanner,
+    judgeLine: judgeBannerLine,
   });
 
   // -------------------------------------------------------------------------
   // Step 3 (scorer) — expected-gated exact-match default. A case WITH expected
   // is gated by deep-equality; a case WITHOUT stays un-scored ([] → derivePass
   // → null → un-gated) rather than auto-failing.
+  //
+  // --judge (E6/#141) appends the deterministic set-membership scorer + the
+  // LLM judge (5-axis rubric) on the SAME runner (incl. the opts.runner test
+  // seam) — zero new runner construction. Without --judge this array is
+  // exactly `[defaultScorer]`, untouched (byte-identical behavior).
   // -------------------------------------------------------------------------
 
   const exact = exactMatch<unknown>();
   const defaultScorer: Scorer<unknown, unknown, unknown> = (args) =>
     args.expected === undefined ? [] : exact(args);
+
+  const scorers: Scorer<unknown, unknown, unknown>[] = judgeEnabled
+    ? [
+        defaultScorer,
+        setMembership(),
+        judgeScorer({ runner, model: judgeModel, thresholds: judgeThresholds }),
+      ]
+    : [defaultScorer];
 
   // -------------------------------------------------------------------------
   // Step 9 — run. The persistence seam is #139's extracted recorder (the
@@ -291,7 +395,7 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
   let report: EvalReport<unknown, unknown, unknown>;
   try {
     report = await runEval(
-      { target: reg.agent, cases, scorers: [defaultScorer], onResult },
+      { target: reg.agent, cases, scorers, onResult },
       { runner, eventBus: bus, ...(evalRunId !== undefined ? { traceId: evalRunId } : {}) },
     );
     if (store && evalRunId !== undefined) {
@@ -399,6 +503,8 @@ function printBanner(info: {
   readonly split: EvalSplit | undefined;
   readonly storageLine: string;
   readonly runnerBanner: string;
+  /** Present only when --judge is set — byte-identical banner without it. */
+  readonly judgeLine?: string;
 }): void {
   const variantText = info.variant ?? "(none)";
   const splitText = info.split ?? "(none)";
@@ -407,6 +513,7 @@ function printBanner(info: {
     `  ${bold("eval")}     ${info.setId} → ${info.targetId}   variant=${variantText}  split=${splitText}`,
     `  storage  ${info.storageLine}`,
     `  runner   ${info.runnerBanner}`,
+    ...(info.judgeLine !== undefined ? [`  judge    ${info.judgeLine}`] : []),
     "",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
