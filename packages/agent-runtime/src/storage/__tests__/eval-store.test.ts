@@ -207,6 +207,126 @@ describe("EvalStore", () => {
     });
   });
 
+  describe("deleteEvalCase", () => {
+    it("removes exactly the targeted case, returns true; a miss returns false; other cases untouched", () => {
+      store.upsertEvalSet({ id: "set-1" });
+      store.upsertEvalCase("set-1", { caseId: "c1", input: { q: "a" } });
+      store.upsertEvalCase("set-1", { caseId: "c2", input: { q: "b" } });
+
+      expect(store.deleteEvalCase("set-1", "c1")).toBe(true);
+      expect(store.listEvalCases("set-1").map((c) => c.caseId)).toEqual(["c2"]);
+
+      // Deleting an already-gone case (or an unknown one) is a no-op false.
+      expect(store.deleteEvalCase("set-1", "c1")).toBe(false);
+      expect(store.deleteEvalCase("set-1", "no-such")).toBe(false);
+
+      // Same case id in a different set is scoped out.
+      store.upsertEvalSet({ id: "set-2" });
+      store.upsertEvalCase("set-2", { caseId: "c2", input: { q: "c" } });
+      expect(store.deleteEvalCase("set-1", "c2")).toBe(true);
+      expect(store.listEvalCases("set-2").map((c) => c.caseId)).toEqual(["c2"]);
+    });
+  });
+
+  describe("caseResultHistory", () => {
+    it("returns every run that evaluated a case, newest-first, joining run-owned fields; scoped to (setId, caseId); empty for unknowns", () => {
+      store.upsertEvalSet({ id: "set-1" });
+      store.upsertEvalCase("set-1", { caseId: "c1", input: { q: "2+2" }, split: "train" });
+
+      // Two runs against c1, an older one then a newer one, each with a runs
+      // row so the join carries finalAnswer/tokens/elapsed.
+      const runIdOld = store.startRun({ agentName: "agent-a" });
+      store.finishRun(runIdOld, {
+        finalAnswer: "3",
+        toolCalls: 0,
+        iterations: 0,
+        inputTokens: 10,
+        outputTokens: 2,
+        finishReason: "stop",
+        elapsedMs: 5,
+        status: "ok",
+      });
+      const evalRunOld = store.startEvalRun({
+        setId: "set-1",
+        targetId: "agent-a",
+        variant: "v1",
+        model: "m1",
+        tsStart: new Date("2026-01-01T00:00:00Z"),
+      });
+      store.recordEvalResult({
+        evalRunId: evalRunOld,
+        caseId: "c1",
+        runId: runIdOld,
+        scores: [{ name: "exact", value: 0, passed: false }],
+        pass: false,
+      });
+      store.finishEvalRun(evalRunOld, { status: "ok" });
+
+      const runIdNew = store.startRun({ agentName: "agent-a" });
+      store.finishRun(runIdNew, {
+        finalAnswer: "4",
+        toolCalls: 0,
+        iterations: 0,
+        inputTokens: 12,
+        outputTokens: 3,
+        finishReason: "stop",
+        elapsedMs: 7,
+        status: "ok",
+      });
+      const evalRunNew = store.startEvalRun({
+        setId: "set-1",
+        targetId: "agent-a",
+        variant: "v2",
+        model: "m2",
+        tsStart: new Date("2026-02-01T00:00:00Z"),
+      });
+      store.recordEvalResult({
+        evalRunId: evalRunNew,
+        caseId: "c1",
+        runId: runIdNew,
+        scores: [{ name: "exact", value: 1, passed: true }],
+        pass: true,
+      });
+      store.finishEvalRun(evalRunNew, { status: "ok" });
+
+      const history = store.caseResultHistory("set-1", "c1");
+      expect(history.map((h) => h.evalRunId)).toEqual([evalRunNew, evalRunOld]); // newest first
+
+      const newest = history[0];
+      expect(newest?.pass).toBe(true);
+      expect(newest?.variant).toBe("v2");
+      expect(newest?.model).toBe("m2");
+      expect(newest?.runStatus).toBe("ok");
+      expect(newest?.finalAnswer).toBe("4"); // joined through runs
+      expect(newest?.inputTokens).toBe(12);
+      expect(newest?.outputTokens).toBe(3);
+      expect(newest?.elapsedMs).toBe(7);
+      expect(newest?.scores).toEqual([{ name: "exact", value: 1, passed: true }]);
+
+      // Scoped: another set's same case id, and unknown ids, don't leak in.
+      store.upsertEvalSet({ id: "set-2" });
+      store.upsertEvalCase("set-2", { caseId: "c1", input: { q: "x" } });
+      const otherRun = store.startEvalRun({ setId: "set-2" });
+      store.recordEvalResult({ evalRunId: otherRun, caseId: "c1", scores: [], pass: true });
+      expect(store.caseResultHistory("set-1", "c1")).toHaveLength(2); // unchanged
+      expect(store.caseResultHistory("set-1", "no-such")).toEqual([]);
+      expect(store.caseResultHistory("no-such-set", "c1")).toEqual([]);
+    });
+
+    it("carries null run-owned fields when the result has no runId (annotate-only)", () => {
+      store.upsertEvalSet({ id: "set-1" });
+      store.upsertEvalCase("set-1", { caseId: "c1", input: { q: "a" } });
+      const evalRunId = store.startEvalRun({ setId: "set-1" });
+      store.recordEvalResult({ evalRunId, caseId: "c1", scores: [], pass: null });
+
+      const [row] = store.caseResultHistory("set-1", "c1");
+      expect(row?.pass).toBeNull();
+      expect(row?.finalAnswer).toBeNull();
+      expect(row?.inputTokens).toBeNull();
+      expect(row?.elapsedMs).toBeNull();
+    });
+  });
+
   describe("suite lifecycle", () => {
     it("startEvalRun round-trips all EvalRunMeta fields; finishEvalRun is first-terminal-wins; listEvalRuns filters + orders newest-first", () => {
       const t1 = new Date("2026-05-11T18:00:00Z");

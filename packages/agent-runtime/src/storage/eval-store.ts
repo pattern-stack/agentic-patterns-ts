@@ -173,6 +173,28 @@ export interface SplitAggregate {
   readonly passRate: number | null; // null when no result carried a pass verdict
 }
 
+/**
+ * One run that evaluated a given `(setId, caseId)` — the case's annotation
+ * (`pass`/`scores`) joined to its `eval_run` metadata and the `runs`-table
+ * execution fields. The "cross-run history" for a single case; newest first.
+ * `split` is the RUN's label (`eval_run.split`), not the case's bank split.
+ */
+export interface EvalCaseHistoryRow {
+  readonly evalRunId: string;
+  readonly tsStart: string;
+  readonly targetId: string | null;
+  readonly variant: string | null;
+  readonly split: EvalSplit | null;
+  readonly model: string | null;
+  readonly runStatus: "running" | "ok" | "error";
+  readonly pass: boolean | null;
+  readonly scores: readonly EvalScoreLike[] | null;
+  readonly finalAnswer: string | null;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly elapsedMs: number | null;
+}
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -180,6 +202,8 @@ export interface SplitAggregate {
 export class EvalStore extends RunStore {
   private readonly _upsertEvalSetStmt: Statement;
   private readonly _upsertEvalCaseStmt: Statement;
+  private readonly _deleteEvalCaseStmt: Statement;
+  private readonly _caseResultHistoryStmt: Statement;
   private readonly _listEvalSetsStmt: Statement;
   private readonly _caseCountsBySetStmt: Statement;
   private readonly _listEvalCasesStmt: Statement;
@@ -210,6 +234,35 @@ export class EvalStore extends RunStore {
         expected_json = excluded.expected_json,
         tags_json     = excluded.tags_json,
         split         = excluded.split
+    `);
+
+    this._deleteEvalCaseStmt = this._db.prepare(`
+      DELETE FROM eval_case WHERE set_id = ? AND case_id = ?
+    `);
+
+    // Cross-run history for one case: every eval_result for (set, case),
+    // joined to its run metadata and the runs-table execution fields. Newest
+    // first. Scoped by ev.set_id so the same case_id in another set is excluded.
+    this._caseResultHistoryStmt = this._db.prepare(`
+      SELECT
+        ev.id           AS evalRunId,
+        ev.ts_start     AS tsStart,
+        ev.target_id    AS targetId,
+        ev.variant      AS variant,
+        ev.split        AS split,
+        ev.model        AS model,
+        ev.status       AS runStatus,
+        er.pass         AS pass,
+        er.scores_json  AS scoresJson,
+        r.final_answer  AS finalAnswer,
+        r.input_tokens  AS inputTokens,
+        r.output_tokens AS outputTokens,
+        r.elapsed_ms    AS elapsedMs
+      FROM eval_result er
+      JOIN eval_run ev ON er.eval_run_id = ev.id
+      LEFT JOIN runs r ON er.run_id = r.run_id
+      WHERE ev.set_id = @setId AND er.case_id = @caseId
+      ORDER BY ev.ts_start DESC
     `);
 
     this._listEvalSetsStmt = this._db.prepare(`
@@ -342,6 +395,11 @@ export class EvalStore extends RunStore {
     );
   }
 
+  /** Delete one case from a set's bank. Returns true iff a row was removed. */
+  deleteEvalCase(setId: string, caseId: string): boolean {
+    return this._deleteEvalCaseStmt.run(setId, caseId).changes > 0;
+  }
+
   /** All eval sets with per-split case counts (the shape `GET /eval/sets` serves). */
   listEvalSets(): EvalSetSummary[] {
     const sets = this._listEvalSetsStmt.all() as RawEvalSetRow[];
@@ -454,6 +512,13 @@ export class EvalStore extends RunStore {
   evalRunResults(evalRunId: string): JoinedEvalResultRow[] {
     const rows = this._evalRunResultsStmt.all(evalRunId) as RawJoinedResultRow[];
     return rows.map(rowToJoinedEvalResultRow);
+  }
+
+  /** Every run that evaluated `(setId, caseId)`, newest first — the case's
+   *  cross-run history. Empty when the case was never run (or is unknown). */
+  caseResultHistory(setId: string, caseId: string): EvalCaseHistoryRow[] {
+    const rows = this._caseResultHistoryStmt.all({ setId, caseId }) as RawCaseHistoryRow[];
+    return rows.map(rowToCaseHistoryRow);
   }
 
   /** A/B compare: same set, two variants, per-case aligned. Throws if either id is unknown. */
@@ -630,6 +695,40 @@ interface RawSplitAggregateRow {
   results: number;
   passed: number;
   failed: number;
+}
+
+interface RawCaseHistoryRow {
+  evalRunId: string;
+  tsStart: string;
+  targetId: string | null;
+  variant: string | null;
+  split: string | null;
+  model: string | null;
+  runStatus: "running" | "ok" | "error";
+  pass: number | null;
+  scoresJson: string | null;
+  finalAnswer: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  elapsedMs: number | null;
+}
+
+function rowToCaseHistoryRow(r: RawCaseHistoryRow): EvalCaseHistoryRow {
+  return {
+    evalRunId: r.evalRunId,
+    tsStart: r.tsStart,
+    targetId: r.targetId,
+    variant: r.variant,
+    split: (r.split as EvalSplit | null) ?? null,
+    model: r.model,
+    runStatus: r.runStatus,
+    pass: intToBool(r.pass),
+    scores: parseScores(r.scoresJson),
+    finalAnswer: r.finalAnswer,
+    inputTokens: r.inputTokens,
+    outputTokens: r.outputTokens,
+    elapsedMs: r.elapsedMs,
+  };
 }
 
 function parseJsonUnknown(s: string | null): unknown {
