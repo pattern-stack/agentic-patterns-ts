@@ -29,6 +29,7 @@ import {
   HeldOutSplitError,
   SQLiteExporter,
   assertSplitSelectable,
+  createEvalResultRecorder,
   createRunner,
   derivePass,
   exactMatch,
@@ -266,42 +267,25 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
     args.expected === undefined ? [] : exact(args);
 
   // -------------------------------------------------------------------------
-  // Step 9 — run. onResult is #132's persistence seam, verbatim shape.
+  // Step 9 — run. The persistence seam is #139's extracted recorder (the
+  // exact #132 shape, now shared with the server's POST /eval/runs route) —
+  // onResult here is just printCaseLine + recorder?.(r), behavior-identical.
   // -------------------------------------------------------------------------
+
+  const recorder =
+    store && evalRunId !== undefined
+      ? createEvalResultRecorder(store, {
+          evalRunId,
+          targetId,
+          model,
+          variant: opts.variant,
+          split,
+        })
+      : undefined;
 
   const onResult = (r: EvalResult<unknown, unknown, unknown>): void => {
     printCaseLine(r);
-    if (!store || evalRunId === undefined) return;
-
-    const runId = store.startRun({
-      agentName: targetId,
-      model,
-      ...(r.traceId ? { traceId: r.traceId } : {}),
-      metadata: {
-        evalRunId,
-        caseId: r.case.id,
-        ...(opts.variant !== undefined ? { variant: opts.variant } : {}),
-        ...((r.case.split ?? split) !== undefined ? { split: r.case.split ?? split } : {}),
-      },
-    });
-    store.finishRun(runId, {
-      finalAnswer: r.output === undefined ? "" : JSON.stringify(r.output),
-      toolCalls: 0,
-      iterations: 0,
-      inputTokens: r.inputTokens,
-      outputTokens: r.outputTokens,
-      finishReason: r.succeeded ? "stop" : "error",
-      elapsedMs: 0,
-      status: r.succeeded ? "ok" : "error",
-      ...(r.error !== undefined ? { error: r.error } : {}),
-    });
-    store.recordEvalResult({
-      evalRunId,
-      caseId: r.case.id,
-      runId,
-      scores: r.scores,
-      pass: derivePass(r.scores),
-    });
+    recorder?.(r);
   };
 
   let report: EvalReport<unknown, unknown, unknown>;

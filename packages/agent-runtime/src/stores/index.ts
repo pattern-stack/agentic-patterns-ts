@@ -42,3 +42,6 @@ export type {
   SplitAggregate,
   StoredEvalCase,
 } from "../storage/eval-store.js";
+
+export { createEvalResultRecorder } from "../storage/eval-recorder.js";
+export type { EvalRecorderMeta, EvalResultLike } from "../storage/eval-recorder.js";
