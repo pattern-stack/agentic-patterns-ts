@@ -5,7 +5,7 @@
  * from `ConversationDetailPage`, plus the lazy trace click).
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalRunDetailResponse } from "../api/types";
@@ -201,6 +201,196 @@ function renderPage() {
     </MemoryRouter>,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Live mode (#139, E5c) — stubbed EventSource, the `useEventStream` precedent
+// ---------------------------------------------------------------------------
+
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  readonly url: string;
+  private readonly listeners = new Map<string, Array<(e: { data: string }) => void>>();
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
+
+  constructor(url: string) {
+    this.url = url;
+    FakeEventSource.instances.push(this);
+  }
+
+  addEventListener(name: string, cb: (e: { data: string }) => void): void {
+    const list = this.listeners.get(name) ?? [];
+    list.push(cb);
+    this.listeners.set(name, list);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  emit(name: string, data: unknown): void {
+    for (const cb of this.listeners.get(name) ?? []) {
+      cb({ data: JSON.stringify(data) });
+    }
+  }
+}
+
+function stubFetchLive(getDetail: () => EvalRunDetailResponse) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("/eval/sets/bank/cases")) {
+      return mkFetchResponse(200, casesResponse);
+    }
+    if (url.includes("/eval/runs/run-1")) {
+      return mkFetchResponse(200, getDetail());
+    }
+    return mkFetchResponse(404, { error: "unhandled in test" });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+describe("EvalRunDetailPage — live mode (#139)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    FakeEventSource.instances = [];
+  });
+
+  const runningDetail: EvalRunDetailResponse = {
+    run: { ...detailResponse.run, status: "running", tsEnd: null },
+    results: [],
+    summary: {
+      cases: 0,
+      passed: 0,
+      failed: 0,
+      ungated: 0,
+      errored: 0,
+      passRate: null,
+      inputTokens: 0,
+      outputTokens: 0,
+    },
+  };
+
+  it("attaches the stream while running; case.result upserts a row with no duplicates on snapshot overlap", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
+    stubFetchLive(() => runningDetail);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances.length).toBeGreaterThan(0);
+    });
+    const source = FakeEventSource.instances[0];
+    if (!source) throw new Error("unreachable");
+
+    source.emit("run.snapshot", { runId: "run-1", status: "running", completed: 0, total: 1 });
+    await waitFor(() => {
+      expect(screen.getByText(/0.*\/ 1 cases/)).toBeTruthy();
+    });
+
+    source.emit("case.result", {
+      caseId: "case-live",
+      pass: true,
+      succeeded: true,
+      scores: [{ name: "exact-match", value: 1, passed: true }],
+      finalAnswer: '"4"',
+      inputTokens: 1,
+      outputTokens: 1,
+      traceId: "run-1:case-live",
+      completed: 1,
+      total: 1,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("case-live")).toBeTruthy();
+    });
+    // Overlapping re-emission of the same case (e.g. a snapshot re-attach) —
+    // upsert, never a second row.
+    source.emit("case.result", {
+      caseId: "case-live",
+      pass: true,
+      succeeded: true,
+      scores: [{ name: "exact-match", value: 1, passed: true }],
+      finalAnswer: '"4"',
+      inputTokens: 1,
+      outputTokens: 1,
+      traceId: "run-1:case-live",
+      completed: 1,
+      total: 1,
+    });
+    expect(screen.getAllByText("case-live")).toHaveLength(1);
+  });
+
+  it("run.finished triggers a refetch of the authoritative joined rows", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
+    let detail = runningDetail;
+    const fetchMock = stubFetchLive(() => detail);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances.length).toBeGreaterThan(0);
+    });
+    const source = FakeEventSource.instances[0];
+    if (!source) throw new Error("unreachable");
+    const callsBeforeFinish = fetchMock.mock.calls.length;
+
+    // The store is truth once finished — flip the stubbed detail to terminal
+    // so the refetch is observable.
+    detail = {
+      run: { ...detailResponse.run, status: "ok" },
+      results: detailResponse.results,
+      summary: detailResponse.summary,
+    };
+    source.emit("run.finished", { status: "ok" });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeFinish);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("case-pass")).toBeTruthy();
+    });
+  });
+
+  it("run.detached starts 3s polling until terminal", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
+    let detail = runningDetail;
+    const fetchMock = stubFetchLive(() => detail);
+
+    renderPage();
+
+    await vi.waitFor(() => {
+      expect(FakeEventSource.instances.length).toBeGreaterThan(0);
+    });
+    const source = FakeEventSource.instances[0];
+    if (!source) throw new Error("unreachable");
+    const callsBeforeDetach = fetchMock.mock.calls.length;
+
+    act(() => {
+      source.emit("run.detached", { status: "running" });
+    });
+    expect(screen.getByText("watching (detached)")).toBeTruthy();
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeDetach);
+
+    // Flip to terminal so the poll clears itself — no further calls after.
+    detail = {
+      run: { ...detailResponse.run, status: "ok" },
+      results: [],
+      summary: runningDetail.summary,
+    };
+    await vi.advanceTimersByTimeAsync(3000);
+    const callsAfterTerminal = fetchMock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(fetchMock.mock.calls.length).toBe(callsAfterTerminal);
+  });
+});
 
 describe("EvalRunDetailPage", () => {
   afterEach(() => {

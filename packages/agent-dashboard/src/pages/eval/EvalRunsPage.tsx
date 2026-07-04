@@ -19,6 +19,7 @@ import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
 import { type EvalRunFilters, fetchEvalRuns, filterRuns } from "../../lib/evalApi";
+import { RunLauncher } from "./RunLauncher";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
 
 // pages never share code (playground-redesign.md) — lifted from ConversationsPage as-is.
@@ -163,9 +164,12 @@ export function EvalRunsPage() {
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Eval Runs</h1>
-        <Button variant="ghost" size="sm" onClick={load}>
-          Refresh
-        </Button>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <RunLauncher />
+          <Button variant="ghost" size="sm" onClick={load}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {state.kind === "loading" && (
