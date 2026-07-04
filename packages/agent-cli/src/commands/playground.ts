@@ -13,8 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
-import { homedir } from "node:os";
+import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +34,7 @@ import { createServer } from "@agentic-patterns/server";
 import type { AgentRegistration } from "@agentic-patterns/server";
 import { serve } from "@hono/node-server";
 import { DEFAULT_DASHBOARD_PORT } from "../constants.js";
+import { ensureParentDir, resolveDbPath } from "../helpers/db.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 
 // ---------------------------------------------------------------------------
@@ -379,20 +379,6 @@ async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<Persiste
   sqliteExporter.attach(eventBus);
 
   return { store: result.store, banner: `${dbPath} (${result.store.count()} events)` };
-}
-
-function resolveDbPath(): string {
-  if (process.env.AP_DB_PATH) return process.env.AP_DB_PATH;
-  const base = process.env.XDG_STATE_HOME ?? path.join(homedir(), ".local", "state");
-  return path.join(base, "ap", "events.db");
-}
-
-function ensureParentDir(filePath: string): void {
-  try {
-    mkdirSync(path.dirname(filePath), { recursive: true });
-  } catch {
-    // Best effort — EventStore will surface the real error if open fails.
-  }
 }
 
 function parsePositiveInt(s: string | undefined): number | undefined {
