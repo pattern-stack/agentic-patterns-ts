@@ -227,6 +227,37 @@ describe("RunStoreExporter", () => {
     expect(store.getRun("run-b")?.finalAnswer).toBe("b-done");
   });
 
+  it("default construction (no metadataFor seam) — runs row's metadata is null, unchanged from pre-#149 behavior", async () => {
+    const runId = "run-no-metadata";
+    await bus.publish(messageStart({ runId }));
+    await bus.publish(messageComplete({ runId, content: "done" }));
+
+    expect(store.getRun(runId)?.metadata).toBeNull();
+  });
+
+  it("metadataFor seam (#149) — merges the returned metadata into the runs row", async () => {
+    const localStore = new RunStore({ path: ":memory:", Database });
+    const localBus = new AgentEventBus();
+    const seeded = new RunStoreExporter({
+      store: localStore,
+      metadataFor: (event) => ({ variant: "b", split: "test", agentName: event.agentName }),
+    });
+    seeded.attach(localBus);
+
+    const runId = "run-with-metadata";
+    await localBus.publish(messageStart({ runId, agentName: "eval-agent" }));
+    await localBus.publish(messageComplete({ runId, content: "done" }));
+
+    expect(localStore.getRun(runId)?.metadata).toEqual({
+      variant: "b",
+      split: "test",
+      agentName: "eval-agent",
+    });
+
+    seeded.detach(localBus);
+    localStore.close();
+  });
+
   it("does not throw if the store rejects a write — bus stays healthy", async () => {
     const failing = {
       startRun: vi.fn(() => {
