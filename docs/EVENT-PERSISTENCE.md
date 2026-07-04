@@ -11,6 +11,7 @@ hook POST ──→ bus ┼─→ SSEExporter ─────→ /admin/events/s
                   └─→ SQLiteExporter ──→ events.db (durable)
                                         ↑
                        /admin/events/recent
+                       /admin/events/trace/:id
                        /admin/claude-code/sessions
                        /admin/claude-code/sessions/:id
                                         ↑
@@ -78,6 +79,7 @@ If `better-sqlite3` can't load (missing, native binary mismatch, etc.), the play
 | Method | Path | Returns |
 |---|---|---|
 | GET | `/admin/events/recent?since=ISO&limit=N&type=...` | Newest-first array of events |
+| GET | `/admin/events/trace/:id` | All events for one trace, oldest first |
 | GET | `/admin/claude-code/sessions?limit=N` | Per-session aggregates (newest first) |
 | GET | `/admin/claude-code/sessions/:sessionId` | All events for one session, oldest first |
 

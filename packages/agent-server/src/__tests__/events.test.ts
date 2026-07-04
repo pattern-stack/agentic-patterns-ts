@@ -70,6 +70,26 @@ describe("events routes", () => {
     expect(body.events).toHaveLength(1); // only sess-B is after 18:00:05Z
   });
 
+  it("GET /admin/events/trace/:id returns that trace's events ASC by timestamp", async () => {
+    const app = mkApp(store);
+    const res = await app.request("/admin/events/trace/sess-A");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      traceId: string;
+      events: { spanId: string; timestamp: string }[];
+    };
+    expect(body.traceId).toBe("sess-A");
+    expect(body.events.map((e) => e.spanId)).toEqual(["a-0", "a-1", "a-2"]);
+  });
+
+  it("GET /admin/events/trace/:id returns an empty array for an unknown trace", async () => {
+    const app = mkApp(store);
+    const res = await app.request("/admin/events/trace/does-not-exist");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { events: unknown[] };
+    expect(body.events).toEqual([]);
+  });
+
   it("GET /admin/claude-code/sessions returns one row per session, newest first", async () => {
     const app = mkApp(store);
     const res = await app.request("/admin/claude-code/sessions");
@@ -101,6 +121,7 @@ describe("events routes", () => {
     const app = mkApp(undefined);
     for (const path of [
       "/admin/events/recent",
+      "/admin/events/trace/x",
       "/admin/claude-code/sessions",
       "/admin/claude-code/sessions/x",
     ]) {
