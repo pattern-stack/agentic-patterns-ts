@@ -17,6 +17,15 @@
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
+// EvalSplit
+// ---------------------------------------------------------------------------
+
+export const EvalSplitSchema = z.enum(["train", "dev", "test"]);
+/** ML-standard split names (doc §7). Canonical home; storage/eval-store.ts:48 keeps
+ *  a structural twin by design (#132 zero-coupling) — drift-guarded by test. */
+export type EvalSplit = z.infer<typeof EvalSplitSchema>; // "train" | "dev" | "test"
+
+// ---------------------------------------------------------------------------
 // EvalCase
 // ---------------------------------------------------------------------------
 
@@ -26,6 +35,7 @@ export interface EvalCase<TIn, TExpected = unknown> {
   readonly input: TIn;
   readonly expected?: TExpected;
   readonly tags?: readonly string[];
+  readonly split?: EvalSplit; // NEW — optional; absent = untagged (pre-#134 behavior)
 }
 
 export const EvalCaseSchema = z.object({
@@ -33,6 +43,7 @@ export const EvalCaseSchema = z.object({
   input: z.unknown(), // TIn — caller narrows via z.infer at their seam
   expected: z.unknown().optional(),
   tags: z.array(z.string()).readonly().optional(),
+  split: EvalSplitSchema.optional(), // NEW
 });
 
 // ---------------------------------------------------------------------------
