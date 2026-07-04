@@ -3,6 +3,8 @@
 export {
   type EvalCase,
   EvalCaseSchema,
+  type EvalSplit,
+  EvalSplitSchema,
   type Score,
   ScoreSchema,
   type EvalResult,
@@ -17,3 +19,13 @@ export { type Scorer, exactMatch, predicateScorer } from "./scorer.js";
 export { type EvalTarget, isNodeShape, isAgentLikeShape, resolveEvalTarget } from "./target.js";
 
 export { type EvalRunContext, type EvalSpec, runEval } from "./run-eval.js";
+
+export {
+  assertSplitSelectable,
+  CaseBankLoadError,
+  filterBySplit,
+  HeldOutSplitError,
+  loadCasesJsonl,
+  loadGold,
+  type SplitSelectOptions,
+} from "./case-bank.js";
