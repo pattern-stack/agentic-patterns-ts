@@ -24,6 +24,10 @@ const navGroups: { heading: string; items: { to: string; label: string; end?: bo
       { to: "/conversations", label: "Conversations" },
     ],
   },
+  {
+    heading: "Evaluate",
+    items: [{ to: "/eval", label: "Runs" }],
+  },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {

@@ -117,3 +117,94 @@ export interface ConversationMessagePart {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Eval types — hand-mirrored from `@agentic-patterns/runtime`'s `EvalStore`
+ * row types (the dashboard has no runtime dependency, `ConversationSummary`
+ * precedent above). Wire shapes served by #136's four `/eval/*` GETs.
+ */
+
+export type EvalSplit = "train" | "dev" | "test";
+
+/** Row returned by `GET /eval/sets` — a case bank + per-split counts. */
+export interface EvalSetSummary {
+  id: string;
+  name: string | null;
+  description: string | null;
+  createdTs: string;
+  caseCount: number;
+  splitCounts: Record<string, number>;
+}
+
+/** Row returned by `GET /eval/sets/:id/cases`. */
+export interface EvalCaseRow {
+  setId: string;
+  caseId: string;
+  input: unknown;
+  expected: unknown;
+  tags: string[] | null;
+  split: EvalSplit | null;
+}
+
+/** Row returned by `GET /eval/runs` and the `run` field of `GET /eval/runs/:id`. */
+export interface EvalRunRow {
+  id: string;
+  tsStart: string;
+  tsEnd: string | null;
+  setId: string | null;
+  targetId: string | null;
+  variant: string | null;
+  split: EvalSplit | null;
+  model: string | null;
+  gitSha: string | null;
+  status: "running" | "ok" | "error";
+}
+
+export interface EvalScoreLike {
+  name: string;
+  value: number | null;
+  passed?: boolean;
+  detail?: Record<string, unknown>;
+  error?: string;
+}
+
+/**
+ * `eval_result` LEFT JOIN `runs` — annotation fields (scores/pass) alongside
+ * run-owned fields (tokens, trace_id, status, final_answer). Never carries
+ * `input`/`expected` — those live in the case bank (`EvalCaseRow`), joined
+ * client-side by `caseId`.
+ */
+export interface JoinedEvalResultRow {
+  evalRunId: string;
+  caseId: string;
+  runId: string | null;
+  scores: EvalScoreLike[] | null;
+  pass: boolean | null;
+  traceId: string | null;
+  runStatus: "running" | "ok" | "error" | null;
+  finalAnswer: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  finishReason: string | null;
+  elapsedMs: number | null;
+  runError: string | null;
+}
+
+/** Handler-computed rollup — the `summary` field of `GET /eval/runs/:id`. */
+export interface EvalRunSummary {
+  cases: number;
+  passed: number;
+  failed: number;
+  ungated: number;
+  errored: number;
+  passRate: number | null;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Full body of `GET /eval/runs/:id`. */
+export interface EvalRunDetailResponse {
+  run: EvalRunRow;
+  results: JoinedEvalResultRow[];
+  summary: EvalRunSummary;
+}

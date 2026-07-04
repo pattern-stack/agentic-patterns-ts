@@ -5,7 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchRecentEvents } from "../lib/eventApi";
+import { fetchRecentEvents, fetchTraceEvents } from "../lib/eventApi";
 
 const originalFetch = globalThis.fetch;
 
@@ -79,3 +79,94 @@ function mkResponse(status: number, body: unknown): Response {
     json: async () => body,
   } as Response;
 }
+
+describe("fetchTraceEvents", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("keeps only rows whose top-level traceId matches, maps to StreamEvent, ASC order", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(200, {
+        events: [
+          // Server returns DESC; note case-b's row sits between the two matches.
+          {
+            id: 4,
+            type: "agent.tool.end",
+            timestamp: "2026-07-03T10:00:04Z",
+            data: { x: 4 },
+            traceId: "run-1:case-a",
+          },
+          {
+            id: 3,
+            type: "agent.tool.progress",
+            timestamp: "2026-07-03T10:00:03Z",
+            data: { x: 3 },
+            traceId: "run-1:case-b",
+          },
+          {
+            id: 2,
+            type: "agent.tool.start",
+            timestamp: "2026-07-03T10:00:02Z",
+            data: { x: 2 },
+            traceId: "run-1:case-a",
+          },
+          {
+            id: 1,
+            type: "agent.llm.start",
+            timestamp: "2026-07-03T10:00:01Z",
+            data: { x: 1 },
+            traceId: null,
+          },
+        ],
+      }),
+    );
+
+    const result = await fetchTraceEvents("run-1:case-a");
+    expect(result.map((e) => e.id)).toEqual(["hist-2", "hist-4"]);
+    expect(result.map((e) => e.timestamp)).toEqual([
+      "2026-07-03T10:00:02Z",
+      "2026-07-03T10:00:04Z",
+    ]);
+  });
+
+  it("returns [] on 503", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(503, { error: "persistence not configured" }),
+    );
+    const result = await fetchTraceEvents("run-1:case-a");
+    expect(result).toEqual([]);
+  });
+
+  it("returns [] when no row carries the traceId (purged / outside the window)", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(200, {
+        events: [
+          {
+            id: 1,
+            type: "agent.llm.start",
+            timestamp: "2026-07-03T10:00:01Z",
+            data: {},
+            traceId: "run-1:other-case",
+          },
+        ],
+      }),
+    );
+    const result = await fetchTraceEvents("run-1:case-a");
+    expect(result).toEqual([]);
+  });
+
+  it("sends limit=10000 by default", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(200, { events: [] }),
+    );
+    await fetchTraceEvents("run-1:case-a");
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const url = call?.[0] as string;
+    expect(url).toContain("/admin/events/recent");
+    expect(url).toContain("limit=10000");
+  });
+});

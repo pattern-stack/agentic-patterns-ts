@@ -39,6 +39,7 @@ export default defineConfig({
       "/agents": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/hooks": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/health": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/eval": { target: "http://localhost:3456", bypass: htmlNavBypass },
     },
   },
 });

@@ -56,9 +56,11 @@ function summarize(event: StreamEvent): string {
 
 interface EventStreamProps {
   events: StreamEvent[];
+  /** Panel height; default preserves the full-page layout. */
+  height?: string | number;
 }
 
-export function EventStream({ events }: EventStreamProps) {
+export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStreamProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -87,7 +89,7 @@ export function EventStream({ events }: EventStreamProps) {
       style={{
         background: "var(--bg-surface)",
         borderRadius: 8,
-        height: "calc(100vh - 220px)",
+        height,
         overflow: "auto",
       }}
     >
