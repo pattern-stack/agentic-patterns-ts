@@ -315,3 +315,97 @@ export async function captureFromSession(
     : (errorBody.error ?? `captureFromSession: HTTP ${res.status}`);
   throw new Error(message);
 }
+
+// ---------------------------------------------------------------------------
+// Set / case write clients (WI-5) — POST/PATCH/PUT/DELETE the WI-2 routes.
+// 503 -> `unconfigured`; 2xx -> `ok`; any other non-2xx throws the server's
+// `error` (+ `hint`), the `captureFromSession` idiom — the modal renders it.
+// ---------------------------------------------------------------------------
+
+export interface SetWriteBody {
+  id: string;
+  name?: string;
+  description?: string;
+}
+
+export interface CaseWriteBody {
+  input: unknown;
+  expected?: unknown;
+  tags?: string[];
+  split?: EvalSplit;
+}
+
+/** Read `error`/`hint` off a non-2xx body and throw — shared by the write clients. */
+async function throwServerError(res: Response, fallback: string): Promise<never> {
+  const errorBody = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
+  const message = errorBody.hint
+    ? `${errorBody.error} — ${errorBody.hint}`
+    : (errorBody.error ?? fallback);
+  throw new Error(message);
+}
+
+/** POST /eval/sets — create or upsert a set. 201/200 both resolve `ok`. */
+export async function createEvalSet(
+  body: SetWriteBody,
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<EvalSetSummary>> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/sets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.ok) return { kind: "ok", data: ((await res.json()) as { set: EvalSetSummary }).set };
+  return throwServerError(res, `createEvalSet: HTTP ${res.status}`);
+}
+
+/** PATCH /eval/sets/:id — edit set metadata (name/description). */
+export async function updateEvalSet(
+  id: string,
+  body: { name?: string; description?: string },
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<EvalSetSummary>> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/sets/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.ok) return { kind: "ok", data: ((await res.json()) as { set: EvalSetSummary }).set };
+  return throwServerError(res, `updateEvalSet: HTTP ${res.status}`);
+}
+
+/** PUT /eval/sets/:id/cases/:caseId — create or edit a case. */
+export async function upsertEvalCase(
+  setId: string,
+  caseId: string,
+  body: CaseWriteBody,
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<EvalCaseRow>> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/sets/${setId}/cases/${encodeURIComponent(caseId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.ok) return { kind: "ok", data: ((await res.json()) as { case: EvalCaseRow }).case };
+  return throwServerError(res, `upsertEvalCase: HTTP ${res.status}`);
+}
+
+/** DELETE /eval/sets/:id/cases/:caseId — remove a case. */
+export async function deleteEvalCase(
+  setId: string,
+  caseId: string,
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<{ deleted: true; caseId: string }>> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/sets/${setId}/cases/${encodeURIComponent(caseId)}`, {
+    method: "DELETE",
+  });
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.ok) return { kind: "ok", data: (await res.json()) as { deleted: true; caseId: string } };
+  return throwServerError(res, `deleteEvalCase: HTTP ${res.status}`);
+}

@@ -12,12 +12,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { EvalCaseHistoryRow, EvalCaseRow } from "../../api/types";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
+import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
 import { fetchEvalCaseDetail, safeParseAnswer } from "../../lib/evalApi";
+import { CaseEditModal } from "./CaseEditModal";
 
 const preStyle = {
   margin: 0,
@@ -95,6 +97,7 @@ export function EvalCaseDetailPage() {
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [expandedKey, setExpandedKey] = useState<string | undefined>(undefined);
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id || !caseId) return;
@@ -206,14 +209,40 @@ export function EvalCaseDetailPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        {backLink}
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 15 }}>{caseRow.caseId}</span>
-        </h1>
-        <Badge tone={heldOut ? "yellow" : "muted"}>{caseRow.split ?? "untagged"}</Badge>
-        {heldOut && <Badge tone="yellow">held-out</Badge>}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {backLink}
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 15 }}>{caseRow.caseId}</span>
+          </h1>
+          <Badge tone={heldOut ? "yellow" : "muted"}>{caseRow.split ?? "untagged"}</Badge>
+          {heldOut && <Badge tone="yellow">held-out</Badge>}
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+          Edit
+        </Button>
       </div>
+
+      {editing && id && (
+        <CaseEditModal
+          setId={id}
+          mode="edit"
+          initial={caseRow}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            void load();
+          }}
+        />
+      )}
 
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>

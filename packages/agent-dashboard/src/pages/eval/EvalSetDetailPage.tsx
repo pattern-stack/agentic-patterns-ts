@@ -14,6 +14,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { EvalCaseRow, EvalRunRow, EvalSetSummary } from "../../api/types";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
+import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
@@ -21,11 +22,15 @@ import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
 import {
   type EvalRunFilters,
+  deleteEvalCase,
   fetchEvalCases,
   fetchEvalRuns,
   fetchEvalSet,
   filterRuns,
 } from "../../lib/evalApi";
+import { CaseEditModal } from "./CaseEditModal";
+import { ConfirmModal } from "./ConfirmModal";
+import { SetEditModal } from "./SetEditModal";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
 
 function relative(dateStr: string | undefined | null): string {
@@ -80,10 +85,19 @@ type LoadState =
   | { kind: "error"; message: string }
   | { kind: "ok"; set: EvalSetSummary; cases: EvalCaseRow[]; runs: EvalRunRow[] };
 
+/** Which editor modal is open, if any. */
+type ModalState =
+  | { kind: "none" }
+  | { kind: "editSet" }
+  | { kind: "newCase" }
+  | { kind: "editCase"; row: EvalCaseRow }
+  | { kind: "deleteCase"; row: EvalCaseRow };
+
 export function EvalSetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [modal, setModal] = useState<ModalState>({ kind: "none" });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -214,13 +228,70 @@ export function EvalSetDetailPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        {backLink}
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>{set.name ?? set.id}</h1>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-muted)" }}>
-          {set.id}
-        </span>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {backLink}
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>{set.name ?? set.id}</h1>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-muted)" }}>
+            {set.id}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "editSet" })}>
+            Edit set
+          </Button>
+          <Button size="sm" onClick={() => setModal({ kind: "newCase" })}>
+            New case
+          </Button>
+        </div>
       </div>
+
+      {modal.kind === "editSet" && (
+        <SetEditModal
+          mode="edit"
+          initial={{ id: set.id, name: set.name, description: set.description }}
+          onClose={() => setModal({ kind: "none" })}
+          onSaved={() => {
+            setModal({ kind: "none" });
+            void load();
+          }}
+        />
+      )}
+      {(modal.kind === "newCase" || modal.kind === "editCase") && (
+        <CaseEditModal
+          setId={set.id}
+          mode={modal.kind === "newCase" ? "create" : "edit"}
+          initial={modal.kind === "editCase" ? modal.row : undefined}
+          onClose={() => setModal({ kind: "none" })}
+          onSaved={() => {
+            setModal({ kind: "none" });
+            void load();
+          }}
+        />
+      )}
+      {modal.kind === "deleteCase" && (
+        <ConfirmModal
+          title="Delete case"
+          message={`Delete case "${modal.row.caseId}" from set "${set.id}"? This cannot be undone.`}
+          onCancel={() => setModal({ kind: "none" })}
+          onConfirm={async () => {
+            const result = await deleteEvalCase(set.id, modal.row.caseId);
+            if (result.kind === "unconfigured") {
+              throw new Error("Eval persistence is not configured on this server.");
+            }
+            setModal({ kind: "none" });
+            void load();
+          }}
+        />
+      )}
 
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
@@ -302,6 +373,37 @@ export function EvalSetDetailPage() {
                           ) : (
                             <span style={{ color: "var(--fg-subtle)" }}>—</span>
                           ),
+                      },
+                      {
+                        key: "actions",
+                        header: "",
+                        align: "right",
+                        render: (row) => (
+                          <span style={{ display: "inline-flex", gap: 6 }}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`edit ${row.caseId}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setModal({ kind: "editCase", row });
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`delete ${row.caseId}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setModal({ kind: "deleteCase", row });
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </span>
+                        ),
                       },
                     ]}
                     data={groupCases}

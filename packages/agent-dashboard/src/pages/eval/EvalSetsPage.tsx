@@ -17,6 +17,7 @@ import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
 import { fetchEvalSets } from "../../lib/evalApi";
+import { SetEditModal } from "./SetEditModal";
 
 // pages never share code (playground-redesign.md) — lifted local.
 function relative(dateStr: string | undefined | null): string {
@@ -48,6 +49,7 @@ type LoadState =
 export function EvalSetsPage() {
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [showNew, setShowNew] = useState(false);
 
   const load = useCallback(async () => {
     setState({ kind: "loading" });
@@ -78,10 +80,26 @@ export function EvalSetsPage() {
         }}
       >
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Eval Sets</h1>
-        <Button variant="ghost" size="sm" onClick={load}>
-          Refresh
-        </Button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <Button size="sm" onClick={() => setShowNew(true)}>
+            New set
+          </Button>
+          <Button variant="ghost" size="sm" onClick={load}>
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      {showNew && (
+        <SetEditModal
+          mode="create"
+          onClose={() => setShowNew(false)}
+          onSaved={(set) => {
+            setShowNew(false);
+            navigate(`/eval/sets/${set.id}`);
+          }}
+        />
+      )}
 
       {state.kind === "loading" && (
         <div
