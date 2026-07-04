@@ -6,6 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EvalRunDetailResponse, EvalRunRow, SplitAggregate } from "../api/types";
 import {
+  type CaptureFromSessionResponse,
+  captureFromSession,
   fetchEvalRunDetail,
   fetchEvalRuns,
   fetchSplitAggregates,
@@ -269,6 +271,77 @@ describe("filterRuns", () => {
 
   it('"untagged" matches only split === null', () => {
     expect(filterRuns(runs, { split: "untagged" }).map((r) => r.id)).toEqual(["run-3"]);
+  });
+});
+
+describe("captureFromSession", () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("201 (created) -> { kind: 'ok', data } with created: true", async () => {
+    const data: CaptureFromSessionResponse = {
+      setId: "bank",
+      caseId: "session-conv-1-1",
+      created: true,
+      input: "hello",
+      expected: "hi there",
+      tags: ["captured", "agent:echo-agent"],
+      split: "train",
+    };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mkResponse(201, data));
+
+    const result = await captureFromSession({ conversationId: "conv-1", setId: "bank" });
+    expect(result).toEqual({ kind: "ok", data });
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call?.[0]).toBe("/eval/cases/from-session");
+    const init = call?.[1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ conversationId: "conv-1", setId: "bank" });
+  });
+
+  it("200 (updated) -> { kind: 'ok', data } with created: false", async () => {
+    const data: CaptureFromSessionResponse = {
+      setId: "bank",
+      caseId: "session-conv-1-1",
+      created: false,
+      input: "hello",
+      expected: "edited",
+      tags: ["captured", "agent:echo-agent"],
+      split: "train",
+    };
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mkResponse(200, data));
+
+    const result = await captureFromSession({
+      conversationId: "conv-1",
+      setId: "bank",
+      expected: "edited",
+    });
+    expect(result).toEqual({ kind: "ok", data });
+  });
+
+  it("returns { kind: 'unconfigured' } on 503", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(503, { error: "persistence not configured" }),
+    );
+    const result = await captureFromSession({ conversationId: "conv-1", setId: "bank" });
+    expect(result).toEqual({ kind: "unconfigured" });
+  });
+
+  it("throws the server error + hint on a non-2xx response (e.g. unknown set)", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mkResponse(404, {
+        error: 'eval set "new-bank" not found',
+        hint: 'retry with "createSet": {"name": …} to create it',
+      }),
+    );
+    await expect(
+      captureFromSession({ conversationId: "conv-1", setId: "new-bank" }),
+    ).rejects.toThrow(/createSet/);
   });
 });
 

@@ -222,3 +222,61 @@ export async function launchEvalRun(
   }
   return { kind: "error", message: message ?? `launchEvalRun: HTTP ${res.status}` };
 }
+
+// ---------------------------------------------------------------------------
+// POST /eval/cases/from-session — capture-from-session (#140, E5d)
+// ---------------------------------------------------------------------------
+
+export interface CaptureFromSessionRequest {
+  conversationId: string;
+  setId: string;
+  exchange?: number;
+  expected?: string;
+  split?: EvalSplit;
+  tags?: string[];
+  caseId?: string;
+  createSet?: { name?: string; description?: string };
+}
+
+export interface CaptureFromSessionResponse {
+  setId: string;
+  caseId: string;
+  created: boolean;
+  input: string;
+  expected: string;
+  tags: string[];
+  split: EvalSplit;
+}
+
+/**
+ * POST /eval/cases/from-session. 503 -> `{kind:"unconfigured"}`; 201/200 ->
+ * `{kind:"ok", data}` (`data.created` distinguishes a new row from an
+ * updated existing one — the re-capture idempotence signal). Any other
+ * non-2xx (400 validation, 404 unknown conversation/set/exchange) throws
+ * with the server's `error` (+ `hint` when present) — the capture panel
+ * catches it and renders the message inline (the `fetchEvalCases`
+ * throw-on-non-503 idiom).
+ */
+export async function captureFromSession(
+  body: CaptureFromSessionRequest,
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<CaptureFromSessionResponse>> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/cases/from-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.status === 201 || res.status === 200) {
+    const data = (await res.json()) as CaptureFromSessionResponse;
+    return { kind: "ok", data };
+  }
+
+  const errorBody = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
+  const message = errorBody.hint
+    ? `${errorBody.error} — ${errorBody.hint}`
+    : (errorBody.error ?? `captureFromSession: HTTP ${res.status}`);
+  throw new Error(message);
+}
