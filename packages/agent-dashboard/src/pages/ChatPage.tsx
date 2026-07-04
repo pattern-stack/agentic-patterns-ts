@@ -10,13 +10,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { type AgentSummary, listAgents } from "../api/chat-client";
-import { type ChatMessage, ChatPanel, useChat } from "../chat";
+import { ChatPanel, useChat } from "../chat";
 import "./chat-route.css";
 import { AgentUniverse } from "../components/AgentUniverse";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
-import { CaptureCasePanel } from "./eval/CaptureCasePanel";
 
 export function ChatPage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
@@ -71,7 +70,6 @@ export function ChatPage() {
         }}
         onNewChat={chat.reset}
         conversationId={chat.conversationId}
-        messages={chat.messages}
         exchangeCount={exchangeCount}
         streaming={chat.streaming}
         loadError={loadError}
@@ -135,7 +133,6 @@ interface HeaderProps {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   conversationId: string | null;
-  messages: ChatMessage[];
   exchangeCount: number;
   streaming: boolean;
   loadError: string | null;
@@ -151,7 +148,6 @@ function Header({
   onSelect,
   onNewChat,
   conversationId,
-  messages,
   exchangeCount,
   streaming,
   loadError,
@@ -197,11 +193,6 @@ function Header({
         <Button variant="ghost" size="sm" onClick={onNewChat} disabled={!conversationId}>
           New Chat
         </Button>
-        <CaptureCasePanel
-          conversationId={conversationId}
-          messages={messages}
-          streaming={streaming}
-        />
         <label
           title="Cap the agent's tool-loop iterations for each message (the runner stops after this many)."
           style={{
