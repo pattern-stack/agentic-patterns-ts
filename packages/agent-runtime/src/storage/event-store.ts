@@ -219,9 +219,14 @@ export class EventStore {
 
   constructor(opts: EventStoreOptions) {
     this._db = new opts.Database(opts.path);
-    this._db.pragma("journal_mode = WAL");
-    this._db.pragma("synchronous = NORMAL");
-    this._db.pragma("foreign_keys = ON");
+    // Driver-agnostic PRAGMAs: `.exec("PRAGMA …")` is supported by every SQLite
+    // binding (better-sqlite3 AND bun:sqlite), whereas `.pragma()` is a
+    // better-sqlite3-only method. Using `.exec` makes the injected-`Database`
+    // seam (EventStoreOptions.Database) honestly driver-agnostic — a Bun
+    // consumer can inject `bun:sqlite`'s Database with no native dep.
+    this._db.exec("PRAGMA journal_mode = WAL");
+    this._db.exec("PRAGMA synchronous = NORMAL");
+    this._db.exec("PRAGMA foreign_keys = ON");
 
     this._migrate();
 
@@ -375,8 +380,13 @@ export class EventStore {
   // -------------------------------------------------------------------------
 
   private _migrate(): void {
-    const row = this._db.pragma("user_version", { simple: true }) as number;
-    let version = typeof row === "number" ? row : 0;
+    // `PRAGMA user_version` read via prepare/get (portable across both drivers);
+    // `.pragma("…", { simple: true })` is better-sqlite3-only. Both drivers
+    // return a single `{ user_version: N }` row.
+    const row = this._db.prepare("PRAGMA user_version").get() as
+      | { user_version?: number }
+      | undefined;
+    let version = typeof row?.user_version === "number" ? row.user_version : 0;
 
     if (version < 1) {
       this._db.exec(SCHEMA_V1);
@@ -398,7 +408,7 @@ export class EventStore {
         `event-store schema version mismatch: db is ${version}, expected ${TARGET_SCHEMA_VERSION}`,
       );
     }
-    this._db.pragma(`user_version = ${TARGET_SCHEMA_VERSION}`);
+    this._db.exec(`PRAGMA user_version = ${TARGET_SCHEMA_VERSION}`);
   }
 }
 
