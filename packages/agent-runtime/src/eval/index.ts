@@ -29,3 +29,19 @@ export {
   loadGold,
   type SplitSelectOptions,
 } from "./case-bank.js";
+
+export {
+  type SetMembershipArgs,
+  type SetMembershipOptions,
+  setMembership,
+} from "./scorers/set-membership.js";
+
+export {
+  JUDGE_AXES,
+  type JudgeAxis,
+  JudgeVerdictSchema,
+  type JudgeVerdict,
+  type JudgeThresholds,
+  type JudgeScorerOptions,
+  judgeScorer,
+} from "./scorers/judge.js";
