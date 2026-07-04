@@ -75,6 +75,20 @@ export async function fetchEvalSets(
   return { kind: "ok", data: body.sets };
 }
 
+/**
+ * One set summary, derived from `GET /eval/sets` (there is no dedicated
+ * single-set route — the list is the source of truth). `data: null` means the
+ * set id was not found, distinct from `unconfigured`.
+ */
+export async function fetchEvalSet(
+  id: string,
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<EvalSetSummary | null>> {
+  const result = await fetchEvalSets(opts);
+  if (result.kind === "unconfigured") return result;
+  return { kind: "ok", data: result.data.find((s) => s.id === id) ?? null };
+}
+
 /** GET /eval/runs/:id — the joined per-case results + handler-computed summary. */
 export async function fetchEvalRunDetail(
   id: string,

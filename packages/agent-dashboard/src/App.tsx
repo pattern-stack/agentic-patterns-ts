@@ -16,6 +16,8 @@ import { RolesPage } from "./pages/build/RolesPage";
 import { EvalComparePage } from "./pages/eval/EvalComparePage";
 import { EvalRunDetailPage } from "./pages/eval/EvalRunDetailPage";
 import { EvalRunsPage } from "./pages/eval/EvalRunsPage";
+import { EvalSetDetailPage } from "./pages/eval/EvalSetDetailPage";
+import { EvalSetsPage } from "./pages/eval/EvalSetsPage";
 
 export function App() {
   return (
@@ -39,8 +41,10 @@ export function App() {
           <Route path="/claude-code" element={<ClaudeCodePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/conversations/:id" element={<ConversationDetailPage />} />
-          {/* EVALUATE — read-only eval review (#137) + A/B compare (#138) */}
+          {/* EVALUATE — set/case exploration (WI-3/4) + run review (#137) + A/B compare (#138) */}
           <Route path="/eval" element={<EvalRunsPage />} />
+          <Route path="/eval/sets" element={<EvalSetsPage />} />
+          <Route path="/eval/sets/:id" element={<EvalSetDetailPage />} />
           <Route path="/eval/runs/:id" element={<EvalRunDetailPage />} />
           <Route path="/eval/compare/:aId/:bId" element={<EvalComparePage />} />
         </Routes>

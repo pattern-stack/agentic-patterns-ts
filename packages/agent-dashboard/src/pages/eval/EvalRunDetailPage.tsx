@@ -307,6 +307,17 @@ export function EvalRunDetailPage() {
 
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          {run.setId ? (
+            <Link
+              to={`/eval/sets/${run.setId}`}
+              style={{ textDecoration: "none" }}
+              title="View this eval set"
+            >
+              <Badge tone="accent">set · {run.setId}</Badge>
+            </Link>
+          ) : (
+            <Badge tone="muted">set · —</Badge>
+          )}
           <Badge tone="muted">target · {run.targetId ?? "—"}</Badge>
           <Badge tone="muted">variant · {run.variant ?? "—"}</Badge>
           <Badge tone="muted">split · {run.split ?? "untagged"}</Badge>

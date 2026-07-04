@@ -221,3 +221,30 @@ export interface SplitAggregate {
   failed: number;
   passRate: number | null; // null when no result carried a pass verdict
 }
+
+/**
+ * One run that evaluated a given case — mirror of `EvalStore`'s
+ * `EvalCaseHistoryRow`. `split` is the RUN's label, not the case's bank split.
+ * Served by `GET /eval/sets/:id/cases/:caseId`.
+ */
+export interface EvalCaseHistoryRow {
+  evalRunId: string;
+  tsStart: string;
+  targetId: string | null;
+  variant: string | null;
+  split: EvalSplit | null;
+  model: string | null;
+  runStatus: "running" | "ok" | "error";
+  pass: boolean | null;
+  scores: EvalScoreLike[] | null;
+  finalAnswer: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  elapsedMs: number | null;
+}
+
+/** Full body of `GET /eval/sets/:id/cases/:caseId` — the case + its cross-run history. */
+export interface EvalCaseDetailResponse {
+  case: EvalCaseRow;
+  history: EvalCaseHistoryRow[];
+}
