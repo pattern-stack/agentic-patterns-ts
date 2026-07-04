@@ -44,6 +44,7 @@ export function createServer(config: ServerConfig): Hono {
       agents: config.agents,
       eventBus: config.eventBus,
       evalExecution: config.evalExecution,
+      conversations,
     }),
   );
 
