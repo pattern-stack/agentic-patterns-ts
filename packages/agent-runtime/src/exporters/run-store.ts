@@ -26,6 +26,12 @@
  * evict-oldest) bounds orphan growth in long-lived processes; rows left
  * 'running' (evicted, or the process died) are swept by `RunStore.sweepRunning()`.
  *
+ * `metadataFor` (optional, #149): a per-run function from the `message.start`
+ * event to metadata merged into `RunMeta.metadata` on `startRun()` — the seam
+ * a host (e.g. eval-cli stamping variant/split) uses without this exporter
+ * knowing what either means. Absent → no metadata, byte-identical to
+ * pre-#149 behavior.
+ *
  * Best-effort like SQLiteExporter: every handler body is try/caught into an
  * `onError` callback (default stderr) — a misbehaving store must never break
  * the bus.
@@ -86,6 +92,7 @@ export class RunStoreExporter extends BaseExporter {
   // of that name would collide with it.
   private readonly _reportError: (err: unknown, event: BaseEvent) => void;
   private readonly _maxOpenRuns: number;
+  private readonly _metadataFor?: (event: MessageStartEvent) => Record<string, unknown> | undefined;
   private readonly _open = new Map<string, RunAccumulator>();
 
   constructor(opts: {
@@ -93,10 +100,13 @@ export class RunStoreExporter extends BaseExporter {
     onError?: (err: unknown, event: BaseEvent) => void;
     /** Bound on concurrently-open run accumulators (evict-oldest). Default 1000. */
     maxOpenRuns?: number;
+    /** Per-run metadata seam (#149) — merged into `RunMeta.metadata` on `startRun()`. */
+    metadataFor?: (event: MessageStartEvent) => Record<string, unknown> | undefined;
   }) {
     super();
     this._store = opts.store;
     this._maxOpenRuns = opts.maxOpenRuns ?? 1000;
+    this._metadataFor = opts.metadataFor;
     this._reportError =
       opts.onError ??
       ((err, event) => {
@@ -119,6 +129,7 @@ export class RunStoreExporter extends BaseExporter {
         model,
         systemPrompt: event.systemPrompt,
         agentConfig: event.agentConfig,
+        metadata: this._metadataFor?.(event),
       });
       this._open.set(event.runId, {
         tsStart: event.timestamp,
