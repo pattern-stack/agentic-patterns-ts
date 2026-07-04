@@ -11,6 +11,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { type AgentSummary, listAgents } from "../api/chat-client";
 import { ChatPanel, useChat } from "../chat";
+import { CaptureCasePanel } from "../chat/CaptureCasePanel";
+import type { ChatMessage } from "../chat/model";
 import "./chat-route.css";
 import { AgentUniverse } from "../components/AgentUniverse";
 import { Badge } from "../components/atoms/Badge";
@@ -70,6 +72,7 @@ export function ChatPage() {
         }}
         onNewChat={chat.reset}
         conversationId={chat.conversationId}
+        messages={chat.messages}
         exchangeCount={exchangeCount}
         streaming={chat.streaming}
         loadError={loadError}
@@ -133,6 +136,7 @@ interface HeaderProps {
   onSelect: (id: string) => void;
   onNewChat: () => void;
   conversationId: string | null;
+  messages: ChatMessage[];
   exchangeCount: number;
   streaming: boolean;
   loadError: string | null;
@@ -148,6 +152,7 @@ function Header({
   onSelect,
   onNewChat,
   conversationId,
+  messages,
   exchangeCount,
   streaming,
   loadError,
@@ -259,6 +264,12 @@ function Header({
       {chatError && (
         <div style={{ fontSize: 12, color: "var(--red)" }}>Stream error: {chatError}</div>
       )}
+      <CaptureCasePanel
+        conversationId={conversationId}
+        messages={messages}
+        exchangeCount={exchangeCount}
+        disabled={streaming}
+      />
     </div>
   );
 }
