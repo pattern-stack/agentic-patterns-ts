@@ -6,6 +6,7 @@ import type {
   AdminServiceProtocol,
   AgentEventBus,
   AgentLike,
+  EvalStore,
   EventStore,
   RunResult,
   RunnerProtocol,
@@ -93,6 +94,8 @@ export interface ServerConfig {
   readonly store?: ConversationStoreLike;
   /** Optional durable event log; enables historical query routes when present. */
   readonly eventStore?: EventStore;
+  /** Optional eval store; enables /eval read routes when present (503 otherwise). */
+  readonly evalStore?: EvalStore;
   readonly staticDir?: string;
   /** CORS options forwarded to Hono's cors middleware. Defaults to `origin: "*"`. */
   readonly cors?: CORSConfig;

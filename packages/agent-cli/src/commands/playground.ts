@@ -27,9 +27,9 @@ import {
   createRunner,
   createToolboxExecutor,
   isPromotedAgent,
-  loadEventStore,
+  loadEvalStore,
 } from "@agentic-patterns/runtime";
-import type { EventStore } from "@agentic-patterns/runtime";
+import type { EvalStore } from "@agentic-patterns/runtime";
 import { createServer } from "@agentic-patterns/server";
 import type { AgentRegistration } from "@agentic-patterns/server";
 import { serve } from "@hono/node-server";
@@ -81,7 +81,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   // Durable event log (SQLite). Optional — degrades to memory-only when
   // better-sqlite3 isn't installed or AP_PERSISTENCE=0 is set.
   const persistence = await maybeAttachPersistence(eventBus);
-  const eventStore = persistence.store;
+  const store = persistence.store;
 
   // -------------------------------------------------------------------------
   // 2. Runner — env-driven auto-detection
@@ -122,7 +122,8 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     adminService,
     eventBus,
     sseExporter,
-    eventStore,
+    eventStore: store,
+    evalStore: store,
   });
 
   // -------------------------------------------------------------------------
@@ -208,9 +209,17 @@ function resolveDashboardDir(): string | null {
  * Known API route prefixes — any GET that matches one of these is never
  * rewritten to `index.html`. Keep in sync with `createServer()` routes.
  */
-const API_PREFIXES = ["/agents", "/roles", "/capabilities", "/conversations", "/admin", "/health"];
+const API_PREFIXES = [
+  "/agents",
+  "/roles",
+  "/capabilities",
+  "/conversations",
+  "/admin",
+  "/health",
+  "/eval",
+];
 
-function isApiPath(pathname: string): boolean {
+export function isApiPath(pathname: string): boolean {
   return API_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
@@ -348,13 +357,15 @@ function openBrowser(url: string): void {
 // ---------------------------------------------------------------------------
 
 interface PersistenceAttachment {
-  store: EventStore | undefined;
+  store: EvalStore | undefined;
   banner: string;
 }
 
 /**
- * Try to construct an `EventStore` and attach a `SQLiteExporter` to the bus.
- * Soft-degrades to in-memory when:
+ * Try to construct an `EvalStore` (an `EvalStore` IS an `EventStore` IS a
+ * `RunStore` — the same instance backs both `ServerConfig.eventStore` and
+ * `ServerConfig.evalStore`, and `ap eval` writes the very same db) and
+ * attach a `SQLiteExporter` to the bus. Soft-degrades to in-memory when:
  *   - `AP_PERSISTENCE=0` is set, or
  *   - `better-sqlite3` cannot be loaded.
  */
@@ -369,7 +380,7 @@ async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<Persiste
   const retentionDays = parsePositiveInt(process.env.AP_RETENTION_DAYS) ?? 30;
   const maxRows = parsePositiveInt(process.env.AP_MAX_ROWS) ?? 1_000_000;
 
-  const result = await loadEventStore({ path: dbPath, retentionDays, maxRows });
+  const result = await loadEvalStore({ path: dbPath, retentionDays, maxRows });
 
   if (result.unavailable || !result.store) {
     return { store: undefined, banner: `memory-only — ${result.reason}` };
