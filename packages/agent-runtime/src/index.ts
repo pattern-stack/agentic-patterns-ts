@@ -1,4 +1,12 @@
 // @agentic-patterns/runtime — barrel export
+
+// Explicit disambiguation: eval/types.ts and storage/eval-store.ts both declare
+// `EvalSplit` (identical structural twins, #132 zero-coupling by design — see
+// storage/eval-store.ts:48). Without this explicit re-export, the two `export *`
+// stars below make `EvalSplit` ambiguous and TypeScript silently DROPS the name
+// from the package root. Do not "clean up" — this line is load-bearing.
+export type { EvalSplit } from "./eval/types.js";
+
 export * from "./events/index.js";
 export * from "./gates/index.js";
 export * from "./runner/index.js";
