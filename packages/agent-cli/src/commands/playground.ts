@@ -12,7 +12,7 @@
  * project and passing them in as `opts.agents`.
  */
 
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,11 +87,8 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   // 2. Runner — env-driven auto-detection
   // -------------------------------------------------------------------------
 
-  const selection = await createRunner({
-    eventBus,
-    tier: (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet",
-    verbose: false,
-  });
+  const tier = (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet";
+  const selection = await createRunner({ eventBus, tier, verbose: false });
   const { runner: llmRunner } = selection;
 
   // -------------------------------------------------------------------------
@@ -124,6 +121,11 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     sseExporter,
     eventStore: store,
     evalStore: store,
+    evalExecution: {
+      runner: llmRunner,
+      model: process.env.AGENT_MODEL ?? tier,
+      gitSha: readGitSha(),
+    },
   });
 
   // -------------------------------------------------------------------------
@@ -349,6 +351,17 @@ function openBrowser(url: string): void {
     child.unref();
   } catch {
     /* ignore */
+  }
+}
+
+/** Best-effort HEAD sha for `evalExecution.gitSha` provenance (the CLI's `commands/eval.ts` inline). */
+function readGitSha(): string | undefined {
+  try {
+    return execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+  } catch {
+    return undefined;
   }
 }
 

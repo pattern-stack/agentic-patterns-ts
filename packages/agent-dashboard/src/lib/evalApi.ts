@@ -13,6 +13,7 @@ import type {
   EvalCaseRow,
   EvalRunDetailResponse,
   EvalRunRow,
+  EvalSetSummary,
   EvalSplit,
   SplitAggregate,
 } from "../api/types";
@@ -21,6 +22,10 @@ export type EvalFetch<T> = { kind: "ok"; data: T } | { kind: "unconfigured" };
 
 interface EvalRunsResponse {
   runs: EvalRunRow[];
+}
+
+interface EvalSetsResponse {
+  sets: EvalSetSummary[];
 }
 
 interface EvalCasesResponse {
@@ -55,6 +60,19 @@ export async function fetchEvalRuns(
 
   const body = (await res.json()) as EvalRunsResponse;
   return { kind: "ok", data: body.runs };
+}
+
+/** GET /eval/sets — case-bank summaries (id + per-split counts), for the run launcher's set picker. */
+export async function fetchEvalSets(
+  opts: { baseUrl?: string } = {},
+): Promise<EvalFetch<EvalSetSummary[]>> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/sets`);
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (!res.ok) throw new Error(`fetchEvalSets: HTTP ${res.status}`);
+
+  const body = (await res.json()) as EvalSetsResponse;
+  return { kind: "ok", data: body.sets };
 }
 
 /** GET /eval/runs/:id — the joined per-case results + handler-computed summary. */
@@ -152,4 +170,55 @@ export function safeParseAnswer(finalAnswer: string | null): unknown {
   } catch {
     return finalAnswer;
   }
+}
+
+// ---------------------------------------------------------------------------
+// POST /eval/runs — run launcher (#139, E5c)
+// ---------------------------------------------------------------------------
+
+export interface LaunchEvalRunBody {
+  setId: string;
+  targetId: string;
+  variant?: string;
+  split?: EvalSplit;
+  allowTest?: boolean;
+}
+
+export type LaunchEvalRunResult =
+  | { kind: "ok"; runId: string; total: number }
+  | { kind: "unconfigured" }
+  | { kind: "refused" | "error"; message: string };
+
+/**
+ * POST /eval/runs. 202 -> `{kind:"ok", runId, total}`; 503 (either
+ * "persistence not configured" or "eval execution not configured") ->
+ * `{kind:"unconfigured"}`; 403 (held-out split refusal) -> `{kind:"refused"}`;
+ * any other non-2xx (400 validation, 404 unknown set/target) -> `{kind:"error"}`
+ * — the launcher renders `refused`/`error` inline (the runs-page error Card
+ * grammar) and treats `unconfigured` like every other eval page's persistence hint.
+ */
+export async function launchEvalRun(
+  body: LaunchEvalRunBody,
+  opts: { baseUrl?: string } = {},
+): Promise<LaunchEvalRunResult> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 503) return { kind: "unconfigured" };
+  if (res.status === 202) {
+    const data = (await res.json()) as { runId: string; total: number };
+    return { kind: "ok", runId: data.runId, total: data.total };
+  }
+
+  const errorBody = (await res.json().catch(() => ({}))) as { error?: string; hint?: string };
+  const message = errorBody.hint ? `${errorBody.error} — ${errorBody.hint}` : errorBody.error;
+
+  if (res.status === 403) {
+    return { kind: "refused", message: message ?? "held-out split refused" };
+  }
+  return { kind: "error", message: message ?? `launchEvalRun: HTTP ${res.status}` };
 }

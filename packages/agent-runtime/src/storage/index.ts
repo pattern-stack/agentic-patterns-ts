@@ -18,6 +18,8 @@ export type {
   SplitAggregate,
   StoredEvalCase,
 } from "./eval-store.js";
+export { createEvalResultRecorder } from "./eval-recorder.js";
+export type { EvalRecorderMeta, EvalResultLike } from "./eval-recorder.js";
 export { EventStore } from "./event-store.js";
 export type { EventStoreOptions, PersistedEvent, SessionSummary } from "./event-store.js";
 export { loadEvalStore, loadEventStore, loadRunStore } from "./load.js";

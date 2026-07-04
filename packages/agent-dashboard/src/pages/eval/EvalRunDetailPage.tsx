@@ -1,5 +1,5 @@
 /**
- * /eval/runs/:id — a single eval run's results (E5a, #137).
+ * /eval/runs/:id — a single eval run's results (E5a, #137; live mode #139/E5c).
  *
  * Sequential dependent fetches (the `ConversationDetailPage` precedent):
  * `fetchEvalRunDetail(id)` first, then — when `run.setId` is non-null —
@@ -7,9 +7,18 @@
  * joins `expected` from. A missing/unconfigured case bank degrades to a
  * per-case fallback ("case not in bank"), not a page error — the run detail
  * is still useful without it.
+ *
+ * Live mode (#139): when the fetched run is `status === "running"`,
+ * `useEvalRunStream` attaches the SSE feed — hydrate-then-attach recovers a
+ * mid-run page reload for free (fact 5: the persisted partial state GET
+ * already returns everything completed so far). Streamed `case.result` rows
+ * are merged into the table by `caseId` (upsert, never duplicate); on
+ * `run.finished` the REST detail is refetched (the store is truth, the
+ * stream is a live approximation); on `run.detached` (a concurrent `ap eval`
+ * or an orphaned row) the page falls back to 3s polling.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { EvalCaseRow, EvalRunRow, EvalRunSummary, JoinedEvalResultRow } from "../../api/types";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
@@ -17,8 +26,42 @@ import { Card } from "../../components/atoms/Card";
 import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
+import { type StreamedCaseResult, useEvalRunStream } from "../../hooks/useEvalRunStream";
 import { fetchEvalCases, fetchEvalRunDetail } from "../../lib/evalApi";
 import { CaseDetail } from "./CaseDetail";
+
+/** `StreamedCaseResult` -> the `JoinedEvalResultRow` shape the table renders. */
+function streamedToRow(evalRunId: string, s: StreamedCaseResult): JoinedEvalResultRow {
+  return {
+    evalRunId,
+    caseId: s.caseId,
+    runId: null,
+    scores: s.scores,
+    pass: s.pass,
+    traceId: s.traceId ?? null,
+    runStatus: s.succeeded ? "ok" : "error",
+    finalAnswer: s.finalAnswer,
+    inputTokens: s.inputTokens,
+    outputTokens: s.outputTokens,
+    finishReason: null,
+    elapsedMs: null,
+    runError: s.error ?? null,
+  };
+}
+
+/** Merge streamed rows over the fetched results, keyed by caseId (upsert, no dupes). */
+function mergeResults(
+  fetched: readonly JoinedEvalResultRow[],
+  evalRunId: string,
+  streamed: ReadonlyMap<string, StreamedCaseResult>,
+): JoinedEvalResultRow[] {
+  if (streamed.size === 0) return [...fetched];
+  const byId = new Map(fetched.map((r) => [r.caseId, r]));
+  for (const s of streamed.values()) {
+    byId.set(s.caseId, streamedToRow(evalRunId, s));
+  }
+  return [...byId.values()].sort((a, b) => a.caseId.localeCompare(b.caseId));
+}
 
 function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 7) : "—";
@@ -85,22 +128,32 @@ export function EvalRunDetailPage() {
   const [casesById, setCasesById] = useState<Map<string, EvalCaseRow>>(new Map());
   const [expandedKey, setExpandedKey] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    (async () => {
-      setState({ kind: "loading" });
-      setExpandedKey(undefined);
+  // Live mode (#139) — attach only once the fetched run is genuinely
+  // "running"; disabled (`null`) otherwise, including while still loading.
+  const streamRunId = id && state.kind === "ok" && state.run.status === "running" ? id : null;
+  const {
+    status: streamStatus,
+    progress,
+    results: streamedResults,
+    finishedStatus,
+  } = useEvalRunStream(streamRunId);
+
+  const load = useCallback(
+    async (opts: { showSpinner: boolean } = { showSpinner: true }): Promise<boolean> => {
+      if (!id) return false;
+      if (opts.showSpinner) {
+        setState({ kind: "loading" });
+        setExpandedKey(undefined);
+      }
       try {
         const detail = await fetchEvalRunDetail(id);
-        if (cancelled) return;
         if (detail.kind === "not-found") {
           setState({ kind: "not-found" });
-          return;
+          return true;
         }
         if (detail.kind === "unconfigured") {
           setState({ kind: "unconfigured" });
-          return;
+          return true;
         }
 
         const { run, results, summary } = detail.data;
@@ -117,20 +170,47 @@ export function EvalRunDetailPage() {
             // not a page error — the run detail is still useful without it.
           }
         }
-        if (!cancelled) {
-          setCasesById(cases);
-          setState({ kind: "ok", run, results, summary });
-        }
+        setCasesById(cases);
+        setState({ kind: "ok", run, results, summary });
+        return run.status !== "running";
       } catch (e) {
-        if (!cancelled) {
-          setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
-        }
+        setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+        return true;
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    },
+    [id],
+  );
+
+  // `load` is stable per `id` (see its own useCallback deps) — depending on
+  // `id` directly here avoids re-running this effect on every render.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see comment above.
+  useEffect(() => {
+    void load();
   }, [id]);
+
+  // On run.finished: the stream was a live approximation — refetch the
+  // authoritative joined rows and let the natural state transition
+  // (run.status leaves "running") disable the stream.
+  const refetchedForFinish = useRef<string | null>(null);
+  useEffect(() => {
+    if (finishedStatus === null || !id) return;
+    if (refetchedForFinish.current === id) return;
+    refetchedForFinish.current = id;
+    void load({ showSpinner: false });
+  }, [finishedStatus, id, load]);
+
+  // On run.detached (a concurrent `ap eval`, or an orphaned row from a
+  // restarted server): 3s poll until terminal — this also makes a
+  // concurrently-running CLI eval watchable from the dashboard.
+  useEffect(() => {
+    if (streamStatus !== "detached") return;
+    const timer = setInterval(() => {
+      void load({ showSpinner: false }).then((terminal) => {
+        if (terminal) clearInterval(timer);
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [streamStatus, load]);
 
   const backLink = (
     <Link to="/eval" style={{ color: "var(--fg-muted)", fontSize: 13, textDecoration: "none" }}>
@@ -212,6 +292,7 @@ export function EvalRunDetailPage() {
 
   const { run, results, summary } = state;
   const duration = formatDuration(run.tsStart, run.tsEnd);
+  const mergedResults = mergeResults(results, run.id, streamedResults);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -221,6 +302,7 @@ export function EvalRunDetailPage() {
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 14 }}>{run.id}</span>
         </h1>
         <Badge tone={statusTone(run.status)}>{run.status}</Badge>
+        {streamStatus === "detached" && <Badge tone="muted">watching (detached)</Badge>}
       </div>
 
       <Card>
@@ -236,6 +318,37 @@ export function EvalRunDetailPage() {
           {duration && <Badge tone="muted">{duration}</Badge>}
         </div>
       </Card>
+
+      {run.status === "running" && progress && (
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ fontSize: 13, color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
+              {progress.completed}
+              {progress.total !== null ? ` / ${progress.total}` : ""} cases
+            </div>
+            <div
+              style={{
+                flex: 1,
+                height: 8,
+                background: "var(--bg-inset)",
+                borderRadius: 999,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  width:
+                    progress.total && progress.total > 0
+                      ? `${Math.round((progress.completed / progress.total) * 100)}%`
+                      : "0%",
+                  height: "100%",
+                  background: "var(--accent)",
+                }}
+              />
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <div
@@ -310,7 +423,7 @@ export function EvalRunDetailPage() {
               render: (row) => formatElapsed(row.elapsedMs),
             },
           ]}
-          data={results}
+          data={mergedResults}
           rowKey={(row) => row.caseId}
           expandedKey={expandedKey}
           onToggleExpand={(key) => setExpandedKey((prev) => (prev === key ? undefined : key))}

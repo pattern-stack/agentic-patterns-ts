@@ -84,6 +84,23 @@ export interface CORSConfig {
 }
 
 /**
+ * Server-launched eval execution config (spec `.ai-docs/stacks/eval-surface/
+ * specs/139.md` § Decision 3). Absent → `POST /eval/runs` returns 503.
+ */
+export interface EvalExecutionConfig {
+  /**
+   * RAW LLM runner (`createRunner()`'s) — NEVER a registration's possibly
+   * `NodeBackedRunner`-wrapped one (`workflows/as-agent.ts` throws on a
+   * nested `AgentStep` handed a non-promoted agent). `resolveEvalTarget`
+   * handles promoted/agent/node targets itself.
+   */
+  readonly runner: RunnerProtocol;
+  /** Provenance stamped onto eval_run rows (CLI formula: AGENT_MODEL ?? tier). */
+  readonly model?: string;
+  readonly gitSha?: string;
+}
+
+/**
  * Server configuration.
  */
 export interface ServerConfig {
@@ -96,6 +113,8 @@ export interface ServerConfig {
   readonly eventStore?: EventStore;
   /** Optional eval store; enables /eval read routes when present (503 otherwise). */
   readonly evalStore?: EvalStore;
+  /** Optional eval execution seam; enables POST /eval/runs when present (503 otherwise). */
+  readonly evalExecution?: EvalExecutionConfig;
   readonly staticDir?: string;
   /** CORS options forwarded to Hono's cors middleware. Defaults to `origin: "*"`. */
   readonly cors?: CORSConfig;
