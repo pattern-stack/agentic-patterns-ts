@@ -41,6 +41,74 @@ interface ResolvedDriver {
   driver: string;
 }
 
+// ---------------------------------------------------------------------------
+// bun:sqlite named-param adapter
+// ---------------------------------------------------------------------------
+
+/**
+ * The store classes bind named params with BARE object keys (`{ status }` for
+ * `@status`) — the better-sqlite3 convention. `bun:sqlite` instead matches by the
+ * SIGIL'd key (`{ "@status" }`) and returns SQLITE_MISMATCH for a bare key. Since
+ * `bun:sqlite` tolerates unused/extra keys, we normalize a named-bind object to
+ * ALSO carry the `@`-prefixed variant of every bare key (all store params use `@`).
+ * Positional binds (array / spread) pass through untouched. Node/better-sqlite3 is
+ * never wrapped, so its bare-key path is unchanged.
+ */
+function normalizeBunBindArgs(args: unknown[]): unknown[] {
+  if (
+    args.length === 1 &&
+    args[0] !== null &&
+    typeof args[0] === "object" &&
+    !Array.isArray(args[0])
+  ) {
+    const src = args[0] as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...src };
+    for (const key of Object.keys(src)) {
+      if (!/^[@$:]/.test(key)) out[`@${key}`] = src[key];
+    }
+    return [out];
+  }
+  return args;
+}
+
+/**
+ * Wrap a `bun:sqlite` `Database` constructor so prepared-statement `all`/`get`/`run`
+ * accept the stores' bare-key named binds (see {@link normalizeBunBindArgs}). Only
+ * the surface the stores use — `prepare` / `exec` / `close` — is proxied.
+ */
+function wrapBunDatabase(Ctor: new (path: string, opts?: unknown) => unknown): unknown {
+  type Stmt = {
+    all: (...a: unknown[]) => unknown;
+    get: (...a: unknown[]) => unknown;
+    run: (...a: unknown[]) => unknown;
+  };
+  type RawDb = {
+    prepare: (sql: string) => Stmt;
+    exec: (sql: string) => unknown;
+    close: () => unknown;
+  };
+  return class BunSqliteAdapter {
+    private readonly _db: RawDb;
+    constructor(path: string, opts?: unknown) {
+      this._db = new Ctor(path, opts) as RawDb;
+    }
+    prepare(sql: string) {
+      const stmt = this._db.prepare(sql);
+      return {
+        all: (...a: unknown[]) => stmt.all(...normalizeBunBindArgs(a)),
+        get: (...a: unknown[]) => stmt.get(...normalizeBunBindArgs(a)),
+        run: (...a: unknown[]) => stmt.run(...normalizeBunBindArgs(a)),
+      };
+    }
+    exec(sql: string) {
+      return this._db.exec(sql);
+    }
+    close() {
+      return this._db.close();
+    }
+  };
+}
+
 /**
  * Resolve a SQLite `Database` constructor for the current runtime — `bun:sqlite`
  * under Bun, `better-sqlite3` under Node. Never throws: returns `{ reason }` when
@@ -61,7 +129,11 @@ async function resolveDatabase(): Promise<ResolvedDriver | { reason: string }> {
       if (typeof Database !== "function") {
         return { reason: "bun:sqlite did not expose a Database constructor" };
       }
-      return { Database, driver: "bun:sqlite" };
+      // Wrap so the stores' bare-key named binds work under bun:sqlite (SQLITE_MISMATCH otherwise).
+      return {
+        Database: wrapBunDatabase(Database as new (path: string, opts?: unknown) => unknown),
+        driver: "bun:sqlite",
+      };
     } catch (err) {
       return { reason: `bun:sqlite not loadable (${(err as Error).message ?? "unknown"})` };
     }
