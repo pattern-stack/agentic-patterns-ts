@@ -666,7 +666,35 @@ Supports substring triggers and `"*"` wildcard. Emits the full streaming event l
 | `DEEPSEEK_API_KEY` | `@ai-sdk/deepseek` |
 | `OPENROUTER_API_KEY` | `@openrouter/ai-sdk-provider` |
 | `OLLAMA_HOST` | `ollama-ai-provider` |
+| `AP_GATEWAY_BASE_URL` | Routes every agent's declared model through one OpenAI-compatible gateway (Bifrost, LiteLLM, vLLM, …) instead of a single bound provider |
+| `AP_GATEWAY_API_KEY` | Gateway bearer key — sent as `Authorization: Bearer` |
+| `AP_GATEWAY_BASIC_USER` + `AP_GATEWAY_BASIC_PASS` | Gateway HTTP Basic auth (e.g. a Bifrost deployment fronted by Basic, which 401s on Bearer) — sent as a precomputed `Authorization: Basic <base64>`. Use this **or** `AP_GATEWAY_API_KEY`, not both |
+| `AP_GATEWAY_MODEL_PREFIX` | Optional id prefix qualifying the agent's declared model to the gateway's namespace (e.g. `anthropic/` turns `claude-sonnet-4-5` into `anthropic/claude-sonnet-4-5`) |
 | _(none, `claude` on PATH)_ | `ClaudeCodeAPIRunner` |
+
+**Gateway is a routing override, not a fallback.** `envGateway()` (`create-runner.ts`) is read at step "2.5" of the priority list — before `options.provider` and before the env-var rows above — and, when set, builds a resolver-backed runner (`HybridModelResolver`) that dispatches **each agent's own declared model** through the gateway at call time, rather than binding one model up front. That also means `tier`/`modelId` are ignored on this path: the gateway receives whatever each agent declares (optionally prefixed), so one `AP_GATEWAY_BASE_URL` is enough to route an entire multi-agent project through Bifrost (or any OpenAI-compatible endpoint) with no per-provider key. See `providers/model-resolver.ts` (`GatewayConfig`, `HybridModelResolver`) for the resolution precedence (profile → gateway → pattern-matched family → error).
+
+#### Credential preflight (`ap` CLI)
+
+§3.4 above treats `ClaudeCodeAPIRunner` as `createRunner()`'s last-resort default — fine for local dev on a Claude Max subscription, but a deploy trap: a real deployment has no `claude` binary, no interactive login, and gets the degraded event vocabulary from §3.3. The CLI package (`@agentic-patterns/cli`) puts a credential preflight in front of that fallback so it's a loud, explicit choice rather than a silent one.
+
+`packages/agent-cli/src/services/execution-service.ts` exports `ExecutionService`, which `ap eval`, `ap run`, and `ap playground` now all construct and call instead of `createRunner()` directly:
+
+```ts
+const svc = new ExecutionService({ configRoot });
+const selection = await svc.resolveRunner(runnerOpts, agents);
+```
+
+`resolveRunner()` forwards `runnerOpts` (each command's existing `CreateRunnerOptions` — eval's `tier`, run's env ladder, playground's `resolveAgentModel`/tier override) to `createRunner()` **verbatim**; the service changes nothing about resolution policy, it only adds a check beforehand:
+
+1. **`inspect(agents)`** — pure, no side effects. For every discovered agent it reads the declared model (`agent.getModel()`), classifies it with `inferProvider()`, and checks whether that provider's env var(s) (`PROVIDERS[provider].envVars`) are set. The result is a `CredentialReport`: providers implied by the agents, any unclassified model ids, and `hasCredential` — true if `AP_GATEWAY_BASE_URL` is set **or** any provider key is present at all (even one no agent declared, since the env-priority ladder in `createRunner` could still pick it up).
+2. **No credential found** → a framed warning goes to `stderr`: which providers the agents declare, which models didn't classify, and the fix (`ap config set`, or point at a gateway). This fires whether or not the process is interactive — CI logs still show it.
+3. **Interactive (TTY, and neither `AP_NO_PROMPT` nor `CI=true`)** → a `@clack/prompts` menu offers to set `ANTHROPIC_API_KEY`, set `OPENAI_API_KEY`, configure a gateway (base URL, Basic-vs-Bearer auth, optional model prefix), continue on the Claude subscription anyway (explicit, dev-only), or quit. Answers are written to `.env` via the same `upsertEnvFile` helper `ap config set` uses, so they land in the project's `.env` (under `configRoot`, threaded from `cli.ts`'s `config.root` — the nearest `package.json` directory) and take effect immediately via `process.env` for the rest of the run.
+4. **Non-interactive (CI / non-TTY / `AP_NO_PROMPT=1`)** → warns once and continues; no hard block. `createRunner()` still runs its own ladder afterwards, so a non-interactive run with no credential at all still falls through to the CC subscription (or throws, per §4's step 7) exactly as before this preflight existed.
+
+`ap config` / `ap config set` is the persistent surface for the same variables: `TRACKED_ENV` (`commands/config.ts`) now lists the `AP_GATEWAY_*` keys alongside the provider keys, so `ap config`'s status view and `ap config set`'s picker cover gateway setup too — not just the interactive prompt above.
+
+**Parked follow-up:** `run`/`eval` still resolve one bound model up front (tier or env ladder); only `playground` opts into resolver mode (`resolveAgentModel: true`) by default. Whether `run`/`eval` should also default to per-agent resolver mode is an open question, not addressed by this change.
 
 ---
 
