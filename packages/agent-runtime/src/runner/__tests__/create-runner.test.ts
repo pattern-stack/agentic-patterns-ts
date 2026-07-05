@@ -190,6 +190,60 @@ describe("createRunner", () => {
     expect(spy).toHaveBeenCalledWith("claude-magic-5");
   });
 
+  // --- provider-follows-model (env-detection path) --------------------------
+
+  it("explicit gemini modelId with only OPENAI key fails loud (no silent mismatch)", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai";
+    const openaiSpy = stubProviderLoad(PROVIDERS.openai);
+    await expect(
+      createRunner({ modelId: "gemini-3.1-flash-lite", verbose: false }),
+    ).rejects.toThrow(/gemini-3\.1-flash-lite/);
+    // Never stapled the gemini id onto the priority-detected openai provider.
+    expect(openaiSpy).not.toHaveBeenCalled();
+  });
+
+  it("names the required google env vars in the mismatch error", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai";
+    await expect(
+      createRunner({ modelId: "gemini-3.1-flash-lite", verbose: false }),
+    ).rejects.toThrow(/GOOGLE_GENERATIVE_AI_API_KEY/);
+  });
+
+  it("routes an explicit gemini modelId to google when the GOOGLE key is present", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai";
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "goog-key";
+    const googleSpy = stubProviderLoad(PROVIDERS.google);
+    const openaiSpy = stubProviderLoad(PROVIDERS.openai);
+    const { source } = await createRunner({ modelId: "gemini-3.1-flash-lite", verbose: false });
+    expect(source).toBe("env-google");
+    expect(googleSpy).toHaveBeenCalledWith("gemini-3.1-flash-lite");
+    expect(openaiSpy).not.toHaveBeenCalled(); // provider followed the model, not priority
+  });
+
+  it("routes an explicit gpt modelId to openai when the OPENAI key is present", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai";
+    const spy = stubProviderLoad(PROVIDERS.openai);
+    const { source } = await createRunner({ modelId: "gpt-4o", verbose: false });
+    expect(source).toBe("env-openai");
+    expect(spy).toHaveBeenCalledWith("gpt-4o");
+  });
+
+  it("fails loud for an AGENT_MODEL gemini id when only the OPENAI key is present", async () => {
+    process.env.OPENAI_API_KEY = "sk-openai";
+    process.env.AGENT_MODEL = "gemini-3.1-flash-lite";
+    await expect(createRunner({ verbose: false })).rejects.toThrow(/gemini-3\.1-flash-lite/);
+  });
+
+  it("pins an unclassifiable custom id onto the priority-detected provider (unchanged)", async () => {
+    // inferProvider() can't map `qwen3.6:27b` → any vendor, so it must fall
+    // through to the env-priority loop rather than error.
+    process.env.OLLAMA_HOST = "http://localhost:11434";
+    const spy = stubProviderLoad(PROVIDERS.ollama);
+    const { source } = await createRunner({ modelId: "qwen3.6:27b", verbose: false });
+    expect(source).toBe("env-ollama");
+    expect(spy).toHaveBeenCalledWith("qwen3.6:27b");
+  });
+
   it("falls back to MockRunner when fallbackToMock is true", async () => {
     // We can't stub hasClaudeCli() easily here; rely on the fact that CI
     // runners typically don't have `claude` on PATH. If the fallback path

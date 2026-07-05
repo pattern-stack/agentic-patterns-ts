@@ -6,7 +6,9 @@
  *   2. options.model (LanguageModelV2) → new AgentRunner(model)
  *   2.5 resolveAgentModel/profiles/modelsPath → new AgentRunner(resolver)  (per-agent model)
  *   3. options.provider + tier/modelId → new AgentRunner(provider.load(...))
- *   4. env vars (in PROVIDER_PRIORITY order) → new AgentRunner(...)
+ *   4. explicit modelId/AGENT_MODEL → inferProvider(id) picks the provider (the
+ *      PROVIDER FOLLOWS THE MODEL; fail loud if that provider's key is absent);
+ *      otherwise env vars in PROVIDER_PRIORITY order → new AgentRunner(...)
  *   5. claude CLI on PATH            → new ClaudeCodeAPIRunner()  (fallback, limited events)
  *   6. options.fallbackToMock === true → new MockRunner()
  *   7. throw
@@ -30,6 +32,7 @@ import {
   type GatewayConfig,
   type ModelProfiles,
   createModelResolver,
+  inferProvider,
 } from "../providers/model-resolver.js";
 import { AgentRunner } from "./agent-runner.js";
 import { ClaudeCodeAPIRunner } from "./claude-code-api-runner.js";
@@ -59,6 +62,13 @@ export interface CreateRunnerOptions {
    * is the only way to pin an exact model from a `.env` file (e.g.
    * `AGENT_MODEL=qwen3.6:27b` to use a model the framework's tier map
    * doesn't list).
+   *
+   * On the env-detection path (no `provider`), the PROVIDER FOLLOWS THE MODEL:
+   * a classifiable id (via {@link inferProvider}, e.g. `gemini-*` → google)
+   * selects that provider and REQUIRES its env key — a key-absent classified id
+   * fails loud instead of being stapled onto a priority-detected provider. An
+   * unclassifiable custom id (e.g. `qwen3.6:27b`) still pins onto the
+   * priority-detected provider (or `opts.provider`).
    */
   modelId?: string;
   /**
@@ -201,10 +211,10 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     return log(verbose, {
       runner: new AgentRunner(resolver, opts.eventBus),
       reason: gateway
-        ? `resolving agent models per run (gateway ${gateway.baseURL})`
+        ? `resolving each agent's declared model per run (gateway ${gateway.baseURL})`
         : opts.modelsPath
-          ? `resolving agent models per run (profiles + ${opts.modelsPath})`
-          : "resolving agent models per run",
+          ? `resolving each agent's declared model per run (profiles + ${opts.modelsPath})`
+          : "resolving each agent's declared model per run",
       source: "model-resolver",
     });
   }
@@ -221,7 +231,37 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     });
   }
 
-  // 4. Env-based auto-detection, in PROVIDER_PRIORITY order.
+  // 4. Env-based auto-detection.
+  //
+  // When an explicit model id is known (opts.modelId / AGENT_MODEL) the PROVIDER
+  // must FOLLOW THE MODEL — never pair a model with whichever priority-detected
+  // provider happens to have a key. inferProvider() classifies the id to its
+  // vendor; we then require THAT provider's env key. A classified id whose
+  // provider key is absent FAILS LOUD (below) instead of being stapled onto a
+  // different provider (the openai + gemini-3.1-flash-lite mismatch bug). Only an
+  // UNCLASSIFIABLE id (custom / OSS names inferProvider can't map, e.g.
+  // `qwen3.6:27b`) falls through to the priority loop, which pins it onto the
+  // priority-detected provider — the documented "AGENT_MODEL pins an exact id"
+  // escape hatch.
+  if (modelId) {
+    const inferred = inferProvider(modelId);
+    if (inferred) {
+      const provider = PROVIDERS[inferred];
+      const matchedEnv = provider.envVars.find((v) => process.env[v]);
+      if (!matchedEnv) {
+        throw new Error(modelProviderMismatchError(modelId, inferred, provider));
+      }
+      const model = await provider.load(modelId);
+      return log(verbose, {
+        runner: new AgentRunner(model, opts.eventBus),
+        reason: `using ${inferred} (model ${modelId} → ${inferred}, env ${matchedEnv})`,
+        source: `env-${inferred}` as RunnerSource,
+      });
+    }
+  }
+
+  // No explicit model id, or an unclassifiable custom id: choose the provider by
+  // env priority and resolve its tier default (or pin the unclassifiable id).
   for (const name of PROVIDER_PRIORITY) {
     const provider = PROVIDERS[name];
     const matchedEnv = provider.envVars.find((v) => process.env[v]);
@@ -288,6 +328,24 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
 function envTier(): ProviderTier | undefined {
   const v = process.env.AGENT_TIER;
   return v === "opus" || v === "sonnet" || v === "haiku" ? v : undefined;
+}
+
+/**
+ * Build the fail-loud error for an explicit model id whose inferred provider has
+ * no credential present. Names the model, the provider it belongs to, and the
+ * env var(s) to set — so the mismatch is fixed rather than silently paired with a
+ * priority-detected provider that can't serve the model.
+ */
+function modelProviderMismatchError(
+  modelId: string,
+  provider: SupportedProvider,
+  adapter: ProviderProtocol,
+): string {
+  return [
+    `createRunner: model "${modelId}" is a ${provider} model, but no ${provider} credential is set.`,
+    `Set one of: ${adapter.envVars.join(", ")} — or choose a model for a provider whose key you have.`,
+    `(The model names its provider; the framework will not run a ${provider} model on a different provider.)`,
+  ].join("\n");
 }
 
 function log(verbose: boolean, selection: RunnerSelection): RunnerSelection {
