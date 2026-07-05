@@ -51,6 +51,27 @@ export async function fetchAgentCapabilities(agentId: string): Promise<AgentComp
   return res.json() as Promise<AgentComposition>;
 }
 
+/** A provenance chip on a role slot: which tier authored it + its source file. */
+export interface SlotProvenance {
+  tier?: string;
+  sourcePath?: string;
+}
+/** The subset of GET /agents/:id/composition the inspector's Provenance tab reads:
+ *  the real per-slot provenance the server attaches to each role slot. */
+export interface AgentCompositionDetail {
+  role?: {
+    persona?: { provenance?: SlotProvenance };
+    capabilities?: { name: string; provenance?: SlotProvenance }[];
+  };
+}
+
+/** Full two-tier introspection incl. per-slot provenance (Role × Mission origin). */
+export async function fetchAgentComposition(agentId: string): Promise<AgentCompositionDetail> {
+  const res = await fetch(`/agents/${encodeURIComponent(agentId)}/composition`);
+  if (!res.ok) throw new Error(`GET /agents/${agentId}/composition failed: ${res.status}`);
+  return res.json() as Promise<AgentCompositionDetail>;
+}
+
 /** Create a new conversation with a given agent. */
 export async function createConversation(agentId: string): Promise<ConversationCreated> {
   const res = await fetch("/conversations", {

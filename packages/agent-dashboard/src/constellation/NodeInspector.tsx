@@ -32,13 +32,40 @@ export interface RunMeta {
   systemPrompt?: string;
 }
 
-/** Real provenance chip for a slot (from /composition), keyed by node id. */
+/** Real provenance chip for a slot (from /composition), keyed by node id: the
+ *  tier that authored the slot + its source file. */
 export interface ProvenanceChip {
-  source?: string;
-  origin?: string;
-  label?: string;
+  tier?: string;
+  sourcePath?: string;
 }
 export type ProvenanceMap = Record<string, ProvenanceChip>;
+
+/** The subset of a `/composition` role the provenance map reads. */
+export interface CompositionRole {
+  persona?: { provenance?: ProvenanceChip };
+  capabilities?: { name: string; provenance?: ProvenanceChip }[];
+}
+
+/**
+ * Key the real per-slot provenance by graph node id: agent / sub-agent nodes
+ * carry the role's (persona) chip; capability + tool nodes carry their
+ * capability's chip. Empty for roles without slots (e.g. a promoted pipeline).
+ */
+export function buildProvenanceMap(nodes: ConstNode[], role?: CompositionRole): ProvenanceMap {
+  if (!role) return {};
+  const persona = role.persona?.provenance;
+  const byCap = new Map((role.capabilities ?? []).map((c) => [c.name, c.provenance]));
+  const map: ProvenanceMap = {};
+  for (const n of nodes) {
+    if (n.data.kind === "agent" || n.data.kind === "subagent") {
+      if (persona) map[n.id] = persona;
+    } else if (n.data.capabilityName) {
+      const p = byCap.get(n.data.capabilityName);
+      if (p) map[n.id] = p;
+    }
+  }
+  return map;
+}
 
 function Eyebrow({ children }: { children: string }) {
   return (
@@ -241,18 +268,45 @@ function ProvenanceTab({ node, chip }: { node: ConstNode; chip?: ProvenanceChip 
         <div style={{ fontFamily: T.font.mono, fontSize: T.fz.micro, color: "var(--mute)" }}>
           via {derived.via}
         </div>
-        {chip && (chip.source || chip.origin || chip.label) && (
+        {chip && (chip.tier || chip.sourcePath) && (
           <div
             style={{
-              marginTop: 6,
-              paddingTop: 6,
+              marginTop: 8,
+              paddingTop: 8,
               borderTop: "1px dashed var(--line)",
-              fontFamily: T.font.mono,
-              fontSize: T.fz.micro,
-              color: "var(--ink-2)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
             }}
           >
-            {chip.label ?? chip.origin ?? chip.source}
+            <div
+              style={{
+                fontSize: T.fz.micro,
+                fontFamily: T.font.mono,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "var(--mute)",
+              }}
+            >
+              resolved
+            </div>
+            {chip.tier && (
+              <div style={{ fontFamily: T.font.mono, fontSize: T.fz.micro, color: "var(--ink-2)" }}>
+                tier · {chip.tier}
+              </div>
+            )}
+            {chip.sourcePath && (
+              <div
+                style={{
+                  fontFamily: T.font.mono,
+                  fontSize: T.fz.micro,
+                  color: "var(--mute)",
+                  wordBreak: "break-all",
+                }}
+              >
+                {chip.sourcePath}
+              </div>
+            )}
           </div>
         )}
       </div>

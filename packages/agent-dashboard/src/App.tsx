@@ -1,11 +1,10 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./components/templates/AppShell";
 import { ChatPage } from "./pages/ChatPage";
 import { ClaudeCodePage } from "./pages/ClaudeCodePage";
 import { ConversationDetailPage } from "./pages/ConversationDetailPage";
 import { ConversationsPage } from "./pages/ConversationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { GraphPage } from "./pages/GraphPage";
 import { LivePage } from "./pages/LivePage";
 import { RunSurfacePage } from "./pages/RunSurfacePage";
 import { TokensPage } from "./pages/TokensPage";
@@ -40,7 +39,8 @@ export function App() {
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/live" element={<LivePage />} />
           <Route path="/run" element={<RunSurfacePage />} />
-          <Route path="/graph" element={<GraphPage />} />
+          {/* /graph retired — Live Run (/run) supersedes it; redirect old links. */}
+          <Route path="/graph" element={<Navigate to="/run" replace />} />
           <Route path="/claude-code" element={<ClaudeCodePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />
           <Route path="/conversations/:id" element={<ConversationDetailPage />} />
