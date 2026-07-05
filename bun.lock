@@ -60,6 +60,7 @@
     },
     "packages/agent-dashboard": {
       "name": "@agentic-patterns/dashboard",
+      "version": "0.10.0",
       "dependencies": {
         "@xyflow/react": "^12.11.1",
         "lucide-react": "^1.21.0",
