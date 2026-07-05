@@ -16,7 +16,9 @@ import type { BlastRadius, CapabilityMeta, CapabilityRecord, TraceStep } from ".
 
 export type ConstNodeKind = "agent" | "capability" | "tool" | "subagent";
 export type RunState = "pending" | "running" | "complete" | "error" | "skipped";
-export type ToolReveal = "hidden" | "emerging" | "shown" | "settled" | "gated";
+// resting = part of the faint declared-composition ring (present from frame one,
+// subordinate); hidden = not shown until used (the execution-chain default).
+export type ToolReveal = "resting" | "hidden" | "emerging" | "shown" | "settled" | "gated";
 export type EdgeKind = "tether" | "tool" | "handoff";
 
 /** Disc diameters per node kind (small circular nodes). */
@@ -55,6 +57,8 @@ export interface ConstEdgeData {
   active?: boolean;
   complete?: boolean;
   emerging?: boolean;
+  /** a spoke into a resting (declared-but-unused) tool — faint, not hidden. */
+  resting?: boolean;
   [key: string]: unknown;
 }
 
@@ -179,6 +183,8 @@ export interface Frame {
   activeEdgeIds: Set<string>;
   completeEdgeIds: Set<string>;
   emergingEdgeIds: Set<string>;
+  /** spokes into resting (declared-but-unused) tools — the faint composition ring. */
+  restingEdgeIds: Set<string>;
   resultChips: Record<string, string>;
   hud: {
     phase: string;
@@ -240,18 +246,27 @@ const edgeKey = (s: string, t: string) => `e:${s}->${t}`;
  * tool node (owned by one agent) reveals just-in-time when THAT agent invokes it
  * — so tools pop above their agent and light only while actually running.
  */
-export function computeFrame(steps: TraceStep[], cursor: number, graph: Constellation): Frame {
+export function computeFrame(
+  steps: TraceStep[],
+  cursor: number,
+  graph: Constellation,
+  restBase = false,
+): Frame {
   const nodeStates: Record<string, RunState> = {};
   const reveals: Record<string, ToolReveal> = {};
   const resultChips: Record<string, string> = {};
   const activeEdgeIds = new Set<string>();
   const completeEdgeIds = new Set<string>();
   const emergingEdgeIds = new Set<string>();
+  const restingEdgeIds = new Set<string>();
 
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  // declared-composition mode (`restBase`) shows every tool faintly at rest from
+  // frame one; execution-chain mode keeps unused tools hidden until they run.
+  const toolBase: ToolReveal = restBase ? "resting" : "hidden";
   for (const n of graph.nodes) {
     nodeStates[n.id] = "pending";
-    if (n.data.kind === "tool") reveals[n.id] = n.data.gated ? "gated" : "hidden";
+    if (n.data.kind === "tool") reveals[n.id] = n.data.gated ? "gated" : toolBase;
   }
 
   const lastIdx = steps.length - 1;
@@ -309,8 +324,8 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
       (here.kind === "tool_call" || here.kind === "tool_result");
     const lastResultSeen = Math.max(-1, ...results.filter((i) => i <= clamped));
 
-    let reveal: ToolReveal = "hidden";
-    if (clamped < 0 || clamped < decideIdx) reveal = "hidden";
+    let reveal: ToolReveal = toolBase;
+    if (clamped < 0 || clamped < decideIdx) reveal = toolBase;
     else if (clamped < firstCall) reveal = "emerging";
     else if (onThisTool) reveal = "shown";
     else reveal = "settled";
@@ -426,6 +441,14 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
     }
   }
 
+  // ── faint spokes into every resting (declared-but-unused) tool: the
+  //    composition ring reads as wired-up from frame one. ──
+  if (restBase) {
+    for (const e of graph.edges) {
+      if (e.data?.kind === "tool" && reveals[e.target] === "resting") restingEdgeIds.add(e.id);
+    }
+  }
+
   // ── HUD readout ──
   const elapsedMs = seen.reduce((sum, s) => sum + (s.ms || 0), 0);
   const lastModel = [...seen].reverse().find((s) => s.kind === "model");
@@ -450,6 +473,7 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
     activeEdgeIds,
     completeEdgeIds,
     emergingEdgeIds,
+    restingEdgeIds,
     resultChips,
     hud: {
       phase,

@@ -416,6 +416,40 @@ describe("computeFrame — single-agent per-frame fold", () => {
   });
 });
 
+/* ── computeFrame · declared-composition resting ring (restBase) ─────────────── */
+
+describe("computeFrame — declared-composition resting ring", () => {
+  // the declared surface: query-surface arms TWO tools, but the run uses only `search`.
+  const caps: CapabilityMeta[] = [
+    {
+      name: "query-surface",
+      title: "Query Surface",
+      surface: "Query",
+      blastRadius: "read",
+      tools: ["search", "fetch"],
+    },
+  ];
+  const graph = buildConstellation("retrieval-analyst", caps, []);
+  const steps = eventsToSteps(liveSingle, tools); // uses `search` only
+  const last = steps.length - 1;
+  const USED = "tool:query-surface:search";
+  const UNUSED = "tool:query-surface:fetch";
+  const UNUSED_SPOKE = "e:cap:query-surface->tool:query-surface:fetch";
+
+  it("rests the declared-but-unused tool while lighting the used one (restBase=true)", () => {
+    const f = computeFrame(steps, last, graph, true);
+    expect(f.reveals[UNUSED]).toBe("resting"); // faint composition ring, never called
+    expect(f.reveals[USED]).toBe("settled"); // used + done
+    expect([...f.restingEdgeIds]).toContain(UNUSED_SPOKE);
+  });
+
+  it("hides the unused tool in the chain default (restBase=false)", () => {
+    const f = computeFrame(steps, last, graph, false);
+    expect(f.reveals[UNUSED]).toBe("hidden");
+    expect(f.restingEdgeIds.size).toBe(0);
+  });
+});
+
 /** Two-agent pipeline gather -> curate, each owning its own tool. */
 const PIPELINE_RUN: Logical[] = [
   { type: "message.start", seq: 0, agent: "gather" },

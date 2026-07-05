@@ -64,6 +64,7 @@ export function ConstellationGraph({
           active: frame.activeEdgeIds.has(e.id),
           complete: frame.completeEdgeIds.has(e.id),
           emerging: frame.emergingEdgeIds.has(e.id),
+          resting: frame.restingEdgeIds.has(e.id),
         },
       })),
     [graph, frame],

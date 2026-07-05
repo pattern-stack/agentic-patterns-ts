@@ -66,7 +66,9 @@ function stateTone(state: RunState, active: boolean): Tone {
 
 function nodeOpacity(kind: ConstNodeKind, state: RunState, reveal: ToolReveal | undefined): number {
   if (kind === "tool") {
-    return { hidden: 0, emerging: 0.6, shown: 1, settled: 0.82, gated: 0.4 }[reveal ?? "hidden"];
+    return { hidden: 0, resting: 0.55, emerging: 0.6, shown: 1, settled: 0.82, gated: 0.4 }[
+      reveal ?? "hidden"
+    ];
   }
   if (kind === "agent") return 1; // the anchor is always fully present
   return state === "pending" ? 0.72 : 1;
@@ -74,7 +76,9 @@ function nodeOpacity(kind: ConstNodeKind, state: RunState, reveal: ToolReveal | 
 
 function nodeScale(kind: ConstNodeKind, reveal: ToolReveal | undefined): number {
   if (kind !== "tool") return 1;
-  return { hidden: 0.3, emerging: 0.85, shown: 1, settled: 0.8, gated: 0.82 }[reveal ?? "hidden"];
+  return { hidden: 0.3, resting: 0.64, emerging: 0.85, shown: 1, settled: 0.8, gated: 0.82 }[
+    reveal ?? "hidden"
+  ];
 }
 
 function Medallion({ color, children }: { color: string; children: ReactNode }) {

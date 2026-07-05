@@ -49,6 +49,12 @@ export interface ReplayOpts {
    * honesty clamp (cursor ≤ arrived) holds either way. Default LIVE_STEP_MS.
    */
   paceMs?: number;
+  /**
+   * Declared-composition mode: show every tool faintly at rest (the full toolbox
+   * ring) from frame one, lit just-in-time as used — rather than the chain
+   * default of hiding unused tools. Forwarded to `computeFrame`.
+   */
+  restBase?: boolean;
 }
 
 export function useRunReplay(
@@ -57,7 +63,7 @@ export function useRunReplay(
   runKey: string,
   opts: ReplayOpts = {},
 ): ReplayApi {
-  const { live = false, paceMs } = opts;
+  const { live = false, paceMs, restBase = false } = opts;
   const cadence = paceMs ?? LIVE_STEP_MS;
   const [cursor, setCursor] = useState(-1);
   const [playing, setPlaying] = useState(false);
@@ -121,7 +127,10 @@ export function useRunReplay(
     setCursor(index);
   }, []);
 
-  const frame = useMemo(() => computeFrame(steps, cursor, graph), [steps, cursor, graph]);
+  const frame = useMemo(
+    () => computeFrame(steps, cursor, graph, restBase),
+    [steps, cursor, graph, restBase],
+  );
 
   return { cursor, playing, frame, play, pause, reset, seek };
 }

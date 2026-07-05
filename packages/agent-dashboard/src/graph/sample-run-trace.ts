@@ -16,6 +16,23 @@
  * `composition.ts`'s static inventory (chain AND composition projections light).
  */
 import type { EventLite } from "./composition";
+import type { CapabilityMeta } from "./types";
+
+/**
+ * The agent's DECLARED composition (what it CAN do) — feeds the composition-mode
+ * graph. Six query-surface tools are declared; the run only uses three
+ * (search · fetch · curate), so the other three (describe · list_types · inspect)
+ * stay in the faint resting ring, demonstrating "declared surface, lit as used".
+ */
+export const SAMPLE_CAPABILITIES: CapabilityMeta[] = [
+  {
+    name: "query-surface",
+    title: "Query Surface",
+    surface: "Query",
+    blastRadius: "read",
+    tools: ["search", "fetch", "curate", "describe", "list_types", "inspect"],
+  },
+];
 
 export const SAMPLE_REQUEST =
   "What landed this week — any meetings or threads I should know about?";
