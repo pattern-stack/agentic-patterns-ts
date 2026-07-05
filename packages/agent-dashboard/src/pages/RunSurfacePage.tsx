@@ -1,24 +1,39 @@
 /**
  * RunSurfacePage — the integrated Live Run surface.
  *
- * Owns the replay engine and composes the pieces around it: the constellation
- * canvas (with the HUD overlay + the node inspector) on the left, the
- * LiveTracePanel scrubber on the right, and a Play/Reset transport up top. The
- * trace panel and the graph share ONE `useRunReplay` cursor — clicking a trace
- * row seeks the constellation, and Play walks both in lockstep.
+ * Owns the replay engine and composes every piece around ONE shared cursor: the
+ * constellation canvas (HUD overlay + node inspector) on the left, the
+ * LiveTracePanel scrubber on the right, an agent picker + message box + a
+ * Chain ⇄ Composition toggle up top. Clicking a trace row seeks the graph; Play
+ * walks both in lockstep (replay); a live run drains the cursor as SSE arrives.
  *
- * Phase 1 (this slice + the mode toggle): driven by the deterministic
- * `SAMPLE_EVENTS` so the whole surface is browser-verifiable without a live
- * model. The Chain ⇄ Composition toggle swaps the GRAPH (executed chain vs. the
- * full declared surface) while the SAME trace overlays both. Slice 6 adds the
- * live path: an agent picker + SSE streaming into the same replay.
+ * Two trace sources, ONE renderer:
+ *   • LIVE — pick an agent, send a message; `streamMessage` events flatten
+ *     through `toEventLike` into the fold, and the engine drains the cursor at a
+ *     paced cadence as they arrive (`live`). The answer streams into the panel.
+ *   • DEMO — before any live run, the deterministic `SAMPLE_EVENTS` play through
+ *     the exact same stack (browser-verifiable without a model).
+ * The Chain ⇄ Composition toggle swaps the GRAPH (executed chain vs. the agent's
+ * full declared surface) while the same trace overlays both.
+ *
+ * This is the flagship run view; the older split /graph + /chat routes remain for
+ * the raw event log + free-form chat.
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type AgentSummary,
+  createConversation,
+  fetchAgentCapabilities,
+  listAgents,
+  streamMessage,
+} from "../api/chat-client";
+import { toEventLike } from "../api/event-adapter";
 import { ConstellationGraph } from "../constellation/ConstellationGraph";
 import { LiveTracePanel } from "../constellation/LiveTracePanel";
 import { NodeInspector, type RunMeta } from "../constellation/NodeInspector";
 import { RunBarHud } from "../constellation/RunBarHud";
-import { type GraphSource, buildGraph, buildToolIndex } from "../graph/composition";
+import { prettifySlug } from "../graph/catalog";
+import { type EventLite, type GraphSource, buildGraph, buildToolIndex } from "../graph/composition";
 import {
   SAMPLE_ANSWER,
   SAMPLE_CAPABILITIES,
@@ -27,12 +42,13 @@ import {
   SAMPLE_SYSTEM_PROMPT,
 } from "../graph/sample-run-trace";
 import { eventsToSteps } from "../graph/trace-from-events";
+import type { CapabilityMeta } from "../graph/types";
 import { useRunReplay } from "../graph/use-run-replay";
-import { Button } from "../ui/atoms";
+import { Badge, Button } from "../ui/atoms";
 import { T } from "../ui/tokens";
 
 const TOOL_INDEX = buildToolIndex();
-const RUN_META: RunMeta = {
+const DEMO_META: RunMeta = {
   request: SAMPLE_REQUEST,
   answer: SAMPLE_ANSWER,
   systemPrompt: SAMPLE_SYSTEM_PROMPT,
@@ -85,53 +101,220 @@ function ModeToggle({ mode, onChange }: { mode: GraphMode; onChange: (m: GraphMo
   );
 }
 
+/** Map the API's declared composition to the CapabilityMeta the graph builder wants. */
+function toCapabilityMeta(caps: { name: string; tools: { name: string }[] }[]): CapabilityMeta[] {
+  return caps.map((c) => ({
+    name: c.name,
+    title: prettifySlug(c.name),
+    surface: "",
+    blastRadius: "read",
+    tools: c.tools.map((t) => t.name),
+  }));
+}
+
+const bare = (t: unknown) => String(t).replace(/^(agent|pattern)\./, "");
+
 export function RunSurfacePage() {
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const [sentMsg, setSentMsg] = useState("");
+  const [liveEvents, setLiveEvents] = useState<EventLite[]>([]);
+  const [liveCaps, setLiveCaps] = useState<CapabilityMeta[] | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [runKey, setRunKey] = useState("demo");
   const [mode, setMode] = useState<GraphMode>("chain");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const convIdRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const isLive = streaming || liveEvents.length > 0;
+
+  // load agents once
+  useEffect(() => {
+    let cancelled = false;
+    listAgents()
+      .then((list) => {
+        if (cancelled) return;
+        setAgents(list);
+        setSelectedId((cur) => cur ?? list[0]?.id ?? null);
+      })
+      .catch(
+        (e) => !cancelled && setError(e instanceof Error ? e.message : "Failed to load agents"),
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // fetch the selected agent's declared composition (for composition mode)
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    fetchAgentCapabilities(selectedId)
+      .then((comp) => !cancelled && setLiveCaps(toCapabilityMeta(comp.capabilities)))
+      .catch(() => !cancelled && setLiveCaps(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
+
+  const events: EventLite[] = isLive ? liveEvents : SAMPLE_EVENTS;
+  // stable ref (only changes when live/caps change) so the graph memo doesn't churn.
+  const caps = useMemo<CapabilityMeta[]>(
+    () => (isLive ? (liveCaps ?? []) : SAMPLE_CAPABILITIES),
+    [isLive, liveCaps],
+  );
+  const agentName = isLive
+    ? (agents.find((a) => a.id === selectedId)?.name ?? "agent")
+    : "retrieval-analyst";
+
   const source = useMemo<GraphSource>(
     () =>
-      mode === "composition"
-        ? { mode: "composition", agentName: "retrieval-analyst", capabilities: SAMPLE_CAPABILITIES }
-        : { mode: "chain", arm: "single", toolDefs: [], events: SAMPLE_EVENTS },
-    [mode],
+      mode === "composition" && caps.length > 0
+        ? { mode: "composition", agentName, capabilities: caps }
+        : { mode: "chain", arm: "single", toolDefs: [], events },
+    [mode, caps, agentName, events],
   );
   const graph = useMemo(() => buildGraph(source), [source]);
-  const steps = useMemo(() => eventsToSteps(SAMPLE_EVENTS, TOOL_INDEX, { terminal: true }), []);
-  // one cursor across both projections; composition mode rests the full toolbox ring.
-  const replay = useRunReplay(steps, graph, "demo", { restBase: mode === "composition" });
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const steps = useMemo(
+    () => eventsToSteps(events, TOOL_INDEX, { terminal: !streaming }),
+    [events, streaming],
+  );
+  const replay = useRunReplay(steps, graph, runKey, {
+    live: isLive,
+    restBase: mode === "composition",
+  });
+
+  const liveAnswer = useMemo(() => {
+    const complete = [...liveEvents].reverse().find((e) => bare(e.type) === "message.complete");
+    if (complete && typeof complete.content === "string") return complete.content;
+    return liveEvents
+      .filter((e) => bare(e.type) === "message.delta")
+      .map((e) => (typeof e.delta === "string" ? e.delta : ""))
+      .join("");
+  }, [liveEvents]);
+
+  const runMeta: RunMeta = isLive ? { request: sentMsg, answer: liveAnswer } : DEMO_META;
   const selectedNode = selectedNodeId
     ? (graph.nodes.find((n) => n.id === selectedNodeId) ?? null)
     : null;
 
+  const send = useCallback(
+    async (content: string) => {
+      if (!selectedId || streaming || !content.trim()) return;
+      setError(null);
+      const conv = convIdRef.current ?? (await createConversation(selectedId)).id;
+      convIdRef.current = conv;
+      setSentMsg(content);
+      setLiveEvents([]);
+      setRunKey(String(Date.now()));
+      setStreaming(true);
+      setInput("");
+      const ac = new AbortController();
+      abortRef.current = ac;
+      try {
+        for await (const ev of streamMessage(conv, content, undefined, ac.signal)) {
+          setLiveEvents((prev) => [...prev, toEventLike(ev)]);
+        }
+      } catch (e) {
+        if (!ac.signal.aborted) setError(e instanceof Error ? e.message : "Stream failed");
+      } finally {
+        setStreaming(false);
+      }
+    },
+    [selectedId, streaming],
+  );
+
+  const selectAgent = (id: string) => {
+    setSelectedId(id);
+    convIdRef.current = null;
+    abortRef.current?.abort();
+    setStreaming(false);
+    setLiveEvents([]);
+    setLiveCaps(null);
+    setRunKey("demo");
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Live Run</h1>
-        <span
-          style={{
-            fontSize: T.fz.micro,
-            fontFamily: T.font.mono,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            color: "var(--mute)",
-            border: "1px solid var(--line)",
-            borderRadius: T.radius.sm,
-            padding: "2px 7px",
-          }}
-        >
-          demo · sample trace
-        </span>
+        <Badge tone={isLive ? "run" : "mute"}>{isLive ? "live" : "demo · sample trace"}</Badge>
         <div style={{ flex: 1 }} />
         <ModeToggle mode={mode} onChange={setMode} />
-        <Button variant="default" onClick={replay.playing ? replay.pause : replay.play}>
-          {replay.playing ? "⏸ Pause" : "▶ Play"}
-        </Button>
-        <Button variant="ghost" onClick={replay.reset}>
-          ↺ Reset
-        </Button>
+        {!isLive && (
+          <Button variant="default" onClick={replay.playing ? replay.pause : replay.play}>
+            {replay.playing ? "⏸ Pause" : "▶ Play"}
+          </Button>
+        )}
+        {!isLive && (
+          <Button variant="ghost" onClick={replay.reset}>
+            ↺ Reset
+          </Button>
+        )}
       </div>
 
-      <div style={{ display: "flex", gap: 16, minHeight: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <select
+          value={selectedId ?? ""}
+          onChange={(e) => selectAgent(e.target.value)}
+          disabled={!agents.length || streaming}
+          style={{
+            fontFamily: "inherit",
+            fontSize: 13,
+            background: "var(--fill)",
+            color: "var(--ink)",
+            border: "1px solid var(--line)",
+            borderRadius: T.radius.sm,
+            padding: "7px 10px",
+            minWidth: 170,
+          }}
+        >
+          {agents.length === 0 && <option value="">No agents registered</option>}
+          {agents.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+        </select>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void send(input);
+            }
+          }}
+          disabled={!selectedId || streaming}
+          placeholder={selectedId ? "Ask the agent something…" : "Select an agent to start."}
+          style={{
+            flex: 1,
+            minWidth: 220,
+            fontFamily: "inherit",
+            fontSize: 13,
+            background: "var(--fill)",
+            color: "var(--ink)",
+            border: "1px solid var(--line)",
+            borderRadius: T.radius.sm,
+            padding: "8px 12px",
+          }}
+        />
+        <Button onClick={() => void send(input)} disabled={!selectedId || streaming}>
+          Send
+        </Button>
+        {streaming && (
+          <Button variant="ghost" onClick={() => abortRef.current?.abort()}>
+            Abort
+          </Button>
+        )}
+        {error && <span style={{ fontSize: 12, color: "var(--red)" }}>{error}</span>}
+      </div>
+
+      <div style={{ display: "flex", gap: 16, minHeight: 540 }}>
         <div
           style={{
             flex: 1,
@@ -154,7 +337,7 @@ export function RunSurfacePage() {
             <NodeInspector
               node={selectedNode}
               steps={steps}
-              runMeta={RUN_META}
+              runMeta={runMeta}
               onClose={() => setSelectedNodeId(null)}
             />
           )}
@@ -163,8 +346,8 @@ export function RunSurfacePage() {
           steps={steps}
           cursor={replay.cursor}
           onSeek={replay.seek}
-          request={SAMPLE_REQUEST}
-          answer={SAMPLE_ANSWER}
+          request={runMeta.request}
+          answer={runMeta.answer}
         />
       </div>
     </div>
