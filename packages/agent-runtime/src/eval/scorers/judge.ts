@@ -304,12 +304,18 @@ export function judgeScorer(opts: JudgeScorerOptions): Scorer<unknown, unknown, 
   const maxIterations = opts.maxIterations ?? 1;
   const buildPrompt = opts.prompt ?? defaultPrompt;
 
+  const judgeSystem = opts.system ?? DEFAULT_JUDGE_SYSTEM;
   const defaultAgent: AgentLike = {
     role: { name: "eval-judge" },
     getModel: () => opts.model ?? "sonnet",
     getTools: () => [],
-    getSystemPrompt: () => opts.system ?? DEFAULT_JUDGE_SYSTEM,
-    renderInitialPrompt: () => "",
+    // AgentRunner (the main runner) reads renderInitialPrompt() for the system
+    // message; ClaudeCodeRunner reads getSystemPrompt(). Return the judge system
+    // prompt from BOTH so the rubric+schema reaches the model regardless of runner.
+    // Previously renderInitialPrompt was "" → the schema was silently dropped on
+    // the AgentRunner path and the model invented its own verdict shape.
+    getSystemPrompt: () => judgeSystem,
+    renderInitialPrompt: () => judgeSystem,
   };
   const agent = opts.agent ?? defaultAgent;
 
