@@ -84,11 +84,25 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   const store = persistence.store;
 
   // -------------------------------------------------------------------------
-  // 2. Runner — env-driven auto-detection
+  // 2. Runner — default to each agent's DECLARED (coded) model
   // -------------------------------------------------------------------------
 
+  // Default: resolver mode. `createRunner({ resolveAgentModel: true })` builds a
+  // runner that dispatches each agent's `getModel()` at run time, so an agent
+  // that declares `gemini-3.1-flash-lite` runs on GOOGLE — instead of forcing a
+  // single env-detected model (previously `gpt-4o`) onto every agent. The
+  // per-agent provider follows the declared model, and an agent that declares no
+  // model falls back to its role's default (never a silent gpt-4o).
+  //
+  // AGENT_MODEL / AGENT_TIER remain a GLOBAL OVERRIDE: when either is set we bind
+  // that one model for every agent via env auto-detection, where `createRunner`
+  // now makes the provider follow the model (a classified id whose provider key
+  // is absent fails loud rather than mismatching).
   const tier = (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet";
-  const selection = await createRunner({ eventBus, tier, verbose: false });
+  const hasGlobalOverride = Boolean(process.env.AGENT_MODEL || process.env.AGENT_TIER);
+  const selection = hasGlobalOverride
+    ? await createRunner({ eventBus, tier, verbose: false })
+    : await createRunner({ eventBus, resolveAgentModel: true, verbose: false });
   const { runner: llmRunner } = selection;
 
   // -------------------------------------------------------------------------
