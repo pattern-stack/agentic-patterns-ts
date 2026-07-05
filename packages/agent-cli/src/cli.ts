@@ -208,7 +208,7 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const message = positionals.slice(2).join(" ") || undefined;
-      await runRunCommand({ agents, agentId, message });
+      await runRunCommand({ agents, agentId, message, configRoot: config.root });
       return;
     }
 
@@ -234,6 +234,7 @@ async function main(): Promise<void> {
         port,
         noDashboard: Boolean(values["no-dashboard"]),
         open: !values["no-open"],
+        configRoot: config.root,
       });
       return;
     }
@@ -241,6 +242,7 @@ async function main(): Promise<void> {
     case "eval": {
       await runEvalCommand({
         agents,
+        configRoot: config.root,
         set: values.set ? String(values.set) : undefined,
         gold: values.gold ? String(values.gold) : undefined,
         target: values.target ? String(values.target) : undefined,

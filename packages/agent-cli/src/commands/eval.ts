@@ -34,7 +34,6 @@ import {
   SQLiteExporter,
   assertSplitSelectable,
   createEvalResultRecorder,
-  createRunner,
   derivePass,
   exactMatch,
   filterBySplit,
@@ -58,6 +57,7 @@ import type {
 } from "@agentic-patterns/runtime";
 import { ensureParentDir, resolveDbPath } from "../helpers/db.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
+import { ExecutionService } from "../services/execution-service.js";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -92,6 +92,8 @@ export interface EvalCommandOptions {
   judgeThresholds?: string;
   /** Test seam — injected runner skips createRunner(). Default: createRunner({eventBus,…}). */
   runner?: RunnerProtocol;
+  /** Project root for `.env` (credential preflight). Defaults to cwd. */
+  configRoot?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +308,8 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
     runner = opts.runner;
     runnerBanner = "injected runner (test seam)";
   } else {
-    const selection = await createRunner({ eventBus: bus, tier, verbose: false });
+    const svc = new ExecutionService({ configRoot: opts.configRoot ?? process.cwd() });
+    const selection = await svc.resolveRunner({ eventBus: bus, tier, verbose: false }, opts.agents);
     runner = selection.runner;
     runnerBanner = `${selection.source} — ${selection.reason}`;
   }

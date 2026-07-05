@@ -20,14 +20,14 @@ interface ConfigInput {
   config: ProjectConfig;
 }
 
-interface EnvVarSpec {
+export interface EnvVarSpec {
   key: string;
   label: string;
   /** Should the value be hidden when prompting? */
   secret: boolean;
 }
 
-const TRACKED_ENV: readonly EnvVarSpec[] = [
+export const TRACKED_ENV: readonly EnvVarSpec[] = [
   { key: "ANTHROPIC_API_KEY", label: "Anthropic API key", secret: true },
   { key: "OPENAI_API_KEY", label: "OpenAI API key", secret: true },
   { key: "GOOGLE_GENERATIVE_AI_API_KEY", label: "Google API key", secret: true },
@@ -37,6 +37,18 @@ const TRACKED_ENV: readonly EnvVarSpec[] = [
   { key: "DEEPSEEK_API_KEY", label: "DeepSeek API key", secret: true },
   { key: "OPENROUTER_API_KEY", label: "OpenRouter API key", secret: true },
   { key: "OLLAMA_HOST", label: "Ollama host URL", secret: false },
+  // Gateway (Bifrost / any OpenAI-compatible endpoint). Setting AP_GATEWAY_BASE_URL
+  // routes EVERY agent's declared model through the one gateway — createRunner's
+  // envGateway() reads these (see providers/model-resolver.ts GatewayConfig).
+  { key: "AP_GATEWAY_BASE_URL", label: "Gateway base URL (Bifrost, …/v1)", secret: false },
+  { key: "AP_GATEWAY_API_KEY", label: "Gateway bearer key", secret: true },
+  { key: "AP_GATEWAY_BASIC_USER", label: "Gateway HTTP Basic user", secret: false },
+  { key: "AP_GATEWAY_BASIC_PASS", label: "Gateway HTTP Basic password", secret: true },
+  {
+    key: "AP_GATEWAY_MODEL_PREFIX",
+    label: "Gateway model prefix (e.g. anthropic/)",
+    secret: false,
+  },
   { key: "AGENT_TIER", label: "Default tier (opus | sonnet | haiku)", secret: false },
   { key: "AGENT_MODEL", label: "Pinned model id (overrides tier)", secret: false },
 ];
@@ -116,13 +128,13 @@ export async function runConfigSetCommand(input: ConfigInput): Promise<void> {
 // helpers
 // ---------------------------------------------------------------------------
 
-function maskSecret(v: string): string {
+export function maskSecret(v: string): string {
   if (v.length <= 8) return "•".repeat(v.length);
   return `${v.slice(0, 4)}${"•".repeat(Math.min(8, v.length - 8))}${v.slice(-4)}`;
 }
 
 /** Insert or replace a single KEY=VALUE line in the .env file. Creates if missing. */
-function upsertEnvFile(file: string, key: string, value: string): void {
+export function upsertEnvFile(file: string, key: string, value: string): void {
   let lines: string[] = [];
   if (fs.existsSync(file)) {
     lines = fs.readFileSync(file, "utf-8").split("\n");
