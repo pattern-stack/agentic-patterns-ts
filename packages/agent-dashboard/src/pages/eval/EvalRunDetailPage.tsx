@@ -107,11 +107,17 @@ function passLabel(pass: boolean | null): string {
   return "ungated";
 }
 
+/** Round a numeric score to 3 sig-figs without trailing-zero noise (0.6666… → 0.667, 1 → 1). */
+function fmtScoreValue(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  return typeof value === "number" ? String(Number(value.toFixed(3))) : String(value);
+}
+
 function scoresSummary(scores: JoinedEvalResultRow["scores"]): string {
   if (!scores || scores.length === 0) return "—";
   const passedCount = scores.filter((s) => s.passed === true).length;
   const first = scores[0];
-  const firstStr = first ? `${first.name}: ${first.value ?? "—"}` : "";
+  const firstStr = first ? `${first.name}: ${fmtScoreValue(first.value)}` : "";
   return `${passedCount}/${scores.length} · ${firstStr}`;
 }
 
