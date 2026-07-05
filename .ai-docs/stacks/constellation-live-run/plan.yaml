@@ -1,0 +1,199 @@
+plan:
+  slug: constellation-live-run
+  summary: Reconcile & upgrade the dashboard's agent-execution constellation to full parity with the evolved swe-brain fork — paced live replay, node/edge polish, a node inspector, a trace-scrubber panel, a dual (declared-composition ⇄ execution-chain) graph model, and one integrated Live Run surface
+  milestone: constellation-live-run
+
+  epic_title: "Live Run constellation — bring the swe-brain execution renderer home"
+  epic_body: |
+    The dashboard already ships an agent-execution constellation (`agent-dashboard/src/graph/*`
+    + `src/constellation/*`, from the #80 rebuild). It and the renderer in the sibling repo
+    `../swe-brain` (`apps/frontend/src/.../constellation/*`) descend from the same "Claude
+    Design handoff" ancestor — swe-brain then evolved its copy substantially. This stack is a
+    **reconciliation/upgrade of our existing system, not a fresh port**: bring over the pieces
+    swe-brain pulled ahead on, adapting (not copying) its alignment-domain concepts.
+
+    The architecture is a pure fold — `TraceStep[] + cursor → computeFrame() → Frame →
+    <ConstellationGraph/>` — recomputed every render, which is why "the trace IS the scrubber"
+    works (seek = setCursor) and why live and replay are the same engine (only the cursor source
+    differs). Confirmed prerequisite: the **backend is already ready** — `GET /agents/:id/capabilities`
+    (declared composition), the `/composition` route's provenance chips, and the normalized SSE
+    fold all exist. So every issue here is **frontend-only, scoped to `packages/agent-dashboard`**.
+
+    Scope (maximal, per product decision): (1) upgrade the replay engine to swe-brain's live-paced
+    drain + a "thinking" model step; (2) node/edge polish; (3) a click-to-inspect NodeInspector
+    whose Provenance tab maps onto OUR Role×Mission / Capability=Toolbox algebra; (4) a LiveTracePanel
+    trace-scrubber; (5) a dual graph model with a declared-composition ⇄ execution-chain toggle;
+    (6) one integrated Live Run surface tying it together. Open design question carried into
+    /design: swe-brain's "blast radius" (read/write/external consent taxonomy) and gated-tool veil —
+    our node already renders both (inherited from the ancestor) but `composition.ts` `blastOf()` is a
+    stub returning "read". Decide whether to map blast → our runtime gates layer (safety/approval/
+    rate-limit) or keep it a thin visual for this stack. Default recommendation: keep it a thin visual
+    now; a gates mapping is its own follow-up. Conventions: biome (double quotes, semicolons, 2-space,
+    100 col), strict TS, vitest.
+
+issues:
+  - key: replay-engine
+    title: "Replay engine: live-paced drain + honesty clamp + 'thinking' model step"
+    depends_on: []
+    parallel_with: [node-edge-polish, node-inspector]
+    labels: []
+    description: |
+      Upgrade `graph/use-run-replay.ts` to swe-brain's unified live+replay engine and teach the
+      trace fold to represent an in-flight model call. Foundation slice — pure logic, no surface
+      wiring required to ship (the existing GraphPage keeps working).
+
+      - `use-run-replay.ts`: add `ReplayOpts { live?, paceMs? }`. In live mode the engine OWNS the
+        cursor and drains it toward the growing SSE frontier at `paceMs` (default ~550ms), re-arming
+        as new steps arrive; `paceMs <= 0` snaps to the frontier (strict real-time). The honesty
+        clamp (cursor ≤ arrived) holds either way. The manual play/seek loop is suspended while live.
+        Keep `runKey` reset semantics (new run → idle; live appends within a run don't rewind).
+      - `graph/trace-from-events.ts`: fold `agent.llm.start` (currently ignored, see the switch
+        default) into a provisional `model` step with `status: 'thinking'`, finalized in place on
+        `llm.end` (keep its seq/position) — so the agent node pulses "thinking…" during a model call
+        instead of looking frozen. Match swe-brain's `run-trace-from-rows.ts` pendingModelIdx logic.
+
+      Acceptance:
+      - Live mode drains the cursor at cadence and parks in a "thinking" pulse when caught up; cursor
+        never exceeds arrived steps (honesty clamp) — covered by a unit test over a growing step array
+      - `llm.start`→`llm.end` yields exactly one model step (provisional finalized in place), not two;
+        replay rows lacking `llm.start` still produce one model step (fallback path) — unit tested
+      - Existing replay behavior (play/pause/seek/reset, runKey reset) unchanged; all current
+        graph tests stay green; typecheck + vitest pass
+
+  - key: node-edge-polish
+    title: "Node + edge polish: drifting result card, radial labels, marching-ants + energy particle"
+    depends_on: []
+    parallel_with: [replay-engine, node-inspector]
+    labels: []
+    description: |
+      Bring `constellation/ConstellationNode.tsx`, `ConstellationEdge.tsx`, and `constellation.css`
+      up to swe-brain's craft. Works in the current chain mode; no dependency on the dual model
+      (the `resting` toolbox-ring reveal lands with `dual-graph-model`, where declared tools exist to
+      rest). Purely presentational.
+
+      - Node: replace the static result chip with the floating/drifting result card (`const-floater`,
+        `--float-x/--float-y`, radial outward drift + CSS linger) and add `labelDir`-driven radial
+        label placement for orbit tools (fall back to below-disc when absent). Port swe-brain's
+        `richResult()` summarizer for the card text if not already present.
+      - Edge: add marching-ants dash + a traveling SVG energy particle on active edges, and the
+        radial spoke geometry (centre→centre, clipped to each disc) for tool edges; keep tether/
+        handoff as beziers.
+      - `constellation.css`: add the `const-floater` drift/fade keyframes and any pulse-ring tweaks.
+
+      Acceptance:
+      - An active tool edge shows marching ants + a moving particle; a resolved tool emits a result
+        card that drifts outward and fades (visible in `ap playground` on a live run)
+      - Tool labels place radially outward without overlapping the capability; non-oriented nodes
+        unaffected
+      - Theme tokens only (re-tones across themes); typecheck + vitest + biome pass
+
+  - key: node-inspector
+    title: "NodeInspector: click-to-inspect slide-over (I/O · Tokens · Provenance · Lens)"
+    depends_on: []
+    parallel_with: [replay-engine, node-edge-polish]
+    labels: []
+    description: |
+      New component `constellation/NodeInspector.tsx` — a 4-tab slide-over that opens on node click
+      (ConstellationGraph already tracks `selectedNodeId` + `onNodeClick`). Escape / scrim close.
+      Adapt swe-brain's `NodeInspector.tsx`.
+
+      - I/O tab: tool node → args + result from its trace steps; agent node → system prompt / request
+        / final answer; capability node → composition blurb.
+      - Tokens tab: per-node latency (+ blast/rows for tools) or run totals (iterations, tool calls,
+        in/out tokens, total ms, finish reason).
+      - Provenance tab (the differentiator): which SLOT authored the node, mapped to OUR algebra —
+        Agent = Role × Mission, Capability = Toolbox, tool ← its Toolbox. Wire to REAL provenance from
+        the server `/composition` route (add a `getComposition()` fetch to `api/chat-client.ts` if
+        absent; fall back to a derived slot mapping when unavailable).
+      - Lens tab: honest stub (slot-discipline lens lands with a later Runs/Audit slice).
+      - Mount into the existing GraphPage so it's demoable independently of the full surface.
+
+      Acceptance:
+      - Clicking any node opens the inspector to a relevant default tab; Escape and scrim-click close;
+        tool nodes show real args/result, agent node shows system prompt + final answer
+      - Provenance tab renders real `/composition` provenance chips when available, degrades cleanly
+        to the derived slot mapping when not
+      - Uses the `Segmented`/atoms already in the dashboard; typecheck + vitest + biome pass
+
+  - key: live-trace-panel
+    title: "LiveTracePanel: grouped waterfall trace-scrubber with chat framing"
+    depends_on: [replay-engine]
+    parallel_with: [node-inspector, node-edge-polish]
+    labels: []
+    description: |
+      New component `constellation/LiveTracePanel.tsx` — the right-hand "trace IS the scrubber".
+      Adapt swe-brain's `LiveTracePanel.tsx`. Rows grouped Setup / Iteration N / Finish; each row is a
+      typed spine dot + label + a waterfall timing bar placed on the run's shared timeline + mono
+      ms/tokens; every row is a button that `seek`s the constellation to that step (uses the
+      replay-engine's `cursor`/`onSeek`). Frames the run as chat: request at top, streamed answer at
+      the bottom (answer lands only once the cursor reaches the trace end).
+
+      Reconcile with the existing `chat/` panel (`ChatPanel`/`MessageRow`/`parts`): decide whether the
+      trace panel reuses `ChatBubble`-equivalent atoms for the request/answer framing, and whether it
+      supersedes or sits beside the chat thread on the integrated surface. Document the choice in the
+      component header.
+
+      Acceptance:
+      - Clicking a trace row seeks the constellation to that step; the active row auto-scrolls into
+        view during playback; waterfall bars are placed + width-scaled on the shared timeline
+      - The streamed answer only appears once cursor ≥ last step (doesn't "answer" before the graph
+        finishes animating)
+      - Coexistence with `chat/` is decided + documented (no duplicate/competing chat surfaces);
+        typecheck + vitest + biome pass
+
+  - key: dual-graph-model
+    title: "Dual graph model: declared-composition ⇄ execution-chain, with a mode toggle"
+    depends_on: [node-edge-polish]
+    parallel_with: [node-inspector, live-trace-panel]
+    labels: []
+    description: |
+      Give the graph two build modes and a toggle. Today `graph/composition.ts` builds only the
+      execution CHAIN (agents/tools that ran). Add the declared-COMPOSITION mode: the agent's full
+      Role → Capabilities → Tools from `GET /agents/:id/capabilities` (`chat-client.ts`
+      `getCapabilities()` already exists), rendered as a faint `resting` orbit from frame one and lit
+      just-in-time as the run uses each node.
+
+      - `composition.ts`: add a `mode: 'chain' | 'composition'` source; composition mode builds the
+        full declared graph via `buildConstellation` (constellation-model) from the capabilities API.
+      - `constellation-model.ts` `computeFrame`: make `resting` (not `hidden`) the base reveal for
+        declared-but-unused tools so the toolbox ring reads as wired-up from the first frame; add the
+        `emerging` forming-wire for decided-but-not-yet-run tools if not already present.
+      - Node/edge: honor the `resting` reveal (builds on `node-edge-polish`).
+      - Add a mode toggle control (host it in GraphPage for now; the integrated surface adopts it in
+        `live-run-surface`).
+      - Carry the blast-radius design decision here: `blastOf()` is a stub — either keep it a thin
+        visual (recommended for this stack) or wire it to the runtime gates model. Record the decision
+        in the file header + surface it at /design.
+
+      Acceptance:
+      - Composition mode shows the agent's full declared capabilities/tools as a resting orbit before
+        any step runs, then lights nodes just-in-time; chain mode is unchanged
+      - A toggle switches modes live without a full remount glitch (structure key handles the node-set
+        change); the blast decision is documented
+      - Capabilities fetch failure degrades to chain mode (or a skeleton) without crashing; typecheck
+        + vitest + biome pass
+
+  - key: live-run-surface
+    title: "Integrated Live Run surface: graph + inspector + trace + transport in one route"
+    depends_on: [node-inspector, live-trace-panel, dual-graph-model]
+    parallel_with: []
+    labels: []
+    description: |
+      The capstone. A single dashboard route (adapt swe-brain `pages/agents/LiveRunSurface.tsx`) that
+      composes ConstellationGraph + NodeInspector + LiveTracePanel + RunBarHud transport + the
+      mode toggle into one experience: pick an agent, send a message, watch the constellation animate
+      live, scrub the trace, click nodes to inspect. Supersedes the split GraphPage/ChatPage flow —
+      decide whether to replace GraphPage's nav entry or add a new "Live Run" route and deprecate the
+      old one.
+
+      - New page under `pages/` wiring the pieces via `useRunReplay({ live })` off the SSE stream
+        (reuse `api/chat-client` `streamMessage` + `event-adapter` + `trace-from-events`).
+      - Topbar transport (Reset / Play / live indicator) + agent picker + mode toggle in one header.
+      - Route registration in `App.tsx` + nav; remove or redirect the superseded route.
+
+      Acceptance:
+      - From the route: select an agent → send → the constellation animates live (paced), the trace
+        panel fills and stays in sync, node-click opens the inspector, the mode toggle works — end to
+        end in `ap playground`
+      - No orphaned/duplicate route; App builds; typecheck + vitest + biome pass
+      - Manual verification notes recorded (the /verify-style end-to-end drive)

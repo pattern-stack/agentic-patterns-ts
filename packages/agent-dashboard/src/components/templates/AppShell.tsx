@@ -19,6 +19,7 @@ const navGroups: { heading: string; items: { to: string; label: string; end?: bo
       { to: "/tools", label: "Tools" },
       { to: "/tokens", label: "Tokens" },
       { to: "/live", label: "Live" },
+      { to: "/run", label: "Live Run" },
       { to: "/graph", label: "Graph" },
       { to: "/claude-code", label: "Claude Code" },
       { to: "/conversations", label: "Conversations" },
