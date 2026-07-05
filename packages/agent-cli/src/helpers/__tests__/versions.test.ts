@@ -78,7 +78,10 @@ describe("fs-backed helpers", () => {
 
   it("collectApDeps is empty when there is no package.json or no AP deps", () => {
     expect(collectApDeps(dir)).toEqual([]); // no package.json
-    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ dependencies: { zod: "^3" } }));
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ dependencies: { zod: "^3" } }),
+    );
     expect(collectApDeps(dir)).toEqual([]);
   });
 

@@ -171,8 +171,7 @@ interface CacheShape {
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // once/day
 
 function cacheFile(): string {
-  const base =
-    process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
   return path.join(base, "agentic-patterns", "update-check.json");
 }
 
@@ -222,7 +221,11 @@ export async function notifyIfOutdated(root: string): Promise<void> {
     }
 
     const behind = deps
-      .map((d) => ({ name: d.name, installed: readInstalledVersion(root, d.name), latest: latest[d.name] ?? null }))
+      .map((d) => ({
+        name: d.name,
+        installed: readInstalledVersion(root, d.name),
+        latest: latest[d.name] ?? null,
+      }))
       .filter((d) => isBehind(d.installed, d.latest));
     if (behind.length === 0) return;
 
@@ -230,9 +233,13 @@ export async function notifyIfOutdated(root: string): Promise<void> {
     const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
     process.stderr.write(`\n${yellow("⬆ @agentic-patterns update available")}\n`);
     for (const d of behind) {
-      process.stderr.write(`  ${d.name}  ${dim(String(d.installed))} → ${yellow(String(d.latest))}\n`);
+      process.stderr.write(
+        `  ${d.name}  ${dim(String(d.installed))} → ${yellow(String(d.latest))}\n`,
+      );
     }
-    process.stderr.write(`  ${dim("run")} ap update ${dim("to upgrade  ·  AP_NO_UPDATE_NOTIFIER=1 to silence")}\n`);
+    process.stderr.write(
+      `  ${dim("run")} ap update ${dim("to upgrade  ·  AP_NO_UPDATE_NOTIFIER=1 to silence")}\n`,
+    );
   } catch {
     /* a notifier must never break the CLI */
   }

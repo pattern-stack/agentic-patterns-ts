@@ -30,7 +30,11 @@ function renderTable(statuses: readonly DepStatus[]): void {
   for (const s of statuses) {
     const cur = s.installed ?? "—";
     const latest = s.latest ?? "?";
-    const mark = s.behind ? yellow("⬆ behind") : s.latest === null ? dim("? offline") : green("✓ latest");
+    const mark = s.behind
+      ? yellow("⬆ behind")
+      : s.latest === null
+        ? dim("? offline")
+        : green("✓ latest");
     process.stdout.write(
       `  ${s.name.padEnd(nameW)}  ${dim(cur.padStart(curW))} → ${(s.behind ? yellow(latest) : dim(latest)).padEnd(6)}  ${mark}\n`,
     );
@@ -80,12 +84,16 @@ export async function runUpdateCommand(opts: UpdateCommandOptions = {}): Promise
   const pm = detectPackageManager(root);
   const specs = behind.map((s) => `${s.name}@${s.latest}`);
   const argv = installLatestArgv(pm, specs);
-  process.stdout.write(`\nUpdating ${behind.length} package(s) via ${green(pm)}:\n  ${dim(`${pm} ${argv.join(" ")}`)}\n\n`);
+  process.stdout.write(
+    `\nUpdating ${behind.length} package(s) via ${green(pm)}:\n  ${dim(`${pm} ${argv.join(" ")}`)}\n\n`,
+  );
 
   const res = spawnSync(pm, argv, { cwd: root, stdio: "inherit" });
   if (res.status !== 0) {
     process.stderr.write(`\n${red("error:")} ${pm} exited with code ${res.status ?? "unknown"}\n`);
     process.exit(res.status ?? 1);
   }
-  process.stdout.write(`\n${green("✓")} updated ${behind.map((s) => s.name.replace("@agentic-patterns/", "")).join(", ")} to latest\n\n`);
+  process.stdout.write(
+    `\n${green("✓")} updated ${behind.map((s) => s.name.replace("@agentic-patterns/", "")).join(", ")} to latest\n\n`,
+  );
 }
