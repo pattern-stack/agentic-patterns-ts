@@ -126,7 +126,9 @@ function ScoreRow({ score }: { score: EvalScoreLike }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
         <span style={{ fontFamily: "var(--font-mono)" }}>{score.name}</span>
-        <span style={{ color: "var(--fg-muted)" }}>{score.value ?? "—"}</span>
+        <span style={{ color: "var(--fg-muted)" }}>
+          {typeof score.value === "number" ? Number(score.value.toFixed(3)) : (score.value ?? "—")}
+        </span>
         {score.passed !== undefined && (
           <Badge tone={score.passed ? "green" : "red"}>{score.passed ? "pass" : "fail"}</Badge>
         )}

@@ -168,7 +168,35 @@ export function EvalSetsPage() {
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{row.id}</span>
                 ),
               },
-              { key: "name", header: "Name", render: (row) => row.name ?? "—" },
+              {
+                key: "name",
+                header: "Name",
+                render: (row) => (
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 3, padding: "2px 0" }}
+                    title={row.description ?? undefined}
+                  >
+                    <span style={{ fontWeight: 500, color: "var(--fg-default)" }}>
+                      {row.name ?? "—"}
+                    </span>
+                    {row.description && (
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "var(--fg-muted)",
+                          lineHeight: 1.4,
+                          maxWidth: 440,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {row.description}
+                      </span>
+                    )}
+                  </div>
+                ),
+              },
               {
                 key: "caseCount",
                 header: "Cases",
