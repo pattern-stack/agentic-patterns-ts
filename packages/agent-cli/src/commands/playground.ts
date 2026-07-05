@@ -24,7 +24,6 @@ import {
   NodeBackedRunner,
   SQLiteExporter,
   SSEExporter,
-  createRunner,
   createToolboxExecutor,
   isPromotedAgent,
   loadEvalStore,
@@ -36,6 +35,7 @@ import { serve } from "@hono/node-server";
 import { DEFAULT_DASHBOARD_PORT } from "../constants.js";
 import { ensureParentDir, resolveDbPath } from "../helpers/db.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
+import { ExecutionService } from "../services/execution-service.js";
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -50,6 +50,8 @@ export interface PlaygroundOptions {
   noDashboard?: boolean;
   /** Auto-open the dashboard URL in a browser. Defaults to true. */
   open?: boolean;
+  /** Project root for `.env` (credential preflight). Defaults to cwd. */
+  configRoot?: string;
 }
 
 /**
@@ -100,9 +102,11 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   // is absent fails loud rather than mismatching).
   const tier = (process.env.AGENT_TIER as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet";
   const hasGlobalOverride = Boolean(process.env.AGENT_MODEL || process.env.AGENT_TIER);
-  const selection = hasGlobalOverride
-    ? await createRunner({ eventBus, tier, verbose: false })
-    : await createRunner({ eventBus, resolveAgentModel: true, verbose: false });
+  const runnerOpts = hasGlobalOverride
+    ? { eventBus, tier, verbose: false }
+    : { eventBus, resolveAgentModel: true, verbose: false };
+  const svc = new ExecutionService({ configRoot: opts.configRoot ?? process.cwd() });
+  const selection = await svc.resolveRunner(runnerOpts, opts.agents);
   const { runner: llmRunner } = selection;
 
   // -------------------------------------------------------------------------
