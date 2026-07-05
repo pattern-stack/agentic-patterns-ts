@@ -6,7 +6,7 @@
  * the run as node pulses via useRunReplay. Drives REPLAY (persisted, scrubber),
  * LIVE (events streaming in), and the static composition view (no steps).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ConstellationGraph } from "../constellation/ConstellationGraph";
 import { RunBarHud } from "../constellation/RunBarHud";
 import { type GraphSource, buildGraph, buildToolIndex } from "../graph/composition";
@@ -50,13 +50,10 @@ export function GraphPanel({
       source.mode === "chain" ? eventsToSteps(source.events, TOOL_INDEX, { terminal }) : NO_STEPS,
     [source.mode, eventCount, terminal],
   );
-  const replay = useRunReplay(steps, graph, runKey);
+  // live mode: the engine drains the cursor toward the growing SSE frontier at a
+  // flowing cadence (paced just-in-time reveal). Replay mode: manual play/seek.
+  const replay = useRunReplay(steps, graph, runKey, { live });
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-
-  // live: advance the cursor to the freshest step as events stream in.
-  useEffect(() => {
-    if (live && steps.length > 0) replay.seek(steps.length - 1);
-  }, [live, steps.length, replay.seek]);
 
   const selectedNode = selectedNodeId
     ? (graph.nodes.find((n) => n.id === selectedNodeId) ?? null)
