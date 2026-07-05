@@ -21,16 +21,18 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  type AgentCompositionDetail,
   type AgentSummary,
   createConversation,
   fetchAgentCapabilities,
+  fetchAgentComposition,
   listAgents,
   streamMessage,
 } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
 import { ConstellationGraph } from "../constellation/ConstellationGraph";
 import { LiveTracePanel } from "../constellation/LiveTracePanel";
-import { NodeInspector, type RunMeta } from "../constellation/NodeInspector";
+import { NodeInspector, type RunMeta, buildProvenanceMap } from "../constellation/NodeInspector";
 import { RunBarHud } from "../constellation/RunBarHud";
 import { prettifySlug } from "../graph/catalog";
 import { type EventLite, type GraphSource, buildGraph, buildToolIndex } from "../graph/composition";
@@ -121,6 +123,7 @@ export function RunSurfacePage() {
   const [sentMsg, setSentMsg] = useState("");
   const [liveEvents, setLiveEvents] = useState<EventLite[]>([]);
   const [liveCaps, setLiveCaps] = useState<CapabilityMeta[] | null>(null);
+  const [comp, setComp] = useState<AgentCompositionDetail | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [runKey, setRunKey] = useState("demo");
   const [mode, setMode] = useState<GraphMode>("chain");
@@ -149,13 +152,17 @@ export function RunSurfacePage() {
     };
   }, []);
 
-  // fetch the selected agent's declared composition (for composition mode)
+  // fetch the selected agent's declared composition (for composition mode) + its
+  // full introspection with per-slot provenance (for the inspector's Provenance tab)
   useEffect(() => {
     if (!selectedId) return;
     let cancelled = false;
     fetchAgentCapabilities(selectedId)
-      .then((comp) => !cancelled && setLiveCaps(toCapabilityMeta(comp.capabilities)))
+      .then((c) => !cancelled && setLiveCaps(toCapabilityMeta(c.capabilities)))
       .catch(() => !cancelled && setLiveCaps(null));
+    fetchAgentComposition(selectedId)
+      .then((c) => !cancelled && setComp(c))
+      .catch(() => !cancelled && setComp(null));
     return () => {
       cancelled = true;
     };
@@ -202,6 +209,14 @@ export function RunSurfacePage() {
     ? (graph.nodes.find((n) => n.id === selectedNodeId) ?? null)
     : null;
 
+  // real /composition per-slot provenance, keyed by graph node id (for the
+  // inspector) — only in LIVE mode, where the graph IS the selected agent's; the
+  // demo graph is a fixed sample unrelated to the picked agent, so it derives.
+  const provenance = useMemo(
+    () => (isLive ? buildProvenanceMap(graph.nodes, comp?.role) : {}),
+    [isLive, comp, graph],
+  );
+
   const send = useCallback(
     async (content: string) => {
       if (!selectedId || streaming || !content.trim()) return;
@@ -235,6 +250,7 @@ export function RunSurfacePage() {
     setStreaming(false);
     setLiveEvents([]);
     setLiveCaps(null);
+    setComp(null);
     setRunKey("demo");
   };
 
@@ -338,6 +354,7 @@ export function RunSurfacePage() {
               node={selectedNode}
               steps={steps}
               runMeta={runMeta}
+              provenance={provenance}
               onClose={() => setSelectedNodeId(null)}
             />
           )}
