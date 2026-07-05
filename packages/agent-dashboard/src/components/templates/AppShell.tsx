@@ -26,7 +26,10 @@ const navGroups: { heading: string; items: { to: string; label: string; end?: bo
   },
   {
     heading: "Evaluate",
-    items: [{ to: "/eval", label: "Runs" }],
+    items: [
+      { to: "/eval/sets", label: "Sets" },
+      { to: "/eval", label: "Runs", end: true },
+    ],
   },
 ];
 

@@ -4,6 +4,7 @@
 
 export { derivePass, EvalStore } from "./eval-store.js";
 export type {
+  EvalCaseHistoryRow,
   EvalCaseRow,
   EvalComparison,
   EvalComparisonRow,
