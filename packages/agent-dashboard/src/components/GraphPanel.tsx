@@ -8,12 +8,12 @@
  */
 import { useMemo, useState } from "react";
 import { ConstellationGraph } from "../constellation/ConstellationGraph";
+import { NodeInspector, type ProvenanceMap, type RunMeta } from "../constellation/NodeInspector";
 import { RunBarHud } from "../constellation/RunBarHud";
 import { type GraphSource, buildGraph, buildToolIndex } from "../graph/composition";
-import type { ConstNode } from "../graph/constellation-model";
 import { eventsToSteps } from "../graph/trace-from-events";
 import { useRunReplay } from "../graph/use-run-replay";
-import { Badge, Button } from "../ui/atoms";
+import { Button } from "../ui/atoms";
 import { T } from "../ui/tokens";
 
 const TOOL_INDEX = buildToolIndex();
@@ -26,6 +26,8 @@ export function GraphPanel({
   terminal = true,
   minZoom,
   fitPadding,
+  runMeta,
+  provenance,
 }: {
   source: GraphSource;
   runKey: string;
@@ -35,6 +37,10 @@ export function GraphPanel({
    *  chain fits instead of overflowing. Omit for the default eval-view framing. */
   minZoom?: number;
   fitPadding?: number;
+  /** run framing (request / answer / system prompt) for the inspector's agent I/O tab. */
+  runMeta?: RunMeta;
+  /** real per-node provenance chips (from /composition); inspector derives when absent. */
+  provenance?: ProvenanceMap;
 }) {
   // chain-projection inputs (only present in chain mode); used for memo keys.
   const eventCount = source.mode === "chain" ? source.events.length : 0;
@@ -82,7 +88,13 @@ export function GraphPanel({
           fitPadding={fitPadding}
         />
         {selectedNode && (
-          <NodeInspector node={selectedNode} onClose={() => setSelectedNodeId(null)} />
+          <NodeInspector
+            node={selectedNode}
+            steps={steps}
+            runMeta={runMeta}
+            provenance={provenance}
+            onClose={() => setSelectedNodeId(null)}
+          />
         )}
       </div>
       {!live && <Scrubber replay={replay} count={steps.length} />}
@@ -124,84 +136,6 @@ function Scrubber({ replay, count }: { replay: ReturnType<typeof useRunReplay>; 
       >
         {replay.cursor < 0 ? "idle" : `${replay.cursor + 1} / ${count}`}
       </span>
-    </div>
-  );
-}
-
-function NodeInspector({ node, onClose }: { node: ConstNode; onClose: () => void }) {
-  const d = node.data;
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: "var(--space-3)",
-        right: "var(--space-3)",
-        width: 240,
-        background: "var(--paper)",
-        border: "1px solid var(--line)",
-        borderRadius: T.radius.lg,
-        boxShadow: T.shadow.s2,
-        padding: "12px 14px",
-        zIndex: 5,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 8,
-        }}
-      >
-        <Badge tone="accent">{d.kind}</Badge>
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--mute)",
-            cursor: "pointer",
-            fontSize: 16,
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <div
-        style={{
-          fontWeight: 700,
-          fontSize: T.fz.lg,
-          marginBottom: 4,
-          fontFamily: d.kind === "tool" ? T.font.mono : T.font.sans,
-        }}
-      >
-        {d.label}
-      </div>
-      {d.agentLabel && (
-        <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>tool of · {d.agentLabel}</div>
-      )}
-      {d.capabilityName && (
-        <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>
-          capability · {d.capabilityName}
-        </div>
-      )}
-      {d.blast && (
-        <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>blast · {d.blast}</div>
-      )}
-      {d.sub && <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>{d.sub}</div>}
-      {d.resultChip && (
-        <div
-          style={{
-            marginTop: 8,
-            fontFamily: T.font.mono,
-            fontSize: T.fz.micro,
-            color: "var(--ink-2)",
-          }}
-        >
-          {d.resultChip}
-        </div>
-      )}
     </div>
   );
 }

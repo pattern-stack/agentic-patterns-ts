@@ -1,0 +1,434 @@
+/**
+ * The node inspector slide-over. Opens on node click; four tabs — I/O · Tokens ·
+ * Provenance · Lens. Escape / scrim close. Adapted from swe-brain's NodeInspector,
+ * re-pointed at OUR algebra: the Provenance tab names which SLOT authored the
+ * node — Agent = Role × Mission, Capability = Toolbox, tool ← its Toolbox — which
+ * IS this framework's core composition algebra, so it reads truest here.
+ *
+ * Provenance degrades gracefully: it always shows the derived slot mapping, and
+ * enriches with the real `/agents/:id/composition` chip when the surface passes
+ * one (the live Run surface does; the demo does not).
+ */
+import type { ReactNode } from "react";
+import { useEffect, useState } from "react";
+import type { ConstNode } from "../graph/constellation-model";
+import type { TraceStep } from "../graph/types";
+import { T } from "../ui/tokens";
+
+const PANEL_W = 344;
+
+type Tab = "io" | "tok" | "prov" | "lens";
+const TABS: { value: Tab; label: string }[] = [
+  { value: "io", label: "I/O" },
+  { value: "tok", label: "Tokens" },
+  { value: "prov", label: "Provenance" },
+  { value: "lens", label: "Lens" },
+];
+
+/** Optional run framing for the agent-node I/O tab. */
+export interface RunMeta {
+  request?: string;
+  answer?: string;
+  systemPrompt?: string;
+}
+
+/** Real provenance chip for a slot (from /composition), keyed by node id. */
+export interface ProvenanceChip {
+  source?: string;
+  origin?: string;
+  label?: string;
+}
+export type ProvenanceMap = Record<string, ProvenanceChip>;
+
+function Eyebrow({ children }: { children: string }) {
+  return (
+    <div
+      style={{
+        fontSize: T.fz.micro,
+        fontFamily: T.font.mono,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: "var(--mute)",
+        marginBottom: 4,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MonoBlock({ value }: { value: unknown }) {
+  const text =
+    typeof value === "string" ? value : value == null ? "—" : JSON.stringify(value, null, 2);
+  return (
+    <pre
+      style={{
+        margin: 0,
+        padding: 10,
+        background: "var(--fill)",
+        border: "1px solid var(--line)",
+        borderRadius: T.radius.md,
+        fontFamily: T.font.mono,
+        fontSize: T.fz.micro,
+        color: "var(--ink-2)",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        maxHeight: 220,
+        overflow: "auto",
+      }}
+    >
+      {text}
+    </pre>
+  );
+}
+
+function KV({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <span style={{ fontSize: T.fz.small, color: "var(--mute)" }}>{label}</span>
+      <span style={{ fontFamily: T.font.mono, fontSize: T.fz.small, color: "var(--ink)" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <Eyebrow>{title}</Eyebrow>
+      {children}
+    </div>
+  );
+}
+
+/** find this tool node's call + result steps (by tool name, owning agent if set). */
+function toolSteps(
+  steps: TraceStep[],
+  d: ConstNode["data"],
+): { call?: TraceStep; result?: TraceStep } {
+  const owns = (s: TraceStep) =>
+    s.tool === d.toolName && (d.agentLabel == null || s.agent === d.agentLabel);
+  return {
+    call: steps.find((s) => s.kind === "tool_call" && owns(s)),
+    result: steps.find((s) => s.kind === "tool_result" && owns(s)),
+  };
+}
+
+/** aggregate run totals from the trace (mirrors the HUD readout). */
+function runTotals(steps: TraceStep[]) {
+  const models = steps.filter((s) => s.kind === "model");
+  const finish = [...steps].reverse().find((s) => s.kind === "finish");
+  return {
+    iterations: steps.reduce((m, s) => Math.max(m, s.iter), 0),
+    toolCalls: steps.filter((s) => s.kind === "tool_call").length,
+    inputTokens: [...models].reverse().find((s) => s.ctxTokens != null)?.ctxTokens ?? 0,
+    outputTokens: models.reduce((sum, s) => sum + (s.outTokens ?? 0), 0),
+    totalMs: steps.reduce((sum, s) => sum + (s.ms || 0), 0),
+    finishReason: finish?.status === "error" ? "error" : "stop",
+  };
+}
+
+function IOTab({
+  node,
+  steps,
+  runMeta,
+}: {
+  node: ConstNode;
+  steps: TraceStep[];
+  runMeta?: RunMeta;
+}) {
+  const d = node.data;
+  if (d.kind === "tool") {
+    const { call, result } = toolSteps(steps, d);
+    return (
+      <>
+        <Section title="Arguments">
+          <MonoBlock value={call?.args ?? "—"} />
+        </Section>
+        <Section title="Result">
+          <MonoBlock value={result?.output ?? "—"} />
+        </Section>
+      </>
+    );
+  }
+  if (d.kind === "capability") {
+    return (
+      <Section title="Composition">
+        <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.5 }}>
+          <strong>{d.label}</strong> arms the run's {d.sub ?? "tools"}. In the algebra a Capability
+          = Toolbox (+ optional Manual + Playbook).
+        </div>
+      </Section>
+    );
+  }
+  // agent / sub-agent
+  return (
+    <>
+      <Section title="System prompt">
+        <MonoBlock value={runMeta?.systemPrompt ?? "—"} />
+      </Section>
+      <Section title="Request">
+        <MonoBlock value={runMeta?.request ?? "—"} />
+      </Section>
+      <Section title="Final answer">
+        <MonoBlock value={runMeta?.answer ?? "—"} />
+      </Section>
+    </>
+  );
+}
+
+function TokensTab({ node, steps }: { node: ConstNode; steps: TraceStep[] }) {
+  const d = node.data;
+  if (d.kind === "tool") {
+    const { result } = toolSteps(steps, d);
+    return (
+      <Section title="Latency">
+        <KV label="duration" value={result ? `${result.ms}ms` : "—"} />
+        <KV label="blast" value={d.blast ?? "—"} />
+        <KV label="result" value={result?.note ?? "—"} />
+      </Section>
+    );
+  }
+  const t = runTotals(steps);
+  return (
+    <Section title="Run totals">
+      <KV label="iterations" value={String(t.iterations)} />
+      <KV label="tool calls" value={String(t.toolCalls)} />
+      <KV label="input tokens" value={String(t.inputTokens)} />
+      <KV label="output tokens" value={String(t.outputTokens)} />
+      <KV label="total" value={`${(t.totalMs / 1000).toFixed(1)}s`} />
+      <KV label="finish" value={t.finishReason} />
+    </Section>
+  );
+}
+
+function ProvenanceTab({ node, chip }: { node: ConstNode; chip?: ProvenanceChip }) {
+  const d = node.data;
+  const derived =
+    d.kind === "agent"
+      ? { slot: "Agent", what: "Role × Mission", via: "agent registration" }
+      : d.kind === "capability"
+        ? {
+            slot: "Capability",
+            what: `Toolbox · ${d.capabilityName ?? d.label}`,
+            via: "role.capabilities[]",
+          }
+        : d.kind === "tool"
+          ? {
+              slot: "Tool",
+              what: `armed by ${d.capabilityName ?? d.agentLabel ?? "a toolbox"}`,
+              via: "Toolbox.getToolSchemas()",
+            }
+          : { slot: "Sub-agent", what: "hand-off target", via: "composition" };
+  return (
+    <Section title="Authored by slot">
+      <div
+        style={{
+          border: "1px solid var(--line)",
+          borderRadius: T.radius.md,
+          padding: 12,
+          background: "var(--paper)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
+        <div style={{ fontSize: T.fz.md, fontWeight: 600, color: "var(--ink)" }}>
+          {derived.slot}
+        </div>
+        <div style={{ fontSize: T.fz.small, color: "var(--ink-2)" }}>{derived.what}</div>
+        <div style={{ fontFamily: T.font.mono, fontSize: T.fz.micro, color: "var(--mute)" }}>
+          via {derived.via}
+        </div>
+        {chip && (chip.source || chip.origin || chip.label) && (
+          <div
+            style={{
+              marginTop: 6,
+              paddingTop: 6,
+              borderTop: "1px dashed var(--line)",
+              fontFamily: T.font.mono,
+              fontSize: T.fz.micro,
+              color: "var(--ink-2)",
+            }}
+          >
+            {chip.label ?? chip.origin ?? chip.source}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function LensTab() {
+  return (
+    <div
+      style={{
+        border: "1px dashed var(--line)",
+        borderRadius: T.radius.md,
+        padding: 14,
+        background: "var(--fill)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ fontSize: T.fz.small, fontWeight: 600, color: "var(--ink)" }}>
+        Slot-discipline Lens
+      </div>
+      <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.5 }}>
+        Per-slot discipline: <strong>CLEAN</strong> · <strong>IGNORED</strong> (carried but violated
+        — a model signal) · <strong>ABSENT</strong> (never reached the model — a slot bug). Lands
+        with the Runs · Audit slice.
+      </div>
+    </div>
+  );
+}
+
+export function NodeInspector({
+  node,
+  steps,
+  runMeta,
+  provenance,
+  onClose,
+}: {
+  node: ConstNode;
+  steps: TraceStep[];
+  runMeta?: RunMeta;
+  provenance?: ProvenanceMap;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState<Tab>("io");
+  const d = node.data;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div style={{ position: "absolute", inset: 0, zIndex: 6, display: "flex" }}>
+      {/* scrim — click to dismiss */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop; Escape closes (keydown above) + the header × is the keyboard path. */}
+      <div
+        onClick={onClose}
+        style={{ flex: 1, background: "color-mix(in oklch, var(--ink) 8%, transparent)" }}
+      />
+      <aside
+        style={{
+          width: PANEL_W,
+          flex: "none",
+          background: "var(--paper)",
+          borderLeft: "1px solid var(--line)",
+          boxShadow: T.shadow.s3,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
+            padding: 16,
+            borderBottom: "1px solid var(--line)",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <Eyebrow>{d.kind}</Eyebrow>
+            <div
+              style={{
+                fontSize: T.fz.lg,
+                fontWeight: 600,
+                color: "var(--ink)",
+                fontFamily: d.kind === "tool" ? T.font.mono : T.font.sans,
+              }}
+            >
+              {d.label}
+            </div>
+            {d.blast && (
+              <div style={{ marginTop: 6, fontSize: T.fz.micro, color: "var(--mute)" }}>
+                blast · {d.blast}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close inspector"
+            style={{
+              border: "1px solid var(--line)",
+              background: "var(--paper)",
+              borderRadius: T.radius.sm,
+              padding: 4,
+              cursor: "pointer",
+              color: "var(--ink-2)",
+              lineHeight: 1,
+              fontSize: 14,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* segmented tabs */}
+        <div style={{ padding: "12px 16px 0" }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 3,
+              background: "var(--fill)",
+              padding: 3,
+              borderRadius: T.radius.md,
+            }}
+          >
+            {TABS.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                onClick={() => setTab(t.value)}
+                style={{
+                  flex: 1,
+                  border: "none",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: T.fz.micro,
+                  padding: "5px 8px",
+                  borderRadius: T.radius.sm,
+                  background: tab === t.value ? "var(--paper)" : "transparent",
+                  color: tab === t.value ? "var(--ink)" : "var(--mute)",
+                  fontWeight: tab === t.value ? 600 : 500,
+                  boxShadow: tab === t.value ? T.shadow.s1 : "none",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            minHeight: 0,
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
+          {tab === "io" && <IOTab node={node} steps={steps} runMeta={runMeta} />}
+          {tab === "tok" && <TokensTab node={node} steps={steps} />}
+          {tab === "prov" && <ProvenanceTab node={node} chip={provenance?.[node.id]} />}
+          {tab === "lens" && <LensTab />}
+        </div>
+      </aside>
+    </div>
+  );
+}

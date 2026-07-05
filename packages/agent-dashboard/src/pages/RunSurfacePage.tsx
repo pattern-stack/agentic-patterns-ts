@@ -9,9 +9,21 @@
  */
 import { useMemo } from "react";
 import { GraphPanel } from "../components/GraphPanel";
+import type { RunMeta } from "../constellation/NodeInspector";
 import type { GraphSource } from "../graph/composition";
-import { SAMPLE_EVENTS, SAMPLE_REQUEST } from "../graph/sample-run-trace";
+import {
+  SAMPLE_ANSWER,
+  SAMPLE_EVENTS,
+  SAMPLE_REQUEST,
+  SAMPLE_SYSTEM_PROMPT,
+} from "../graph/sample-run-trace";
 import { T } from "../ui/tokens";
+
+const RUN_META: RunMeta = {
+  request: SAMPLE_REQUEST,
+  answer: SAMPLE_ANSWER,
+  systemPrompt: SAMPLE_SYSTEM_PROMPT,
+};
 
 export function RunSurfacePage() {
   const source = useMemo<GraphSource>(
@@ -40,7 +52,7 @@ export function RunSurfacePage() {
       </div>
       <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>{SAMPLE_REQUEST}</div>
       <div style={{ height: 520 }}>
-        <GraphPanel source={source} runKey="demo" />
+        <GraphPanel source={source} runKey="demo" runMeta={RUN_META} />
       </div>
     </div>
   );

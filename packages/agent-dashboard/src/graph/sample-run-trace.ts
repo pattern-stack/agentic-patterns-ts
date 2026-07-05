@@ -25,6 +25,11 @@ export const SAMPLE_ANSWER =
   "and a **vendor security questionnaire** from acme. Both trace back to Monday's planning thread; " +
   "nothing else is material. Want me to draft a reply to the questionnaire?";
 
+export const SAMPLE_SYSTEM_PROMPT =
+  "You are retrieval-analyst — surface what changed this week across the workspace.\n" +
+  "Mission: sweep recent threads + meetings, curate the material few, and recap plainly.\n" +
+  "Capabilities: query-surface (search · fetch · curate). Cite ids; never invent rows.";
+
 /** The exact live SSE frames (camelCase payloads) a real run of the agent emits. */
 export const SAMPLE_EVENTS: EventLite[] = [
   { type: "message.start", seq: 1, agentName: "retrieval-analyst" },
