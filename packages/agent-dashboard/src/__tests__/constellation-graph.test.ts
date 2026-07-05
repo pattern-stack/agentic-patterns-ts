@@ -388,10 +388,11 @@ describe("computeFrame — single-agent per-frame fold", () => {
     });
   });
 
-  it("at the tool_result cursor (3): result chip surfaces the row note", () => {
+  it("at the tool_result cursor (3): result card summarizes the returned items", () => {
     const f = computeFrame(steps, 3, graph);
     expect(f.nodeStates[TOOL]).toBe("running");
-    expect(f.resultChips[TOOL]).toBe("2 rows");
+    // richResult lists the items by their human label (id here) rather than a count.
+    expect(f.resultChips[TOOL]).toBe("a · b");
     expect(sorted(f.activeEdgeIds)).toEqual([SPOKE]);
   });
 

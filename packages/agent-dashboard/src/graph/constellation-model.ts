@@ -38,6 +38,9 @@ export interface ConstNodeData {
   agentLabel?: string;
   agentId?: string;
   gated?: boolean;
+  /** outward unit vector for an orbit tool — the label + drifting result card sit
+   *  along it, away from the parent. Absent for columnar layouts (label below). */
+  labelDir?: { x: number; y: number };
   // per-frame overlay (set by the surface each render):
   state?: RunState;
   reveal?: ToolReveal;
@@ -189,10 +192,43 @@ export interface Frame {
   };
 }
 
-function firstLine(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  const s = typeof value === "string" ? value : JSON.stringify(value);
-  return (s.split("\n")[0] ?? "").slice(0, 48);
+/** cursor steps a tool's floating result card lingers after its result lands. */
+const RESULT_WINDOW = 2;
+
+/** A short human label for one result item (subject / title / summary / …). */
+function itemLabel(o: unknown): string {
+  if (o && typeof o === "object") {
+    const r = o as Record<string, unknown>;
+    const v = r.subject ?? r.title ?? r.summary ?? r.name ?? r.question ?? r.id;
+    return typeof v === "string" ? v : "";
+  }
+  return typeof o === "string" ? o : "";
+}
+
+/**
+ * A rich-but-compact result summary for the floating card — the first couple of
+ * items by their human label + "+N more" (or a couple of scalar fields), rather
+ * than the raw payload. Substance without a JSON dump.
+ */
+function richResult(output: unknown, note?: string): string {
+  const clip = (s: string) => (s.length > 30 ? `${s.slice(0, 29)}…` : s);
+  const fromList = (arr: unknown[]): string => {
+    const labels = arr.slice(0, 2).map(itemLabel).filter(Boolean).map(clip);
+    const more = arr.length - labels.length;
+    return labels.join(" · ") + (more > 0 ? ` · +${more} more` : "");
+  };
+  if (Array.isArray(output)) return output.length ? fromList(output) : (note ?? "no rows");
+  if (output && typeof output === "object") {
+    const r = output as Record<string, unknown>;
+    const arr = Object.values(r).find((v) => Array.isArray(v)) as unknown[] | undefined;
+    if (arr?.length) return fromList(arr);
+    const parts = Object.entries(r)
+      .filter(([, v]) => typeof v === "string" || typeof v === "number")
+      .slice(0, 2)
+      .map(([k, v]) => `${k}: ${clip(String(v))}`);
+    return parts.join(" · ") || (note ?? "result");
+  }
+  return note ?? (typeof output === "string" ? clip(output) : "ok");
 }
 
 const edgeKey = (s: string, t: string) => `e:${s}->${t}`;
@@ -290,9 +326,12 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
             : "complete"
           : "pending";
 
-    if (onThisTool && here?.kind === "tool_result") {
-      // prefer the short note ("4 rows") over the raw JSON so the chip stays tiny.
-      resultChips[n.id] = (here?.note ?? "") || firstLine(here?.output);
+    // floating result card: present for a short window AFTER the tool's result,
+    // so it can drift off + fade on its own (longer than the step, without
+    // pausing playback). Cleared once the cursor moves well past it.
+    if (lastResultSeen >= 0 && clamped - lastResultSeen <= RESULT_WINDOW) {
+      const rs = steps[lastResultSeen];
+      resultChips[n.id] = richResult(rs?.output, rs?.note);
     }
 
     // light the edge(s) into this tool (agent→tool for chain, capability→tool for composition)

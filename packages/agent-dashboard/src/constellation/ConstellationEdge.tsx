@@ -88,8 +88,9 @@ export function ConstellationEdge(props: EdgeProps) {
             "stroke var(--motion-mid) var(--ease-out), opacity var(--motion-mid) var(--ease-out)",
         }}
       />
-      {/* the "data flows" particle — only on an active hand-off (the chain step) */}
-      {active && kind === "handoff" && (
+      {/* the "data visibly flows" particle — on EVERY active edge (tool spoke,
+          tether, or hand-off), a lit dot travelling source→target along the wire */}
+      {active && (
         <circle r={3} fill="var(--accent)">
           <animateMotion dur="1s" repeatCount="indefinite" path={path} />
         </circle>
