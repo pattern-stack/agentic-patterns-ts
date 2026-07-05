@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/cli",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "agentic \u2014 CLI for running agent projects. Crawls ./agents/, wires observability, serves chat + admin dashboard.",
   "license": "MIT",
   "type": "module",
@@ -40,7 +40,6 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "@agentic-patterns/dashboard": "workspace:^",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
     "tsup": "^8.3.0",

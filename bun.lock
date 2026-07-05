@@ -20,7 +20,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.10.0",
+      "version": "0.10.1",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -36,7 +36,6 @@
         "tsx": "^4.21.0",
       },
       "devDependencies": {
-        "@agentic-patterns/dashboard": "workspace:^",
         "@types/better-sqlite3": "^7.6.13",
         "@types/node": "^25.6.0",
         "tsup": "^8.3.0",
@@ -84,7 +83,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.10.0",
+      "version": "0.10.1",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/provider": "^2.0.0",
@@ -120,7 +119,7 @@
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.10.0",
+      "version": "0.10.1",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@agentic-patterns/runtime": "workspace:^",

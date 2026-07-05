@@ -2,11 +2,22 @@
  * Optional-dep loader for the SQLite-backed `EventStore` (and `RunStore` /
  * `EvalStore`, which extend it).
  *
- * `better-sqlite3` is declared as an optional peer dep on @agentic-patterns/runtime
- * so library consumers don't pay the native-binary cost unless they want
- * durable telemetry. Callers (typically the `ap playground` CLI) invoke
- * `loadEventStore()` / `loadRunStore()` / `loadEvalStore()` to wire one up if
- * available, and fall back to an in-memory-only setup otherwise.
+ * The store classes are DRIVER-AGNOSTIC: they take an injected `Database`
+ * constructor and use only the portable `.exec` / `.prepare` surface (never
+ * better-sqlite3's `.pragma()`). These loaders pick the right driver for the
+ * host runtime so persistence works out of the box on both:
+ *
+ *   • Node → `better-sqlite3` (declared as an optional peer dep, so library
+ *     consumers don't pay the native-binary cost unless they want durable
+ *     telemetry).
+ *   • Bun  → `bun:sqlite` (built in). `better-sqlite3` IMPORTS under Bun but
+ *     throws at `new Database()` ("not yet supported in Bun"), so under Bun we
+ *     never touch it — we use the native driver, no compiled dep required. This
+ *     is what lets `ap playground` persist eval/run/event data under Bun.
+ *
+ * Callers (typically the `ap playground` CLI) invoke `loadEventStore()` /
+ * `loadRunStore()` / `loadEvalStore()` to wire one up if available, and fall
+ * back to an in-memory-only setup otherwise.
  */
 
 import type { EvalStore } from "./eval-store.js";
@@ -16,40 +27,79 @@ import type { RunStore } from "./run-store.js";
 /** Inputs for {@link loadEventStore}. The `Database` field is auto-resolved. */
 export type LoadEventStoreOptions = Omit<EventStoreOptions, "Database">;
 
+/** True when running under the Bun runtime (its built-in `bun:sqlite` is available). */
+function isBun(): boolean {
+  return (
+    typeof (globalThis as { Bun?: unknown }).Bun !== "undefined" ||
+    typeof process.versions.bun === "string"
+  );
+}
+
+/** A resolved SQLite `Database` constructor plus its driver name (for banners). */
+interface ResolvedDriver {
+  Database: unknown;
+  driver: string;
+}
+
+/**
+ * Resolve a SQLite `Database` constructor for the current runtime — `bun:sqlite`
+ * under Bun, `better-sqlite3` under Node. Never throws: returns `{ reason }` when
+ * the driver can't be loaded or doesn't expose a constructor, so the caller can
+ * soft-degrade to in-memory.
+ */
+async function resolveDatabase(): Promise<ResolvedDriver | { reason: string }> {
+  if (isBun()) {
+    try {
+      // `bun:sqlite` is a Bun built-in; the import only resolves under Bun. It is
+      // marked `external` in the runtime tsup build so the bundler leaves it as a
+      // live dynamic import rather than trying (and failing) to resolve it.
+      // Specifier widened to `string` so tsc skips module resolution (no
+      // `bun:sqlite` types under Node); the literal survives type-stripping,
+      // and tsup marks it `external`, so the live import is kept under Bun.
+      const mod = await import("bun:sqlite" as string);
+      const Database = (mod as { Database?: unknown }).Database;
+      if (typeof Database !== "function") {
+        return { reason: "bun:sqlite did not expose a Database constructor" };
+      }
+      return { Database, driver: "bun:sqlite" };
+    } catch (err) {
+      return { reason: `bun:sqlite not loadable (${(err as Error).message ?? "unknown"})` };
+    }
+  }
+
+  try {
+    const mod = await import("better-sqlite3");
+    const Database = (mod as { default?: unknown }).default ?? mod;
+    if (typeof Database !== "function") {
+      return { reason: "better-sqlite3 module did not expose a constructor" };
+    }
+    return { Database, driver: "better-sqlite3" };
+  } catch (err) {
+    return { reason: `better-sqlite3 not installed (${(err as Error).message ?? "unknown"})` };
+  }
+}
+
 /** Result of {@link loadEventStore}: store + diagnostic info. */
 export interface LoadEventStoreResult {
-  /** Live store if better-sqlite3 was resolvable. */
+  /** Live store if a SQLite driver was resolvable. */
   store?: EventStore;
-  /** True when the optional dep is missing or initialization failed. */
+  /** True when no driver could be loaded or initialization failed. */
   unavailable: boolean;
   /** Human-readable reason; surfaced in the CLI banner. */
   reason: string;
 }
 
 /**
- * Attempt to instantiate an {@link EventStore} backed by SQLite.
+ * Attempt to instantiate an {@link EventStore} backed by SQLite (bun:sqlite under
+ * Bun, better-sqlite3 under Node).
  *
- * Returns `{ unavailable: true }` with a reason if better-sqlite3 cannot be
- * loaded. The caller decides whether that's fatal or a soft degradation
- * (default: soft).
+ * Returns `{ unavailable: true }` with a reason if no driver can be loaded. The
+ * caller decides whether that's fatal or a soft degradation (default: soft).
  */
 export async function loadEventStore(opts: LoadEventStoreOptions): Promise<LoadEventStoreResult> {
-  let Database: unknown;
-  try {
-    const mod = await import("better-sqlite3");
-    Database = (mod as { default?: unknown }).default ?? mod;
-  } catch (err) {
-    return {
-      unavailable: true,
-      reason: `better-sqlite3 not installed (${(err as Error).message ?? "unknown"})`,
-    };
-  }
-
-  if (typeof Database !== "function") {
-    return {
-      unavailable: true,
-      reason: "better-sqlite3 module did not expose a constructor",
-    };
+  const resolved = await resolveDatabase();
+  if ("reason" in resolved) {
+    return { unavailable: true, reason: resolved.reason };
   }
 
   const { EventStore } = await import("./event-store.js");
@@ -57,9 +107,13 @@ export async function loadEventStore(opts: LoadEventStoreOptions): Promise<LoadE
     const store = new EventStore({
       ...opts,
       // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
-      Database: Database as any,
+      Database: resolved.Database as any,
     });
-    return { store, unavailable: false, reason: `connected to ${opts.path}` };
+    return {
+      store,
+      unavailable: false,
+      reason: `connected to ${opts.path} via ${resolved.driver}`,
+    };
   } catch (err) {
     return {
       unavailable: true,
@@ -70,9 +124,9 @@ export async function loadEventStore(opts: LoadEventStoreOptions): Promise<LoadE
 
 /** Result of {@link loadRunStore}: store + diagnostic info. */
 export interface LoadRunStoreResult {
-  /** Live store if better-sqlite3 was resolvable. */
+  /** Live store if a SQLite driver was resolvable. */
   store?: RunStore;
-  /** True when the optional dep is missing or initialization failed. */
+  /** True when no driver could be loaded or initialization failed. */
   unavailable: boolean;
   /** Human-readable reason; surfaced in the CLI banner. */
   reason: string;
@@ -80,30 +134,13 @@ export interface LoadRunStoreResult {
 
 /**
  * Attempt to instantiate a {@link RunStore} backed by SQLite. Exact mirror of
- * {@link loadEventStore} — same optional-dep dance, `RunStore` instead of
+ * {@link loadEventStore} — same driver resolution, `RunStore` instead of
  * `EventStore`.
- *
- * Returns `{ unavailable: true }` with a reason if better-sqlite3 cannot be
- * loaded. The caller decides whether that's fatal or a soft degradation
- * (default: soft).
  */
 export async function loadRunStore(opts: LoadEventStoreOptions): Promise<LoadRunStoreResult> {
-  let Database: unknown;
-  try {
-    const mod = await import("better-sqlite3");
-    Database = (mod as { default?: unknown }).default ?? mod;
-  } catch (err) {
-    return {
-      unavailable: true,
-      reason: `better-sqlite3 not installed (${(err as Error).message ?? "unknown"})`,
-    };
-  }
-
-  if (typeof Database !== "function") {
-    return {
-      unavailable: true,
-      reason: "better-sqlite3 module did not expose a constructor",
-    };
+  const resolved = await resolveDatabase();
+  if ("reason" in resolved) {
+    return { unavailable: true, reason: resolved.reason };
   }
 
   const { RunStore } = await import("./run-store.js");
@@ -111,9 +148,13 @@ export async function loadRunStore(opts: LoadEventStoreOptions): Promise<LoadRun
     const store = new RunStore({
       ...opts,
       // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
-      Database: Database as any,
+      Database: resolved.Database as any,
     });
-    return { store, unavailable: false, reason: `connected to ${opts.path}` };
+    return {
+      store,
+      unavailable: false,
+      reason: `connected to ${opts.path} via ${resolved.driver}`,
+    };
   } catch (err) {
     return {
       unavailable: true,
@@ -124,9 +165,9 @@ export async function loadRunStore(opts: LoadEventStoreOptions): Promise<LoadRun
 
 /** Result of {@link loadEvalStore}: store + diagnostic info. */
 export interface LoadEvalStoreResult {
-  /** Live store if better-sqlite3 was resolvable. */
+  /** Live store if a SQLite driver was resolvable. */
   store?: EvalStore;
-  /** True when the optional dep is missing or initialization failed. */
+  /** True when no driver could be loaded or initialization failed. */
   unavailable: boolean;
   /** Human-readable reason; surfaced in the CLI banner. */
   reason: string;
@@ -134,30 +175,13 @@ export interface LoadEvalStoreResult {
 
 /**
  * Attempt to instantiate an {@link EvalStore} backed by SQLite. Exact mirror of
- * {@link loadRunStore} — same optional-dep dance, `EvalStore` instead of
+ * {@link loadRunStore} — same driver resolution, `EvalStore` instead of
  * `RunStore`.
- *
- * Returns `{ unavailable: true }` with a reason if better-sqlite3 cannot be
- * loaded. The caller decides whether that's fatal or a soft degradation
- * (default: soft).
  */
 export async function loadEvalStore(opts: LoadEventStoreOptions): Promise<LoadEvalStoreResult> {
-  let Database: unknown;
-  try {
-    const mod = await import("better-sqlite3");
-    Database = (mod as { default?: unknown }).default ?? mod;
-  } catch (err) {
-    return {
-      unavailable: true,
-      reason: `better-sqlite3 not installed (${(err as Error).message ?? "unknown"})`,
-    };
-  }
-
-  if (typeof Database !== "function") {
-    return {
-      unavailable: true,
-      reason: "better-sqlite3 module did not expose a constructor",
-    };
+  const resolved = await resolveDatabase();
+  if ("reason" in resolved) {
+    return { unavailable: true, reason: resolved.reason };
   }
 
   const { EvalStore } = await import("./eval-store.js");
@@ -165,9 +189,13 @@ export async function loadEvalStore(opts: LoadEventStoreOptions): Promise<LoadEv
     const store = new EvalStore({
       ...opts,
       // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
-      Database: Database as any,
+      Database: resolved.Database as any,
     });
-    return { store, unavailable: false, reason: `connected to ${opts.path}` };
+    return {
+      store,
+      unavailable: false,
+      reason: `connected to ${opts.path} via ${resolved.driver}`,
+    };
   } catch (err) {
     return {
       unavailable: true,
