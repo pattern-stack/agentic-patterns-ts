@@ -132,6 +132,10 @@ export function eventsToSteps(
   let n = 0;
   let sawFirstStart = false;
   let curAgent: string | undefined;
+  // index of a provisional ("thinking") model step pushed on llm.start, awaiting
+  // its llm.end to finalize in place (live SSE). -1 = none pending. Replay streams
+  // that carry no llm.start skip straight to the push fallback in llm.end.
+  let pendingModelIdx = -1;
   const push = (s: Omit<TraceStep, "seq">) => steps.push({ ...s, seq: ++n });
 
   // the last terminal completion in the stream → the `finish` step (no per-phase
@@ -168,18 +172,48 @@ export function eventsToSteps(
         iter = raw === undefined ? iter + 1 : raw + 1; // runtime emits 0-based
         break;
       }
-      case "llm.end":
+      case "llm.start":
+        // Live SSE: the model call is in flight — push a provisional "thinking"
+        // step so the paced cursor has somewhere to land (and the agent node
+        // pulses) during the call, instead of looking frozen on the prior step.
+        // Finalized in place when llm.end arrives. (Replay streams usually omit
+        // llm.start, so this is largely a live-stream affordance.)
         push({
           iter: iter || 1,
           kind: "model",
           label: `Model call · iteration ${iter || 1}`,
-          ms: durMs(col, p),
-          ctxTokens: ctxTok(p),
-          outTokens: outTok(p),
-          detail: planned(p) ? "Planned tool calls for this turn." : "Composed the answer.",
+          ms: 0,
+          detail: "Thinking…",
+          status: "thinking",
           agent: curAgent,
         });
+        pendingModelIdx = steps.length - 1;
         break;
+      case "llm.end": {
+        const detail = planned(p) ? "Planned tool calls for this turn." : "Composed the answer.";
+        const pending = pendingModelIdx >= 0 ? steps[pendingModelIdx] : undefined;
+        if (pending && pending.kind === "model" && pending.status === "thinking") {
+          // finalize the provisional step in place (keeps its seq/position)
+          pending.ms = durMs(col, p);
+          pending.ctxTokens = ctxTok(p);
+          pending.outTokens = outTok(p);
+          pending.detail = detail;
+          pending.status = undefined;
+          pendingModelIdx = -1;
+        } else {
+          push({
+            iter: iter || 1,
+            kind: "model",
+            label: `Model call · iteration ${iter || 1}`,
+            ms: durMs(col, p),
+            ctxTokens: ctxTok(p),
+            outTokens: outTok(p),
+            detail,
+            agent: curAgent,
+          });
+        }
+        break;
+      }
       case "tool.start": {
         const tool = toolNameOf(col, p);
         const meta = tool ? tools.get(tool) : undefined;
@@ -256,7 +290,7 @@ export function eventsToSteps(
           });
         }
         break;
-      // chunk / iteration.end / llm.start / tool.intent / tool.progress /
+      // chunk / iteration.end / tool.intent / tool.progress /
       // reasoning / step.start → no own TraceStep (step.start drives handoff edges,
       // which the constellation derives structurally, not from the flat trace).
       default:

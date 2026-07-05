@@ -29,6 +29,8 @@ const GLYPH: Record<ConstNodeKind, typeof Bot> = {
 const BLAST_DOT = 8;
 const MEDALLION = 15;
 const LABEL_GAP = 6;
+/** how far a result card drifts outward from the tool as it fades. */
+const FLOAT_DIST = 56;
 
 interface Tone {
   border: string;
@@ -64,7 +66,9 @@ function stateTone(state: RunState, active: boolean): Tone {
 
 function nodeOpacity(kind: ConstNodeKind, state: RunState, reveal: ToolReveal | undefined): number {
   if (kind === "tool") {
-    return { hidden: 0, emerging: 0.6, shown: 1, settled: 0.82, gated: 0.4 }[reveal ?? "hidden"];
+    return { hidden: 0, resting: 0.55, emerging: 0.6, shown: 1, settled: 0.82, gated: 0.4 }[
+      reveal ?? "hidden"
+    ];
   }
   if (kind === "agent") return 1; // the anchor is always fully present
   return state === "pending" ? 0.72 : 1;
@@ -72,7 +76,9 @@ function nodeOpacity(kind: ConstNodeKind, state: RunState, reveal: ToolReveal | 
 
 function nodeScale(kind: ConstNodeKind, reveal: ToolReveal | undefined): number {
   if (kind !== "tool") return 1;
-  return { hidden: 0.3, emerging: 0.85, shown: 1, settled: 0.8, gated: 0.82 }[reveal ?? "hidden"];
+  return { hidden: 0.3, resting: 0.64, emerging: 0.85, shown: 1, settled: 0.8, gated: 0.82 }[
+    reveal ?? "hidden"
+  ];
 }
 
 function Medallion({ color, children }: { color: string; children: ReactNode }) {
@@ -110,6 +116,21 @@ export function ConstellationNode(props: NodeProps) {
   const Icon = GLYPH[d.kind];
   const dashed = d.kind === "subagent";
   const hidden = d.kind === "tool" && reveal === "hidden";
+
+  // orbit tools (labelDir set) push their label + result card radially OUTWARD so
+  // they never overlap the parent; columnar tools (no labelDir) label below.
+  const dir = d.labelDir;
+  const out = `calc(100% + ${LABEL_GAP}px)`;
+  const labelPos: CSSProperties =
+    d.kind === "tool" && dir
+      ? Math.abs(dir.x) >= Math.abs(dir.y)
+        ? dir.x >= 0
+          ? { left: out, top: "50%", transform: "translateY(-50%)", textAlign: "left" }
+          : { right: out, top: "50%", transform: "translateY(-50%)", textAlign: "right" }
+        : dir.y >= 0
+          ? { top: out, left: "50%", transform: "translateX(-50%)", textAlign: "center" }
+          : { bottom: out, left: "50%", transform: "translateX(-50%)", textAlign: "center" }
+      : { top: out, left: "50%", transform: "translateX(-50%)", textAlign: "center" };
 
   return (
     <div
@@ -195,59 +216,68 @@ export function ConstellationNode(props: NodeProps) {
         </span>
       )}
 
-      {/* label below the disc (out of flow so it doesn't shift edge anchors) */}
-      <div
-        style={{
-          position: "absolute",
-          top: `calc(100% + ${LABEL_GAP}px)`,
-          left: "50%",
-          transform: "translateX(-50%)",
-          textAlign: "center",
-          whiteSpace: "nowrap",
-          pointerEvents: "none",
-        }}
-      >
+      {/* label (out of flow so it doesn't shift edge anchors). Radial for orbit
+          tools; hidden while a result card is drifting off this tool. */}
+      {!(d.kind === "tool" && d.resultChip) && (
         <div
-          title={d.label}
-          style={{
-            fontSize: T.fz.tiny,
-            fontWeight: 600,
-            color: "var(--ink)",
-            fontFamily: d.kind === "tool" ? T.font.mono : T.font.sans,
-            maxWidth: d.kind === "tool" ? 92 : 120,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {d.label}
-        </div>
-        {d.sub && (
-          <div style={{ fontSize: T.fz.micro, color: "var(--mute)", marginTop: 1 }}>{d.sub}</div>
-        )}
-      </div>
-
-      {/* result chip — the first line of a tool's output, only while it runs */}
-      {d.kind === "tool" && active && d.resultChip && (
-        <span
-          className="const-chip"
           style={{
             position: "absolute",
-            left: `calc(100% + ${LABEL_GAP}px)`,
-            top: "50%",
-            transform: "translateY(-50%)",
+            ...labelPos,
             whiteSpace: "nowrap",
-            fontFamily: T.font.mono,
-            fontSize: T.fz.micro,
-            color: "var(--ink-2)",
-            background: "var(--paper)",
-            border: "1px solid var(--line)",
-            borderRadius: T.radius.sm,
-            padding: "2px 7px",
-            boxShadow: T.shadow.s1,
-            maxWidth: 120,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
+            pointerEvents: "none",
           }}
+        >
+          <div
+            title={d.label}
+            style={{
+              fontSize: T.fz.tiny,
+              fontWeight: 600,
+              color: "var(--ink)",
+              fontFamily: d.kind === "tool" ? T.font.mono : T.font.sans,
+              maxWidth: d.kind === "tool" ? 92 : 120,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {d.label}
+          </div>
+          {d.sub && (
+            <div style={{ fontSize: T.fz.micro, color: "var(--mute)", marginTop: 1 }}>{d.sub}</div>
+          )}
+        </div>
+      )}
+
+      {/* floating result card — originates at the tool, drifts radially OUTWARD
+          (into open space, away from the cluster) and fades; lingers a moment on
+          its own (CSS), so it shows longer than the step without pausing playback. */}
+      {d.kind === "tool" && d.resultChip && (
+        <span
+          key={d.resultChip}
+          className="const-floater"
+          style={
+            {
+              position: "absolute",
+              left: "50%",
+              top: "50%",
+              transform: "translate(-50%, -50%)",
+              maxWidth: 176,
+              whiteSpace: "normal",
+              textAlign: (dir?.x ?? 1) < 0 ? "right" : "left",
+              fontFamily: T.font.mono,
+              fontSize: T.fz.micro,
+              lineHeight: 1.3,
+              color: "var(--ink-2)",
+              background: "var(--paper)",
+              border: "1px solid var(--line)",
+              borderRadius: T.radius.sm,
+              padding: "3px 8px",
+              boxShadow: T.shadow.s1,
+              pointerEvents: "none",
+              zIndex: 5,
+              "--float-x": `${(dir?.x ?? 1) * FLOAT_DIST}px`,
+              "--float-y": `${(dir?.y ?? -0.25) * FLOAT_DIST}px`,
+            } as CSSProperties
+          }
         >
           {d.resultChip}
         </span>

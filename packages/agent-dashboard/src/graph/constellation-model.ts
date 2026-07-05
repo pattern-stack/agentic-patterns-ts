@@ -16,7 +16,9 @@ import type { BlastRadius, CapabilityMeta, CapabilityRecord, TraceStep } from ".
 
 export type ConstNodeKind = "agent" | "capability" | "tool" | "subagent";
 export type RunState = "pending" | "running" | "complete" | "error" | "skipped";
-export type ToolReveal = "hidden" | "emerging" | "shown" | "settled" | "gated";
+// resting = part of the faint declared-composition ring (present from frame one,
+// subordinate); hidden = not shown until used (the execution-chain default).
+export type ToolReveal = "resting" | "hidden" | "emerging" | "shown" | "settled" | "gated";
 export type EdgeKind = "tether" | "tool" | "handoff";
 
 /** Disc diameters per node kind (small circular nodes). */
@@ -38,6 +40,9 @@ export interface ConstNodeData {
   agentLabel?: string;
   agentId?: string;
   gated?: boolean;
+  /** outward unit vector for an orbit tool — the label + drifting result card sit
+   *  along it, away from the parent. Absent for columnar layouts (label below). */
+  labelDir?: { x: number; y: number };
   // per-frame overlay (set by the surface each render):
   state?: RunState;
   reveal?: ToolReveal;
@@ -52,6 +57,8 @@ export interface ConstEdgeData {
   active?: boolean;
   complete?: boolean;
   emerging?: boolean;
+  /** a spoke into a resting (declared-but-unused) tool — faint, not hidden. */
+  resting?: boolean;
   [key: string]: unknown;
 }
 
@@ -176,6 +183,8 @@ export interface Frame {
   activeEdgeIds: Set<string>;
   completeEdgeIds: Set<string>;
   emergingEdgeIds: Set<string>;
+  /** spokes into resting (declared-but-unused) tools — the faint composition ring. */
+  restingEdgeIds: Set<string>;
   resultChips: Record<string, string>;
   hud: {
     phase: string;
@@ -189,10 +198,43 @@ export interface Frame {
   };
 }
 
-function firstLine(value: unknown): string {
-  if (value === undefined || value === null) return "";
-  const s = typeof value === "string" ? value : JSON.stringify(value);
-  return (s.split("\n")[0] ?? "").slice(0, 48);
+/** cursor steps a tool's floating result card lingers after its result lands. */
+const RESULT_WINDOW = 2;
+
+/** A short human label for one result item (subject / title / summary / …). */
+function itemLabel(o: unknown): string {
+  if (o && typeof o === "object") {
+    const r = o as Record<string, unknown>;
+    const v = r.subject ?? r.title ?? r.summary ?? r.name ?? r.question ?? r.id;
+    return typeof v === "string" ? v : "";
+  }
+  return typeof o === "string" ? o : "";
+}
+
+/**
+ * A rich-but-compact result summary for the floating card — the first couple of
+ * items by their human label + "+N more" (or a couple of scalar fields), rather
+ * than the raw payload. Substance without a JSON dump.
+ */
+function richResult(output: unknown, note?: string): string {
+  const clip = (s: string) => (s.length > 30 ? `${s.slice(0, 29)}…` : s);
+  const fromList = (arr: unknown[]): string => {
+    const labels = arr.slice(0, 2).map(itemLabel).filter(Boolean).map(clip);
+    const more = arr.length - labels.length;
+    return labels.join(" · ") + (more > 0 ? ` · +${more} more` : "");
+  };
+  if (Array.isArray(output)) return output.length ? fromList(output) : (note ?? "no rows");
+  if (output && typeof output === "object") {
+    const r = output as Record<string, unknown>;
+    const arr = Object.values(r).find((v) => Array.isArray(v)) as unknown[] | undefined;
+    if (arr?.length) return fromList(arr);
+    const parts = Object.entries(r)
+      .filter(([, v]) => typeof v === "string" || typeof v === "number")
+      .slice(0, 2)
+      .map(([k, v]) => `${k}: ${clip(String(v))}`);
+    return parts.join(" · ") || (note ?? "result");
+  }
+  return note ?? (typeof output === "string" ? clip(output) : "ok");
 }
 
 const edgeKey = (s: string, t: string) => `e:${s}->${t}`;
@@ -204,18 +246,27 @@ const edgeKey = (s: string, t: string) => `e:${s}->${t}`;
  * tool node (owned by one agent) reveals just-in-time when THAT agent invokes it
  * — so tools pop above their agent and light only while actually running.
  */
-export function computeFrame(steps: TraceStep[], cursor: number, graph: Constellation): Frame {
+export function computeFrame(
+  steps: TraceStep[],
+  cursor: number,
+  graph: Constellation,
+  restBase = false,
+): Frame {
   const nodeStates: Record<string, RunState> = {};
   const reveals: Record<string, ToolReveal> = {};
   const resultChips: Record<string, string> = {};
   const activeEdgeIds = new Set<string>();
   const completeEdgeIds = new Set<string>();
   const emergingEdgeIds = new Set<string>();
+  const restingEdgeIds = new Set<string>();
 
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  // declared-composition mode (`restBase`) shows every tool faintly at rest from
+  // frame one; execution-chain mode keeps unused tools hidden until they run.
+  const toolBase: ToolReveal = restBase ? "resting" : "hidden";
   for (const n of graph.nodes) {
     nodeStates[n.id] = "pending";
-    if (n.data.kind === "tool") reveals[n.id] = n.data.gated ? "gated" : "hidden";
+    if (n.data.kind === "tool") reveals[n.id] = n.data.gated ? "gated" : toolBase;
   }
 
   const lastIdx = steps.length - 1;
@@ -273,8 +324,8 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
       (here.kind === "tool_call" || here.kind === "tool_result");
     const lastResultSeen = Math.max(-1, ...results.filter((i) => i <= clamped));
 
-    let reveal: ToolReveal = "hidden";
-    if (clamped < 0 || clamped < decideIdx) reveal = "hidden";
+    let reveal: ToolReveal = toolBase;
+    if (clamped < 0 || clamped < decideIdx) reveal = toolBase;
     else if (clamped < firstCall) reveal = "emerging";
     else if (onThisTool) reveal = "shown";
     else reveal = "settled";
@@ -290,9 +341,12 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
             : "complete"
           : "pending";
 
-    if (onThisTool && here?.kind === "tool_result") {
-      // prefer the short note ("4 rows") over the raw JSON so the chip stays tiny.
-      resultChips[n.id] = (here?.note ?? "") || firstLine(here?.output);
+    // floating result card: present for a short window AFTER the tool's result,
+    // so it can drift off + fade on its own (longer than the step, without
+    // pausing playback). Cleared once the cursor moves well past it.
+    if (lastResultSeen >= 0 && clamped - lastResultSeen <= RESULT_WINDOW) {
+      const rs = steps[lastResultSeen];
+      resultChips[n.id] = richResult(rs?.output, rs?.note);
     }
 
     // light the edge(s) into this tool (agent→tool for chain, capability→tool for composition)
@@ -387,6 +441,14 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
     }
   }
 
+  // ── faint spokes into every resting (declared-but-unused) tool: the
+  //    composition ring reads as wired-up from frame one. ──
+  if (restBase) {
+    for (const e of graph.edges) {
+      if (e.data?.kind === "tool" && reveals[e.target] === "resting") restingEdgeIds.add(e.id);
+    }
+  }
+
   // ── HUD readout ──
   const elapsedMs = seen.reduce((sum, s) => sum + (s.ms || 0), 0);
   const lastModel = [...seen].reverse().find((s) => s.kind === "model");
@@ -411,6 +473,7 @@ export function computeFrame(steps: TraceStep[], cursor: number, graph: Constell
     activeEdgeIds,
     completeEdgeIds,
     emergingEdgeIds,
+    restingEdgeIds,
     resultChips,
     hud: {
       phase,

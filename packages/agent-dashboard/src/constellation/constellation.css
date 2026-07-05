@@ -40,19 +40,31 @@
     box-shadow var(--motion-mid) var(--ease-out);
 }
 
-/* the result chip springs in when a tool node is active */
-@keyframes constChipIn {
-  from {
+/* the result card: springs in at the tool centre, drifts radially OUTWARD (into
+   open space, along --float-x/--float-y) and fades, lingering a beat on its own
+   so it reads longer than the step without pausing playback. */
+@keyframes constFloat {
+  0% {
     opacity: 0;
-    transform: translateY(2px) scale(0.92);
+    transform: translate(-50%, -50%) scale(0.92);
   }
-  to {
+  16% {
     opacity: 1;
-    transform: none;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  68% {
+    opacity: 1;
+    transform: translate(calc(-50% + var(--float-x, 0px)), calc(-50% + var(--float-y, 0px)))
+      scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--float-x, 0px)), calc(-50% + var(--float-y, 0px)))
+      scale(0.98);
   }
 }
-.const-chip {
-  animation: constChipIn var(--motion-mid) var(--ease-out);
+.const-floater {
+  animation: constFloat 2.4s var(--ease-out) forwards;
 }
 
 /* React Flow chrome: let our themed canvas show through. */

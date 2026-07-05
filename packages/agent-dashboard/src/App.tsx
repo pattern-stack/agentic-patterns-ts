@@ -7,6 +7,7 @@ import { ConversationsPage } from "./pages/ConversationsPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { GraphPage } from "./pages/GraphPage";
 import { LivePage } from "./pages/LivePage";
+import { RunSurfacePage } from "./pages/RunSurfacePage";
 import { TokensPage } from "./pages/TokensPage";
 import { ToolsPage } from "./pages/ToolsPage";
 import { AgentLensPage } from "./pages/build/AgentLensPage";
@@ -38,6 +39,7 @@ export function App() {
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/live" element={<LivePage />} />
+          <Route path="/run" element={<RunSurfacePage />} />
           <Route path="/graph" element={<GraphPage />} />
           <Route path="/claude-code" element={<ClaudeCodePage />} />
           <Route path="/conversations" element={<ConversationsPage />} />

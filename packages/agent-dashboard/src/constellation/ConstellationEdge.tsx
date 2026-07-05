@@ -63,14 +63,25 @@ export function ConstellationEdge(props: EdgeProps) {
         ? "color-mix(in oklch, var(--accent) 50%, var(--line))"
         : "var(--line)";
   const strokeWidth = active ? 2 : 1.25;
-  const resting = !active && !complete && !emerging;
+  const idle = !active && !complete && !emerging;
+  // a spoke into a resting (declared-but-unused) tool shows faintly (the
+  // composition ring), instead of the chain default of staying hidden.
+  const restingSpoke = !!data.resting;
   // dashes: active = marching ants; tool spokes + emerging wires are dotted; the
   // hand-off chain + resting tethers are solid.
   const strokeDasharray = active ? "4 4" : kind === "tool" || emerging ? "2 5" : undefined;
-  // opacity: tool spokes stay hidden until their tool reveals; tethers rest faint;
-  // hand-offs are always present.
+  // opacity: idle tool spokes hide (chain) or rest faint (composition); tethers
+  // rest faint; hand-offs are always present.
   const opacity =
-    kind === "tool" && resting ? 0 : emerging ? 0.5 : kind === "tether" && resting ? 0.7 : 1;
+    kind === "tool" && idle
+      ? restingSpoke
+        ? 0.42
+        : 0
+      : emerging
+        ? 0.5
+        : kind === "tether" && idle
+          ? 0.7
+          : 1;
 
   return (
     <>
@@ -88,8 +99,9 @@ export function ConstellationEdge(props: EdgeProps) {
             "stroke var(--motion-mid) var(--ease-out), opacity var(--motion-mid) var(--ease-out)",
         }}
       />
-      {/* the "data flows" particle — only on an active hand-off (the chain step) */}
-      {active && kind === "handoff" && (
+      {/* the "data visibly flows" particle — on EVERY active edge (tool spoke,
+          tether, or hand-off), a lit dot travelling source→target along the wire */}
+      {active && (
         <circle r={3} fill="var(--accent)">
           <animateMotion dur="1s" repeatCount="indefinite" path={path} />
         </circle>

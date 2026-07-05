@@ -240,6 +240,45 @@ describe("eventsToSteps — fold to TraceStep[]", () => {
     expect(steps.at(-1)?.kind).toBe("finish");
   });
 
+  it("folds llm.start into a provisional 'thinking' model step, finalized in place by llm.end", () => {
+    // A live stream that carries llm.start BEFORE llm.end must yield exactly ONE
+    // model step per turn (the provisional step finalized in place), not two.
+    const run: Logical[] = [
+      { type: "message.start", seq: 0, agent: "retrieval-analyst" },
+      { type: "iteration.start", seq: 1, iteration: 0 },
+      { type: "llm.start", seq: 2 },
+      {
+        type: "llm.end",
+        seq: 3,
+        durationMs: 900,
+        inputTokens: 500,
+        outputTokens: 40,
+        finishReason: "stop",
+      },
+      { type: "message.complete", seq: 4 },
+    ];
+    const steps = eventsToSteps(run.map(toLive), tools);
+    const models = steps.filter((s) => s.kind === "model");
+    expect(models).toHaveLength(1);
+    // finalized: real tokens/ms folded in, and the transient 'thinking' status cleared.
+    expect(models[0]).toMatchObject({ kind: "model", ms: 900, ctxTokens: 500, outTokens: 40 });
+    expect(models[0]?.status).toBeUndefined();
+  });
+
+  it("leaves a live 'thinking' model step pending while llm.end has not yet arrived", () => {
+    // Mid-flight (llm.start seen, llm.end not) the model step must be present and
+    // marked 'thinking' so the agent node can pulse during the call.
+    const run: Logical[] = [
+      { type: "message.start", seq: 0, agent: "retrieval-analyst" },
+      { type: "iteration.start", seq: 1, iteration: 0 },
+      { type: "llm.start", seq: 2 },
+    ];
+    const steps = eventsToSteps(run.map(toLive), tools, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.status).toBe("thinking");
+    expect(model?.detail).toBe("Thinking…");
+  });
+
   it("folds a tool error into a rejected/errored result and an errored finish", () => {
     const run: Logical[] = [
       { type: "message.start", seq: 0, agent: "retrieval-analyst" },
@@ -349,10 +388,11 @@ describe("computeFrame — single-agent per-frame fold", () => {
     });
   });
 
-  it("at the tool_result cursor (3): result chip surfaces the row note", () => {
+  it("at the tool_result cursor (3): result card summarizes the returned items", () => {
     const f = computeFrame(steps, 3, graph);
     expect(f.nodeStates[TOOL]).toBe("running");
-    expect(f.resultChips[TOOL]).toBe("2 rows");
+    // richResult lists the items by their human label (id here) rather than a count.
+    expect(f.resultChips[TOOL]).toBe("a · b");
     expect(sorted(f.activeEdgeIds)).toEqual([SPOKE]);
   });
 
@@ -373,6 +413,40 @@ describe("computeFrame — single-agent per-frame fold", () => {
       elapsedMs: 2300,
       phase: "Complete · 2 iters · 1 tool",
     });
+  });
+});
+
+/* ── computeFrame · declared-composition resting ring (restBase) ─────────────── */
+
+describe("computeFrame — declared-composition resting ring", () => {
+  // the declared surface: query-surface arms TWO tools, but the run uses only `search`.
+  const caps: CapabilityMeta[] = [
+    {
+      name: "query-surface",
+      title: "Query Surface",
+      surface: "Query",
+      blastRadius: "read",
+      tools: ["search", "fetch"],
+    },
+  ];
+  const graph = buildConstellation("retrieval-analyst", caps, []);
+  const steps = eventsToSteps(liveSingle, tools); // uses `search` only
+  const last = steps.length - 1;
+  const USED = "tool:query-surface:search";
+  const UNUSED = "tool:query-surface:fetch";
+  const UNUSED_SPOKE = "e:cap:query-surface->tool:query-surface:fetch";
+
+  it("rests the declared-but-unused tool while lighting the used one (restBase=true)", () => {
+    const f = computeFrame(steps, last, graph, true);
+    expect(f.reveals[UNUSED]).toBe("resting"); // faint composition ring, never called
+    expect(f.reveals[USED]).toBe("settled"); // used + done
+    expect([...f.restingEdgeIds]).toContain(UNUSED_SPOKE);
+  });
+
+  it("hides the unused tool in the chain default (restBase=false)", () => {
+    const f = computeFrame(steps, last, graph, false);
+    expect(f.reveals[UNUSED]).toBe("hidden");
+    expect(f.restingEdgeIds.size).toBe(0);
   });
 });
 
