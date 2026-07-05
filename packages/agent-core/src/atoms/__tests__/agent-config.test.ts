@@ -17,7 +17,8 @@ describe("RoleTemplateConfigSchema", () => {
     const parsed = RoleTemplateConfigSchema.parse(minimalRoleTemplate);
     expect(parsed.judgments).toEqual([]);
     expect(parsed.responsibilities).toEqual([]);
-    expect(parsed.defaultModel).toBe("claude-sonnet-4-20250514");
+    // No framework default — an unspecified model is undefined (the runner decides).
+    expect(parsed.defaultModel).toBeUndefined();
     expect(parsed.source).toBe("custom");
     expect(parsed.archetype).toBeNull();
   });
@@ -37,16 +38,18 @@ describe("AgentConfig", () => {
     });
     expect(cfg.data.capabilities).toEqual([]);
     expect(cfg.data.model).toBeNull();
+    // Neither an agent model nor a role default → effective model is undefined.
+    expect(cfg.model).toBeUndefined();
     expect(cfg.data.background.team_context).toEqual({});
     expect(cfg.data.awareness.domains).toEqual([]);
   });
 
   it("effective model falls back to the role template default", () => {
     const cfg = new AgentConfig({
-      roleTemplate: minimalRoleTemplate,
+      roleTemplate: { ...minimalRoleTemplate, defaultModel: "claude-haiku-4-5" },
       mission: { objective: "x" },
     });
-    expect(cfg.model).toBe("claude-sonnet-4-20250514");
+    expect(cfg.model).toBe("claude-haiku-4-5");
   });
 
   it("effective model honors an explicit override", () => {
@@ -75,7 +78,7 @@ describe("AgentConfig", () => {
     });
     const prompt = cfg.toPrompt();
     expect(prompt).toContain("Agent Config: Project Manager");
-    expect(prompt).toContain("Model: claude-sonnet-4-20250514");
+    expect(prompt).toContain("Model: (runner default)");
     expect(prompt).toContain("Capabilities: task-management");
     expect(prompt).toContain("a project manager");
     expect(prompt).toContain("Keep the backlog healthy");

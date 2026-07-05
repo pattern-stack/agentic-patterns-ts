@@ -86,8 +86,9 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
     this.mission = data.mission;
   }
 
-  /** Get the LLM model to use. */
-  getModel(): string {
+  /** Get the LLM model to use, or `undefined` when neither the agent nor its
+   *  role pins one (the runner then supplies it — tier/env/gateway). */
+  getModel(): string | undefined {
     return this._data.model ?? this.role.defaultModel;
   }
 

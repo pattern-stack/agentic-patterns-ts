@@ -71,13 +71,17 @@ export function buildAgentFromConfig(
     return options.resolver.resolve(name, options.ctx);
   });
 
-  const role = new RoleBuilder(rt.name)
+  const roleBuilder = new RoleBuilder(rt.name)
     .withPersona(new Persona(rt.persona))
     .withJudgments(rt.judgments.map((j) => new Judgment(j)))
     .withResponsibilities(rt.responsibilities.map((r) => new Responsibility(r)))
-    .withCapabilities(capabilities)
-    .withDefaultModel(rt.defaultModel)
-    .build();
+    .withCapabilities(capabilities);
+  // Only pin a role default when the config declares one — otherwise leave it
+  // unset so the runner supplies the model.
+  if (rt.defaultModel !== undefined) {
+    roleBuilder.withDefaultModel(rt.defaultModel);
+  }
+  const role = roleBuilder.build();
 
   const builder = new AgentBuilder(role)
     .withBackground(new Background(cfg.data.background))

@@ -53,9 +53,11 @@ async function importOptional(pkg: string, feature: string): Promise<any> {
 // ModelResolver
 // ---------------------------------------------------------------------------
 
-/** Turns a declared model id into a live `LanguageModelV2`. */
+/** Turns a declared model id into a live `LanguageModelV2`. `modelId` may be
+ *  `undefined` when an agent pins no model; a pinned/constant resolver ignores
+ *  it, while an id-driven resolver rejects with a clear error. */
 export interface ModelResolver {
-  resolve(modelId: string): Promise<LanguageModelV2>;
+  resolve(modelId: string | undefined): Promise<LanguageModelV2>;
 }
 
 /** Narrow a constructor arg to a {@link ModelResolver} (vs a `LanguageModelV2`). */
@@ -223,7 +225,18 @@ export class HybridModelResolver implements ModelResolver {
     return this._profiles.has(id);
   }
 
-  resolve(modelId: string): Promise<LanguageModelV2> {
+  resolve(modelId: string | undefined): Promise<LanguageModelV2> {
+    if (!modelId) {
+      return Promise.reject(
+        new Error(
+          [
+            "ModelResolver: the agent declares no model and this runner resolves per-agent models.",
+            "Set one with agent.withModel(id) or role.withDefaultModel(id),",
+            "or run a pinned runner (createRunner with an explicit model/tier, no gateway/resolver).",
+          ].join("\n"),
+        ),
+      );
+    }
     const cached = this._cache.get(modelId);
     if (cached) return cached;
     const built = this._build(modelId);

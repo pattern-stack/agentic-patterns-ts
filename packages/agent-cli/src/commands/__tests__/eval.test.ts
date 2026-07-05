@@ -108,7 +108,7 @@ class LifecycleStubRunner implements RunnerProtocol {
           content: "ok",
           inputTokens: 1,
           outputTokens: 1,
-          model: agent.getModel(),
+          model: agent.getModel() ?? "",
           finishReason: "stop",
         }),
       );

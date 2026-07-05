@@ -243,7 +243,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       content: result.response,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
-      model: agent.getModel(),
+      model: agent.getModel() ?? "",
     });
     yield completeEvent;
   }

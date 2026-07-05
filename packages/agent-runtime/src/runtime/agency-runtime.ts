@@ -241,8 +241,11 @@ export class AgencyRuntime {
 
     const roleBuilder = new RoleBuilder(spec.role)
       .withPersona(persona)
-      .withCapability(messagingCap)
-      .withDefaultModel(spec.model);
+      .withCapability(messagingCap);
+    // Only pin a role default when the spec declares one (model is now optional).
+    if (spec.model !== undefined) {
+      roleBuilder.withDefaultModel(spec.model);
+    }
 
     if (spec.judgment) {
       roleBuilder.withJudgment(new Judgment(spec.judgment));

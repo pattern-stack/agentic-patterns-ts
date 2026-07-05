@@ -343,7 +343,7 @@ describe("loadModelProfiles / createModelResolver", () => {
 
 describe("AgentRunner × ModelResolver", () => {
   it("resolver-backed runner dispatches the agent's declared model", async () => {
-    const asked: string[] = [];
+    const asked: (string | undefined)[] = [];
     const resolver: ModelResolver = {
       resolve: async (id) => {
         asked.push(id);

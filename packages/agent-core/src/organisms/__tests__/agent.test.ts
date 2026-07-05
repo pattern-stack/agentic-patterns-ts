@@ -130,12 +130,21 @@ describe("Agent", () => {
       expect(agent.getModel()).toBe("claude-opus-4-20250514");
     });
 
-    it("falls back to role default model", () => {
+    it("falls back to the role default model when set", () => {
+      const role = new RoleBuilder("Test Role")
+        .withPersona(new Persona({ identity: "tester", tone: "neutral" }))
+        .withDefaultModel("claude-haiku-4-5")
+        .build();
+      const agent = new Agent({ role, mission: makeMission() });
+      expect(agent.getModel()).toBe("claude-haiku-4-5");
+    });
+
+    it("returns undefined when neither the agent nor its role pins a model", () => {
       const agent = new Agent({
         role: makeRole(),
         mission: makeMission(),
       });
-      expect(agent.getModel()).toBe("claude-sonnet-4-20250514");
+      expect(agent.getModel()).toBeUndefined();
     });
   });
 

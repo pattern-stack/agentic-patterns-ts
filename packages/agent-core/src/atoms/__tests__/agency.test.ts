@@ -22,7 +22,8 @@ describe("TransportConfig", () => {
 describe("AgentSpec", () => {
   it("constructs with defaults", () => {
     const a = new AgentSpec({ role: "coder" });
-    expect(a.data.model).toBe("anthropic/claude-sonnet-4-20250514");
+    // No framework default — an unspecified model is undefined (the runner decides).
+    expect(a.data.model).toBeUndefined();
     expect(a.data.max_turns).toBe(10);
     expect(a.data.is_coordinator).toBe(false);
   });

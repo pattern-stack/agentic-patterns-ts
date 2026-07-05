@@ -37,7 +37,8 @@ export const RoleTemplateConfigSchema = z.object({
   persona: PersonaSchema,
   judgments: z.array(JudgmentSchema).default([]),
   responsibilities: z.array(ResponsibilitySchema).default([]),
-  defaultModel: z.string().default("claude-sonnet-4-20250514"),
+  // No framework default — unset means "the runner decides" (see role.ts).
+  defaultModel: z.string().optional(),
   source: z.enum(["library", "custom"]).default("custom"),
   archetype: z.string().nullable().default(null),
 });
@@ -74,14 +75,18 @@ export class AgentConfig extends AgenticModel<typeof AgentConfigSchema.shape> {
     super(AgentConfigSchema, data);
   }
 
-  /** Effective model: explicit override, else the role template's default. */
-  get model(): string {
+  /** Effective model: explicit override, else the role template's default,
+   *  else `undefined` (the runner supplies it). */
+  get model(): string | undefined {
     return this.data.model ?? this.data.roleTemplate.defaultModel;
   }
 
   toPrompt(): string {
     const rt = this.data.roleTemplate;
-    const lines: string[] = [`### Agent Config: ${rt.name}`, `Model: ${this.model}`];
+    const lines: string[] = [
+      `### Agent Config: ${rt.name}`,
+      `Model: ${this.model ?? "(runner default)"}`,
+    ];
     if (this.data.capabilities.length > 0) {
       lines.push(`Capabilities: ${this.data.capabilities.join(", ")}`);
     }
