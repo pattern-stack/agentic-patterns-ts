@@ -43,7 +43,15 @@ export function AgentsRosterPage() {
   if (loading) {
     return (
       <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--fg-muted)", padding: 40 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            color: "var(--fg-muted)",
+            padding: 40,
+          }}
+        >
           <Spinner /> Loading agents…
         </div>
       </DetailPageShell>
@@ -52,7 +60,9 @@ export function AgentsRosterPage() {
   if (error || !data) {
     return (
       <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
-        <Card style={{ borderColor: "var(--err)", color: "var(--err)" }}>{error ?? "Agents not found."}</Card>
+        <Card style={{ borderColor: "var(--err)", color: "var(--err)" }}>
+          {error ?? "Agents not found."}
+        </Card>
       </DetailPageShell>
     );
   }
@@ -107,7 +117,14 @@ export function AgentsRosterPage() {
               </button>
 
               {isOpen && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "0 16px 16px" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 10,
+                    padding: "0 16px 16px",
+                  }}
+                >
                   {agents.map((a) => (
                     <AgentCard key={a.id} agent={a} navigate={navigate} />
                   ))}
@@ -148,7 +165,10 @@ function AgentCard({ agent: a, navigate }: { agent: RosterAgent; navigate: Navig
         )}
         {a.readiness.ready ? (
           <Chip tone="neutral">
-            <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }} />
+            <span
+              aria-hidden
+              style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }}
+            />
             ready
           </Chip>
         ) : (
