@@ -97,6 +97,28 @@ for pkg in "${PACKAGES[@]}"; do
   fi
 done
 
+# Lockstep: runtime + server + cli ship as ONE set and MUST share a version.
+# They're the execution/serving stack (runtime executes, server exposes it over
+# HTTP, cli bundles both + the dashboard assets) — a consumer takes them as a
+# unit, so a single version keeps that set legible and kills the "which runtime
+# with which cli" matrix. core FLOATS: it's the portable algebra (atoms→organisms
+# + rendering + protocols) that runs WITHOUT the runtime — consumable standalone,
+# e.g. as an ADK plugin — so it versions on its own cadence. dashboard is private
+# (skipped above) and ships as cli assets, so it carries no version at all.
+bold "lockstep (runtime + server + cli share one version; core floats)"
+LOCKSTEP=(agent-runtime agent-server agent-cli)
+lockstep_ver=""
+for pkg in "${LOCKSTEP[@]}"; do
+  v=$(node -e "console.log(require('$ROOT/packages/$pkg/package.json').version)")
+  if [ -z "$lockstep_ver" ]; then
+    lockstep_ver="$v"
+  elif [ "$v" != "$lockstep_ver" ]; then
+    fail "lockstep drift: $pkg@$v != $lockstep_ver — runtime/server/cli must share one version"
+  fi
+done
+ok "runtime/server/cli aligned at $lockstep_ver"
+dim "  core floats independently at $(node -e "console.log(require('$ROOT/packages/agent-core/package.json').version)")"
+
 bold "publish plan (what would actually ship)"
 echo
 for pkg in "${PACKAGES[@]}"; do
