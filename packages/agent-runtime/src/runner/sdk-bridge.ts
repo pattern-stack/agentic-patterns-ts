@@ -106,7 +106,7 @@ export interface AgentLikeForBridge {
     readonly name: string;
     readonly capabilities: ReadonlyArray<Capability>;
   };
-  getModel(): string;
+  getModel(): string | undefined;
   getTools(): ToolSchema[];
   getSystemPrompt(): string;
   renderInitialPrompt(): string;

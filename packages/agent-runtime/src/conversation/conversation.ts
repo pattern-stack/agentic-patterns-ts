@@ -309,7 +309,7 @@ export class Conversation {
     if (!this._storeConversationId) {
       const conv = await this._store.createConversation(
         this.agent.role.name,
-        this.agent.getModel(),
+        this.agent.getModel() ?? "",
       );
       this._storeConversationId = conv.id;
     }

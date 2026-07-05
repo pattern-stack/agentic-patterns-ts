@@ -95,12 +95,13 @@ describe("Role", () => {
     expect(role.responsibilities).toHaveLength(1);
   });
 
-  it("uses default model when not specified", () => {
+  it("has no default model when not specified", () => {
     const role = new Role({
       name: "Test Role",
       persona: makePersona(),
     });
-    expect(role.defaultModel).toBe("claude-sonnet-4-20250514");
+    // No framework default — the model is chosen by the agent, role, or runner.
+    expect(role.defaultModel).toBeUndefined();
   });
 
   it("requires non-empty name", () => {

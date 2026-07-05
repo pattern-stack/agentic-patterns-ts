@@ -97,7 +97,7 @@ async function runLifecycle(
         content: "ok",
         inputTokens,
         outputTokens,
-        model: agent.getModel(),
+        model: agent.getModel() ?? "",
         finishReason: "stop",
       }),
     );

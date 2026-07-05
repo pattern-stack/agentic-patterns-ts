@@ -108,7 +108,7 @@ export class MockRunner implements RunnerProtocol {
     this._callHistory.push({
       message,
       agentName: agent.role.name,
-      model: agent.getModel(),
+      model: agent.getModel() ?? "",
       maxIterations: options?.maxIterations,
       timestamp: new Date(),
     });
@@ -162,7 +162,7 @@ export class MockRunner implements RunnerProtocol {
     this._callHistory.push({
       message,
       agentName: agent.role.name,
-      model: agent.getModel(),
+      model: agent.getModel() ?? "",
       maxIterations: options?.maxIterations,
       timestamp: new Date(),
     });
@@ -222,7 +222,7 @@ export class MockRunner implements RunnerProtocol {
     this._callHistory.push({
       message,
       agentName: agent.role.name,
-      model: agent.getModel(),
+      model: agent.getModel() ?? "",
       maxIterations: options?.maxIterations,
       timestamp: new Date(),
     });
@@ -291,7 +291,7 @@ export class MockRunner implements RunnerProtocol {
       content: matched.content,
       inputTokens: matched.inputTokens ?? 0,
       outputTokens: matched.outputTokens ?? 0,
-      model: agent.getModel(),
+      model: agent.getModel() ?? "",
     });
   }
 

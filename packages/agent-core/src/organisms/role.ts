@@ -28,7 +28,11 @@ export const RoleSchema = z.object({
   judgments: z.array(JudgmentSchema).default([]),
   capabilities: z.array(z.unknown()).default([]),
   responsibilities: z.array(ResponsibilitySchema).default([]),
-  defaultModel: z.string().default("claude-sonnet-4-20250514"),
+  // No framework default: an unset model is `undefined`. The model is chosen by
+  // the agent (`.withModel()`), the role (`.withDefaultModel()`), or — when both
+  // are unset — the RUNNER (createRunner tier/env/gateway). The framework does
+  // not silently pin a vendor's model onto every agent.
+  defaultModel: z.string().optional(),
 });
 
 export type RoleData = z.infer<typeof RoleSchema>;
@@ -79,8 +83,8 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
     return this._data.name;
   }
 
-  /** Get the default model. */
-  get defaultModel(): string {
+  /** Get the default model, or `undefined` when the role pins none. */
+  get defaultModel(): string | undefined {
     return this._data.defaultModel;
   }
 
@@ -182,7 +186,7 @@ export class RoleBuilder {
   private _judgments: Judgment[] = [];
   private _capabilities: Capability[] = [];
   private _responsibilities: Responsibility[] = [];
-  private _defaultModel = "claude-sonnet-4-20250514";
+  private _defaultModel: string | undefined;
 
   constructor(name: string) {
     this._name = name;

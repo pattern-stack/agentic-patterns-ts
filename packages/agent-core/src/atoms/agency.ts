@@ -36,7 +36,7 @@ export const AgentSpecSchema = z.object({
   agent_definition_id: z.string().nullable().default(null),
   persona: PersonaSchema.nullable().default(null),
   judgment: JudgmentSchema.nullable().default(null),
-  model: z.string().default("anthropic/claude-sonnet-4-20250514"),
+  model: z.string().optional(),
   max_turns: z.number().int().positive().default(10),
   capabilities: z.array(z.string()).default([]),
   is_coordinator: z.boolean().default(false),
@@ -54,7 +54,9 @@ export class AgentSpec extends AgenticModel<typeof AgentSpecSchema.shape> {
 
   toPrompt(): string {
     const lines: string[] = [`### Agent: ${this.data.role}`];
-    lines.push(`Model: ${this.data.model}`);
+    if (this.data.model !== undefined) {
+      lines.push(`Model: ${this.data.model}`);
+    }
     lines.push(`Max turns: ${this.data.max_turns}`);
     if (this.data.is_coordinator) {
       lines.push("Role: **Coordinator**");

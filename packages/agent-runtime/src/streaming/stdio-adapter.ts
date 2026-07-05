@@ -156,7 +156,7 @@ export class StdioAdapter {
     }
 
     const agent = this._agentMap.get(agentName)!;
-    const conv = await this._store.createConversation(agentName, agent.getModel());
+    const conv = await this._store.createConversation(agentName, agent.getModel() ?? "");
     this._conversations.set(conv.id, conv);
 
     return {

@@ -52,7 +52,8 @@ const MODEL_MAP: Record<string, string> = {
   haiku: "haiku",
 };
 
-function mapModel(modelName: string): string | undefined {
+function mapModel(modelName: string | undefined): string | undefined {
+  if (!modelName) return undefined;
   const lower = modelName.toLowerCase();
   for (const [key, value] of Object.entries(MODEL_MAP)) {
     if (lower.includes(key)) return value;
@@ -257,7 +258,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     let toolCallsMade = 0;
     let inputTokens = 0;
     let outputTokens = 0;
-    const model = agent.getModel();
+    const model = agent.getModel() ?? "";
 
     const restoreCorrelation = setCorrelationEnv(correlationId);
 
@@ -385,7 +386,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     let toolCallsMade = 0;
     let inputTokens = 0;
     let outputTokens = 0;
-    const model = agent.getModel();
+    const model = agent.getModel() ?? "";
 
     const restoreCorrelation = setCorrelationEnv(correlationId);
 
