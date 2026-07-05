@@ -1,13 +1,16 @@
-# Handoff — 2026-06-16
+# Handoff — 2026-07-05
 
-**Branch:** `main` (local is 4 commits BEHIND origin — `git pull` to `95376a8` before any work)
-**Last action:** Released **v0.3.0** — core/runtime/server/cli bumped 0.2.0→0.3.0 (PR #73, `95376a8`), CI published all four to npm `latest` via OIDC trusted publishing.
-**Next action:** Quick follow-up PR: bump `actions/checkout@v4` + `actions/setup-node@v4` → v5 in `.github/workflows/ci.yml` (GitHub forces Node-20 actions to Node 24 starting 2026-06-16; next CI run at risk).
-**Obstacles:**
-- CC-vs-API benchmark (the user's real next goal) is unstarted — portable briefing is in the prior chat, nothing written to a file yet.
-- Deferred follow-ups: wire `dispose()` into server/`create-runner`; native retry + cross-provider failover; fold in PR #40 (session-resume, tracked by issue #42) on top of the unified CC runner.
+**Branch:** `main`
+**Last action:** Shipped a **lockstep versioning policy** (PR merged to `main` → CI OIDC publishes). `runtime` + `server` + `cli` collapsed to a shared **0.10.0** (was 0.9.2 / 0.6.0 / 0.9.0); `core` **floats** at 0.6.0 (portable algebra, intended ADK-plugin target — runs without the runtime, so it versions independently); `dashboard` `version` field removed (private, ships as cli assets). `scripts/publish.sh` gained a `lockstep` pre-flight gate that hard-fails if runtime/server/cli drift. `bun.lock` refreshed; `bash scripts/publish.sh check` was fully green pre-merge. Rationale in memory [[project_versioning-policy]].
+**Next action:** Verify the publish landed — `npm view @agentic-patterns/{runtime,server,cli} versions --json` / dist-tags should show 0.10.0 on `latest` (core stays 0.6.0). Then delete the merged `doug/lockstep-versioning` branch. No forced feature work after that.
+**Obstacles:** none.
+
+## Prior context (cli 0.9.0 / runtime 0.9.2 — shipped)
+- Live Run constellation (paced replay, node inspector, trace scrubber, dual graph model), real `/composition` provenance, `/graph` retired (→ `/run`) — #168/#169/#172. Runtime 0.9.2 = `provider follows the model id` fix (#170/#171).
+- Parked follow-ups (unchanged): (1) rework `asAgent`-Sequential provenance to show the 3 underlying agents (backend must introspect the pipeline's steps); (2) map blast-radius → runtime gates (`composition.ts blastOf()` is a stub); (3) chain-mode live graph is sparse for composed agents under the no-key `claude-cli` runner — Composition mode is the reliable view.
 
 ## Notes
-- This session shipped 3 stacked PRs then a release: #70 CC runner config×nativeTools seams + `dispose()`; #71 removed per-id `openai-compatible` profile kind; #72 re-added gateway as resolver-level `GatewayConfig` (Bifrost = "just the URL", model stays per-agent; env `AP_GATEWAY_BASE_URL`).
-- Benchmark path to build: `new AgentRunner(claudeCode("sonnet"))` vs `new AgentRunner(anthropic("claude-sonnet-4-5"))`; gate behind `RUN_LIVE_CLAUDE=1`; watch the auth gotcha (`ANTHROPIC_API_KEY` can hijack the CC subprocess), per-turn history re-flatten, and empty tool-param schemas. Start from `providers/__tests__/claude-code.test.ts`.
-- Working agreement this session: fresh worktree off origin/main per change → real PR (not draft) → squash auto-merge + delete branch → clean up worktree.
+- **Release gotcha:** after ANY version bump you MUST `rm bun.lock && bun install` or the publish job fails on the lockfile-sanity gate (`disk=X vs lock=Y`). Confirm a release landed via `npm view <pkg> versions --json` / dist-tags, NOT cached `npm view <pkg> version`.
+- **Versioning:** runtime/server/cli are lockstep (one version); core floats; dashboard has no version. `publish.sh` enforces the trio via its `lockstep` gate. See [[project_versioning-policy]].
+- **Dashboard verify harness:** `ap playground examples` (deterministic pipeline2, no API key) + `vite dev` + direct Playwright; `graph/sample-run-trace.ts` + `/run` demo mode is the model-free backbone.
+- Untracked `docs/build/` + `docs/.docusaurus/` are Docusaurus output (not gitignored).
