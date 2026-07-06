@@ -30,6 +30,7 @@ import {
 } from "../../lib/evalApi";
 import { CaseEditModal } from "./CaseEditModal";
 import { ConfirmModal } from "./ConfirmModal";
+import { RunLaunchModal } from "./RunLaunchModal";
 import { SetEditModal } from "./SetEditModal";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
 
@@ -88,6 +89,7 @@ type LoadState =
 /** Which editor modal is open, if any. */
 type ModalState =
   | { kind: "none" }
+  | { kind: "runEval" }
   | { kind: "editSet" }
   | { kind: "newCase" }
   | { kind: "editCase"; row: EvalCaseRow }
@@ -245,15 +247,25 @@ export function EvalSetDetailPage() {
           </span>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <Button size="sm" onClick={() => setModal({ kind: "runEval" })}>
+            Run eval
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "editSet" })}>
             Edit set
           </Button>
-          <Button size="sm" onClick={() => setModal({ kind: "newCase" })}>
+          <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "newCase" })}>
             New case
           </Button>
         </div>
       </div>
 
+      {modal.kind === "runEval" && (
+        <RunLaunchModal
+          setId={set.id}
+          setLabel={set.name ?? set.id}
+          onClose={() => setModal({ kind: "none" })}
+        />
+      )}
       {modal.kind === "editSet" && (
         <SetEditModal
           mode="edit"

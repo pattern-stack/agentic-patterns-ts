@@ -7,7 +7,7 @@
  * former is a superstring.
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalCaseRow, EvalRunRow, EvalSetSummary, SplitAggregate } from "../api/types";
@@ -153,6 +153,20 @@ describe("EvalSetDetailPage", () => {
     // Runs panel: this set's run is shown, the other-bank run is filtered out
     expect(screen.getByText("run-aaaa")).toBeTruthy();
     expect(screen.queryByText("run-othe")).toBeNull();
+  });
+
+  it("opens the run-eval modal (set locked) from the header button", async () => {
+    stubFetch();
+    renderPage();
+    await waitFor(() => screen.getByText("Bank One"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Run eval" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Run eval" });
+    // The set is locked to this page's set — a static label, not a picker.
+    const setField = within(dialog).getByLabelText("Set");
+    expect(setField.tagName).not.toBe("SELECT");
+    expect(setField.textContent).toBe("Bank One");
   });
 
   it("navigates into a case on row click", async () => {
