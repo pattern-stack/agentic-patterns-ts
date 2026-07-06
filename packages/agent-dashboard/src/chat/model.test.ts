@@ -101,6 +101,59 @@ describe("applyParts", () => {
     expect(r.parts).toEqual([]);
     expect(r.meta).toEqual({ model: "sonnet", inputTokens: 120, outputTokens: 35 });
   });
+
+  test("step.start + step.end fold into an agent_step part (delegation, not a tool)", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "interpret", agent_name: "Interpreter", arguments: { question: "hi" } },
+      {
+        type: "step.end",
+        span_id: "s1",
+        step_name: "interpret",
+        agent_name: "Interpreter",
+        arguments: { question: "hi" },
+        result: { requests: 1 },
+        duration_ms: 12,
+      },
+    ]);
+    expect(parts).toHaveLength(1);
+    const st = parts[0] as Extract<Part, { kind: "agent_step" }>;
+    expect(st.kind).toBe("agent_step");
+    expect(st.id).toBe("s1");
+    expect(st.name).toBe("interpret");
+    expect(st.agentName).toBe("Interpreter");
+    expect(st.arguments).toEqual({ question: "hi" });
+    expect(st.result).toEqual({ requests: 1 });
+    expect(st.durationMs).toBe(12);
+    expect(st.children).toEqual([]);
+  });
+
+  test("a tool call whose parent_span_id matches a step nests UNDER it (agent contains tool)", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "navigate", arguments: {} },
+      { type: "tool.start", tool_call_id: "t1", tool_name: "select", parent_span_id: "s1", arguments: { entity: "observations" } },
+      { type: "tool.end", tool_call_id: "t1", tool_name: "select", parent_span_id: "s1", result: { rows: 60 }, duration_ms: 8 },
+      { type: "step.end", span_id: "s1", step_name: "navigate", result: { pool: 60 }, duration_ms: 20 },
+    ]);
+    // Exactly ONE top-level part — the step; the tool is nested in its children.
+    expect(parts).toHaveLength(1);
+    const st = parts[0] as Extract<Part, { kind: "agent_step" }>;
+    expect(st.kind).toBe("agent_step");
+    expect(st.children).toHaveLength(1);
+    const child = st.children[0] as Extract<Part, { kind: "tool_call" }>;
+    expect(child.kind).toBe("tool_call");
+    expect(child.name).toBe("select");
+    expect(child.result).toEqual({ rows: 60 });
+    expect(st.result).toEqual({ pool: 60 }); // the step still resolves its own output
+  });
+
+  test("a tool call with no matching parent stays top-level (back-compat)", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "curate", arguments: {} },
+      { type: "tool.start", tool_call_id: "t9", tool_name: "orphan", parent_span_id: "nope" },
+      { type: "tool.end", tool_call_id: "t9", tool_name: "orphan", result: 1, duration_ms: 3 },
+    ]);
+    expect(parts.map((p) => p.kind)).toEqual(["agent_step", "tool_call"]);
+  });
 });
 
 describe("eventsToAssistantMessage", () => {

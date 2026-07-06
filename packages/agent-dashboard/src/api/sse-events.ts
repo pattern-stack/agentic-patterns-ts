@@ -53,6 +53,29 @@ export type ClientEvent =
       data: { tool_name: string; reason: string; gate_name: string };
     }
   | {
+      name: "step.start";
+      data: {
+        span_id: string;
+        parent_span_id?: string;
+        step_name: string;
+        agent_name?: string;
+        arguments: unknown;
+      };
+    }
+  | {
+      name: "step.end";
+      data: {
+        span_id: string;
+        parent_span_id?: string;
+        step_name: string;
+        agent_name?: string;
+        arguments: unknown;
+        result: unknown;
+        duration_ms: number;
+        error?: string;
+      };
+    }
+  | {
       name: "error";
       data: { error_type: string; message: string; recoverable: boolean };
     }
@@ -60,24 +83,20 @@ export type ClientEvent =
 
 export type ClientEventName = ClientEvent["name"];
 
-/** Narrow helper so consumers can match-and-use without inline `as` casts. */
-export function isClientEventName(name: string): name is ClientEventName {
-  return (
-    name === "conversation.start" ||
-    name === "conversation.end" ||
-    name === "message.start" ||
-    name === "message.delta" ||
-    name === "message.complete" ||
-    name === "message.cancel" ||
-    name === "thinking.start" ||
-    name === "thinking" ||
-    name === "thinking.complete" ||
-    name === "tool.intent" ||
-    name === "tool.start" ||
-    name === "tool.progress" ||
-    name === "tool.end" ||
-    name === "tool.rejected" ||
-    name === "error" ||
-    name === "done"
-  );
+/**
+ * A decoded SSE frame: an event `name` + its JSON `data`, with NO name allowlist.
+ *
+ * Deliberately permissive. The transport (`chat-client.parseFrame`) is a dumb
+ * decoder — it never drops a frame by name; the reducer (`applyParts` in
+ * chat/model.ts) is the SINGLE authority on what renders, folding the events it
+ * knows and ignoring the rest. An allowlist HERE was the footgun that silently
+ * ate `agent.step.*` (steps ran server-side but never reached the chat). Keeping
+ * the parser dumb means a new server event can never again vanish in transit —
+ * it flows to the reducer, which renders it or ignores it, but never drops it
+ * invisibly. `ClientEvent` above remains the typed documentation of KNOWN
+ * payload shapes; it is not a gate.
+ */
+export interface WireFrame {
+  name: string;
+  data: Record<string, unknown>;
 }

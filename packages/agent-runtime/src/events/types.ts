@@ -114,6 +114,35 @@ export interface ToolCallEndEvent extends BaseEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Step / delegation events
+// ---------------------------------------------------------------------------
+// A promoted multi-step node (a pipeline promoted via `asAgent`) publishes one
+// start/end pair per STAGE it delegates to a sub-agent — distinct from
+// `agent.tool.*` (a tool the model calls). The transport renders a step as an
+// AGENT delegation and nests any `agent.tool.*` the delegated agent makes under
+// it (by `parentSpanId`). `arguments` is the stage INPUT, `result` the OUTPUT.
+
+export interface StepStartEvent extends BaseEvent {
+  readonly type: "agent.step.start";
+  readonly stepName: string;
+  /** The delegated sub-agent's display name, when known (e.g. "Retrieval Interpreter"). */
+  readonly agentName?: string;
+  /** The stage's input — the delegated agent's `run(input)`. */
+  readonly arguments: Record<string, unknown>;
+}
+
+export interface StepEndEvent extends BaseEvent {
+  readonly type: "agent.step.end";
+  readonly stepName: string;
+  readonly agentName?: string;
+  readonly arguments: Record<string, unknown>;
+  /** The stage's output — what the delegated agent returned. */
+  readonly result: unknown;
+  readonly error?: string;
+  readonly durationMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // Iteration events
 // ---------------------------------------------------------------------------
 
@@ -226,6 +255,8 @@ export type AgentEvent =
   | ToolCallStartEvent
   | ToolCallEndEvent
   | ToolProgressEvent
+  | StepStartEvent
+  | StepEndEvent
   | IterationStartEvent
   | IterationEndEvent
   | LLMCallStartEvent

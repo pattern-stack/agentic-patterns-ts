@@ -11,6 +11,10 @@ import type { StreamEvent } from "../../hooks/useEventStream";
 import { Badge, type BadgeTone } from "../atoms/Badge";
 
 const TYPE_TONES: Record<string, BadgeTone> = {
+  "agent.step.start": "purple",
+  "agent.step.end": "purple",
+  "step.start": "purple",
+  "step.end": "purple",
   "agent.tool.start": "accent",
   "agent.tool.end": "accent",
   "agent.tool.intent": "accent",
