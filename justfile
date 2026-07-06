@@ -85,9 +85,17 @@ clean-worktrees:
 
 # ── Release ──────────────────────────────────
 
-# Bump @agentic-patterns/* versions in lockstep (patch|minor|major|--to=X.Y.Z)
-bump level="patch":
-    bash scripts/bump.sh {{level}}
+# Bump runtime+server+cli lockstep versions (patch|minor|major|X.Y.Z)
+bump-lockstep level="patch":
+    bash scripts/bump.sh --lockstep {{level}}
+
+# Bump core version (floats independently of the lockstep trio)
+bump-core level="patch":
+    bash scripts/bump.sh --core {{level}}
+
+# Bump both tracks at once (e.g. a change touching core + runtime)
+bump-both lockstep="minor" core="minor":
+    bash scripts/bump.sh --lockstep {{lockstep}} --core {{core}}
 
 # Publish pre-flight (build, typecheck, lockfile sanity, dry-run)
 publish-check:
