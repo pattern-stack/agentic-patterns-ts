@@ -481,55 +481,110 @@ function slotEdgesFor(
 /* Routes                                                                    */
 /* ------------------------------------------------------------------------ */
 
+/**
+ * Serialize one agent instance into the full composition payload: role slots,
+ * instantiation delta, provenance, rendered prompt sections, coherence. The
+ * GET route feeds it the DECLARED instance (`reg.agent`); the delivered route
+ * feeds it the instance `reg.instantiate(context)` composed live.
+ */
+function agentCompositionPayload(reg: AgentRegistration, agent: unknown) {
+  const a = agent as AgentIntrospect;
+  const role = a.role ?? {};
+
+  // Render path caveat (§6): report which prompt path the payload carries.
+  // Newer cores expose renderSections(); older ones only the joined string —
+  // that blob mixes role AND instance content, so its source is honestly
+  // "unknown" (§5: never a confident-but-wrong attribution).
+  const prompt =
+    typeof a.renderSections === "function"
+      ? { renderPath: "sections" as const, sections: a.renderSections() }
+      : {
+          renderPath: "joined" as const,
+          sections: [
+            {
+              name: "system",
+              source: "unknown" as const,
+              text: a.renderInitialPrompt?.() ?? "",
+            },
+          ],
+        };
+
+  return {
+    id: reg.id,
+    name: reg.name,
+    description: reg.description ?? "",
+    model: typeof a.getModel === "function" ? a.getModel() : undefined,
+    role: {
+      name: role.name ?? "role",
+      defaultModel: role.defaultModel ?? "",
+      ...roleSlots(role, reg),
+    },
+    instance: {
+      background: a.background?.data ?? null,
+      awareness: a.awareness?.data ?? null,
+      mission: sanitizeMission(a.mission?.data),
+      modelOverride: a.data?.model ?? null,
+    },
+    prompt,
+    coherence: { heuristic: true, warnings: coherenceWarnings(a) },
+    instantiation: {
+      available: typeof reg.instantiate === "function",
+      defaults: reg.instantiateDefaults ?? null,
+    },
+    evals: reg.evals ?? [],
+  };
+}
+
 export function compositionRoutes(agents: AgentRegistration[]): Hono {
   const app = new Hono();
 
-  // GET /agents/:id/composition — full two-tier introspection: role slots,
-  // instantiation delta, provenance, rendered prompt sections, coherence.
+  // GET /agents/:id/composition — the DECLARED instance's introspection (what
+  // the registration statically exports).
   app.get("/agents/:id/composition", (c) => {
     const reg = agents.find((a) => a.id === c.req.param("id"));
     if (!reg) return c.json({ error: "Agent not found" }, 404);
+    return c.json(agentCompositionPayload(reg, reg.agent));
+  });
 
-    const a = reg.agent as unknown as AgentIntrospect;
-    const role = a.role ?? {};
+  // POST /agents/:id/composition/delivered — compose the DELIVERED instance
+  // via the registration's `instantiate(context)` hook and introspect THAT:
+  // the actual Background/prompt an entrypoint would hand the model for this
+  // context. May hit live sources (a tenant DB, an engine), so it's a POST,
+  // never cached, and absent hooks answer 501 honestly.
+  app.post("/agents/:id/composition/delivered", async (c) => {
+    const reg = agents.find((a) => a.id === c.req.param("id"));
+    if (!reg) return c.json({ error: "Agent not found" }, 404);
+    if (typeof reg.instantiate !== "function") {
+      return c.json({ error: "Agent has no instantiate hook — declared composition only" }, 501);
+    }
 
-    // Render path caveat (§6): report which prompt path the payload carries.
-    // Newer cores expose renderSections(); older ones only the joined string —
-    // that blob mixes role AND instance content, so its source is honestly
-    // "unknown" (§5: never a confident-but-wrong attribution).
-    const prompt =
-      typeof a.renderSections === "function"
-        ? { renderPath: "sections" as const, sections: a.renderSections() }
-        : {
-            renderPath: "joined" as const,
-            sections: [
-              {
-                name: "system",
-                source: "unknown" as const,
-                text: a.renderInitialPrompt?.() ?? "",
-              },
-            ],
-          };
+    let context: Record<string, unknown> | undefined;
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+      const raw = body.context;
+      if (raw !== undefined && (typeof raw !== "object" || raw === null || Array.isArray(raw))) {
+        return c.json({ error: "`context` must be a JSON object" }, 400);
+      }
+      context = raw as Record<string, unknown> | undefined;
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
 
-    return c.json({
-      id: reg.id,
-      name: reg.name,
-      description: reg.description ?? "",
-      model: typeof a.getModel === "function" ? a.getModel() : undefined,
-      role: {
-        name: role.name ?? "role",
-        defaultModel: role.defaultModel ?? "",
-        ...roleSlots(role, reg),
-      },
-      instance: {
-        background: a.background?.data ?? null,
-        awareness: a.awareness?.data ?? null,
-        mission: sanitizeMission(a.mission?.data),
-        modelOverride: a.data?.model ?? null,
-      },
-      prompt,
-      coherence: { heuristic: true, warnings: coherenceWarnings(a) },
-    });
+    // No explicit context → compose with the registration's declared defaults,
+    // so the echoed `context` always states what instantiate actually received.
+    const effectiveContext = context ?? reg.instantiateDefaults;
+
+    try {
+      const delivered = await reg.instantiate(effectiveContext);
+      return c.json({
+        ...agentCompositionPayload(reg, delivered),
+        delivered: true,
+        context: effectiveContext ?? null,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: `instantiate failed: ${message}` }, 502);
+    }
   });
 
   // GET /roles — identity catalog grouped by role reference identity.

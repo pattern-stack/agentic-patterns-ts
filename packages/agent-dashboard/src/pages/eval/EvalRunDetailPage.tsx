@@ -324,10 +324,21 @@ export function EvalRunDetailPage() {
           ) : (
             <Badge tone="muted">set · —</Badge>
           )}
-          <Badge tone="muted">target · {run.targetId ?? "—"}</Badge>
+          {run.targetId ? (
+            <Link
+              to={`/agents/${encodeURIComponent(run.targetId)}`}
+              style={{ textDecoration: "none" }}
+              title="View this agent"
+            >
+              <Badge tone="muted">target · {run.targetId}</Badge>
+            </Link>
+          ) : (
+            <Badge tone="muted">target · —</Badge>
+          )}
           <Badge tone="muted">variant · {run.variant ?? "—"}</Badge>
           <Badge tone="muted">split · {run.split ?? "untagged"}</Badge>
           <Badge tone="muted">model · {run.model ?? "—"}</Badge>
+          {run.scorer != null && <Badge tone="muted">scorer · {run.scorer}</Badge>}
           <Badge tone="muted" title={run.gitSha ?? undefined}>
             sha · {shortSha(run.gitSha)}
           </Badge>

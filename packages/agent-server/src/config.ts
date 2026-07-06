@@ -13,6 +13,23 @@ import type {
 } from "@agentic-patterns/runtime";
 
 /**
+ * One declared grading link: an eval set that grades this agent. The mapping
+ * is CODE-DECLARED on the registration (never on the eval_set row — sets get
+ * reseeded by harnesses and one set can grade several arms); the store's only
+ * agent linkage stays the per-run `eval_run.target_id`.
+ */
+export interface AgentEvalRef {
+  /** The eval set's id in the eval store (e.g. "xd-interpret"). */
+  readonly setId: string;
+  /** What the set measures on this agent (human framing, shown in the lens). */
+  readonly grades?: string;
+  /** For composite/pipeline agents: which step this set grades (e.g. "interpret"). */
+  readonly step?: string;
+  /** Default scorer id when launching from the agent page (falls back to the form default). */
+  readonly scorer?: string;
+}
+
+/**
  * Agent registration — what the server knows about each agent.
  *
  * `agent` and `runner.run/stream` use the canonical protocol shapes
@@ -44,6 +61,26 @@ export interface AgentRegistration {
     }>;
   };
   readonly agent: AgentLike;
+  /**
+   * Optional delivered-instance factory. `agent` is the DECLARED instance —
+   * what the registration statically exports; many projects compose the real
+   * one at an assembly site (per-tenant Background fetched live, injected at
+   * run time), which the registry never sees. `instantiate` is that assembly
+   * site surfaced: given a registration-defined context (e.g.
+   * `{ organizationId }`), build the agent AS AN ENTRYPOINT WOULD DELIVER IT.
+   * The composition lens uses it to render the actual Background/prompt
+   * (`POST /agents/:id/composition/delivered`); it is introspection-only and
+   * may hit live sources, so it stays opt-in and can reject.
+   */
+  readonly instantiate?: (context?: Record<string, unknown>) => Promise<AgentLike>;
+  /** Seed context for `instantiate` — prefills the lens's context editor. */
+  readonly instantiateDefaults?: Record<string, unknown>;
+  /**
+   * Declared eval↔agent mapping: the eval sets that grade THIS agent (or one
+   * of its steps). Surfaced on the composition payload so the Agent lens can
+   * show grading history and launch runs with set + target pre-bound.
+   */
+  readonly evals?: ReadonlyArray<AgentEvalRef>;
   readonly runner: Pick<RunnerProtocol, "run" | "stream"> & {
     run(agent: AgentLike, message: string, options?: Record<string, unknown>): Promise<RunResult>;
   };

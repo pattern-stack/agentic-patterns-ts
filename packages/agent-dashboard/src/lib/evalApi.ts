@@ -41,6 +41,10 @@ interface SplitAggregatesResponse {
 export interface FetchEvalRunsOptions {
   /** Max rows returned. Server clamps to [1, 500], default 50. */
   limit?: number;
+  /** Filter to one set (`?set=` — server-side, store-indexed). */
+  set?: string;
+  /** Filter to one target agent (`?target=`). */
+  target?: string;
   /** Override default base URL (mostly for tests). */
   baseUrl?: string;
 }
@@ -51,6 +55,8 @@ export async function fetchEvalRuns(
 ): Promise<EvalFetch<EvalRunRow[]>> {
   const params = new URLSearchParams();
   if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.set) params.set("set", opts.set);
+  if (opts.target) params.set("target", opts.target);
 
   const base = opts.baseUrl ?? "";
   const url = `${base}/eval/runs${params.size ? `?${params}` : ""}`;

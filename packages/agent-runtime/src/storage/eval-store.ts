@@ -98,6 +98,8 @@ export interface EvalRunMeta {
   readonly split?: EvalSplit;
   readonly model?: string;
   readonly gitSha?: string;
+  /** Scorer id the run grades with (v4). Omit when the caller scores externally. */
+  readonly scorer?: string;
 }
 
 export interface EvalRunRow {
@@ -110,6 +112,8 @@ export interface EvalRunRow {
   readonly split: EvalSplit | null;
   readonly model: string | null;
   readonly gitSha: string | null;
+  /** Scorer id the run graded with; NULL = unrecorded (pre-v4 rows / external scoring). */
+  readonly scorer: string | null;
   readonly status: "running" | "ok" | "error";
 }
 
@@ -310,8 +314,8 @@ export class EvalStore extends RunStore {
 
     this._startEvalRunStmt = this._db.prepare(`
       INSERT INTO eval_run (
-        id, ts_start, set_id, target_id, variant, split, model, git_sha, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running')
+        id, ts_start, set_id, target_id, variant, split, model, git_sha, scorer, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running')
     `);
 
     // First-terminal-wins, same idiom as RunStore.finishRun (run-store.ts:149).
@@ -328,14 +332,14 @@ export class EvalStore extends RunStore {
     this._getEvalRunStmt = this._db.prepare(`
       SELECT
         id, ts_start AS tsStart, ts_end AS tsEnd, set_id AS setId,
-        target_id AS targetId, variant, split, model, git_sha AS gitSha, status
+        target_id AS targetId, variant, split, model, git_sha AS gitSha, scorer, status
       FROM eval_run WHERE id = ?
     `);
 
     this._listEvalRunsStmt = this._db.prepare(`
       SELECT
         id, ts_start AS tsStart, ts_end AS tsEnd, set_id AS setId,
-        target_id AS targetId, variant, split, model, git_sha AS gitSha, status
+        target_id AS targetId, variant, split, model, git_sha AS gitSha, scorer, status
       FROM eval_run
       WHERE (@setId    IS NULL OR set_id = @setId)
         AND (@targetId IS NULL OR target_id = @targetId)
@@ -486,6 +490,7 @@ export class EvalStore extends RunStore {
       meta.split ?? null,
       meta.model ?? null,
       meta.gitSha ?? null,
+      meta.scorer ?? null,
     );
     return id;
   }

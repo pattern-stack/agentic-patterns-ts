@@ -55,6 +55,27 @@ export interface DiscoveredAgent {
   readonly file: string;
   /** Per-slot provenance (preset/library/local/inline), attached post-discovery. */
   readonly provenance?: AgentProvenance;
+  /**
+   * Delivered-instance factory, taken verbatim from the registration wrapper —
+   * the playground threads it into the server's AgentRegistration so the
+   * composition lens can render the agent as an entrypoint would compose it
+   * (live Background for a supplied context, e.g. `{ organizationId }`).
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: returns an agent shape, kept loose at the discovery boundary
+  readonly instantiate?: (context?: Record<string, unknown>) => Promise<any>;
+  /** Seed context for `instantiate` (prefills the lens's context editor). */
+  readonly instantiateDefaults?: Record<string, unknown>;
+  /**
+   * Declared eval↔agent mapping from the registration wrapper: the eval sets
+   * that grade this agent (or one of its steps). Passed through to the
+   * server's AgentRegistration; the Agent lens renders history + launch.
+   */
+  readonly evals?: ReadonlyArray<{
+    setId: string;
+    grades?: string;
+    step?: string;
+    scorer?: string;
+  }>;
 }
 
 interface RegistrationWrapper {
@@ -62,6 +83,9 @@ interface RegistrationWrapper {
   name?: unknown;
   description?: unknown;
   agent?: unknown;
+  instantiate?: unknown;
+  instantiateDefaults?: unknown;
+  evals?: unknown;
 }
 
 /**
@@ -162,10 +186,22 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
     const id = (wrapper && str(wrapper.id)) || inferred.id;
     const name = (wrapper && str(wrapper.name)) || inferred.name;
     const description = wrapper ? str(wrapper.description) : undefined;
+    const instantiate =
+      wrapper && typeof wrapper.instantiate === "function"
+        ? (wrapper.instantiate as DiscoveredAgent["instantiate"])
+        : undefined;
+    const instantiateDefaults =
+      wrapper &&
+      typeof wrapper.instantiateDefaults === "object" &&
+      wrapper.instantiateDefaults !== null &&
+      !Array.isArray(wrapper.instantiateDefaults)
+        ? (wrapper.instantiateDefaults as Record<string, unknown>)
+        : undefined;
+    const evals = wrapper ? normalizeEvalRefs(wrapper.evals) : undefined;
 
     if (seenIds.has(id)) continue; // e.g. a default + named export of the same agent
     seenIds.add(id);
-    found.push({ id, name, description, agent, file });
+    found.push({ id, name, description, agent, file, instantiate, instantiateDefaults, evals });
   }
 
   if (found.length === 0) {
@@ -285,4 +321,29 @@ function prettify(slug: string): string {
 
 function str(x: unknown): string | undefined {
   return typeof x === "string" && x.length > 0 ? x : undefined;
+}
+
+/**
+ * Normalize a registration wrapper's `evals` declaration: keep only entries
+ * with a non-empty string `setId`, and only the known fields. A malformed
+ * declaration degrades to the valid subset (or undefined) rather than failing
+ * discovery — the agent itself is still perfectly loadable.
+ */
+function normalizeEvalRefs(raw: unknown): DiscoveredAgent["evals"] {
+  if (!Array.isArray(raw)) return undefined;
+  const refs = raw.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const e = entry as Record<string, unknown>;
+    const setId = str(e.setId);
+    if (!setId) return [];
+    return [
+      {
+        setId,
+        ...(str(e.grades) ? { grades: str(e.grades) } : {}),
+        ...(str(e.step) ? { step: str(e.step) } : {}),
+        ...(str(e.scorer) ? { scorer: str(e.scorer) } : {}),
+      },
+    ];
+  });
+  return refs.length > 0 ? refs : undefined;
 }

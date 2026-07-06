@@ -171,6 +171,8 @@ export interface EvalRunRow {
   split: EvalSplit | null;
   model: string | null;
   gitSha: string | null;
+  /** Scorer id the run graded with (schema v4); null/absent = unrecorded (older rows/servers). */
+  scorer?: string | null;
   status: "running" | "ok" | "error";
   /** Present on `GET /eval/runs` list rows when the run has results; absent otherwise. */
   summary?: EvalRunListSummary;

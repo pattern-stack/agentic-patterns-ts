@@ -11,13 +11,31 @@ import { RunLaunchForm } from "./RunLaunchForm";
 interface RunLaunchModalProps {
   setId: string;
   setLabel?: string;
+  /** Optional: also lock the target (the Agent lens's "Run" launches with both bound). */
+  targetId?: string;
+  targetLabel?: string;
+  /** Optional initial scorer (a registration-declared default). */
+  initialScorer?: string;
   onClose: () => void;
 }
 
-export function RunLaunchModal({ setId, setLabel, onClose }: RunLaunchModalProps) {
+export function RunLaunchModal({
+  setId,
+  setLabel,
+  targetId,
+  targetLabel,
+  initialScorer,
+  onClose,
+}: RunLaunchModalProps) {
   return (
     <Modal title="Run eval" onClose={onClose}>
-      <RunLaunchForm presetSetId={setId} presetSetLabel={setLabel} />
+      <RunLaunchForm
+        presetSetId={setId}
+        presetSetLabel={setLabel}
+        presetTargetId={targetId}
+        presetTargetLabel={targetLabel}
+        initialScorer={initialScorer}
+      />
     </Modal>
   );
 }

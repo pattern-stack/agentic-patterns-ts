@@ -539,6 +539,7 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
       split,
       model: stampModel,
       gitSha: evalExecution.gitSha,
+      scorer: chosenScorer.id,
     });
 
     const live: LiveEvalRun = {
@@ -987,10 +988,8 @@ interface NamedScorer {
  * Array ORDER is the display order — GET /eval/scorers and the dashboard select
  * present these in exactly this sequence, "exact-match" first (the default).
  *
- * Route-local by construction: the store never learns the scorer id (no schema
- * change; the id rides the 202 response only).
- *   FOLLOW-UP: persist scorer id on the `eval_run` row so historical runs record
- *   how they were graded (needs an EvalStore column + migration).
+ * The chosen id is persisted on the `eval_run` row (`scorer`, schema v4) so
+ * historical runs record how they were graded; it also rides the 202 response.
  */
 const SCORER_REGISTRY: readonly NamedScorer[] = [
   {

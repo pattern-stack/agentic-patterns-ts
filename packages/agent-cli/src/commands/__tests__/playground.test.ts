@@ -10,8 +10,11 @@
  * locks the whole allowlist (old + new) against accidental regressions.
  */
 
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { isApiPath } from "../playground.js";
+import { isApiPath, isHtmlNavigation, withHtmlNavigationShim } from "../playground.js";
 
 describe("isApiPath", () => {
   it("classifies /eval and its subpaths as API — would have failed before this change", () => {
@@ -43,5 +46,96 @@ describe("isApiPath", () => {
       expect(isApiPath(prefix)).toBe(true);
       expect(isApiPath(`${prefix}/sub`)).toBe(true);
     }
+  });
+});
+
+describe("isHtmlNavigation", () => {
+  it("recognizes a browser top-level navigation by its Accept header", () => {
+    expect(
+      isHtmlNavigation(
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8",
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat SPA fetch() calls as navigations", () => {
+    expect(isHtmlNavigation("*/*")).toBe(false);
+    expect(isHtmlNavigation("application/json")).toBe(false);
+    expect(isHtmlNavigation(undefined)).toBe(false);
+  });
+});
+
+describe("withHtmlNavigationShim", () => {
+  const apiResponse = () =>
+    new Response(JSON.stringify({ from: "api" }), {
+      headers: { "content-type": "application/json" },
+    });
+  const api = { fetch: () => apiResponse() };
+
+  async function withDashboardDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ap-shim-"));
+    try {
+      await fs.writeFile(path.join(dir, "index.html"), "<html>SPA</html>");
+      await fs.writeFile(path.join(dir, "app.css"), "body{}");
+      return await fn(dir);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  const BROWSER_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+  it("answers a browser navigation to an API-colliding route from the SPA", async () => {
+    await withDashboardDir(async (dir) => {
+      const shim = withHtmlNavigationShim(api, dir);
+      const res = await shim.fetch(
+        new Request("http://x/eval/runs/abc-123", { headers: { accept: BROWSER_ACCEPT } }),
+      );
+      expect(res.headers.get("content-type")).toContain("text/html");
+      expect(await res.text()).toContain("SPA");
+    });
+  });
+
+  it("passes fetch()-style requests through to the API untouched", async () => {
+    await withDashboardDir(async (dir) => {
+      const shim = withHtmlNavigationShim(api, dir);
+      const res = await shim.fetch(
+        new Request("http://x/eval/runs/abc-123", { headers: { accept: "*/*" } }),
+      );
+      expect(await res.json()).toEqual({ from: "api" });
+    });
+  });
+
+  it("serves a literal asset over the SPA index when one exists", async () => {
+    await withDashboardDir(async (dir) => {
+      const shim = withHtmlNavigationShim(api, dir);
+      const res = await shim.fetch(
+        new Request("http://x/app.css", { headers: { accept: BROWSER_ACCEPT } }),
+      );
+      expect(res.headers.get("content-type")).toContain("text/css");
+    });
+  });
+
+  it("falls through to the API when the SPA index is missing", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ap-shim-empty-"));
+    try {
+      const shim = withHtmlNavigationShim(api, dir);
+      const res = await shim.fetch(
+        new Request("http://x/agents/foo", { headers: { accept: BROWSER_ACCEPT } }),
+      );
+      expect(await res.json()).toEqual({ from: "api" });
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never intercepts non-GET requests", async () => {
+    await withDashboardDir(async (dir) => {
+      const shim = withHtmlNavigationShim(api, dir);
+      const res = await shim.fetch(
+        new Request("http://x/eval/runs", { method: "POST", headers: { accept: BROWSER_ACCEPT } }),
+      );
+      expect(await res.json()).toEqual({ from: "api" });
+    });
   });
 });

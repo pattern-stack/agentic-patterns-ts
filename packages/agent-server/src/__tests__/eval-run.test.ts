@@ -689,6 +689,8 @@ describe("POST /eval/runs — scorer choice", () => {
     const body = (await res.json()) as { runId: string; scorer: string };
     expect(body.scorer).toBe("exact-match");
     await waitForTerminal(store, body.runId);
+    // Persisted on the row (schema v4), not just echoed on the 202.
+    expect(store.getEvalRun(body.runId)?.scorer).toBe("exact-match");
   });
 
   it('scorer "none" completes the run with every case UNSCORED (derivePass([]) → pass null)', async () => {
@@ -710,6 +712,7 @@ describe("POST /eval/runs — scorer choice", () => {
 
     const run = store.getEvalRun(body.runId);
     expect(run?.status).toBe("ok");
+    expect(run?.scorer).toBe("none"); // persisted (schema v4), not just echoed
     const rows = store.evalRunResults(body.runId);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
