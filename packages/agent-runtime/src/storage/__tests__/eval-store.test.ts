@@ -338,6 +338,7 @@ describe("EvalStore", () => {
         split: "train",
         model: "test-model",
         gitSha: "abc123",
+        scorer: "set-membership",
       });
 
       const row = store.getEvalRun(id1);
@@ -347,6 +348,7 @@ describe("EvalStore", () => {
       expect(row?.split).toBe("train");
       expect(row?.model).toBe("test-model");
       expect(row?.gitSha).toBe("abc123");
+      expect(row?.scorer).toBe("set-membership");
       expect(row?.status).toBe("running");
       expect(row?.tsEnd).toBeNull();
 
@@ -385,6 +387,75 @@ describe("EvalStore", () => {
       expect(store.listEvalRuns({ split: "train" }).map((r) => r.id)).toEqual([id1]);
       expect(store.listEvalRuns().map((r) => r.id)).toEqual([id3, id2, id1]); // newest first
       expect(store.listEvalRuns({ limit: 1 })).toHaveLength(1);
+    });
+
+    it("scorer omitted -> NULL (external scoring / harness rows); the list read carries the column", () => {
+      const scored = store.startEvalRun({ setId: "s", scorer: "exact-match" });
+      const unscored = store.startEvalRun({ setId: "s" });
+      expect(store.getEvalRun(scored)?.scorer).toBe("exact-match");
+      expect(store.getEvalRun(unscored)?.scorer).toBeNull();
+      expect(
+        store
+          .listEvalRuns({ setId: "s" })
+          .map((r) => r.scorer)
+          .sort(),
+      ).toEqual([null, "exact-match"].sort());
+    });
+  });
+
+  describe("v3 -> v4 in-place migration", () => {
+    it("adds eval_run.scorer to a hand-built v3 DB; pre-v4 rows read scorer NULL", () => {
+      const fs = require("node:fs") as typeof import("node:fs");
+      const os = require("node:os") as typeof import("node:os");
+      const path = require("node:path") as typeof import("node:path");
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "evalstore-migrate-v4-"));
+      const dbPath = path.join(dir, "events.db");
+
+      // Hand-build a v3 DB: the v2 tables plus the four eval tables WITHOUT
+      // the scorer column (the exact pre-#scorer eval_run shape).
+      const raw = new Database(dbPath);
+      raw.exec(`
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL, timestamp TEXT NOT NULL, trace_id TEXT, run_id TEXT,
+          span_id TEXT, cc_session_id TEXT, cc_hook_name TEXT, cc_cwd TEXT, data TEXT NOT NULL
+        );
+        CREATE TABLE runs (
+          run_id TEXT PRIMARY KEY, trace_id TEXT, ts_start TEXT NOT NULL, ts_end TEXT,
+          agent_name TEXT, model TEXT, system_prompt TEXT, agent_config TEXT, final_answer TEXT,
+          tool_calls INTEGER, iterations INTEGER, input_tokens INTEGER, output_tokens INTEGER,
+          finish_reason TEXT, elapsed_ms INTEGER, status TEXT NOT NULL, error TEXT,
+          step_metrics TEXT, metadata TEXT
+        );
+        CREATE TABLE eval_set (id TEXT PRIMARY KEY, name TEXT, description TEXT, created_ts TEXT NOT NULL);
+        CREATE TABLE eval_case (
+          set_id TEXT NOT NULL, case_id TEXT NOT NULL, input_json TEXT, expected_json TEXT,
+          tags_json TEXT, split TEXT, PRIMARY KEY (set_id, case_id)
+        );
+        CREATE TABLE eval_run (
+          id TEXT PRIMARY KEY, ts_start TEXT NOT NULL, ts_end TEXT, set_id TEXT, target_id TEXT,
+          variant TEXT, split TEXT, model TEXT, git_sha TEXT, status TEXT NOT NULL
+        );
+        CREATE TABLE eval_result (
+          eval_run_id TEXT NOT NULL, case_id TEXT NOT NULL, run_id TEXT, scores_json TEXT,
+          pass INTEGER, PRIMARY KEY (eval_run_id, case_id)
+        );
+      `);
+      raw
+        .prepare("INSERT INTO eval_run (id, ts_start, set_id, status) VALUES (?, ?, ?, ?)")
+        .run("legacy-run", "2026-05-11T18:00:00.000Z", "set-legacy", "ok");
+      raw.pragma("user_version = 3");
+      raw.close();
+
+      // Reopen via EvalStore: ALTER lands, the legacy row reads scorer NULL,
+      // and a fresh insert round-trips a scorer id.
+      const es = new EvalStore({ path: dbPath, Database });
+      expect(es.getEvalRun("legacy-run")?.scorer).toBeNull();
+      const scored = es.startEvalRun({ setId: "set-legacy", scorer: "none" });
+      expect(es.getEvalRun(scored)?.scorer).toBe("none");
+      es.close();
+
+      fs.rmSync(dir, { recursive: true, force: true });
     });
   });
 

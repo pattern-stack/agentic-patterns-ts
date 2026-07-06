@@ -86,6 +86,26 @@ export interface AgentComposition {
   };
   prompt: { renderPath: "sections" | "joined"; sections: PromptSection[] };
   coherence: { heuristic: boolean; warnings: CoherenceWarning[] };
+  /** Whether the registration can compose its DELIVERED instance (and the seed context). */
+  instantiation?: { available: boolean; defaults: Record<string, unknown> | null };
+  /** Declared eval↔agent mapping: the eval sets that grade this agent (or a step of it). */
+  evals?: AgentEvalRef[];
+}
+
+/** One declared grading link (registration-declared; mirrors server config.ts). */
+export interface AgentEvalRef {
+  setId: string;
+  grades?: string;
+  step?: string;
+  scorer?: string;
+}
+
+/** The delivered-instance payload — the same composition, composed live via the
+ *  registration's `instantiate(context)` hook (POST …/composition/delivered). */
+export interface DeliveredComposition extends AgentComposition {
+  delivered: true;
+  /** The context `instantiate` actually received (explicit, else the defaults). */
+  context: Record<string, unknown> | null;
 }
 
 // --------------------------------------------------------------------------
@@ -163,6 +183,24 @@ export interface RosterAgent {
 export const compositionApi = {
   agentComposition: (id: string) =>
     fetchJSON<AgentComposition>(`/agents/${encodeURIComponent(id)}/composition`),
+  /** POST the context and compose the delivered instance. Unlike fetchJSON, this
+   *  surfaces the server's `{error}` body — an instantiate failure (dead tenant
+   *  DB, bad context) carries its reason, not just "HTTP 502". */
+  deliveredComposition: async (id: string, context?: Record<string, unknown>) => {
+    const response = await fetch(`/agents/${encodeURIComponent(id)}/composition/delivered`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(context === undefined ? {} : { context }),
+    });
+    const body = (await response.json().catch(() => null)) as
+      | (DeliveredComposition & { error?: string })
+      | null;
+    if (!response.ok) {
+      throw new Error(body?.error ?? `HTTP ${response.status}: ${response.statusText}`);
+    }
+    if (!body) throw new Error("Empty delivered-composition response");
+    return body as DeliveredComposition;
+  },
   roles: () => fetchJSON<RoleSummary[]>("/roles"),
   role: (id: string) => fetchJSON<RoleDetail>(`/roles/${encodeURIComponent(id)}`),
   capabilities: () => fetchJSON<CapabilitySummary[]>("/capabilities"),

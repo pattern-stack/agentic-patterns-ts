@@ -198,7 +198,19 @@ CREATE INDEX IF NOT EXISTS idx_eval_run_ts     ON eval_run(ts_start);
 CREATE INDEX IF NOT EXISTS idx_eval_result_run ON eval_result(run_id) WHERE run_id IS NOT NULL;
 `;
 
-const TARGET_SCHEMA_VERSION = 3;
+/**
+ * v4 — adds `eval_run.scorer`: the scorer id a server-launched run graded
+ * with (routes/eval.ts previously only echoed it on the 202 — historical runs
+ * couldn't say how they were scored, making cross-run pass-rate comparisons
+ * ambiguous). NULL = unrecorded (pre-v4 rows, or a caller that didn't say).
+ * Same downgrade caveat as v2/v3: a v4 DB opened by an older runtime throws
+ * the version-mismatch error below. Dev telemetry, lockstep — accepted.
+ */
+const SCHEMA_V4 = `
+ALTER TABLE eval_run ADD COLUMN scorer TEXT;
+`;
+
+const TARGET_SCHEMA_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -401,6 +413,11 @@ export class EventStore {
     if (version < 3) {
       this._db.exec(SCHEMA_V3);
       version = 3;
+    }
+
+    if (version < 4) {
+      this._db.exec(SCHEMA_V4);
+      version = 4;
     }
 
     if (version !== TARGET_SCHEMA_VERSION) {

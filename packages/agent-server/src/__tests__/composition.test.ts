@@ -520,3 +520,167 @@ describe("GET /capabilities/:id", () => {
     expect(body.sharesToolboxWith).toEqual(["file-management-file-tools"]);
   });
 });
+
+/* ------------------------------------------------------------------------ */
+/* POST /agents/:id/composition/delivered                                    */
+/* ------------------------------------------------------------------------ */
+
+describe("POST /agents/:id/composition/delivered", () => {
+  /** A grounded twin of alpha — what an entrypoint would deliver: same role,
+   *  but with the live Background an assembly site fetches per tenant. */
+  function deliveredAgentFor(context: Record<string, unknown> | undefined): Agent {
+    return new Agent({
+      role: researcherRole,
+      awareness: coveredAwareness,
+      background: new Background({
+        current_state: {
+          FIELD_CATALOG: "outcome ∈ {won | lost}",
+          TENANT: context?.organizationId ?? "unscoped",
+        },
+      }),
+      mission: new Mission({ objective: "Summarize the corpus" }),
+      model: "claude-opus-4-20250514",
+    });
+  }
+
+  function instantiableReg(overrides: Partial<AgentRegistration> = {}): {
+    reg: AgentRegistration;
+    received: { context?: Record<string, unknown> }[];
+  } {
+    const received: { context?: Record<string, unknown> }[] = [];
+    const reg: AgentRegistration = {
+      id: "alpha",
+      name: "Alpha",
+      agent: agentAlpha,
+      runner: mockRunner,
+      instantiate: async (context?: Record<string, unknown>) => {
+        received.push({ context });
+        return deliveredAgentFor(context);
+      },
+      instantiateDefaults: { organizationId: "org-default" },
+      ...overrides,
+    };
+    return { reg, received };
+  }
+
+  it("GET composition advertises instantiation availability", async () => {
+    const { reg } = instantiableReg();
+    const withHook = await makeApp([reg]).request("/agents/alpha/composition");
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const hookBody = (await withHook.json()) as any;
+    expect(hookBody.instantiation).toEqual({
+      available: true,
+      defaults: { organizationId: "org-default" },
+    });
+
+    const without = await makeApp().request("/agents/alpha/composition");
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const plainBody = (await without.json()) as any;
+    expect(plainBody.instantiation).toEqual({ available: false, defaults: null });
+  });
+
+  it("returns 404 for unknown agent and 501 without a hook", async () => {
+    const notFound = await makeApp().request("/agents/nope/composition/delivered", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(notFound.status).toBe(404);
+
+    const noHook = await makeApp().request("/agents/alpha/composition/delivered", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(noHook.status).toBe(501);
+  });
+
+  it("composes the delivered instance with an explicit context", async () => {
+    const { reg, received } = instantiableReg();
+    const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ context: { organizationId: "org-42" } }),
+    });
+    expect(res.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+
+    expect(received).toEqual([{ context: { organizationId: "org-42" } }]);
+    expect(body.delivered).toBe(true);
+    expect(body.context).toEqual({ organizationId: "org-42" });
+    // The delivered instance's LIVE background — not the declared agent's.
+    expect(body.instance.background.current_state.TENANT).toBe("org-42");
+    expect(body.instance.background.current_state.FIELD_CATALOG).toBe("outcome ∈ {won | lost}");
+    // Full composition payload shape rides along.
+    expect(body.prompt.sections.length).toBeGreaterThan(0);
+    expect(body.role.name).toBe("Researcher");
+  });
+
+  it("falls back to instantiateDefaults when no context is posted", async () => {
+    const { reg, received } = instantiableReg();
+    const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(res.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+    expect(received).toEqual([{ context: { organizationId: "org-default" } }]);
+    expect(body.context).toEqual({ organizationId: "org-default" });
+    expect(body.instance.background.current_state.TENANT).toBe("org-default");
+  });
+
+  it("rejects a non-object context with 400", async () => {
+    const { reg } = instantiableReg();
+    const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ context: ["not", "an", "object"] }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("surfaces an instantiate failure as 502 with the reason", async () => {
+    const { reg } = instantiableReg({
+      instantiate: async () => {
+        throw new Error("tenant DB unreachable");
+      },
+    });
+    const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+      method: "POST",
+      body: "{}",
+    });
+    expect(res.status).toBe(502);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+    expect(body.error).toContain("tenant DB unreachable");
+  });
+});
+
+describe("registration evals declaration", () => {
+  it("defaults to an empty list on the composition payload", async () => {
+    const res = await makeApp().request("/agents/alpha/composition");
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+    expect(body.evals).toEqual([]);
+  });
+
+  it("surfaces the declared eval refs verbatim", async () => {
+    const reg: AgentRegistration = {
+      id: "alpha",
+      name: "Alpha",
+      agent: agentAlpha,
+      runner: mockRunner,
+      evals: [
+        { setId: "xd-interpret", grades: "scope shape + resolved-deal-set F1", step: "interpret" },
+        { setId: "e2e-answer", scorer: "set-membership" },
+      ],
+    };
+    const res = await makeApp([reg]).request("/agents/alpha/composition");
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+    expect(body.evals).toEqual([
+      { setId: "xd-interpret", grades: "scope shape + resolved-deal-set F1", step: "interpret" },
+      { setId: "e2e-answer", scorer: "set-membership" },
+    ]);
+  });
+});

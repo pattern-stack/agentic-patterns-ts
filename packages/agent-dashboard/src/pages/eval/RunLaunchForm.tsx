@@ -49,19 +49,31 @@ export interface RunLaunchFormProps {
   presetSetId?: string;
   /** Friendly label for the locked set (falls back to the id). */
   presetSetLabel?: string;
+  /** Locks the form to one target agent: hides the picker, skips the agents fetch. */
+  presetTargetId?: string;
+  /** Friendly label for the locked target (falls back to the id). */
+  presetTargetLabel?: string;
+  /** Initial scorer selection (e.g. a registration-declared default). */
+  initialScorer?: string;
 }
 
-export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProps = {}) {
+export function RunLaunchForm({
+  presetSetId,
+  presetSetLabel,
+  presetTargetId,
+  presetTargetLabel,
+  initialScorer,
+}: RunLaunchFormProps = {}) {
   const navigate = useNavigate();
   const [sets, setSets] = useState<SetsState>({ kind: "loading" });
   const [agents, setAgents] = useState<AgentsState>({ kind: "loading" });
   const [setId, setSetId] = useState(presetSetId ?? "");
-  const [targetId, setTargetId] = useState("");
+  const [targetId, setTargetId] = useState(presetTargetId ?? "");
   const [variant, setVariant] = useState("");
   const [split, setSplit] = useState<"" | EvalSplit>("");
   const [allowTest, setAllowTest] = useState(false);
   const [scorers, setScorers] = useState<ScorerOption[]>([...BUILTIN_SCORERS]);
-  const [scorer, setScorer] = useState(DEFAULT_SCORER_ID);
+  const [scorer, setScorer] = useState(initialScorer ?? DEFAULT_SCORER_ID);
   const [launchError, setLaunchError] = useState<string | undefined>(undefined);
   const [launching, setLaunching] = useState(false);
 
@@ -91,6 +103,8 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
   }, [presetSetId]);
 
   useEffect(() => {
+    // Preset mode already knows its target — skip the agents fetch entirely.
+    if (presetTargetId) return;
     let cancelled = false;
     (async () => {
       setAgents({ kind: "loading" });
@@ -106,7 +120,7 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [presetTargetId]);
 
   // Scorer options come from GET /eval/scorers; a fetch failure (older server,
   // blip) keeps the hardcoded three built-ins seeded above — the picker never
@@ -197,21 +211,30 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
       </LauncherField>
 
       <LauncherField label="Target">
-        <select
-          value={targetId}
-          onChange={(e) => setTargetId(e.target.value)}
-          style={selectStyle}
-          aria-label="Target"
-        >
-          <option value="">Select a target…</option>
-          {agents.kind === "ok" &&
-            agents.agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-        </select>
-        {agents.kind === "error" && (
+        {presetTargetId ? (
+          <div
+            style={{ ...selectStyle, color: "var(--fg-muted)", fontFamily: "var(--font-mono)" }}
+            aria-label="Target"
+          >
+            {presetTargetLabel ?? presetTargetId}
+          </div>
+        ) : (
+          <select
+            value={targetId}
+            onChange={(e) => setTargetId(e.target.value)}
+            style={selectStyle}
+            aria-label="Target"
+          >
+            <option value="">Select a target…</option>
+            {agents.kind === "ok" &&
+              agents.agents.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+          </select>
+        )}
+        {!presetTargetId && agents.kind === "error" && (
           <div style={{ fontSize: 12, color: "var(--red)" }}>{agents.message}</div>
         )}
       </LauncherField>

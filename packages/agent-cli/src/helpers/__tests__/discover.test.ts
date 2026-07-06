@@ -137,3 +137,21 @@ describe("discoverAgents — recursive across domains + dedupe", () => {
     expect(found.map((a) => a.id).sort()).toEqual(["canvas/writer", "dealbrain/retrieval"]);
   });
 });
+
+describe("loadAgentsFromFile — registration `evals` declaration", () => {
+  it("passes valid refs through and drops malformed entries", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "graded/agent.mjs"), FX);
+    expect(a?.id).toBe("graded");
+    expect(a?.evals).toEqual([
+      { setId: "xd-interpret", grades: "scope shape", step: "interpret", scorer: "none" },
+      { setId: "e2e-answer" },
+    ]);
+  });
+
+  it("leaves evals undefined on registrations that declare none", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "todo/agent.mjs"), FX);
+    expect(a?.evals).toBeUndefined();
+  });
+});

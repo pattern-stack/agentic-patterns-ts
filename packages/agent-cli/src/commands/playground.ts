@@ -122,6 +122,9 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     agent: reg.agent,
     file: reg.file,
     provenance: reg.provenance,
+    instantiate: reg.instantiate,
+    instantiateDefaults: reg.instantiateDefaults,
+    evals: reg.evals,
     runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner) : llmRunner,
   }));
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
@@ -152,10 +155,14 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
 
   const dashboardDir = resolveDashboardDir();
   let dashboardMounted = false;
+  // The handler the HTTP server serves: the bare API app, or — when the SPA is
+  // mounted — the API wrapped in the HTML-navigation shim (see the shim's doc).
+  let handler: FetchLike = app;
 
   if (serveDashboard) {
     if (dashboardDir && existsSync(dashboardDir)) {
       mountDashboard(app, dashboardDir);
+      handler = withHtmlNavigationShim(app, dashboardDir);
       dashboardMounted = true;
     } else {
       const where = dashboardDir ?? "<unresolved>";
@@ -170,7 +177,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   // -------------------------------------------------------------------------
 
   await new Promise<void>((resolve) => {
-    serve({ fetch: app.fetch, port }, () => {
+    serve({ fetch: handler.fetch as Parameters<typeof serve>[0]["fetch"], port }, () => {
       resolve();
     });
   });
@@ -244,6 +251,53 @@ export function isApiPath(pathname: string): boolean {
 }
 
 /**
+ * A browser top-level navigation advertises `Accept: text/html,…`; the SPA's
+ * own `fetch()` calls send a default Accept (never text/html). This is the
+ * tell that lets a deep link / refresh on an SPA route under an API prefix
+ * (e.g. `/agents/:id`) serve the SPA index, while an unmatched API fetch
+ * still 404s as JSON expects. Same content-negotiation trick as the
+ * dashboard vite config's `htmlNavBypass`.
+ */
+export function isHtmlNavigation(accept: string | undefined): boolean {
+  return accept?.includes("text/html") ?? false;
+}
+
+/** The minimal fetch-handler shape shared by a Hono app and the shim below. */
+export interface FetchLike {
+  fetch: (req: Request, ...rest: never[]) => Response | Promise<Response>;
+}
+
+/**
+ * Wrap the server's fetch with the HTML-NAVIGATION shim: a browser top-level
+ * navigation (`Accept: text/html`) is answered from the SPA bundle BEFORE the
+ * API routes can match, so SPA routes that COLLIDE with registered API GETs —
+ * `/eval/runs/:id`, `/agents/:id` — deep-link and reload as pages instead of
+ * returning raw JSON (Hono matches registered routes ahead of any fallback,
+ * so this cannot be fixed inside the app). Mirrors the dashboard vite dev
+ * proxy's `htmlNavBypass` semantics exactly: `fetch()`/SSE/curl requests
+ * (which never Accept text/html) pass through to the API untouched, and a
+ * literal asset file wins over the SPA index when one exists.
+ */
+export function withHtmlNavigationShim(api: FetchLike, dashboardDir: string): FetchLike {
+  const indexPath = path.join(dashboardDir, "index.html");
+  return {
+    fetch: (req, ...rest) => {
+      if (req.method === "GET" && isHtmlNavigation(req.headers.get("accept") ?? undefined)) {
+        const pathname = decodeURIComponent(new URL(req.url).pathname);
+        const assetPath = pathname === "/" ? indexPath : safeJoin(dashboardDir, pathname);
+        if (assetPath && existsSync(assetPath) && statSync(assetPath).isFile()) {
+          return streamFile(assetPath);
+        }
+        if (existsSync(indexPath)) {
+          return streamFile(indexPath);
+        }
+      }
+      return api.fetch(req, ...rest);
+    },
+  };
+}
+
+/**
  * Register a static-file + SPA-fallback handler on the Hono app. This is
  * mounted after `createServer()`'s routes, so API endpoints win the match.
  *
@@ -262,7 +316,12 @@ function mountDashboard(app: ReturnType<typeof createServer>, dashboardDir: stri
     const url = new URL(c.req.url);
     const pathname = decodeURIComponent(url.pathname);
 
-    if (isApiPath(pathname)) {
+    // Only non-navigation requests hard-404 on API prefixes. REGISTERED API
+    // routes never reach this handler (Hono matches them first) — what lands
+    // here under an API prefix is either an SPA route colliding with a prefix
+    // (a browser deep link / refresh on `/agents/:id` → serve the SPA) or an
+    // unmatched API fetch (→ 404, never index.html masquerading as JSON).
+    if (isApiPath(pathname) && !isHtmlNavigation(c.req.header("accept"))) {
       return c.notFound();
     }
 
