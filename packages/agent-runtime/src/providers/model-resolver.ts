@@ -144,6 +144,18 @@ export interface GatewayConfig {
   readonly modelPrefix?: string;
   /** Full control over agent-id → gateway-id mapping. Overrides `modelPrefix`. */
   readonly qualify?: (modelId: string) => string;
+  /**
+   * Whether this gateway faithfully forwards OpenAI `response_format` json-schema
+   * (structured outputs) to its upstream models. `@ai-sdk/openai-compatible`
+   * defaults to `false` for a generic gateway — it then STRIPS the schema before
+   * sending, so the model free-forms and structured emits fail ("No object
+   * generated"). Set `true` only when you know the gateway translates structured
+   * outputs for the models you route through it (e.g. Bifrost → Gemini, verified).
+   * It is a property of the (gateway × upstream model) pair, so it is opt-in, not
+   * assumed. Per-model granularity belongs in a model profile (which wins over the
+   * gateway). Env: `AP_GATEWAY_STRUCTURED_OUTPUTS`.
+   */
+  readonly supportsStructuredOutputs?: boolean;
 }
 
 /** Map an agent's declared id to the id the gateway expects. */
@@ -302,6 +314,9 @@ async function buildFromGateway(modelId: string, gw: GatewayConfig): Promise<Lan
     baseURL: gw.baseURL,
     ...(apiKey ? { apiKey } : {}),
     ...(gw.headers ? { headers: gw.headers } : {}),
+    // Provider-level in @ai-sdk/openai-compatible: gates whether the SDK SENDS the
+    // json-schema `response_format` (default false → stripped). Opt-in per gateway.
+    ...(gw.supportsStructuredOutputs ? { supportsStructuredOutputs: true } : {}),
   });
   return provider(qualifyGatewayId(modelId, gw));
 }

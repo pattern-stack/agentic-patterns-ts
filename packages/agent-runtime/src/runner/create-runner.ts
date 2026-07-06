@@ -135,9 +135,11 @@ export interface RunnerSelection {
 
 /**
  * Build a {@link GatewayConfig} from env: `AP_GATEWAY_BASE_URL` (required),
- * `AP_GATEWAY_API_KEY`, `AP_GATEWAY_MODEL_PREFIX`. Returns undefined when no
- * gateway URL is set — so setting one env var routes every agent through the
- * gateway, no code change.
+ * `AP_GATEWAY_API_KEY`, `AP_GATEWAY_MODEL_PREFIX`,
+ * `AP_GATEWAY_STRUCTURED_OUTPUTS` (1/true → the gateway forwards json-schema
+ * structured outputs; see {@link GatewayConfig.supportsStructuredOutputs}).
+ * Returns undefined when no gateway URL is set — so setting one env var routes
+ * every agent through the gateway, no code change.
  *
  * Auth: a token gateway uses `AP_GATEWAY_API_KEY` (sent as `Authorization: Bearer`).
  * A Basic-auth gateway (e.g. a Bifrost deployment fronted by HTTP Basic, which 401s
@@ -162,6 +164,9 @@ function envGateway(): GatewayConfig | undefined {
       ? { modelPrefix: process.env.AP_GATEWAY_MODEL_PREFIX }
       : {}),
     ...(basicHeader ? { headers: basicHeader } : {}),
+    ...(/^(1|true|yes)$/i.test(process.env.AP_GATEWAY_STRUCTURED_OUTPUTS ?? "")
+      ? { supportsStructuredOutputs: true }
+      : {}),
   };
 }
 
