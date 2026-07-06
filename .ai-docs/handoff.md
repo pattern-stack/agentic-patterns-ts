@@ -1,16 +1,14 @@
-# Handoff — 2026-07-05
+# Handoff — 2026-07-05 (pm)
 
-**Branch:** `main`
-**Last action:** Shipped a **lockstep versioning policy** (PR merged to `main` → CI OIDC publishes). `runtime` + `server` + `cli` collapsed to a shared **0.10.0** (was 0.9.2 / 0.6.0 / 0.9.0); `core` **floats** at 0.6.0 (portable algebra, intended ADK-plugin target — runs without the runtime, so it versions independently); `dashboard` `version` field removed (private, ships as cli assets). `scripts/publish.sh` gained a `lockstep` pre-flight gate that hard-fails if runtime/server/cli drift. `bun.lock` refreshed; `bash scripts/publish.sh check` was fully green pre-merge. Rationale in memory [[project_versioning-policy]].
-**Next action:** Verify the publish landed — `npm view @agentic-patterns/{runtime,server,cli} versions --json` / dist-tags should show 0.10.0 on `latest` (core stays 0.6.0). Then delete the merged `doug/lockstep-versioning` branch. No forced feature work after that.
-**Obstacles:** none.
-
-## Prior context (cli 0.9.0 / runtime 0.9.2 — shipped)
-- Live Run constellation (paced replay, node inspector, trace scrubber, dual graph model), real `/composition` provenance, `/graph` retired (→ `/run`) — #168/#169/#172. Runtime 0.9.2 = `provider follows the model id` fix (#170/#171).
-- Parked follow-ups (unchanged): (1) rework `asAgent`-Sequential provenance to show the 3 underlying agents (backend must introspect the pipeline's steps); (2) map blast-radius → runtime gates (`composition.ts blastOf()` is a stub); (3) chain-mode live graph is sparse for composed agents under the no-key `claude-cli` runner — Composition mode is the reliable view.
+**Branch:** `main` (clean; all session work merged + published)
+**Last action:** Shipped the session — `@agentic-patterns/core@0.7.0`, `runtime`/`server`/`cli@0.11.1` live on npm (verified via dist-tags). PRs #178 (credential preflight / ExecutionService), #179 (no framework-default model), #180 (bump.sh two-track) merged; dashboard work landed as #181/#182.
+**Next action:** No work mid-flight. Pick one of the parked items below, or start fresh.
+**Obstacles:** none blocking.
 
 ## Notes
-- **Release gotcha:** after ANY version bump you MUST `rm bun.lock && bun install` or the publish job fails on the lockfile-sanity gate (`disk=X vs lock=Y`). Confirm a release landed via `npm view <pkg> versions --json` / dist-tags, NOT cached `npm view <pkg> version`.
-- **Versioning:** runtime/server/cli are lockstep (one version); core floats; dashboard has no version. `publish.sh` enforces the trio via its `lockstep` gate. See [[project_versioning-policy]].
-- **Dashboard verify harness:** `ap playground examples` (deterministic pipeline2, no API key) + `vite dev` + direct Playwright; `graph/sample-run-trace.ts` + `/run` demo mode is the model-free backbone.
-- Untracked `docs/build/` + `docs/.docusaurus/` are Docusaurus output (not gitignored).
+- **Parked design fork:** should `ap run`/`ap eval` adopt per-agent resolver mode (like `playground`) so agents own their model everywhere? Undecided. Today run/eval use the env-ladder (one global model), so `.withModel()` is honored in playground/gateway but IGNORED in run/eval.
+- **Model default removed (breaking, #179):** `Agent.getModel()` / `Role.defaultModel` are now `string | undefined`. Unset ⇒ the runner supplies the model (tier/env/gateway) or fails loud. Declare models explicitly. See [[project_no-framework-model-default]].
+- **Credential preflight (#178):** `agent-cli`'s `ExecutionService` wraps `createRunner` for run/eval/playground — loud signal when no key, interactive fix, Bifrost gateway via `AP_GATEWAY_*`. See [[project_runner-credential-preflight]].
+- **Gateway (Bifrost):** `.env` has `AP_GATEWAY_BASE_URL=…findtempo.co/v1` + Basic auth. Catalog is **Gemini + OpenAI only, no Claude** — agents run through it must declare a `gemini/*` or `openai/*` id (e.g. `gemini/gemini-3.1-flash-lite`). Needs `@ai-sdk/openai-compatible@1.x` (NOT 3.x — spec-v4, rejected by ai@5). No agents wired to the gateway yet. See [[reference_bifrost-dev-gateway]].
+- **Release tooling:** `scripts/bump.sh` is now two-track — `bash scripts/bump.sh --lockstep <spec> [--core <spec>]` (justfile `bump-lockstep`/`bump-core`/`bump-both`). Old all-four positional form is gone. Then `git add packages/*/package.json bun.lock && publish.sh check`. See [[project_versioning-policy]].
+- **Untracked artifacts** (not this session's work): `docs/build/`, `docs/.docusaurus/`, `packages/agent-cli/.DS_Store`, `.ai-docs/research/adk-plugin.md` — safe to ignore or gitignore.
