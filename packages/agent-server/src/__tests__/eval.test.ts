@@ -343,6 +343,40 @@ describe("eval routes", () => {
       const res = await app.request("/eval/runs?split=bogus");
       expect(res.status).toBe(400);
     });
+
+    it("carries a per-run pass summary (additive); result-less runs omit it", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/runs");
+      type RunWithSummary = EvalRunRow & {
+        summary?: {
+          cases: number;
+          passed: number;
+          failed: number;
+          ungated: number;
+          passRate: number | null;
+        };
+      };
+      const body = (await res.json()) as { runs: RunWithSummary[] };
+      const byId = new Map(body.runs.map((r) => [r.id, r]));
+      // Suite A: case-01 pass, case-02 fail, case-03 error/null -> 1 pass, 1 fail, 1 ungated.
+      expect(byId.get(runAId)?.summary).toEqual({
+        cases: 3,
+        passed: 1,
+        failed: 1,
+        ungated: 1,
+        passRate: 0.5,
+      });
+      // Suite B: two passes -> passRate 1, no ungated.
+      expect(byId.get(runBId)?.summary).toEqual({
+        cases: 2,
+        passed: 2,
+        failed: 0,
+        ungated: 0,
+        passRate: 1,
+      });
+      // Suite C recorded no results -> no summary field (backward-compatible row shape).
+      expect(byId.get(runCId)?.summary).toBeUndefined();
+    });
   });
 
   describe("GET /eval/runs/:id", () => {

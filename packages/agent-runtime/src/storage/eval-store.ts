@@ -174,6 +174,22 @@ export interface SplitAggregate {
 }
 
 /**
+ * Per-run pass rollup — one row per `eval_run` that has any `eval_result`,
+ * the list-view counterpart of `GET /eval/runs/:id`'s handler-computed
+ * summary. A single grouped aggregate over `eval_result` (the runs list needs
+ * per-row pass counts without N detail fetches). Runs with zero results are
+ * simply absent — the caller falls back to no summary.
+ */
+export interface EvalRunAggregate {
+  readonly evalRunId: string;
+  readonly cases: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly ungated: number;
+  readonly passRate: number | null; // null when no result in the run carried a pass verdict
+}
+
+/**
  * One run that evaluated a given `(setId, caseId)` — the case's annotation
  * (`pass`/`scores`) joined to its `eval_run` metadata and the `runs`-table
  * execution fields. The "cross-run history" for a single case; newest first.
@@ -214,6 +230,7 @@ export class EvalStore extends RunStore {
   private readonly _listEvalRunsStmt: Statement;
   private readonly _evalRunResultsStmt: Statement;
   private readonly _splitAggregatesStmt: Statement;
+  private readonly _evalRunSummariesStmt: Statement;
 
   constructor(opts: EventStoreOptions) {
     super(opts);
@@ -366,6 +383,24 @@ export class EvalStore extends RunStore {
         AND (@targetId IS NULL OR ev.target_id = @targetId)
         AND (@variant  IS NULL OR ev.variant = @variant)
       GROUP BY COALESCE(ec.split, ev.split)
+    `);
+
+    // Per-run pass counts: one grouped aggregate over eval_result, filtered by
+    // the SAME facets as listEvalRuns so the two align row-for-row. Runs with
+    // no results yield no group (absent -> the list falls back to no summary).
+    this._evalRunSummariesStmt = this._db.prepare(`
+      SELECT
+        er.eval_run_id                                                     AS evalRunId,
+        COUNT(*)                                                           AS cases,
+        COALESCE(SUM(CASE WHEN er.pass = 1 THEN 1 ELSE 0 END), 0)          AS passed,
+        COALESCE(SUM(CASE WHEN er.pass = 0 THEN 1 ELSE 0 END), 0)          AS failed
+      FROM eval_result er
+      JOIN eval_run ev ON er.eval_run_id = ev.id
+      WHERE (@setId    IS NULL OR ev.set_id = @setId)
+        AND (@targetId IS NULL OR ev.target_id = @targetId)
+        AND (@variant  IS NULL OR ev.variant = @variant)
+        AND (@split    IS NULL OR ev.split = @split)
+      GROUP BY er.eval_run_id
     `);
   }
 
@@ -591,6 +626,35 @@ export class EvalStore extends RunStore {
       };
     });
   }
+
+  /**
+   * Per-run pass counts for the runs list — a single grouped aggregate over
+   * `eval_result`, filterable by the same facets as `listEvalRuns`. Keyed by
+   * `evalRunId`; runs with no results are absent. `ungated` = cases with no
+   * pass verdict; `passRate` is over gated cases only (null when none gated).
+   */
+  evalRunSummaries(
+    opts: { setId?: string; targetId?: string; variant?: string; split?: EvalSplit } = {},
+  ): EvalRunAggregate[] {
+    const rows = this._evalRunSummariesStmt.all({
+      setId: opts.setId ?? null,
+      targetId: opts.targetId ?? null,
+      variant: opts.variant ?? null,
+      split: opts.split ?? null,
+    }) as RawEvalRunSummaryRow[];
+
+    return rows.map((r) => {
+      const gated = r.passed + r.failed;
+      return {
+        evalRunId: r.evalRunId,
+        cases: r.cases,
+        passed: r.passed,
+        failed: r.failed,
+        ungated: r.cases - r.passed - r.failed,
+        passRate: gated > 0 ? r.passed / gated : null,
+      };
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -693,6 +757,13 @@ function rowToJoinedEvalResultRow(r: RawJoinedResultRow): JoinedEvalResultRow {
 interface RawSplitAggregateRow {
   split: string | null;
   results: number;
+  passed: number;
+  failed: number;
+}
+
+interface RawEvalRunSummaryRow {
+  evalRunId: string;
+  cases: number;
   passed: number;
   failed: number;
 }

@@ -641,6 +641,62 @@ describe("EvalStore", () => {
     });
   });
 
+  describe("evalRunSummaries", () => {
+    it("rolls up per-run pass counts; ungated excludes null-pass; result-less runs are absent; honors filters", () => {
+      // Run A: 1 pass, 1 fail, 1 ungated (null pass).
+      const runA = store.startEvalRun({ setId: "set-1", targetId: "agent-a", variant: "a" });
+      store.recordEvalResult({ evalRunId: runA, caseId: "c1", scores: [], pass: true });
+      store.recordEvalResult({ evalRunId: runA, caseId: "c2", scores: [], pass: false });
+      store.recordEvalResult({ evalRunId: runA, caseId: "c3", scores: [], pass: null });
+
+      // Run B: 2 pass — a different variant, same set (filter coverage).
+      const runB = store.startEvalRun({ setId: "set-1", targetId: "agent-a", variant: "b" });
+      store.recordEvalResult({ evalRunId: runB, caseId: "c1", scores: [], pass: true });
+      store.recordEvalResult({ evalRunId: runB, caseId: "c2", scores: [], pass: true });
+
+      // Run C: started but never recorded a result — absent from the rollup.
+      const runC = store.startEvalRun({ setId: "set-1", targetId: "agent-a", variant: "c" });
+
+      const byId = new Map(store.evalRunSummaries({ setId: "set-1" }).map((s) => [s.evalRunId, s]));
+
+      expect(byId.get(runA)).toEqual({
+        evalRunId: runA,
+        cases: 3,
+        passed: 1,
+        failed: 1,
+        ungated: 1,
+        passRate: 0.5,
+      });
+      expect(byId.get(runB)).toEqual({
+        evalRunId: runB,
+        cases: 2,
+        passed: 2,
+        failed: 0,
+        ungated: 0,
+        passRate: 1,
+      });
+      // No eval_result rows -> no group -> absent (the list falls back to no summary).
+      expect(byId.has(runC)).toBe(false);
+
+      // Facet filter narrows to a single run.
+      expect(store.evalRunSummaries({ variant: "b" }).map((s) => s.evalRunId)).toEqual([runB]);
+    });
+
+    it("a fully-ungated run yields passRate null", () => {
+      const run = store.startEvalRun({ setId: "set-x", targetId: "agent-a" });
+      store.recordEvalResult({ evalRunId: run, caseId: "c1", scores: [], pass: null });
+      const [summary] = store.evalRunSummaries({ setId: "set-x" });
+      expect(summary).toEqual({
+        evalRunId: run,
+        cases: 1,
+        passed: 0,
+        failed: 0,
+        ungated: 1,
+        passRate: null,
+      });
+    });
+  });
+
   describe("derivePass", () => {
     it("all gated scores passed -> true", () => {
       expect(

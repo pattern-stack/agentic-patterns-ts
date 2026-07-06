@@ -9,6 +9,7 @@ export type {
   EvalComparison,
   EvalComparisonRow,
   EvalResultRecord,
+  EvalRunAggregate,
   EvalRunMeta,
   EvalRunRow,
   EvalScoreLike,

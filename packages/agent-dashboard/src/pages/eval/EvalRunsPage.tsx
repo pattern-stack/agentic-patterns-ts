@@ -52,6 +52,27 @@ function statusTone(status: EvalRunRow["status"]): BadgeTone {
   }
 }
 
+function passRateTone(rate: number): BadgeTone {
+  if (rate >= 0.999) return "green";
+  if (rate >= 0.5) return "yellow";
+  return "red";
+}
+
+/** Runs-list pass cell: "9/12" + a pass-rate badge; ungated (or summary-less) runs show "—". */
+function PassCell({ summary }: { summary: EvalRunRow["summary"] }) {
+  if (!summary || summary.passRate === null) {
+    return <span style={{ color: "var(--fg-subtle)" }}>—</span>;
+  }
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+        {summary.passed}/{summary.cases}
+      </span>
+      <Badge tone={passRateTone(summary.passRate)}>{Math.round(summary.passRate * 100)}%</Badge>
+    </span>
+  );
+}
+
 function getField(row: EvalRunRow, key: string): string {
   return String((row as unknown as Record<string, unknown>)[key] ?? "");
 }
@@ -344,6 +365,11 @@ export function EvalRunsPage() {
                     key: "status",
                     header: "Status",
                     render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
+                  },
+                  {
+                    key: "passed",
+                    header: "Passed",
+                    render: (row) => <PassCell summary={row.summary} />,
                   },
                   { key: "model", header: "Model", render: (row) => row.model ?? "—" },
                   {

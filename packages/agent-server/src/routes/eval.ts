@@ -171,14 +171,33 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
       return c.json({ error: split.error }, 400);
     }
     const limit = parseInt10(c.req.query("limit"), 50, 1, 500);
-    const runs = evalStore.listEvalRuns({
+    const filters = {
       setId: c.req.query("set"),
       targetId: c.req.query("target"),
       variant: c.req.query("variant"),
       split: split.value,
-      limit,
+    };
+    const runs = evalStore.listEvalRuns({ ...filters, limit });
+    // Per-run pass rollup for the list view — one grouped aggregate over
+    // eval_result (not N detail fetches). Additive: a run with no results has
+    // no entry here and keeps the pre-existing (summary-less) row shape.
+    const summaryById = new Map(evalStore.evalRunSummaries(filters).map((s) => [s.evalRunId, s]));
+    const withSummary = runs.map((run) => {
+      const s = summaryById.get(run.id);
+      return s
+        ? {
+            ...run,
+            summary: {
+              cases: s.cases,
+              passed: s.passed,
+              failed: s.failed,
+              ungated: s.ungated,
+              passRate: s.passRate,
+            },
+          }
+        : run;
     });
-    return c.json({ runs });
+    return c.json({ runs: withSummary });
   });
 
   app.get("/eval/runs/:id", (c) => {

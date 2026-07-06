@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import type { EvalCaseRow, EvalScoreLike, JoinedEvalResultRow } from "../../api/types";
+import { Markdown } from "../../chat/atoms";
 import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Spinner } from "../../components/atoms/Spinner";
@@ -29,6 +30,18 @@ const preStyle = {
 
 const mutedStyle = { color: "var(--fg-muted)", fontSize: 13 };
 
+// Inset panel for rendered markdown — the `preStyle` box chrome without the
+// monospace/pre-wrap (the markdown tags own their own layout).
+const mdPanelStyle = {
+  margin: 0,
+  padding: "2px 12px",
+  background: "var(--bg-inset)",
+  borderRadius: 6,
+  fontSize: 13,
+  overflowX: "auto" as const,
+  wordBreak: "break-word" as const,
+};
+
 const sectionHeadingStyle = {
   fontSize: 12,
   fontWeight: 600,
@@ -45,6 +58,45 @@ function pretty(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/**
+ * Score details often carry a `explanationMdLines: string[]` (a judge's
+ * rationale as markdown lines). Returns the joined markdown, or null when
+ * absent/malformed (caller keeps the raw-JSON expander either way).
+ */
+function explanationMd(detail: EvalScoreLike["detail"]): string | null {
+  const lines = (detail as { explanationMdLines?: unknown } | undefined)?.explanationMdLines;
+  return isStringArray(lines) && lines.length > 0 ? lines.join("\n") : null;
+}
+
+/**
+ * The run's answer. Canvas evals persist markdown as an array of lines
+ * (`safeParseAnswer` yields a `string[]`) — render those as markdown; every
+ * other shape stays pretty-printed JSON. The fail border is preserved either way.
+ */
+function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
+  const value = safeParseAnswer(finalAnswer);
+  if (isStringArray(value)) {
+    return (
+      <div
+        style={
+          pass === false ? { ...mdPanelStyle, borderLeft: "3px solid var(--red)" } : mdPanelStyle
+        }
+      >
+        <Markdown content={value.join("\n")} />
+      </div>
+    );
+  }
+  return (
+    <pre style={pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle}>
+      {pretty(value)}
+    </pre>
+  );
 }
 
 interface CaseDetailProps {
@@ -86,15 +138,7 @@ export function CaseDetail({ result, caseRow }: CaseDetailProps) {
               {result.runError ?? "(no error message recorded)"}
             </pre>
           ) : (
-            <pre
-              style={
-                result.pass === false
-                  ? { ...preStyle, borderLeft: "3px solid var(--red)" }
-                  : preStyle
-              }
-            >
-              {pretty(safeParseAnswer(result.finalAnswer))}
-            </pre>
+            <ActualAnswer finalAnswer={result.finalAnswer} pass={result.pass} />
           )}
         </div>
       </div>
@@ -122,6 +166,7 @@ export function CaseDetail({ result, caseRow }: CaseDetailProps) {
 
 function ScoreRow({ score }: { score: EvalScoreLike }) {
   const extra = score.detail ?? (score.error ? { error: score.error } : undefined);
+  const mdExplanation = explanationMd(score.detail);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
@@ -133,10 +178,15 @@ function ScoreRow({ score }: { score: EvalScoreLike }) {
           <Badge tone={score.passed ? "green" : "red"}>{score.passed ? "pass" : "fail"}</Badge>
         )}
       </div>
+      {mdExplanation && (
+        <div style={{ ...mdPanelStyle, marginTop: 2 }}>
+          <Markdown content={mdExplanation} />
+        </div>
+      )}
       {extra && (
         <details>
           <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
-            details
+            {mdExplanation ? "raw detail" : "details"}
           </summary>
           <pre style={{ ...preStyle, marginTop: 4 }}>{pretty(extra)}</pre>
         </details>

@@ -18,6 +18,7 @@ import type {
   EvalRunRow,
   JoinedEvalResultRow,
 } from "../../api/types";
+import { Markdown } from "../../chat/atoms";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
@@ -47,6 +48,17 @@ const preStyle = {
 
 const mutedStyle = { color: "var(--fg-muted)", fontSize: 13 };
 
+// Inset panel for rendered markdown — `preStyle` chrome without monospace/pre-wrap.
+const mdPanelStyle = {
+  margin: 0,
+  padding: "2px 12px",
+  background: "var(--bg-inset)",
+  borderRadius: 6,
+  fontSize: 13,
+  overflowX: "auto" as const,
+  wordBreak: "break-word" as const,
+};
+
 const sectionHeadingStyle = {
   fontSize: 12,
   fontWeight: 600,
@@ -63,6 +75,10 @@ function pretty(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
 }
 
 function shortSha(sha: string | null): string {
@@ -417,6 +433,30 @@ function Stat({
   );
 }
 
+/**
+ * The run's answer — markdown when persisted as an array of lines (canvas
+ * evals), pretty JSON otherwise. Fail border preserved either way.
+ */
+function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
+  const value = safeParseAnswer(finalAnswer);
+  if (isStringArray(value)) {
+    return (
+      <div
+        style={
+          pass === false ? { ...mdPanelStyle, borderLeft: "3px solid var(--red)" } : mdPanelStyle
+        }
+      >
+        <Markdown content={value.join("\n")} />
+      </div>
+    );
+  }
+  return (
+    <pre style={pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle}>
+      {pretty(value)}
+    </pre>
+  );
+}
+
 function SideActualPanel({ label, result }: { label: string; result: JoinedEvalResultRow | null }) {
   return (
     <div>
@@ -428,13 +468,7 @@ function SideActualPanel({ label, result }: { label: string; result: JoinedEvalR
           {result.runError ?? "(no error message recorded)"}
         </pre>
       ) : (
-        <pre
-          style={
-            result.pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle
-          }
-        >
-          {pretty(safeParseAnswer(result.finalAnswer))}
-        </pre>
+        <ActualAnswer finalAnswer={result.finalAnswer} pass={result.pass} />
       )}
     </div>
   );

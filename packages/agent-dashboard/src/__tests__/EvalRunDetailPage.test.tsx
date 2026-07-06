@@ -448,6 +448,88 @@ describe("EvalRunDetailPage", () => {
     expect(screen.queryByText("no scores recorded")).toBeTruthy();
   });
 
+  it("renders an array-of-lines answer + a score's explanationMdLines as markdown (raw JSON stays reachable)", async () => {
+    // Canvas evals persist the answer as a JSON array of markdown lines, and
+    // judge scores carry `explanationMdLines`. Both should render as markdown.
+    const mdDetail: EvalRunDetailResponse = {
+      run: { ...detailResponse.run },
+      results: [
+        {
+          evalRunId: "run-1",
+          caseId: "case-md",
+          runId: "rmd",
+          scores: [
+            {
+              name: "answer-judge",
+              value: 0.8,
+              passed: true,
+              detail: {
+                explanationMdLines: ["**Verdict:** solid", "", "- covers pricing", "- cites deal"],
+                rawScore: 0.8,
+              },
+            },
+          ],
+          pass: true,
+          traceId: null,
+          runStatus: "ok",
+          finalAnswer: JSON.stringify([
+            "# Summary",
+            "",
+            "The deal looks healthy.",
+            "",
+            "- point one",
+            "- point two",
+          ]),
+          inputTokens: 20,
+          outputTokens: 10,
+          finishReason: "stop",
+          elapsedMs: 100,
+          runError: null,
+        },
+      ],
+      summary: {
+        cases: 1,
+        passed: 1,
+        failed: 0,
+        ungated: 0,
+        errored: 0,
+        passRate: 1,
+        inputTokens: 20,
+        outputTokens: 10,
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/eval/sets/bank/cases")) return mkFetchResponse(200, casesResponse);
+        if (url.includes("/eval/runs/run-1")) return mkFetchResponse(200, mdDetail);
+        return mkFetchResponse(404, { error: "unhandled in test" });
+      }),
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("case-md")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("case-md"));
+
+    // The answer renders as markdown: the `# Summary` heading and list items
+    // become real elements, not a raw JSON-array dump.
+    await waitFor(() => {
+      expect(screen.getByText("Summary")).toBeTruthy();
+    });
+    expect(screen.getByText("point one")).toBeTruthy();
+    expect(screen.getByText("point two")).toBeTruthy();
+    expect(screen.queryByText(/\[\s*"# Summary"/)).toBeNull();
+
+    // The score's explanationMdLines render as markdown above the expander...
+    expect(screen.getByText("covers pricing")).toBeTruthy();
+    // ...and the raw JSON detail is still reachable behind it.
+    expect(screen.getByText("raw detail")).toBeTruthy();
+  });
+
   it("a case absent from the bank shows the 'not in bank' fallback", async () => {
     stubFetch();
     renderPage();
