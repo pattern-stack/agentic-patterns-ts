@@ -22,6 +22,12 @@ const sets = [
 
 const agents = [{ id: "dealbrain/curator", name: "curator", description: "" }];
 
+const scorers = [
+  { id: "exact-match", description: "" },
+  { id: "set-membership", description: "" },
+  { id: "none", description: "" },
+];
+
 function mkFetchResponse(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
@@ -45,6 +51,9 @@ function stubFetch(opts: StubOptions = {}) {
     const method = init?.method ?? "GET";
     if (method === "POST" && url.includes("/eval/runs")) {
       return mkFetchResponse(postStatus, postBody);
+    }
+    if (url.includes("/eval/scorers")) {
+      return mkFetchResponse(200, { scorers });
     }
     if (url.includes("/eval/sets")) {
       return mkFetchResponse(200, { sets });
@@ -133,6 +142,37 @@ describe("RunLauncher", () => {
       targetId: "dealbrain/curator",
       split: "test",
       allowTest: true,
+      scorer: "exact-match",
+    });
+  });
+
+  it("defaults the scorer to exact-match; choosing another threads it into the POST body", async () => {
+    const fetchMock = stubFetch();
+    renderLauncher();
+    await openAndPopulate();
+
+    // The scorer picker is seeded from GET /eval/scorers (all three options).
+    await waitFor(() => {
+      expect(
+        within(screen.getByLabelText("Scorer") as HTMLSelectElement).getByText("set-membership"),
+      ).toBeTruthy();
+    });
+    expect((screen.getByLabelText("Scorer") as HTMLSelectElement).value).toBe("exact-match");
+
+    fireEvent.change(screen.getByLabelText("Set"), { target: { value: "bank" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "dealbrain/curator" } });
+    fireEvent.change(screen.getByLabelText("Scorer"), { target: { value: "set-membership" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(true);
+    });
+    const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+    const body = JSON.parse((postCall?.[1] as RequestInit).body as string);
+    expect(body).toEqual({
+      setId: "bank",
+      targetId: "dealbrain/curator",
+      scorer: "set-membership",
     });
   });
 

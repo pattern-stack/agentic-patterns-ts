@@ -16,7 +16,15 @@ import { useNavigate } from "react-router-dom";
 import { listAgents } from "../../api/chat-client";
 import type { EvalSetSummary, EvalSplit } from "../../api/types";
 import { Button } from "../../components/atoms/Button";
-import { fetchEvalSets, launchEvalRun } from "../../lib/evalApi";
+import {
+  BUILTIN_SCORERS,
+  type ScorerOption,
+  fetchEvalSets,
+  fetchScorers,
+  launchEvalRun,
+} from "../../lib/evalApi";
+
+const DEFAULT_SCORER_ID = "exact-match";
 
 type SetsState =
   | { kind: "loading" }
@@ -52,6 +60,8 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
   const [variant, setVariant] = useState("");
   const [split, setSplit] = useState<"" | EvalSplit>("");
   const [allowTest, setAllowTest] = useState(false);
+  const [scorers, setScorers] = useState<ScorerOption[]>([...BUILTIN_SCORERS]);
+  const [scorer, setScorer] = useState(DEFAULT_SCORER_ID);
   const [launchError, setLaunchError] = useState<string | undefined>(undefined);
   const [launching, setLaunching] = useState(false);
 
@@ -98,6 +108,24 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
     };
   }, []);
 
+  // Scorer options come from GET /eval/scorers; a fetch failure (older server,
+  // blip) keeps the hardcoded three built-ins seeded above — the picker never
+  // hard-fails, and "exact-match" stays a valid default either way.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await fetchScorers();
+        if (!cancelled && list.length > 0) setScorers(list);
+      } catch {
+        // keep BUILTIN_SCORERS
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const handleRun = async () => {
     setLaunchError(undefined);
     setLaunching(true);
@@ -108,6 +136,7 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
         variant: variant.trim() || undefined,
         split: split || undefined,
         allowTest: split === "test" ? allowTest : undefined,
+        scorer,
       });
       if (result.kind === "ok") {
         navigate(`/eval/runs/${result.runId}`);
@@ -222,6 +251,21 @@ export function RunLaunchForm({ presetSetId, presetSetLabel }: RunLaunchFormProp
           Run the held-out test split
         </label>
       )}
+
+      <LauncherField label="Scorer">
+        <select
+          value={scorer}
+          onChange={(e) => setScorer(e.target.value)}
+          style={selectStyle}
+          aria-label="Scorer"
+        >
+          {scorers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.id}
+            </option>
+          ))}
+        </select>
+      </LauncherField>
 
       {launchError && <div style={{ fontSize: 13, color: "var(--red)" }}>{launchError}</div>}
 

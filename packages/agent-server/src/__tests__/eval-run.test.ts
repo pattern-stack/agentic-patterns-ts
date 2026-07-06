@@ -263,7 +263,11 @@ describe("POST /eval/runs — happy path", () => {
     expect(run?.setId).toBe("bank");
     expect(run?.targetId).toBe("echo-agent");
     expect(run?.variant).toBe("v1");
-    expect(run?.model).toBe("sonnet-test");
+    // Honest model stamp (PR: eval-run scorer seam): the row records the TARGET's
+    // declared model, not the ambient `evalExecution.model`. A promoted echo
+    // agent reports `asAgent`'s DEFAULT_MODEL ("sonnet"), which wins over the
+    // "sonnet-test" execution label. (Dedicated stamp coverage below.)
+    expect(run?.model).toBe("sonnet");
 
     const rows = store.evalRunResults(body.runId);
     expect(rows).toHaveLength(2);
@@ -623,5 +627,180 @@ describe("POST /eval/runs — reg-runner trap regression", () => {
       expect(row.runStatus).toBe("ok");
       expect(row.runError).toBeFalsy();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Scorer seam (PR: eval-run scorer seam) — named scorer choice + threading
+// ---------------------------------------------------------------------------
+
+describe("POST /eval/runs — scorer choice", () => {
+  it("400s an unknown scorer with the available-list hint; no run row created", async () => {
+    const target = makeEchoRegistration("echo-agent");
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner() },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "bank", targetId: "echo-agent", scorer: "bogus" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; hint: string };
+    expect(body.error).toBe('unknown scorer "bogus"');
+    expect(body.hint).toBe("available: exact-match, set-membership, none");
+    expect(store.listEvalRuns()).toHaveLength(0);
+  });
+
+  it('400s a non-string scorer via the same "unknown scorer" path', async () => {
+    const target = makeEchoRegistration("echo-agent");
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner() },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "bank", targetId: "echo-agent", scorer: 7 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string; hint: string };
+    expect(body.error).toContain("unknown scorer");
+    expect(body.hint).toContain("exact-match");
+    expect(store.listEvalRuns()).toHaveLength(0);
+  });
+
+  it('omitting scorer defaults to exact-match — 202 echoes scorer:"exact-match"', async () => {
+    const target = makeEchoRegistration("echo-agent");
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner() },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "bank", targetId: "echo-agent" }),
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { runId: string; scorer: string };
+    expect(body.scorer).toBe("exact-match");
+    await waitForTerminal(store, body.runId);
+  });
+
+  it('scorer "none" completes the run with every case UNSCORED (derivePass([]) → pass null)', async () => {
+    const target = makeEchoRegistration("echo-agent");
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner() },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "bank", targetId: "echo-agent", scorer: "none" }),
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { runId: string; scorer: string };
+    expect(body.scorer).toBe("none");
+    await waitForTerminal(store, body.runId);
+
+    const run = store.getEvalRun(body.runId);
+    expect(run?.status).toBe("ok");
+    const rows = store.evalRunResults(body.runId);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.pass == null).toBe(true); // null or undefined — ungraded, not red
+    }
+  });
+
+  it('scorer "set-membership" is threaded — a cited-id case passes where exact-match would not', async () => {
+    const uuid = "11111111-1111-1111-1111-111111111111";
+    store.upsertEvalSet({ id: "cites", name: "Cites" });
+    store.upsertEvalCase("cites", {
+      caseId: "sm",
+      input: `see ${uuid} in the answer`,
+      expected: [uuid],
+    });
+
+    const target = makeEchoRegistration("echo-agent");
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner() },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "cites", targetId: "echo-agent", scorer: "set-membership" }),
+    });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { runId: string; scorer: string };
+    expect(body.scorer).toBe("set-membership");
+    await waitForTerminal(store, body.runId);
+
+    const rows = store.evalRunResults(body.runId);
+    expect(rows).toHaveLength(1);
+    // Echo returns the input (which cites the expected id) → recall/precision 1
+    // → pass true. exact-match would compare the string output to the `[uuid]`
+    // array and FAIL, so pass:true proves set-membership actually ran.
+    expect(rows[0]?.pass).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Honest model stamp (PR: eval-run scorer seam)
+// ---------------------------------------------------------------------------
+
+describe("POST /eval/runs — model stamp", () => {
+  it("stamps the target's declared model over the ambient evalExecution.model", async () => {
+    const target = makeAgentLikeRegistration("declared-agent"); // getModel → "mock-model"
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner(), model: "ambient-model" },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "bank", targetId: "declared-agent" }),
+    });
+    expect(res.status).toBe(202);
+    const { runId } = (await res.json()) as { runId: string };
+    await waitForTerminal(store, runId);
+    expect(store.getEvalRun(runId)?.model).toBe("mock-model");
+  });
+
+  it("falls back to evalExecution.model when the target declares no model", async () => {
+    const agent: AgentLike = {
+      role: { name: "undeclared-agent" },
+      getModel: () => undefined,
+      getTools: () => [],
+      getSystemPrompt: () => "no declared model",
+      renderInitialPrompt: () => "prompt",
+    };
+    const target: AgentRegistration = {
+      id: "undeclared-agent",
+      name: "undeclared-agent",
+      agent,
+      runner: new MockRunner(),
+    };
+    const app = mkApp({
+      evalStore: store,
+      agents: [target],
+      evalExecution: { runner: new MockRunner(), model: "ambient-model" },
+    });
+    const res = await app.request("/eval/runs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ setId: "bank", targetId: "undeclared-agent" }),
+    });
+    expect(res.status).toBe(202);
+    const { runId } = (await res.json()) as { runId: string };
+    await waitForTerminal(store, runId);
+    expect(store.getEvalRun(runId)?.model).toBe("ambient-model");
   });
 });
