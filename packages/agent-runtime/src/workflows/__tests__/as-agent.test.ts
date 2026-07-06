@@ -2,13 +2,14 @@ import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent } from "../../events/types.js";
+import { createEvent } from "../../events/types.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { AgentRunner } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import { AgentStep } from "../agent-step.js";
 import { NodeBackedRunner, asAgent, isPromotedAgent } from "../as-agent.js";
 import { FunctionStep } from "../function-step.js";
-import type { Node } from "../node.js";
+import type { Node, NodeRunContext } from "../node.js";
 import { Sequential } from "../sequential.js";
 
 // ---------------------------------------------------------------------------
@@ -202,6 +203,79 @@ describe("asAgent", () => {
     } else {
       throw new Error("expected chunk event");
     }
+  });
+
+  it("stream() relays a node's intra-run tool.* events LIVE, before the terminal chunk (filtering llm noise)", async () => {
+    // A node that publishes stage span events on ctx.eventBus mid-run — the live
+    // step-reporting seam. `agent.llm.start` is published too and MUST be filtered
+    // (internal-only); the node's output still arrives once, in the terminal chunk.
+    const emitting: Node<string, string> = {
+      name: "emitter",
+      async run(input: string, ctx: NodeRunContext) {
+        const bus = ctx.eventBus;
+        await bus?.publish(
+          createEvent("agent.tool.start", {
+            traceId: "t",
+            runId: "r",
+            toolCallId: "interpret",
+            toolName: "interpret",
+            arguments: {},
+          }),
+        );
+        await bus?.publish(
+          // internal noise — must NOT be relayed to the transport
+          createEvent("agent.llm.start", {
+            traceId: "t",
+            runId: "r",
+            model: "m",
+            messageCount: 1,
+            hasTools: false,
+          }),
+        );
+        await bus?.publish(
+          createEvent("agent.tool.end", {
+            traceId: "t",
+            runId: "r",
+            toolCallId: "interpret",
+            toolName: "interpret",
+            arguments: {},
+            result: { ok: true },
+            durationMs: 1,
+            resultTokens: 0,
+          }),
+        );
+        return {
+          output: input.toUpperCase(),
+          succeeded: true,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+        };
+      },
+    };
+
+    const promoted = asAgent(emitting, { role: { name: "Emitter" } });
+    const runner = new NodeBackedRunner(new MockRunner());
+
+    const events: AgentEvent[] = [];
+    for await (const event of runner.stream(promoted, "yo")) events.push(event);
+    const types = events.map((e) => e.type);
+
+    // start first, complete last; both stage span events relayed; llm filtered.
+    expect(types[0]).toBe("agent.message.start");
+    expect(types[types.length - 1]).toBe("agent.message.complete");
+    expect(types).toContain("agent.tool.start");
+    expect(types).toContain("agent.tool.end");
+    expect(types).not.toContain("agent.llm.start");
+
+    // LIVE: the relayed span events precede the terminal answer chunk (not batched after it).
+    const chunkIdx = types.indexOf("agent.message.chunk");
+    expect(types.indexOf("agent.tool.start")).toBeLessThan(chunkIdx);
+    expect(types.indexOf("agent.tool.end")).toBeLessThan(chunkIdx);
+
+    // the answer body still arrives once, in the terminal chunk
+    const chunk = events.find((e) => e.type === "agent.message.chunk");
+    if (chunk?.type === "agent.message.chunk") expect(chunk.delta).toBe("YO");
+    else throw new Error("expected chunk event");
   });
 
   it("run() throws a clear error when given a non-promoted agent", async () => {

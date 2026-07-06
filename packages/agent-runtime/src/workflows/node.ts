@@ -10,6 +10,7 @@
  * `Step`/`StepResult`/`PatternResult` types are NOT touched here.
  */
 
+import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { RunResult, RunnerProtocol, ToolExecutor } from "../runner/types.js";
 import type { PatternHooks } from "./base.js";
 import type { DepReader } from "./deps.js";
@@ -54,6 +55,18 @@ export interface NodeRunContext {
    * behave identically (they never read deps).
    */
   readonly deps?: DepReader;
+  /**
+   * The run's live event bus. OPTIONAL: when present, a node may publish its
+   * lifecycle events (`agent.tool.start` / `agent.tool.end` per stage,
+   * `agent.message.chunk`, …) onto it, and a streaming runner
+   * ({@link NodeBackedRunner.stream}) relays them to the transport AS THEY
+   * HAPPEN — so a promoted multi-step pipeline reports each step live instead
+   * of collapsing to one terminal chunk. Injected by the runner and carried by
+   * reference across the node tree (`{ ...ctx }`). Absent → today's behavior
+   * (a node emits nothing extra; the terminal chunk is the only output). The
+   * back-compat hinge: existing callers that pass `{ runner }` never touch it.
+   */
+  readonly eventBus?: AgentEventBus;
 }
 
 // ---------------------------------------------------------------------------
