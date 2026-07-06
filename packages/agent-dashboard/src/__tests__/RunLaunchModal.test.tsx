@@ -12,6 +12,12 @@ import { RunLaunchModal } from "../pages/eval/RunLaunchModal";
 
 const agents = [{ id: "dealbrain/curator", name: "curator", description: "" }];
 
+const scorers = [
+  { id: "exact-match", description: "" },
+  { id: "set-membership", description: "" },
+  { id: "none", description: "" },
+];
+
 function mkFetchResponse(status: number, body: unknown) {
   return {
     ok: status >= 200 && status < 300,
@@ -31,6 +37,7 @@ function stubFetch(opts: { postStatus?: number; postBody?: unknown } = {}) {
     if (method === "POST" && url.includes("/eval/runs")) {
       return mkFetchResponse(postStatus, postBody);
     }
+    if (url.includes("/eval/scorers")) return mkFetchResponse(200, { scorers });
     if (url.includes("/eval/sets")) return mkFetchResponse(200, { sets: [] });
     if (url.includes("/agents")) return mkFetchResponse(200, agents);
     return mkFetchResponse(404, { error: "unhandled in test" });
@@ -99,7 +106,7 @@ describe("RunLaunchModal", () => {
     });
     const postCall = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     const body = JSON.parse((postCall?.[1] as RequestInit).body as string);
-    expect(body).toEqual({ setId: "bank", targetId: "dealbrain/curator" });
+    expect(body).toEqual({ setId: "bank", targetId: "dealbrain/curator", scorer: "exact-match" });
   });
 
   it("closes on the modal's ✕", async () => {

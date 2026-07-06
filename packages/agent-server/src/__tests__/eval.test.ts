@@ -727,6 +727,28 @@ describe("eval routes", () => {
     expect((await app.request("/eval/sets/x/cases/y")).status).toBe(503);
   });
 
+  describe("GET /eval/scorers", () => {
+    it("returns the three registry entries with descriptions, in display order", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/scorers");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { scorers: Array<{ id: string; description: string }> };
+      expect(body.scorers.map((s) => s.id)).toEqual(["exact-match", "set-membership", "none"]);
+      for (const s of body.scorers) {
+        expect(typeof s.description).toBe("string");
+        expect(s.description.length).toBeGreaterThan(0);
+      }
+    });
+
+    it("answers even when no store is configured (the registry is static)", async () => {
+      const app = mkApp(undefined);
+      const res = await app.request("/eval/scorers");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { scorers: Array<{ id: string }> };
+      expect(body.scorers.map((s) => s.id)).toEqual(["exact-match", "set-membership", "none"]);
+    });
+  });
+
   describe("config threading (createServer)", () => {
     function makeConfig(overrides?: Partial<ServerConfig>): ServerConfig {
       return {

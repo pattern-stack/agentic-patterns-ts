@@ -217,6 +217,46 @@ export interface LaunchEvalRunBody {
   variant?: string;
   split?: EvalSplit;
   allowTest?: boolean;
+  /** Named scorer id (server `SCORER_REGISTRY`). Absent → server default "exact-match". */
+  scorer?: string;
+}
+
+// ---------------------------------------------------------------------------
+// GET /eval/scorers — the named scorer registry, for the launcher's scorer picker
+// ---------------------------------------------------------------------------
+
+export interface ScorerOption {
+  id: string;
+  description: string;
+}
+
+interface ScorersResponse {
+  scorers: ScorerOption[];
+}
+
+/**
+ * The three built-in scorers, in server-registry order — the form's FALLBACK
+ * when GET /eval/scorers fails (older server, transient error). Ids mirror the
+ * server registry; the "exact-match" default is first.
+ */
+export const BUILTIN_SCORERS: readonly ScorerOption[] = [
+  { id: "exact-match", description: "Expected-gated deep equality (the default)." },
+  { id: "set-membership", description: "Deterministic cited-id precision/recall/F1." },
+  { id: "none", description: "Execute + inspect only — always ungraded." },
+];
+
+/**
+ * GET /eval/scorers — the named scorer registry (id + description) in display
+ * order. The route is static (independent of persistence), so it answers even
+ * when a run is not yet launchable. Throws on any non-2xx — the caller falls
+ * back to `BUILTIN_SCORERS`.
+ */
+export async function fetchScorers(opts: { baseUrl?: string } = {}): Promise<ScorerOption[]> {
+  const base = opts.baseUrl ?? "";
+  const res = await fetch(`${base}/eval/scorers`);
+  if (!res.ok) throw new Error(`fetchScorers: HTTP ${res.status}`);
+  const body = (await res.json()) as ScorersResponse;
+  return body.scorers;
 }
 
 export type LaunchEvalRunResult =

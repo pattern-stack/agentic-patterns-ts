@@ -37,6 +37,7 @@ import {
   exactMatch,
   filterBySplit,
   runEval,
+  setMembership,
 } from "@agentic-patterns/runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -63,6 +64,14 @@ interface LaunchEvalRunBody {
   variant?: string;
   split?: EvalSplit;
   allowTest?: boolean;
+  /**
+   * Named scorer choice (PR: eval-run scorer seam). Absent → "exact-match" —
+   * the back-compatible pre-seam behavior (POST /eval/runs used to hardcode the
+   * expected-gated exact-match). Resolved against `SCORER_REGISTRY`; unknown →
+   * 400. The resolved id rides the 202 response; it is NOT persisted on the
+   * eval_run row (no schema change — see the registry's follow-up note).
+   */
+  scorer?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -223,6 +232,20 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
       variant: c.req.query("variant"),
     });
     return c.json({ aggregates });
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /eval/scorers (PR: eval-run scorer seam) — the named scorer registry
+  // (id + description), in the SAME order the launch form presents. Static (it
+  // does not touch the store), so it answers even when persistence/execution
+  // are unconfigured — the form needs the option list before a run is
+  // launchable, and the choice only matters at POST /eval/runs time.
+  // ---------------------------------------------------------------------------
+
+  app.get("/eval/scorers", (c) => {
+    return c.json({
+      scorers: SCORER_REGISTRY.map((s) => ({ id: s.id, description: s.description })),
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -418,6 +441,26 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
     const variant = typeof body.variant === "string" ? body.variant : undefined;
     const allowTest = body.allowTest === true;
 
+    // ---- resolve scorer choice (PR: eval-run scorer seam) -------------------
+    // Optional; default "exact-match" (the pre-seam hardcoded scorer, so an
+    // older client that omits the field is unchanged). Unknown or non-string →
+    // 400 with the available list (the unknown-target 404 hint grammar). A
+    // non-string collapses into the same "unknown scorer" 400 path per spec.
+    const rawScorer = body.scorer;
+    const chosenScorer =
+      typeof rawScorer === "string" || rawScorer === undefined
+        ? resolveScorer(rawScorer)
+        : undefined;
+    if (!chosenScorer) {
+      return c.json(
+        {
+          error: `unknown scorer "${String(rawScorer)}"`,
+          hint: `available: ${SCORER_REGISTRY.map((s) => s.id).join(", ")}`,
+        },
+        400,
+      );
+    }
+
     // ---- validate split value -----------------------------------------------
     const rawSplit = body.split;
     if (rawSplit !== undefined && typeof rawSplit !== "string") {
@@ -478,13 +521,23 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
       }
     }
 
+    // ---- honest model stamp (PR: eval-run scorer seam) ----------------------
+    // Stamp the TARGET agent's declared model when it has one, not the server's
+    // ambient `evalExecution.model` (which mislabels e.g. a Gemini agent
+    // "sonnet"). `getModel` may legally return undefined since core 0.7.0, so
+    // fall back to the ambient value. Guarded `typeof` for older AgentLike
+    // shapes without the method (the agents.ts / composition.ts precedent).
+    const declaredModel =
+      typeof reg.agent.getModel === "function" ? reg.agent.getModel() : undefined;
+    const stampModel = declaredModel ?? evalExecution.model;
+
     // ---- start the suite row synchronously (better-sqlite3 is sync) --------
     const evalRunId = evalStore.startEvalRun({
       setId,
       targetId,
       variant,
       split,
-      model: evalExecution.model,
+      model: stampModel,
       gitSha: evalExecution.gitSha,
     });
 
@@ -499,7 +552,7 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
     const recorder = createEvalResultRecorder(evalStore, {
       evalRunId,
       targetId,
-      model: evalExecution.model,
+      model: stampModel,
       variant,
       split,
     });
@@ -514,7 +567,7 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
           {
             target: reg.agent,
             cases,
-            scorers: [defaultScorer],
+            scorers: [chosenScorer.scorer],
             onResult: async (r) => {
               recorder(r);
               live.completed++;
@@ -541,7 +594,7 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
         ),
     });
 
-    return c.json({ runId: evalRunId, total: cases.length }, 202);
+    return c.json({ runId: evalRunId, total: cases.length, scorer: chosenScorer.id }, 202);
   });
 
   // ---------------------------------------------------------------------------
@@ -910,6 +963,62 @@ function storedCaseToEvalCase(row: EvalCaseRow): EvalCase<unknown, unknown> {
 const exact = exactMatch<unknown>();
 const defaultScorer: Scorer<unknown, unknown, unknown> = (args) =>
   args.expected === undefined ? [] : exact(args);
+
+/**
+ * The "none" scorer — always UNSCORED (returns `[]`). Execute + inspect only:
+ * `derivePass([])` is null, so cases render ungraded rather than falsely red.
+ * The escape hatch for a set whose `expected` is a grading rubric neither
+ * exact-match nor set-membership can read.
+ */
+const noneScorer: Scorer<unknown, unknown, unknown> = () => [];
+
+interface NamedScorer {
+  readonly id: string;
+  readonly description: string;
+  readonly scorer: Scorer<unknown, unknown, unknown>;
+}
+
+/**
+ * The named scorer registry (PR: eval-run scorer seam). POST /eval/runs used to
+ * hardcode `[defaultScorer]`, so a dashboard-launched run against a set whose
+ * `expected` is a rubric (not a literal output copy) reds 100% of cases. This
+ * registry lets the caller pick one by id via the optional `scorer` body param.
+ *
+ * Array ORDER is the display order — GET /eval/scorers and the dashboard select
+ * present these in exactly this sequence, "exact-match" first (the default).
+ *
+ * Route-local by construction: the store never learns the scorer id (no schema
+ * change; the id rides the 202 response only).
+ *   FOLLOW-UP: persist scorer id on the `eval_run` row so historical runs record
+ *   how they were graded (needs an EvalStore column + migration).
+ */
+const SCORER_REGISTRY: readonly NamedScorer[] = [
+  {
+    id: "exact-match",
+    description:
+      "Expected-gated deep equality — an expected-less case is UNSCORED (not auto-failed). The pre-seam default.",
+    scorer: defaultScorer,
+  },
+  {
+    id: "set-membership",
+    description:
+      "Deterministic cited-id precision/recall/F1. Reads `expected` as a string[] of ids (or `expected.citedIds`); any other `expected` shape is UNSCORED.",
+    scorer: setMembership(),
+  },
+  {
+    id: "none",
+    description: "Execute + inspect only — always UNSCORED (cases render ungraded, never red).",
+    scorer: noneScorer,
+  },
+];
+
+const DEFAULT_SCORER_ID = "exact-match";
+
+/** Resolve a scorer id against the registry; `undefined` → the default. Returns
+ *  `undefined` for an unknown id (the caller 400s with the available list). */
+function resolveScorer(id: string | undefined): NamedScorer | undefined {
+  return SCORER_REGISTRY.find((s) => s.id === (id ?? DEFAULT_SCORER_ID));
+}
 
 /** Serialize broadcast delivery per listener (await in order) — the writeSSE
  *  precedent every listener owns its own stream, so there's no shared-write race. */
