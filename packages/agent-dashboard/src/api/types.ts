@@ -146,6 +146,20 @@ export interface EvalCaseRow {
   split: EvalSplit | null;
 }
 
+/**
+ * Per-run pass rollup carried inline on `GET /eval/runs` list rows (additive,
+ * #eval-list-passrate). `passRate` is over gated cases only; `null` when the
+ * run has no gated case (fully ungated). Absent on `EvalRunRow` when the run
+ * has no results (or from an older server) — callers fall back to "—".
+ */
+export interface EvalRunListSummary {
+  cases: number;
+  passed: number;
+  failed: number;
+  ungated: number;
+  passRate: number | null;
+}
+
 /** Row returned by `GET /eval/runs` and the `run` field of `GET /eval/runs/:id`. */
 export interface EvalRunRow {
   id: string;
@@ -158,6 +172,8 @@ export interface EvalRunRow {
   model: string | null;
   gitSha: string | null;
   status: "running" | "ok" | "error";
+  /** Present on `GET /eval/runs` list rows when the run has results; absent otherwise. */
+  summary?: EvalRunListSummary;
 }
 
 export interface EvalScoreLike {

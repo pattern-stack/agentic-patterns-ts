@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { EvalCaseHistoryRow, EvalCaseRow } from "../../api/types";
+import { Markdown } from "../../chat/atoms";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
@@ -42,6 +43,17 @@ const sectionHeadingStyle = {
   marginBottom: 8,
 };
 
+// Inset panel for rendered markdown — `preStyle` chrome without monospace/pre-wrap.
+const mdPanelStyle = {
+  margin: 0,
+  padding: "2px 12px",
+  background: "var(--bg-inset)",
+  borderRadius: 6,
+  fontSize: 13,
+  overflowX: "auto" as const,
+  wordBreak: "break-word" as const,
+};
+
 function pretty(value: unknown): string {
   if (value === undefined) return "—";
   try {
@@ -49,6 +61,34 @@ function pretty(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/**
+ * The run's answer — markdown when persisted as an array of lines (canvas
+ * evals), pretty JSON otherwise. Fail border preserved either way.
+ */
+function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
+  const value = safeParseAnswer(finalAnswer);
+  if (isStringArray(value)) {
+    return (
+      <div
+        style={
+          pass === false ? { ...mdPanelStyle, borderLeft: "3px solid var(--red)" } : mdPanelStyle
+        }
+      >
+        <Markdown content={value.join("\n")} />
+      </div>
+    );
+  }
+  return (
+    <pre style={pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle}>
+      {pretty(value)}
+    </pre>
+  );
 }
 
 function relative(dateStr: string | undefined | null): string {
@@ -346,15 +386,7 @@ export function EvalCaseDetailPage() {
                     </div>
                     <div>
                       <div style={sectionHeadingStyle}>Actual</div>
-                      <pre
-                        style={
-                          row.pass === false
-                            ? { ...preStyle, borderLeft: "3px solid var(--red)" }
-                            : preStyle
-                        }
-                      >
-                        {pretty(safeParseAnswer(row.finalAnswer))}
-                      </pre>
+                      <ActualAnswer finalAnswer={row.finalAnswer} pass={row.pass} />
                     </div>
                   </div>
                   <Link

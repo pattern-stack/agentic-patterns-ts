@@ -27,6 +27,8 @@ const runs: EvalRunRow[] = [
     model: "sonnet",
     gitSha: "abc1234",
     status: "ok",
+    // 3 of 4 gated cases passed -> "3/4" + "75%".
+    summary: { cases: 4, passed: 3, failed: 1, ungated: 0, passRate: 0.75 },
   },
   {
     id: "run-bbbbbbbb",
@@ -39,6 +41,7 @@ const runs: EvalRunRow[] = [
     model: "opus",
     gitSha: "def5678",
     status: "running",
+    // No summary (still running) -> the pass cell shows "—".
   },
 ];
 
@@ -143,6 +146,29 @@ describe("EvalRunsPage", () => {
     expect(rows.getByText("candidate")).toBeTruthy();
     expect(rows.getByText("ok")).toBeTruthy();
     expect(rows.getByText("running")).toBeTruthy();
+  });
+
+  it("renders the pass column — passed/cases + rate badge; a summary-less run shows —", async () => {
+    stubFetch();
+
+    renderPage();
+
+    let table: HTMLElement;
+    await waitFor(() => {
+      table = screen.getByRole("table");
+    });
+
+    // Column header + the seeded run's fraction and rate badge (scoped to the
+    // runs table — the split-aggregates panel above it also renders a "75%").
+    expect(within(table!).getByText("Passed")).toBeTruthy();
+    expect(within(table!).getByText("3/4")).toBeTruthy();
+    expect(within(table!).getByText("75%")).toBeTruthy();
+
+    // The running (summary-less) run's pass cell is the only "—" in its row.
+    const checkbox = screen.getByLabelText("select run run-bbbbbbbb for compare");
+    const row = checkbox.closest("tr");
+    expect(row).toBeTruthy();
+    expect(within(row as HTMLElement).getByText("—")).toBeTruthy();
   });
 
   it("503 -> the unconfigured card, not the empty state", async () => {
