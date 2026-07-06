@@ -18,7 +18,8 @@
 
 import type { Role } from "@agentic-patterns/core";
 import { generateId } from "ai";
-import type { AgentEvent } from "../events/types.js";
+import { AgentEventBus } from "../events/agent-event-bus.js";
+import type { AgentEvent, AgentEventType, BaseEvent } from "../events/types.js";
 import { createEvent } from "../events/types.js";
 import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunOptions, RunResult, RunnerProtocol } from "../runner/types.js";
@@ -182,6 +183,11 @@ export class NodeBackedRunner implements RunnerProtocol {
       parentSpanId: options?.parentSpanId,
       scratchpad: createScratchpad(),
       deps: agent.deps,
+      // Thread the run's event bus onto the ctx so a promoted node can publish
+      // its lifecycle events (`stream()` supplies a per-run bus it relays; a
+      // direct `run()` forwards the caller's bus, or none). OPTIONAL → absent
+      // when no bus is provided, preserving today's no-emit behavior.
+      ...(options?.eventBus ? { eventBus: options.eventBus } : {}),
     };
 
     const input = agent.coerceIn(message);
@@ -224,7 +230,78 @@ export class NodeBackedRunner implements RunnerProtocol {
     const rootSpanId = startEvent.spanId;
     yield startEvent;
 
-    const result = await this.run(agent, message, options);
+    // Live step relay. A FRESH per-run bus (never the caller's shared bus —
+    // subscribing to that would leak concurrent conversations' events into this
+    // stream) is threaded onto the node's ctx; the node runs concurrently while
+    // we forward the lifecycle events it publishes AS THEY HAPPEN. A promoted
+    // pipeline that emits `agent.tool.start`/`agent.tool.end` per stage (via
+    // `ctx.eventBus`) therefore reports each step live instead of collapsing to
+    // one terminal chunk. Back-compat: a node that publishes nothing leaves the
+    // queue empty, so only start → chunk → complete are yielded, exactly as
+    // before. We relay only the tool-lifecycle span events; iteration/llm noise
+    // stays internal and the answer text still arrives once, in the terminal
+    // chunk below (streaming the answer body as deltas is a deliberate later step).
+    const bus = new AgentEventBus();
+    const queue: AgentEvent[] = [];
+    // One-shot parked-consumer resolver, held on an object so the cross-closure
+    // assignment (set in the Promise executor, cleared here) doesn't get
+    // control-flow-narrowed to `null` at these reads.
+    const waiter: { resolve: (() => void) | null } = { resolve: null };
+    const wake = (): void => {
+      const r = waiter.resolve;
+      waiter.resolve = null;
+      r?.();
+    };
+    const onEvent = (event: BaseEvent): void => {
+      if (RELAYED_STREAM_EVENTS.has(event.type as AgentEventType)) {
+        queue.push(event as AgentEvent);
+        wake();
+      }
+    };
+    bus.subscribeAll(onEvent);
+
+    let settled = false;
+    let runResult: RunResult | undefined;
+    let runError: unknown;
+    const runPromise = (async () => {
+      try {
+        runResult = await this.run(agent, message, { ...options, eventBus: bus });
+      } catch (err) {
+        runError = err;
+      } finally {
+        settled = true;
+        wake();
+      }
+    })();
+
+    try {
+      while (!settled || queue.length > 0) {
+        const next = queue.shift();
+        if (next !== undefined) {
+          yield next;
+          continue;
+        }
+        // Nothing buffered and the run is still going — park until an event
+        // arrives or the run settles. The synchronous guard closes the wakeup
+        // race: anything enqueued between the drain above and installing the
+        // resolver resolves us immediately (no missed wakeups, single-threaded).
+        await new Promise<void>((resolve) => {
+          waiter.resolve = resolve;
+          if (settled || queue.length > 0) {
+            waiter.resolve = null;
+            resolve();
+          }
+        });
+      }
+    } finally {
+      bus.unsubscribeAll(onEvent);
+    }
+
+    await runPromise;
+    if (runError !== undefined) {
+      throw runError instanceof Error ? runError : new Error(String(runError));
+    }
+    const result = runResult as RunResult;
 
     const chunkEvent = createEvent("agent.message.chunk", {
       traceId,
@@ -248,3 +325,18 @@ export class NodeBackedRunner implements RunnerProtocol {
     yield completeEvent;
   }
 }
+
+/**
+ * The intra-run events {@link NodeBackedRunner.stream} forwards live to the
+ * transport: the tool-lifecycle span events a promoted pipeline emits per stage.
+ * Iteration/LLM events stay internal (transport already filters them), and the
+ * answer body is delivered once via the terminal `agent.message.chunk`, so it is
+ * intentionally NOT relayed here (no duplicate text).
+ */
+const RELAYED_STREAM_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEventType>([
+  "agent.tool.intent",
+  "agent.tool.start",
+  "agent.tool.progress",
+  "agent.tool.end",
+  "agent.tool.rejected",
+]);
