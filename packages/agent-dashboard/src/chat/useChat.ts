@@ -5,7 +5,8 @@
  * the dashboard's named-SSE seam (Phase A):
  *   1. `createConversation(agentId)` ONCE per thread — the id is reused for
  *      follow-ups (true conversational memory, server-threaded).
- *   2. `streamMessage(convId, content, signal)` yields typed `ClientEvent`s.
+ *   2. `streamMessage(convId, content, signal)` yields decoded `WireFrame`s
+ *      (name + data, NO name allowlist — the reducer decides what renders).
  *   3. each event → `toEventLike` → folded into the assistant message's parts
  *      via `applyParts` (streaming-first).
  *

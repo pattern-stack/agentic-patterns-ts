@@ -6,7 +6,7 @@
  * parse the standard SSE frame format (`event: X\ndata: Y\n\n`) ourselves.
  */
 
-import { type ClientEvent, isClientEventName } from "./sse-events";
+import type { WireFrame } from "./sse-events";
 
 export interface AgentSummary {
   id: string;
@@ -101,7 +101,7 @@ export async function* streamMessage(
   content: string,
   opts?: SendOptions,
   signal?: AbortSignal,
-): AsyncGenerator<ClientEvent, void, void> {
+): AsyncGenerator<WireFrame, void, void> {
   const res = await fetch(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -162,7 +162,7 @@ function findFrameBoundary(buffer: string): FrameBoundary | -1 {
   return lf < crlf ? { start: lf, end: lf + 2 } : { start: crlf, end: crlf + 4 };
 }
 
-function parseFrame(frame: string): ClientEvent | null {
+function parseFrame(frame: string): WireFrame | null {
   let eventName: string | null = null;
   let dataJson = "";
   for (const rawLine of frame.split(/\r?\n/)) {
@@ -175,10 +175,17 @@ function parseFrame(frame: string): ClientEvent | null {
     if (field === "event") eventName = value;
     else if (field === "data") dataJson += (dataJson ? "\n" : "") + value;
   }
-  if (!eventName || !isClientEventName(eventName)) return null;
+  // Drop only MALFORMED frames (no event name / unparseable data) — NEVER by
+  // event name. The reducer (chat/model.applyParts) decides what renders; a
+  // name allowlist here silently ate `agent.step.*`. See WireFrame in sse-events.ts.
+  if (!eventName) return null;
   try {
     const data = dataJson ? JSON.parse(dataJson) : {};
-    return { name: eventName, data } as ClientEvent;
+    const obj =
+      data && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {};
+    return { name: eventName, data: obj };
   } catch {
     return null;
   }

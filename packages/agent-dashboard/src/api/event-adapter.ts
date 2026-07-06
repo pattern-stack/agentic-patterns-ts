@@ -18,7 +18,7 @@
 // FOLDS, never hacked around here.
 
 import type { EventLike } from "../graph/trace-from-events";
-import type { ClientEvent } from "./sse-events";
+import type { WireFrame } from "./sse-events";
 
 /**
  * Flatten one typed framework SSE event into the flat `EventLike` the cockpit
@@ -33,6 +33,6 @@ import type { ClientEvent } from "./sse-events";
  *   { name: "message.delta", data: { delta, chunk_index } }
  *     -> { type: "message.delta", delta, chunk_index }
  */
-export function toEventLike(ev: ClientEvent): EventLike {
+export function toEventLike(ev: WireFrame): EventLike {
   return { type: ev.name, ...ev.data };
 }

@@ -57,8 +57,17 @@ export function useEventStream(
         retryDelayRef.current = INITIAL_RETRY_MS;
       };
 
+      // The raw event-log's subscription list. This is the ONE event-name list
+      // that legitimately must exist: EventSource has no wildcard — a NAMED SSE
+      // event (`event: X`) only fires a listener registered for X, so this panel
+      // must enumerate what it wants to see. (The chat has NO such list — its
+      // parser is name-agnostic; the reducer decides rendering. See
+      // api/sse-events.ts WireFrame.) A new event type missing here only means
+      // the debug log omits it — never a chat regression.
       const NAMED_EVENTS = [
         "claude_code.hook",
+        "step.start",
+        "step.end",
         "tool.start",
         "tool.end",
         "tool.intent",

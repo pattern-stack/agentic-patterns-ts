@@ -106,6 +106,68 @@ function ToolCallPart({ part }: { part: Extract<Part, { kind: "tool_call" }> }) 
   );
 }
 
+/* ── agent step (delegation) ─────────────────────────────────────────────────*/
+function AgentStepPart({
+  part,
+  role,
+  streaming,
+}: {
+  part: Extract<Part, { kind: "agent_step" }>;
+  role: "user" | "assistant";
+  streaming?: boolean;
+}) {
+  const running = part.result === undefined && !part.error;
+  const status = part.error ? "err" : running ? "running" : "ok";
+  const badge = part.error ? "✗" : running ? "⋯" : "✓";
+  const args = fmt(part.arguments);
+  const out = fmt(part.result);
+  return (
+    <details className={`chat-tool chat-step ${status}`} open={running || !!part.error}>
+      <summary>
+        <span aria-hidden>◆</span>
+        <span className="tool-name">{part.name}</span>
+        <span className="step-kind">agent{part.agentName ? ` · ${part.agentName}` : ""}</span>
+        {part.durationMs != null && <span className="tool-dur">{part.durationMs}ms</span>}
+        <span aria-hidden>{badge}</span>
+      </summary>
+      <div className="tool-io">
+        {args && (
+          <div>
+            <div className="io-label">input</div>
+            <CodeBlock text={args} copyable maxHeight={180} />
+          </div>
+        )}
+        {part.error ? (
+          <div>
+            <div className="io-label">error</div>
+            <CodeBlock text={part.error} danger />
+          </div>
+        ) : (
+          out && (
+            <div>
+              <div className="io-label">output</div>
+              <CodeBlock text={out} copyable maxHeight={240} />
+            </div>
+          )
+        )}
+        {part.children.length > 0 && (
+          <div className="step-children">
+            <div className="io-label">tools called</div>
+            {part.children.map((child, i) => (
+              <PartView
+                key={child.kind === "tool_call" ? child.id : i}
+                part={child}
+                role={role}
+                streaming={streaming}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 /* ── error ──────────────────────────────────────────────────────────────────*/
 function ErrorPart({ errorType, message }: { errorType: string; message: string }) {
   return (
@@ -136,6 +198,8 @@ export function PartView({
       return <ThinkingPart content={part.content} complete={part.complete} />;
     case "tool_call":
       return <ToolCallPart part={part} />;
+    case "agent_step":
+      return <AgentStepPart part={part} role={role} streaming={streaming} />;
     case "error":
       return <ErrorPart errorType={part.errorType} message={part.message} />;
     default:

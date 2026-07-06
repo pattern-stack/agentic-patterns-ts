@@ -288,6 +288,32 @@
   margin-bottom: 3px;
 }
 
+/* Agent step (delegation) — a pipeline stage handed to a sub-agent. A doubled
+   left-accent, an "agent" chip, and an indented child rail visually separate a
+   DELEGATION from a tool the model called (which stays a plain .chat-tool). */
+.chat-step {
+  border-left-style: double;
+  border-left-width: 4px;
+}
+.chat-step > summary .step-kind {
+  font-family: var(--font-mono);
+  font-size: var(--fz-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--line));
+  border-radius: var(--radius-sm);
+  padding: 0 5px;
+}
+.chat-step .step-children {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  margin-left: 2px;
+}
+
 /* shared code surface for tool io / code blocks */
 .chat-code {
   position: relative;

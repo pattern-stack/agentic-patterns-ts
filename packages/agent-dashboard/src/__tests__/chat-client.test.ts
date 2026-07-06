@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { streamMessage } from "../api/chat-client";
-import type { ClientEvent } from "../api/sse-events";
+import type { WireFrame } from "../api/sse-events";
 
 /** Build a minimal fetch Response whose body streams the given chunks. */
 function mockFetchWithChunks(chunks: string[]): typeof fetch {
@@ -21,8 +21,8 @@ function mockFetchWithChunks(chunks: string[]): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-async function collect(gen: AsyncGenerator<ClientEvent, void, void>): Promise<ClientEvent[]> {
-  const out: ClientEvent[] = [];
+async function collect(gen: AsyncGenerator<WireFrame, void, void>): Promise<WireFrame[]> {
+  const out: WireFrame[] = [];
   for await (const e of gen) out.push(e);
   return out;
 }
@@ -77,9 +77,7 @@ describe("streamMessage SSE parser", () => {
 
     const events = await collect(streamMessage("c1", "hi"));
     expect(events[0]?.name).toBe("message.delta");
-    if (events[0]?.name === "message.delta") {
-      expect(events[0].data.delta).toBe("ab");
-    }
+    expect(events[0]?.data.delta).toBe("ab");
     expect(events[events.length - 1]?.name).toBe("done");
 
     vi.unstubAllGlobals();
@@ -101,7 +99,9 @@ describe("streamMessage SSE parser", () => {
     vi.unstubAllGlobals();
   });
 
-  it("ignores frames with unknown event names", async () => {
+  it("passes unknown event names THROUGH — the reducer, not the parser, decides rendering", async () => {
+    // Was previously "ignores unknown event names" — that allowlist behavior is
+    // exactly what silently ate `agent.step.*`. The parser is now name-agnostic.
     vi.stubGlobal(
       "fetch",
       mockFetchWithChunks([
@@ -112,7 +112,25 @@ describe("streamMessage SSE parser", () => {
     );
 
     const events = await collect(streamMessage("c1", "hi"));
-    expect(events.map((e) => e.name)).toEqual(["message.delta", "done"]);
+    expect(events.map((e) => e.name)).toEqual(["something.custom", "message.delta", "done"]);
+
+    vi.unstubAllGlobals();
+  });
+
+  it("does NOT drop agent.step.* frames (regression: pipeline steps must reach the chat)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetchWithChunks([
+        'event: step.start\ndata: {"span_id":"s1","step_name":"interpret","agent_name":"Interpreter","arguments":{"question":"hi"}}\n\n',
+        'event: step.end\ndata: {"span_id":"s1","step_name":"interpret","result":{"requests":1},"duration_ms":12}\n\n',
+        "event: done\ndata: {}\n\n",
+      ]),
+    );
+
+    const events = await collect(streamMessage("c1", "hi"));
+    expect(events.map((e) => e.name)).toEqual(["step.start", "step.end", "done"]);
+    const start = events.find((e) => e.name === "step.start");
+    expect(start?.data).toMatchObject({ step_name: "interpret", agent_name: "Interpreter" });
 
     vi.unstubAllGlobals();
   });

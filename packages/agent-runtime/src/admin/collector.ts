@@ -362,6 +362,8 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.tool.intent":
       case "agent.tool.rejected":
       case "agent.tool.progress":
+      case "agent.step.start":
+      case "agent.step.end":
       case "agent.llm.start":
       case "claude_code.hook":
         this._recordEvent(typed);

@@ -334,6 +334,11 @@ export class NodeBackedRunner implements RunnerProtocol {
  * intentionally NOT relayed here (no duplicate text).
  */
 const RELAYED_STREAM_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEventType>([
+  // Step / delegation spans a promoted multi-step node emits per stage — the
+  // transport renders these as AGENT delegations (distinct from tool calls).
+  "agent.step.start",
+  "agent.step.end",
+  // Tool-lifecycle spans a delegated agent makes — nested under their step.
   "agent.tool.intent",
   "agent.tool.start",
   "agent.tool.progress",

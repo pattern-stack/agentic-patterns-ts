@@ -33,6 +33,8 @@ export type SSEEventName =
   | "tool.progress"
   | "tool.end"
   | "tool.rejected"
+  | "step.start"
+  | "step.end"
   | "iteration.start"
   | "iteration.end"
   | "llm.start"
@@ -205,6 +207,30 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
           payload: event.payload,
         },
       };
+    case "agent.step.start":
+      return {
+        name: "step.start",
+        payload: {
+          span_id: event.spanId,
+          parent_span_id: event.parentSpanId,
+          step_name: event.stepName,
+          agent_name: event.agentName,
+          arguments: event.arguments,
+        },
+      };
+    case "agent.step.end": {
+      const payload: Record<string, unknown> = {
+        span_id: event.spanId,
+        parent_span_id: event.parentSpanId,
+        step_name: event.stepName,
+        agent_name: event.agentName,
+        arguments: event.arguments,
+        result: event.result,
+        duration_ms: event.durationMs,
+      };
+      if (event.error !== undefined) payload.error = event.error;
+      return { name: "step.end", payload };
+    }
     default: {
       // Exhaustiveness check — a new AgentEvent variant without a branch here
       // is a compile-time error.
@@ -240,6 +266,8 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.tool.progress": "tool.progress",
   "agent.tool.end": "tool.end",
   "agent.tool.rejected": "tool.rejected",
+  "agent.step.start": "step.start",
+  "agent.step.end": "step.end",
   "agent.iteration.start": "iteration.start",
   "agent.iteration.end": "iteration.end",
   "agent.llm.start": "llm.start",
