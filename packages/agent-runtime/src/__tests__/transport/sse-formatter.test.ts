@@ -46,10 +46,12 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.iteration.end"]).toBe("iteration.end");
     expect(SSE_EVENT_NAMES["agent.llm.start"]).toBe("llm.start");
     expect(SSE_EVENT_NAMES["agent.llm.end"]).toBe("llm.end");
+    expect(SSE_EVENT_NAMES["agent.step.start"]).toBe("step.start");
+    expect(SSE_EVENT_NAMES["agent.step.end"]).toBe("step.end");
   });
 
-  it("has exactly 19 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(19);
+  it("has exactly 21 mappings", () => {
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(21);
   });
 });
 
