@@ -104,7 +104,13 @@ describe("applyParts", () => {
 
   test("step.start + step.end fold into an agent_step part (delegation, not a tool)", () => {
     const parts = fold([
-      { type: "step.start", span_id: "s1", step_name: "interpret", agent_name: "Interpreter", arguments: { question: "hi" } },
+      {
+        type: "step.start",
+        span_id: "s1",
+        step_name: "interpret",
+        agent_name: "Interpreter",
+        arguments: { question: "hi" },
+      },
       {
         type: "step.end",
         span_id: "s1",
@@ -130,9 +136,28 @@ describe("applyParts", () => {
   test("a tool call whose parent_span_id matches a step nests UNDER it (agent contains tool)", () => {
     const parts = fold([
       { type: "step.start", span_id: "s1", step_name: "navigate", arguments: {} },
-      { type: "tool.start", tool_call_id: "t1", tool_name: "select", parent_span_id: "s1", arguments: { entity: "observations" } },
-      { type: "tool.end", tool_call_id: "t1", tool_name: "select", parent_span_id: "s1", result: { rows: 60 }, duration_ms: 8 },
-      { type: "step.end", span_id: "s1", step_name: "navigate", result: { pool: 60 }, duration_ms: 20 },
+      {
+        type: "tool.start",
+        tool_call_id: "t1",
+        tool_name: "select",
+        parent_span_id: "s1",
+        arguments: { entity: "observations" },
+      },
+      {
+        type: "tool.end",
+        tool_call_id: "t1",
+        tool_name: "select",
+        parent_span_id: "s1",
+        result: { rows: 60 },
+        duration_ms: 8,
+      },
+      {
+        type: "step.end",
+        span_id: "s1",
+        step_name: "navigate",
+        result: { pool: 60 },
+        duration_ms: 20,
+      },
     ]);
     // Exactly ONE top-level part — the step; the tool is nested in its children.
     expect(parts).toHaveLength(1);

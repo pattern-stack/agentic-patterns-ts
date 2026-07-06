@@ -181,7 +181,10 @@ function parseFrame(frame: string): WireFrame | null {
   if (!eventName) return null;
   try {
     const data = dataJson ? JSON.parse(dataJson) : {};
-    const obj = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+    const obj =
+      data && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {};
     return { name: eventName, data: obj };
   } catch {
     return null;

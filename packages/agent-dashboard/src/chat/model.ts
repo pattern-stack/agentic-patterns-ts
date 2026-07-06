@@ -226,7 +226,14 @@ export function applyParts(
       // tool.intent then tool.start can both fire — upsert by id, don't double.
       if (list.some((part) => part.kind === "tool_call" && part.id === id)) return { parts };
       return {
-        parts: write(list.concat({ kind: "tool_call", id, name: toolName(col, p), arguments: toolArgs(col, p) })),
+        parts: write(
+          list.concat({
+            kind: "tool_call",
+            id,
+            name: toolName(col, p),
+            arguments: toolArgs(col, p),
+          }),
+        ),
       };
     }
     case "tool.end": {
