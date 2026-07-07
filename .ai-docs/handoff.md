@@ -1,8 +1,8 @@
-# Handoff — 2026-07-06 (pm)
+# Handoff — 2026-07-07
 
-**Branch:** `pg/s8-console-lenses-polish` (stack tip; main is clean)
-**Last action:** Shipped the **playground-upgrades** stack — 8 stacked PRs **#191→#198**, all CI-green, awaiting review/merge. Ported swe-brain's agentic surfaces into the playground (minus the Composer, by decision) + a board-wide styling level-up.
-**Next action:** Slice PRs #191→#198 merge sequentially into the feature branch `feat/playground-upgrades`; the user merges the umbrella PR into main and publishes. After merge to main: runtime+server+cli changed → lockstep version bump (`bump.sh --lockstep`), dashboard/core per policy.
+**Branch:** `main` (clean, synced)
+**Last action:** **playground-upgrades SHIPPED + PUBLISHED.** 8 slice PRs #191→#198 merged sequentially into `feat/playground-upgrades`; umbrella #199 merged to main (420cded); publish job succeeded — npm dist-tags verified: runtime/server/cli **0.15.0**, core 0.7.0 (unchanged), dashboard private. Ported swe-brain's agentic surfaces (minus Composer, by decision) + board-wide styling level-up.
+**Next action:** Nothing mid-flight. Follow-up candidates below, or start fresh.
 **Obstacles:** none blocking.
 
 ## The stack (all validated: paired opus reviews + browser agents per wave)
