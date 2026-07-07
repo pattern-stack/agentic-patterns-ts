@@ -1,0 +1,63 @@
+/*
+ * Theme: chalky (light) — blueberry-primary chalk family, light mode.
+ * Source: swe-brain apps/frontend/src/styles/theme-chalky-primary.css
+ * (`:root[data-theme="chalky-primary"]`).
+ *
+ * Reconciled, NOT ported verbatim (port-map §7.3: "translate hsl-triple
+ * vocabulary → the dashboard's full-color base where they differ"):
+ *   - `--accent` = source's `--primary` (232 61% 59%, "blueberry"), NOT
+ *     source's own `--accent` (327 61% 58%, magenta). This dashboard has one
+ *     brand/interactive color slot (`--accent`, drives buttons/links/focus/
+ *     selection); the chalky/chalkboard source split that role across a
+ *     neutral-button `--primary` (blue/blueberry) and a separate highlight
+ *     `--accent` (magenta) — the opposite naming split from blue/earth, where
+ *     source `--accent` already IS the brand hue. Blueberry is the family's
+ *     brand identity (see `--focus-ring`/`--row-selected-bg` below, both
+ *     already blueberry in source), so it wins the `--accent` slot here.
+ *   - `--secondary` is NOT the source's `--secondary` (261 56% 64% lavender —
+ *     a saturated secondary-BUTTON color in source's component system). Used
+ *     directly it would paint every generic fill (Segmented track, table
+ *     stripe rows, …) a loud lavender wash. Recomputed as a neutral
+ *     low-saturation tint in the family's own hue, matching how `--muted`
+ *     (ported verbatim below, source comments it as a generic surface tint)
+ *     relates to `--background`/`--card`.
+ *   - `--font-hand` falls back to the sans stack (locked decision, chalk
+ *     themes ship no external font link).
+ */
+:root[data-theme="chalky"] {
+  color-scheme: light;
+
+  --background: hsl(225 45% 97%);
+  --foreground: hsl(240 19% 20%);
+  --card: hsl(225 100% 99%);
+  --secondary: hsl(225 40% 93%); /* reconciled — see header note */
+  --accent: hsl(232 61% 59%); /* = source --primary, "blueberry" */
+  --muted: hsl(222 56% 95%); /* source --muted, ported verbatim */
+  --muted-foreground: hsl(240 14% 41%);
+  --border: hsl(225 44% 90%);
+  --destructive: hsl(331 55% 43%);
+  --status-completed: hsl(217 60% 55%);
+  --warn: oklch(0.68 0.13 75);
+
+  --hover-bg: 225 45% 94%;
+  --row-selected-bg: 232 61% 95%;
+  --focus-ring: 232 61% 59%;
+
+  --shadow-1: 0 1px 0 rgba(42, 42, 61, 0.04), 0 2px 4px rgba(42, 42, 61, 0.05);
+  --shadow-2: 0 4px 14px rgba(42, 42, 61, 0.08), 0 1px 2px rgba(42, 42, 61, 0.05);
+  --shadow-3: 0 14px 36px rgba(42, 42, 61, 0.14), 0 2px 4px rgba(42, 42, 61, 0.06);
+  --chalk-inset: inset 0 -1px 0 rgba(42, 42, 61, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* Category palette — source labels these billing/batch/onboarding/reserved
+     (a job-pool domain this app doesn't have); values ported verbatim,
+     relabeled onto our brand/flow/emit/generate slots for cross-theme
+     consistency. */
+  --category-1: hsl(232 61% 59%); /* brand — blueberry */
+  --category-2: hsl(261 56% 64%); /* flow — lavender */
+  --category-3: hsl(327 61% 58%); /* emit — magenta */
+  --category-4: hsl(44 71% 46%); /* generate — butter */
+
+  /* LOCKED DECISION: chalk themes drop the handwritten look rather than ship
+     a font reference to an unloaded family — no external font links. */
+  --font-hand: var(--font-sans);
+}

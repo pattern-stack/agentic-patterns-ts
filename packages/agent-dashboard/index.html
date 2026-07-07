@@ -5,16 +5,67 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agentic Patterns Dashboard</title>
     <script>
-      // Apply the saved theme before first paint to avoid a flash. Default: dark.
+      // Apply the resolved theme before first paint to avoid a flash. Mirrors
+      // ui/theme-mode.ts resolution exactly (duplicated here because it must
+      // run before any module import) — six themes, {family,mode} preference,
+      // legacy string migration, live ?theme= override. Default: blue-dark.
       (function () {
-        try {
-          var m = localStorage.getItem("apdash-theme");
-          var mode = m === "light" || m === "dark" || m === "system" ? m : "dark";
-          if (mode === "system") document.documentElement.removeAttribute("data-theme");
-          else document.documentElement.setAttribute("data-theme", mode);
-        } catch (e) {
-          document.documentElement.setAttribute("data-theme", "dark");
+        var LIGHT_FOR = { blue: "blue", earth: "earth", chalk: "chalky" };
+        var DARK_FOR = { blue: "blue-dark", earth: "earth-dark", chalk: "chalkboard" };
+        var THEME_IDS = {
+          blue: 1,
+          "blue-dark": 1,
+          earth: 1,
+          "earth-dark": 1,
+          chalky: 1,
+          chalkboard: 1,
+        };
+        function prefersDarkOS() {
+          try {
+            return window.matchMedia("(prefers-color-scheme: dark)").matches;
+          } catch (e) {
+            return true;
+          }
         }
+        function resolve(pref) {
+          var dark = pref.mode === "system" ? prefersDarkOS() : pref.mode === "dark";
+          return dark ? DARK_FOR[pref.family] : LIGHT_FOR[pref.family];
+        }
+        function migrateLegacy(raw) {
+          if (raw === "dark") return { family: "blue", mode: "dark" };
+          if (raw === "light") return { family: "blue", mode: "light" };
+          if (raw === "system") return { family: "blue", mode: "system" };
+          return null;
+        }
+        var pref = { family: "blue", mode: "dark" };
+        try {
+          var raw = localStorage.getItem("apdash-theme");
+          if (raw) {
+            var legacy = migrateLegacy(raw);
+            if (legacy) {
+              pref = legacy;
+            } else {
+              var parsed = JSON.parse(raw);
+              if (
+                parsed &&
+                (parsed.family === "blue" || parsed.family === "earth" || parsed.family === "chalk") &&
+                (parsed.mode === "system" || parsed.mode === "light" || parsed.mode === "dark")
+              ) {
+                pref = parsed;
+              }
+            }
+          }
+        } catch (e) {
+          /* storage unavailable or corrupt — fall through to the default preference */
+        }
+        var override = null;
+        try {
+          var q = new URLSearchParams(window.location.search).get("theme");
+          if (q && THEME_IDS[q]) override = q;
+        } catch (e) {
+          /* no-op */
+        }
+        document.documentElement.setAttribute("data-theme", override || resolve(pref));
       })();
     </script>
   </head>
