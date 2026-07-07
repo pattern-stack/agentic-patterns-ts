@@ -183,14 +183,16 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
     const outputTokens = options?.outputTokens ?? 0;
 
     // One message INSERT + N part INSERTs + the conversation's `touch` UPDATE
-    // must land atomically — better-sqlite3 is synchronous, so the whole
-    // write set runs inside one `db.transaction()` (sync API; the enclosing
-    // method stays `async` for the protocol, it just has nothing left to
-    // `await` after this call). Without this, a mid-loop failure (e.g. the
-    // Nth part's JSON.stringify or a constraint violation) could leave an
-    // orphan message with a partial part set and a stale conversation
-    // `updated_at`.
-    const insertAll = this._db.transaction(() => {
+    // must land atomically. Transactions run via explicit `exec("BEGIN")` /
+    // `COMMIT` / `ROLLBACK`, NOT `db.transaction()`: the driver contract the
+    // stores are written against is prepare/exec/close only (see `load.ts`
+    // `wrapBunDatabase` — the bun:sqlite adapter exposes exactly that surface,
+    // and `.transaction()` would throw at runtime under Bun even though
+    // better-sqlite3 tests pass under Node). All statements are synchronous,
+    // so nothing can interleave between BEGIN and COMMIT.
+    this._db.exec("BEGIN");
+    let storedParts: StoredMessagePart[];
+    try {
       this._addMessageStmt.run(
         messageId,
         conversationId,
@@ -201,7 +203,7 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
         nowIso,
       );
 
-      const storedParts: StoredMessagePart[] = parts.map((p, index) => {
+      storedParts = parts.map((p, index) => {
         const partId = generateId();
         const metadata = p.metadata ?? {};
         this._addPartStmt.run(
@@ -224,10 +226,11 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
       });
 
       this._touchConvStmt.run(nowIso, conversationId);
-
-      return storedParts;
-    });
-    const storedParts = insertAll();
+      this._db.exec("COMMIT");
+    } catch (err) {
+      this._db.exec("ROLLBACK");
+      throw err;
+    }
 
     return {
       id: messageId,

@@ -312,4 +312,65 @@ describe("SQLiteConversationStore", () => {
       result.store?.close();
     });
   });
+
+  describe("bun:sqlite adapter surface (prepare/exec/close only)", () => {
+    // `load.ts wrapBunDatabase` exposes ONLY prepare/exec/close — no
+    // `.transaction()`. Regression for the live-chat message loss under Bun:
+    // addMessage must transact via exec("BEGIN"/"COMMIT"), never a
+    // better-sqlite3-only API. This driver throws on any other member access.
+    // Typed as `typeof Database` to satisfy the store's option type; at
+    // runtime it deliberately satisfies ONLY the prepare/exec/close surface.
+    function shimOnlyDatabase(): typeof Database {
+      return class ShimOnly {
+        private readonly _raw: InstanceType<typeof Database>;
+        constructor(path: string) {
+          this._raw = new Database(path);
+          // biome-ignore lint/correctness/noConstructorReturn: deliberate — a Proxy is the point
+          return new Proxy(this, {
+            get(target, prop) {
+              if (prop === "prepare") return (sql: string) => target._raw.prepare(sql);
+              if (prop === "exec") return (sql: string) => target._raw.exec(sql);
+              if (prop === "close") return () => target._raw.close();
+              throw new TypeError(`bun adapter surface has no member "${String(prop)}"`);
+            },
+          });
+        }
+      } as never;
+    }
+
+    it("addMessage persists message + parts through the shim surface", async () => {
+      const shimStore = new SQLiteConversationStore({
+        path: ":memory:",
+        Database: shimOnlyDatabase(),
+      });
+      const conv = await shimStore.createConversation("Agent", "model");
+      const msg = await shimStore.addMessage(conv.id, "request", [
+        { type: "user_prompt", content: "hello" },
+        { type: "text", content: "world" },
+      ]);
+      expect(msg.parts).toHaveLength(2);
+      const persisted = await shimStore.getMessages(conv.id);
+      expect(persisted).toHaveLength(1);
+      expect(await shimStore.getMessageParts(msg.id)).toHaveLength(2);
+      shimStore.close();
+    });
+
+    it("a failing part write rolls back the whole message atomically", async () => {
+      const shimStore = new SQLiteConversationStore({
+        path: ":memory:",
+        Database: shimOnlyDatabase(),
+      });
+      const conv = await shimStore.createConversation("Agent", "model");
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic; // JSON.stringify throws mid-loop on the 2nd part
+      await expect(
+        shimStore.addMessage(conv.id, "request", [
+          { type: "text", content: "ok" },
+          { type: "text", content: "boom", metadata: cyclic },
+        ]),
+      ).rejects.toThrow();
+      expect(await shimStore.getMessages(conv.id)).toHaveLength(0);
+      shimStore.close();
+    });
+  });
 });
