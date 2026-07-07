@@ -120,10 +120,10 @@ export {
   type AgentStage,
   type AgentStageSpec,
   type CompletedStage,
-  type SequentialAgentsOpts,
-  type SequentialAgentsResult,
+  type SequentialAgentOpts,
+  type SequentialAgentResult,
   renderSharedState,
-  sequentialAgents,
+  sequentialAgent,
 } from "./sequential-agents.js";
 
 export {

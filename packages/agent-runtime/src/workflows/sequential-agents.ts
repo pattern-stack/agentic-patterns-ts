@@ -1,5 +1,5 @@
 /**
- * `sequentialAgents()` — AGENTS in sequence over an implicitly shared Scratchpad
+ * `sequentialAgent()` — ONE agent composed of AGENTS in sequence over an implicitly shared Scratchpad
  * (DESIGN §6.2 companion; the ADK `SequentialAgent` parity primitive).
  *
  * `Sequential` chains NODES with typed output→input seams — which means every
@@ -17,7 +17,7 @@
  *    sees what happened". A stage may override `prompt` to render a WINDOWED
  *    view instead (large payloads should live in slots its `tail` writes).
  *  - Because slots are run-scoped, the same sharing holds across `Loop`
- *    iterations for free: `Loop({ body: sequentialAgents([...]) })` re-enters
+ *    iterations for free: `Loop({ body: sequentialAgent([...]) })` re-enters
  *    with the pad intact. (Subagent teams — `delegateTo` — do NOT see the pad
  *    yet; opt-in sharing there is a declared follow-up.)
  *  - `output` (zod) per stage is OPTIONAL: structured stages emit through
@@ -68,7 +68,8 @@ export interface AgentStageSpec<TOut = unknown> {
    */
   readonly prompt?: (state: ScratchpadReader, input: unknown) => string;
   /** Where the emission lands. Default: an auto slot keyed `agents.<name>`. */
-  readonly slot?: Slot<TOut | null>;
+  // biome-ignore lint/suspicious/noExplicitAny: Slot<T> is invariant (its `merge` param); the emission write is dynamically typed by design — the SequentialBuilder precedent.
+  readonly slot?: Slot<any>;
   /**
    * The stage's fused deterministic tail — code that REALIZES the agent's
    * decision (writes derived slots, executes the read, enforces floors). May
@@ -91,7 +92,7 @@ export interface AgentStageSpec<TOut = unknown> {
 
 export type AgentStage = AgentLike | AgentStageSpec;
 
-export interface SequentialAgentsOpts {
+export interface SequentialAgentOpts {
   readonly name?: string;
   /**
    * The implicit state render used for stages without a custom `prompt`.
@@ -106,7 +107,7 @@ export interface CompletedStage {
   readonly output: unknown;
 }
 
-export interface SequentialAgentsResult {
+export interface SequentialAgentResult {
   /** Every completed stage's emission, by stage name. */
   readonly outputs: Record<string, unknown>;
   /** Set when a stage's `stop`/`tail` short-circuited the sequence. */
@@ -149,17 +150,17 @@ function stageName(stage: AgentStageSpec, index: number): string {
  * Seat `stages` in order over one shared Scratchpad and return the pipeline as
  * a {@link Node}. See the module doc for semantics.
  */
-export function sequentialAgents(
+export function sequentialAgent(
   stages: ReadonlyArray<AgentStage>,
-  opts: SequentialAgentsOpts = {},
-): Node<unknown, SequentialAgentsResult> {
-  if (stages.length === 0) throw new Error("sequentialAgents: at least one stage is required");
+  opts: SequentialAgentOpts = {},
+): Node<unknown, SequentialAgentResult> {
+  if (stages.length === 0) throw new Error("sequentialAgent: at least one stage is required");
   const specs = stages.map((s) => (isSpec(s) ? s : { agent: s }));
   const names = specs.map((s, i) => stageName(s, i));
   const dupe = names.find((n, i) => names.indexOf(n) !== i);
   if (dupe != null) {
     throw new Error(
-      `sequentialAgents: duplicate stage name '${dupe}' — set an explicit \`name\` per stage`,
+      `sequentialAgent: duplicate stage name '${dupe}' — set an explicit \`name\` per stage`,
     );
   }
 
@@ -177,7 +178,7 @@ export function sequentialAgents(
     for (const r of specs[i]?.reads ?? []) {
       if (!declaredSoFar.has(r.key) && !written.has(r.key)) {
         throw new Error(
-          `sequentialAgents: stage '${names[i]}' reads '${r.key}' but no earlier stage declares writing it`,
+          `sequentialAgent: stage '${names[i]}' reads '${r.key}' but no earlier stage declares writing it`,
         );
       }
     }
@@ -187,7 +188,7 @@ export function sequentialAgents(
 
   return {
     name: opts.name ?? "sequential-agents",
-    async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<SequentialAgentsResult>> {
+    async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<SequentialAgentResult>> {
       const scratchpad = ctx.scratchpad ?? createScratchpad();
       const render = opts.render ?? renderSharedState;
       const completed: CompletedStage[] = [];
@@ -229,7 +230,7 @@ export function sequentialAgents(
             output: undefined as never,
             succeeded: false,
             error:
-              res.error ?? new Error(`sequentialAgents: stage '${name}' failed without an error`),
+              res.error ?? new Error(`sequentialAgent: stage '${name}' failed without an error`),
             totalInputTokens: tokensIn,
             totalOutputTokens: tokensOut,
           };
@@ -240,8 +241,8 @@ export function sequentialAgents(
         completed.push({ name, output: res.output });
 
         const done = (
-          stopped: SequentialAgentsResult["stopped"],
-        ): NodeResult<SequentialAgentsResult> => ({
+          stopped: SequentialAgentResult["stopped"],
+        ): NodeResult<SequentialAgentResult> => ({
           output: { outputs, stopped },
           succeeded: true,
           totalInputTokens: tokensIn,

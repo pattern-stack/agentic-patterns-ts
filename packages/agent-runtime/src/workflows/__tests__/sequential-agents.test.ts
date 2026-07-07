@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
-import { sequentialAgents, renderSharedState } from "../sequential-agents.js";
+import { sequentialAgent, renderSharedState } from "../sequential-agents.js";
 import { createScratchpad, slot } from "../slot.js";
 
 function makeAgent(name: string): AgentLike {
@@ -15,7 +15,7 @@ function makeAgent(name: string): AgentLike {
   };
 }
 
-describe("sequentialAgents", () => {
+describe("sequentialAgent", () => {
   it("shares context implicitly: a later stage's prompt carries the earlier emission", async () => {
     const runner = new MockRunner()
       // Registered FIRST (substring matching is insertion-ordered): fires ONLY when the
@@ -23,7 +23,7 @@ describe("sequentialAgents", () => {
       .addResponse("## finder", { content: "BETA-CONCLUSION" })
       .addResponse("the task", { content: "ALPHA-FINDING" });
 
-    const node = sequentialAgents([makeAgent("finder"), makeAgent("concluder")]);
+    const node = sequentialAgent([makeAgent("finder"), makeAgent("concluder")]);
     const res = await node.run("the task", { runner });
 
     expect(res.succeeded).toBe(true);
@@ -36,7 +36,7 @@ describe("sequentialAgents", () => {
     const pad = createScratchpad();
     const mySlot = slot<string | null>({ key: "custom.finding", scope: "run", init: () => null });
 
-    const node = sequentialAgents([{ agent: makeAgent("finder"), slot: mySlot }]);
+    const node = sequentialAgent([{ agent: makeAgent("finder"), slot: mySlot }]);
     const res = await node.run("go", { runner, scratchpad: pad });
 
     expect(res.succeeded).toBe(true);
@@ -50,7 +50,7 @@ describe("sequentialAgents", () => {
       object: { verdict: "yes" },
     });
 
-    const node = sequentialAgents([{ agent: makeAgent("judge"), output: Shape }]);
+    const node = sequentialAgent([{ agent: makeAgent("judge"), output: Shape }]);
     const res = await node.run("judge it", { runner });
 
     expect(res.succeeded).toBe(true);
@@ -62,7 +62,7 @@ describe("sequentialAgents", () => {
       .addResponse("*", { content: "AMBIGUOUS" })
       .addResponse("AMBIGUOUS", { content: "SHOULD-NEVER-RUN" });
 
-    const node = sequentialAgents([
+    const node = sequentialAgent([
       {
         agent: makeAgent("interpret"),
         stop: (out) => (out === "AMBIGUOUS" ? "clarify: which one?" : null),
@@ -81,7 +81,7 @@ describe("sequentialAgents", () => {
     const derived = slot<number | null>({ key: "derived.count", scope: "run", init: () => null });
     const pad = createScratchpad();
 
-    const node = sequentialAgents([
+    const node = sequentialAgent([
       {
         agent: makeAgent("resolve"),
         tail: (out, p) => {
@@ -105,7 +105,7 @@ describe("sequentialAgents", () => {
       .addResponse("WINDOW[windowed-content]", { content: "done" });
     const view = slot<string | null>({ key: "view", scope: "run", init: () => null });
 
-    const node = sequentialAgents([
+    const node = sequentialAgent([
       { agent: makeAgent("a"), tail: (out, p) => void p.set(view, String(out)) },
       { agent: makeAgent("b"), prompt: (state) => `WINDOW[${state.get(view)}]` },
     ]);
@@ -116,24 +116,27 @@ describe("sequentialAgents", () => {
   });
 
   it("a failed stage fails the sequence with token rollup intact", async () => {
-    const runner = new MockRunner().addResponse("*", { error: new Error("provider down") });
-    const node = sequentialAgents([makeAgent("a")]);
+    const runner = new MockRunner().addResponse("*", {
+      content: "",
+      error: new Error("provider down"),
+    });
+    const node = sequentialAgent([makeAgent("a")]);
     const res = await node.run("anything", { runner });
     expect(res.succeeded).toBe(false);
     expect(res.error?.message).toContain("provider down");
   });
 
   it("build-time guards: empty stages, duplicate names, undeclared reads", () => {
-    expect(() => sequentialAgents([])).toThrow(/at least one stage/);
-    expect(() => sequentialAgents([makeAgent("same"), makeAgent("same")])).toThrow(
+    expect(() => sequentialAgent([])).toThrow(/at least one stage/);
+    expect(() => sequentialAgent([makeAgent("same"), makeAgent("same")])).toThrow(
       /duplicate stage name/,
     );
     expect(() =>
-      sequentialAgents([{ agent: makeAgent("x"), reads: [{ key: "never.written" }] }]),
+      sequentialAgent([{ agent: makeAgent("x"), reads: [{ key: "never.written" }] }]),
     ).toThrow(/reads 'never.written'/);
     // Declared write → the read is satisfied.
     expect(() =>
-      sequentialAgents([
+      sequentialAgent([
         { agent: makeAgent("w"), writes: [{ key: "later.read" }] },
         { agent: makeAgent("r"), reads: [{ key: "later.read" }] },
       ]),
@@ -152,7 +155,7 @@ describe("sequentialAgents", () => {
     const runner = new MockRunner().addResponse("*", { content: "x" });
     const counter = slot<number>({ key: "n", scope: "run", init: () => 0 });
     const pad = createScratchpad();
-    const node = sequentialAgents([
+    const node = sequentialAgent([
       { agent: makeAgent("inc"), tail: (_o, p) => void p.update(counter, (n) => n + 1) },
     ]);
     await node.run("a", { runner, scratchpad: pad });
