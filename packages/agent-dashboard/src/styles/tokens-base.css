@@ -1,0 +1,166 @@
+/*
+ * Token primitives + derivation layer — theme-INDEPENDENT half of the
+ * two-layer token system (port-map §7.3). Six-theme split:
+ *   1. THIS file — fonts/radius/spacing/type ramp/motion primitives (identical
+ *      across every theme) + a color-mix DERIVATION layer
+ *      (--paper/--ink/--line/--ok/--err/--accent-soft/…) that re-resolves per
+ *      theme because it references the ~22 base palette vars each
+ *      `theme-<id>.css` sets under its own `:root[data-theme="<id>"]` block.
+ *   2. `styles/theme-<id>.css` × 6 (`blue`, `blue-dark`, `earth`, `earth-dark`,
+ *      `chalky`, `chalkboard`) — ONE block each, the base palette + category
+ *      slots + T.state triples + shadows. See each file's header for its
+ *      swe-brain source + any values reconciled (not ported verbatim).
+ *
+ * NOTE on representation: the cockpit stored its palette as bare hsl-triples
+ * (used via `hsl(var(--card))`). The dashboard admin surface consumes the same
+ * token NAMES directly as colors (`var(--card)`, `var(--border)`, …). To let
+ * both consumers share one global namespace, each theme file's base palette
+ * holds full COLOR values (`hsl(H S% L%)`) and this derivation layer
+ * references them with `var()` (not `hsl(var())`). The three T.state
+ * vars — `--hover-bg`, `--row-selected-bg`, `--focus-ring` — stay as bare
+ * hsl-triples in every theme file because the typed `T.state` accessor
+ * (ui/tokens.ts) still wraps them in `hsl()`; this is a load-bearing
+ * invariant, not a style choice — do not "fix" them to full colors.
+ *
+ * Mode resolution lives in JS now (ui/theme-mode.ts {family, mode} +
+ * lightFor/darkFor maps) — there is no more `@media(prefers-color-scheme)`
+ * block here; `data-theme` is ALWAYS one of the six concrete ids by the time
+ * any stylesheet rule needs to match (index.html before-paint script).
+ *
+ * An ALIAS BRIDGE at the bottom of :root maps the dashboard's legacy token
+ * names (--bg-*, --fg-*, --green/--red/--yellow/--purple, --accent-emerald…)
+ * onto the cockpit tokens, so every admin page adopts the active theme with no
+ * per-file edit. TRANSITIONAL — deleted in S8 once
+ * `grep -rn "--bg-\|--fg-\|var(--green)\|var(--red)\|var(--yellow)\|var(--purple)\|accent-emerald" src/`
+ * is clean.
+ */
+:root {
+  /* ── Fonts ────────────────────────────────────────── */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Default hand stack for the blue/earth families. The chalk themes
+     (chalky/chalkboard) override this to `var(--font-sans)` — LOCKED
+     DECISION: no external font links, chalk's handwritten look is dropped
+     rather than shipped as a broken font reference to an unloaded family. */
+  --font-hand: "Kalam", "Caveat", cursive;
+
+  /* ── Geometry / density / spacing / type / motion (theme-independent) ── */
+  --radius-xs: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+  --row-height: 30px;
+  --row-height-cozy: 38px;
+  --row-pad-x: 12px;
+  --row-pad-y: 7px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --fz-micro: 10.5px;
+  --fz-tiny: 11px;
+  --fz-small: 12px;
+  --fz-base: 12.5px;
+  --fz-md: 13px;
+  --fz-lg: 14px;
+  --fz-xl: 17px;
+  --fz-xxl: 19px;
+  --fz-hero: 22px;
+  --lh-tight: 1.2;
+  --lh-base: 1.45;
+  --lh-loose: 1.6;
+  --motion-fast: 120ms;
+  --motion-mid: 200ms;
+  --motion-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ── Derivation layer — color-mix over the active theme's base palette
+       (re-resolves per [data-theme] because --card/--accent/… are set there). ── */
+  --paper: var(--card);
+  --ink: var(--foreground);
+  --ink-2: color-mix(in oklch, var(--foreground) 72%, var(--muted-foreground));
+  --ink-3: color-mix(in oklch, var(--muted-foreground) 70%, var(--card));
+  --mute: var(--muted-foreground);
+  --line: var(--border);
+  --line-2: color-mix(in oklch, var(--border) 55%, var(--card));
+  --fill: var(--secondary);
+  --fill-2: var(--muted);
+  --accent-soft: color-mix(in oklch, var(--accent) 14%, var(--card));
+  --accent-ink: color-mix(in oklch, var(--accent) 64%, var(--foreground));
+  --ok: var(--status-completed);
+  --ok-soft: color-mix(in oklch, var(--status-completed) 15%, var(--card));
+  --ok-ink: color-mix(in oklch, var(--status-completed) 60%, var(--foreground));
+  --err: var(--destructive);
+  /* srgb avoids the oklch hue-interpolation arc that drifts this mix toward
+     purple/yellow at 13% — srgb averages RGB channels directly, giving a
+     visibly warm dark-red tint that stays hue-stable across every theme. */
+  --err-soft: color-mix(in srgb, var(--destructive) 13%, var(--card));
+  --err-ink: color-mix(in oklch, var(--destructive) 60%, var(--foreground));
+  --warn-soft: color-mix(in oklch, var(--warn) 13%, var(--card));
+  --warn-ink: color-mix(in oklch, var(--warn) 55%, var(--foreground));
+  --pen: color-mix(in oklch, var(--accent) 75%, var(--foreground));
+  --violet: color-mix(in oklch, var(--accent) 58%, var(--err));
+  --violet-soft: color-mix(in oklch, var(--violet) 15%, var(--card));
+  --violet-ink: color-mix(in oklch, var(--violet) 60%, var(--foreground));
+
+  /* Blast-radius palette (graph/catalog.ts BLAST_COLOR) — read reuses --mute
+     (no tint = "safe", theme-independent); write/external now retune per
+     theme via the --category-* slots each theme file sets (S1 shipped fixed
+     oklch placeholders; this is the "per-theme retuning" the S1 comment
+     flagged as landing in S2). */
+  --blast-read: var(--mute);
+  --blast-write: var(--category-3);
+  --blast-external: var(--category-4);
+
+  /* ══ ALIAS BRIDGE — dashboard legacy token names → cockpit tokens. These
+       reference the cockpit vars (never hardcode), so every theme flips them. ══ */
+  --bg-canvas: var(--background);
+  --bg-surface: var(--fill);
+  --bg-surface-hover: var(--fill-2);
+  --bg-inset: var(--background);
+  --border-muted: var(--line-2);
+  --fg-default: var(--ink);
+  --fg-muted: var(--ink-2);
+  --fg-subtle: var(--ink-3);
+  --green: var(--ok);
+  --red: var(--err);
+  --yellow: var(--warn);
+  --purple: var(--violet);
+  --accent-emerald: var(--accent);
+  --accent-emerald-dim: var(--accent-soft);
+  /* --accent, --card, --border, --foreground, --muted, --muted-foreground,
+     --secondary, --destructive, --status-completed, --background, --font-sans,
+     --font-mono are already cockpit tokens (set per-theme) and consumed directly. */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* ── Keyframes shared by cockpit-native + admin atoms (theme-independent). ── */
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes pulseBtn {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}

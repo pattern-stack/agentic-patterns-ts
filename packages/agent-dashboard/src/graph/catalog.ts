@@ -7,10 +7,11 @@
 import type { BlastRadius, CapabilityMeta } from "./types";
 
 /**
- * read = no tint · write = green (Emit hue 155) · external = amber (Generate
- * hue 75). Values now live behind `--blast-*` tokens (styles/theme.css) rather
- * than raw oklch here, per port-map §7.1's hard-coded-color kill list; the
- * hues stay unchanged. Per-theme retuning (`--category-*` slots) lands in S2.
+ * read = no tint (--mute) · write = the theme's "emit" category hue · external
+ * = the theme's "generate" category hue. Values live behind `--blast-*`
+ * tokens (styles/tokens-base.css derivation layer), which now derive from
+ * each theme's `--category-3`/`--category-4` slots (styles/theme-<id>.css) —
+ * the per-theme retuning flagged here in S1 landed in S2.
  */
 export const BLAST_COLOR: Record<BlastRadius, string> = {
   read: "var(--blast-read)",

@@ -1,0 +1,36 @@
+/*
+ * Theme: earth (light) — warm family, light mode.
+ * Source: swe-brain apps/frontend/src/styles/theme-swe-brain.css
+ * (`:root[data-theme="swe-brain"]`), ported verbatim. Warm paper canvas, warm
+ * charcoal ink, gold/ochre accent, role tints re-toned warm.
+ */
+:root[data-theme="earth"] {
+  color-scheme: light;
+
+  --background: hsl(44 32% 97%);
+  --foreground: hsl(35 14% 18%);
+  --card: hsl(40 33% 99%);
+  --secondary: hsl(40 14% 93%);
+  --accent: hsl(40 62% 46%);
+  --muted: hsl(40 16% 95%);
+  --muted-foreground: hsl(38 8% 44%);
+  --border: hsl(40 14% 86%);
+  --destructive: hsl(10 62% 50%);
+  --status-completed: hsl(92 36% 42%);
+  /* canonical-amber-warn exception — same amber as every other theme. */
+  --warn: oklch(0.68 0.13 75);
+
+  --hover-bg: 40 16% 94%;
+  --row-selected-bg: 40 60% 90%;
+  --focus-ring: 35 14% 18%;
+
+  --shadow-1: 0 1px 0 rgba(60, 48, 30, 0.06);
+  --shadow-2: 0 4px 14px rgba(60, 48, 30, 0.07), 0 1px 0 rgba(60, 48, 30, 0.05);
+  --shadow-3: 0 14px 36px rgba(60, 48, 30, 0.11), 0 2px 4px rgba(60, 48, 30, 0.05);
+  --chalk-inset: inset 0 -1px 0 rgba(60, 48, 30, 0.06);
+
+  --category-1: hsl(40 62% 46%); /* brand — gold */
+  --category-2: hsl(338 38% 56%); /* flow — warm mauve */
+  --category-3: hsl(92 32% 42%); /* emit — olive-green */
+  --category-4: hsl(44 70% 50%); /* generate — amber */
+}

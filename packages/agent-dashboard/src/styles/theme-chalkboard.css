@@ -1,0 +1,46 @@
+/*
+ * Theme: chalkboard (dark) — slate-teal chalk family, dark mode.
+ * Source: swe-brain apps/frontend/src/styles/theme-chalkboard.css
+ * (`:root[data-theme="chalkboard"]`). Dark slate-teal "board", cream chalk
+ * ink, dusty pastel chalk colors.
+ *
+ * Reconciled, NOT ported verbatim — same two deviations as theme-chalky.css
+ * (see its header note for the full rationale):
+ *   - `--accent` = source's `--primary` (212 53% 75%, CHALK.blue), NOT
+ *     source's own `--accent` (331 65% 78%, CHALK.pink).
+ *   - `--secondary` recomputed as a neutral board-toned fill instead of
+ *     source's saturated lavender secondary-button color.
+ *   - `--font-hand` falls back to the sans stack (locked decision).
+ */
+:root[data-theme="chalkboard"] {
+  color-scheme: dark;
+
+  --background: hsl(187 19% 15%); /* CHALK.board #1f2b2e */
+  --foreground: hsl(40 36% 92%); /* CHALK.chalk #f4efe3 */
+  --card: hsl(177 16% 14%); /* CHALK.boardDark, lifted for contrast */
+  --secondary: hsl(187 16% 19%); /* reconciled — see header note */
+  --accent: hsl(212 53% 75%); /* = source --primary, CHALK.blue #9ebce0 */
+  --muted: hsl(187 19% 20%); /* source --muted, ported verbatim */
+  --muted-foreground: hsl(43 14% 60%); /* CHALK.chalk3 #a69f8a */
+  --border: hsl(43 12% 42%); /* CHALK.chalkFaint, bumped for ~2.5:1 contrast */
+  --destructive: hsl(0 65% 76%); /* CHALK.red #e89a9a */
+  --status-completed: hsl(170 36% 67%); /* teal */
+  --warn: oklch(0.74 0.14 75);
+
+  --hover-bg: 177 16% 18%;
+  --row-selected-bg: 212 53% 22%;
+  --focus-ring: 212 53% 75%;
+
+  --shadow-1: 0 0 0 1px rgba(244, 239, 227, 0.04);
+  --shadow-2: 0 0 12px rgba(244, 239, 227, 0.06), 0 0 0 1px rgba(244, 239, 227, 0.05);
+  --shadow-3: 0 0 30px rgba(244, 239, 227, 0.08), 0 0 0 1px rgba(244, 239, 227, 0.07);
+  --chalk-inset: inset 0 0 0 1px rgba(244, 239, 227, 0.04);
+
+  --category-1: hsl(232 61% 70%);
+  --category-2: hsl(269 53% 77%);
+  --category-3: hsl(327 65% 78%);
+  --category-4: hsl(46 70% 73%);
+
+  /* LOCKED DECISION: no external font links — drop the handwritten look. */
+  --font-hand: var(--font-sans);
+}
