@@ -165,9 +165,23 @@ export function isPromotedAgent(x: unknown): x is PromotedAgent<unknown, unknown
  * `RunnerProtocol` that executes a {@link PromotedAgent}'s node instead of
  * LLM-looping it. The injected `inner` runner becomes the `ctx.runner` seen by
  * any nested `AgentStep`s in the pipeline — so they still call the real model.
+ *
+ * `eventBus` (optional, S5 follow-up): the SHARED/admin bus this runner's
+ * `stream()` lifecycle publishes to — mirrors `AgentRunner`'s constructor-
+ * bound bus (`runner/agent-runner.ts`). Without it, `AgentRunner`-backed
+ * conversations already publish their own `message.start`/`.complete` (it
+ * emits-and-yields internally); a `NodeBackedRunner`-backed (promoted-agent)
+ * conversation historically only YIELDED those same event types to its
+ * caller and never published them anywhere else, so `RunStoreExporter`
+ * (subscribed on the shared bus) never saw a `message.start` to open a `runs`
+ * row. Threading the shared bus in here (see `agent-cli/commands/playground.ts`
+ * and `commands/run.ts`) closes that gap without touching what gets yielded.
  */
 export class NodeBackedRunner implements RunnerProtocol {
-  constructor(private readonly inner: RunnerProtocol) {}
+  constructor(
+    private readonly inner: RunnerProtocol,
+    private readonly eventBus?: AgentEventBus,
+  ) {}
 
   async run(agent: AgentLike, message: string, options?: RunOptions): Promise<RunResult> {
     if (!isPromotedAgent(agent)) {
@@ -221,6 +235,17 @@ export class NodeBackedRunner implements RunnerProtocol {
     const traceId = options?.traceId ?? generateId();
     const runId = generateId();
 
+    // The bus this run's lifecycle is made VISIBLE on for persistence/admin
+    // purposes (RunStoreExporter, SQLiteExporter, the admin Live Run relay):
+    // a per-call override, else the constructor-bound default. Distinct from
+    // `bus` below — the FRESH per-run relay bus that only exists to drain a
+    // promoted node's OWN intra-run publishes into this generator's yields;
+    // publishing there would never reach an exporter.
+    const externalBus = options?.eventBus ?? this.eventBus;
+    const publish = async (event: AgentEvent): Promise<void> => {
+      if (externalBus) await externalBus.publish(event);
+    };
+
     const startEvent = createEvent("agent.message.start", {
       traceId,
       runId,
@@ -228,6 +253,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       agentName: agent.role.name,
     });
     const rootSpanId = startEvent.spanId;
+    await publish(startEvent);
     yield startEvent;
 
     // Live step relay. A FRESH per-run bus (never the caller's shared bus —
@@ -278,6 +304,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       while (!settled || queue.length > 0) {
         const next = queue.shift();
         if (next !== undefined) {
+          await publish(next);
           yield next;
           continue;
         }
@@ -299,7 +326,25 @@ export class NodeBackedRunner implements RunnerProtocol {
 
     await runPromise;
     if (runError !== undefined) {
-      throw runError instanceof Error ? runError : new Error(String(runError));
+      const err = runError instanceof Error ? runError : new Error(String(runError));
+      // Publish-only (never yielded) — no `agent.error` was ever part of the
+      // yielded sequence on this path (the generator has always just thrown),
+      // so adding one to the SSE/consumer stream now would be a behavior
+      // change. RunStoreExporter still needs SOMETHING to finalize the open
+      // `runs` row as 'error' (otherwise it lingers 'running' until the next
+      // boot's `sweepRunning()`), so it goes to the bus only.
+      await publish(
+        createEvent("agent.error", {
+          traceId,
+          runId,
+          parentSpanId: rootSpanId,
+          errorType: err.name,
+          message: err.message,
+          recoverable: false,
+          context: {},
+        }),
+      );
+      throw err;
     }
     const result = runResult as RunResult;
 
@@ -310,6 +355,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       delta: result.response,
       chunkIndex: 0,
     });
+    await publish(chunkEvent);
     yield chunkEvent;
 
     const completeEvent = createEvent("agent.message.complete", {
@@ -322,6 +368,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       outputTokens: result.outputTokens,
       model: agent.getModel() ?? "",
     });
+    await publish(completeEvent);
     yield completeEvent;
   }
 }

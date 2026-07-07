@@ -4,7 +4,9 @@
  * Hover/cursor affordances only apply when a row-level interaction is
  * configured (`onRowClick` or `renderExpanded`); otherwise rows render
  * as static cells so the UI doesn't imply an interaction that isn't
- * wired up.
+ * wired up. Interactive rows carry `tabIndex={0}` — the hover/focus-visible
+ * tint comes from the global `tr[tabindex]` CSS rule (styles/globals.css,
+ * port-map §7.1), not a JS `onMouseEnter`/`onMouseLeave` mutation.
  */
 
 import { Fragment, type ReactNode } from "react";
@@ -37,14 +39,14 @@ const cellStyle = (align = "left") =>
   ({
     padding: "10px 14px",
     textAlign: align as "left" | "right" | "center",
-    borderBottom: "1px solid var(--border)",
+    borderBottom: "1px solid var(--line)",
     fontSize: 14,
   }) as const;
 
 const headerStyle = (align = "left") =>
   ({
     ...cellStyle(align),
-    color: "var(--fg-muted)",
+    color: "var(--ink-2)",
     fontWeight: 500,
     fontSize: 12,
     textTransform: "uppercase" as const,
@@ -77,9 +79,9 @@ export function DataTable<T>({
   return (
     <div
       style={{
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border)",
-        borderRadius: 8,
+        background: "var(--paper)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius-lg)",
         overflow: "hidden",
       }}
     >
@@ -129,31 +131,19 @@ export function DataTable<T>({
                   aria-expanded={expandable ? isExpanded : undefined}
                   style={{
                     cursor: interactive ? "pointer" : "default",
-                    background: isExpanded ? "var(--bg-surface-hover)" : "transparent",
+                    // Only set an inline background for the expanded row (a
+                    // permanent, data-driven tint) — leaving it unset otherwise
+                    // lets the global `tr[tabindex]:hover` rule apply; an inline
+                    // "transparent" would out-specificity that CSS hover.
+                    ...(isExpanded ? { background: "var(--fill-2)" } : {}),
                   }}
-                  onMouseEnter={
-                    interactive
-                      ? (e) => {
-                          e.currentTarget.style.background = "var(--bg-surface-hover)";
-                        }
-                      : undefined
-                  }
-                  onMouseLeave={
-                    interactive
-                      ? (e) => {
-                          e.currentTarget.style.background = isExpanded
-                            ? "var(--bg-surface-hover)"
-                            : "transparent";
-                        }
-                      : undefined
-                  }
                 >
                   {expandable && (
                     <td
                       style={{
                         ...cellStyle(),
                         width: 28,
-                        color: "var(--fg-muted)",
+                        color: "var(--ink-2)",
                         fontFamily: "var(--font-mono)",
                       }}
                     >
@@ -174,8 +164,8 @@ export function DataTable<T>({
                       colSpan={totalColSpan}
                       style={{
                         padding: "12px 14px 16px 42px",
-                        background: "var(--bg-inset)",
-                        borderBottom: "1px solid var(--border)",
+                        background: "var(--background)",
+                        borderBottom: "1px solid var(--line)",
                       }}
                     >
                       {renderExpanded(row)}
@@ -191,7 +181,7 @@ export function DataTable<T>({
                 colSpan={totalColSpan}
                 style={{
                   ...cellStyle("center"),
-                  color: "var(--fg-muted)",
+                  color: "var(--ink-2)",
                   padding: 32,
                 }}
               >

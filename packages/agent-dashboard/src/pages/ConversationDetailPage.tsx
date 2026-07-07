@@ -21,34 +21,11 @@ import type {
 } from "../api/types";
 import { Badge, type BadgeTone } from "../components/atoms/Badge";
 import { Card } from "../components/atoms/Card";
-import { Spinner } from "../components/atoms/Spinner";
-import { AlertIcon } from "../components/atoms/icons";
+import { AsyncState } from "../components/kit/AsyncState";
+import { JsonBlock } from "../components/kit/JsonBlock";
+import { formatDuration, statusTone } from "../lib/format";
 
 type MessageWithParts = ConversationMessage & { parts: ConversationMessagePart[] };
-
-function statusTone(status: string): BadgeTone {
-  switch (status) {
-    case "active":
-    case "pending":
-      return "emerald";
-    case "failed":
-    case "error":
-      return "red";
-    case "completed":
-      return "green";
-    default:
-      return "neutral";
-  }
-}
-
-function formatDuration(startedAt: string | null, completedAt: string | null): string | null {
-  if (!startedAt || !completedAt) return null;
-  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (Number.isNaN(ms) || ms < 0) return null;
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 1000)}s`;
-}
 
 export function ConversationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -86,43 +63,12 @@ export function ConversationDetailPage() {
 
   if (error) {
     return (
-      <Card
-        style={{
-          borderColor: "var(--red)",
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 12,
-        }}
-      >
-        <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-          <AlertIcon size={18} />
-        </span>
-        <div>
-          <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-            Failed to load conversation
-          </div>
-          <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{error}</div>
-        </div>
-      </Card>
+      <AsyncState kind="error" error={{ title: "Failed to load conversation", message: error }} />
     );
   }
 
   if (!detail || !messages) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          padding: "48px 0",
-          color: "var(--fg-muted)",
-        }}
-      >
-        <Spinner />
-        <span>Loading conversation...</span>
-      </div>
-    );
+    return <AsyncState kind="loading" loading="Loading conversation..." />;
   }
 
   const duration = formatDuration(detail.startedAt, detail.completedAt);
@@ -132,7 +78,7 @@ export function ConversationDetailPage() {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <Link
           to="/conversations"
-          style={{ color: "var(--fg-muted)", fontSize: 13, textDecoration: "none" }}
+          style={{ color: "var(--mute)", fontSize: 13, textDecoration: "none" }}
         >
           ← Conversations
         </Link>
@@ -145,14 +91,14 @@ export function ConversationDetailPage() {
 
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          <Badge tone="emerald" variant="outline">
+          <Badge tone="ok" variant="outline">
             {detail.agentName}
           </Badge>
-          <Badge tone="muted">{detail.model}</Badge>
+          <Badge tone="mute">{detail.model}</Badge>
           <Badge tone={statusTone(detail.status)}>{detail.status}</Badge>
-          <Badge tone="muted">{detail.messageCount} msgs</Badge>
-          <Badge tone="muted">{detail.tokenCount.toLocaleString()} tokens</Badge>
-          {duration && <Badge tone="muted">{duration}</Badge>}
+          <Badge tone="mute">{detail.messageCount} msgs</Badge>
+          <Badge tone="mute">{detail.tokenCount.toLocaleString()} tokens</Badge>
+          {duration && <Badge tone="mute">{duration}</Badge>}
         </div>
         {detail.error && (
           <div
@@ -160,10 +106,10 @@ export function ConversationDetailPage() {
             style={{
               marginTop: 12,
               padding: "8px 12px",
-              borderRadius: 6,
-              background: "rgba(248, 81, 73, 0.08)",
-              border: "1px solid var(--red)",
-              color: "var(--red)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--err-soft)",
+              border: "1px solid var(--err)",
+              color: "var(--err)",
               fontSize: 13,
               fontFamily: "var(--font-mono)",
             }}
@@ -175,13 +121,7 @@ export function ConversationDetailPage() {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {messages.length === 0 ? (
-          <Card
-            style={{
-              textAlign: "center",
-              padding: 40,
-              color: "var(--fg-muted)",
-            }}
-          >
+          <Card style={{ textAlign: "center", padding: 40, color: "var(--mute)" }}>
             No messages yet.
           </Card>
         ) : (
@@ -193,7 +133,7 @@ export function ConversationDetailPage() {
 }
 
 function MessageCard({ message }: { message: MessageWithParts }) {
-  const kindTone: BadgeTone = message.kind === "request" ? "accent" : "purple";
+  const kindTone: BadgeTone = message.kind === "request" ? "accent" : "violet";
   return (
     <Card>
       <div
@@ -206,18 +146,18 @@ function MessageCard({ message }: { message: MessageWithParts }) {
         }}
       >
         <Badge tone={kindTone}>{message.kind}</Badge>
-        <span style={{ color: "var(--fg-subtle)", fontSize: 12 }}>
+        <span style={{ color: "var(--ink-3)", fontSize: 12 }}>
           {new Date(message.createdAt).toLocaleString()}
         </span>
         {message.kind === "response" && (
-          <Badge tone="muted" title="input / output tokens">
+          <Badge tone="mute" title="input / output tokens">
             {message.inputTokens} in / {message.outputTokens} out
           </Badge>
         )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {message.parts.length === 0 ? (
-          <div style={{ color: "var(--fg-subtle)", fontSize: 13 }}>(no parts)</div>
+          <div style={{ color: "var(--ink-3)", fontSize: 13 }}>(no parts)</div>
         ) : (
           message.parts
             .slice()
@@ -230,18 +170,7 @@ function MessageCard({ message }: { message: MessageWithParts }) {
 }
 
 function PartBlock({ part }: { part: ConversationMessagePart }) {
-  const label = <Badge tone="muted">{part.type}</Badge>;
-  const preStyle = {
-    margin: 0,
-    padding: 10,
-    background: "var(--bg-inset)",
-    borderRadius: 6,
-    fontSize: 12,
-    fontFamily: "var(--font-mono)",
-    overflowX: "auto" as const,
-    whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
-  };
+  const label = <Badge tone="mute">{part.type}</Badge>;
 
   if (part.type === "user_prompt" || part.type === "text") {
     return (
@@ -257,7 +186,7 @@ function PartBlock({ part }: { part: ConversationMessagePart }) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {label}
-        <pre style={preStyle}>{JSON.stringify(args ?? part.metadata ?? {}, null, 2)}</pre>
+        <JsonBlock value={args ?? part.metadata ?? {}} />
       </div>
     );
   }
@@ -265,12 +194,14 @@ function PartBlock({ part }: { part: ConversationMessagePart }) {
   if (part.type === "tool_result") {
     return (
       <details>
-        <summary style={{ cursor: "pointer", fontSize: 13 }}>
-          <Badge tone="muted">{part.type}</Badge>
-        </summary>
-        <pre style={{ ...preStyle, marginTop: 6 }}>
-          {part.content ?? JSON.stringify(part.metadata ?? {}, null, 2)}
-        </pre>
+        <summary style={{ cursor: "pointer", fontSize: 13 }}>{label}</summary>
+        <div style={{ marginTop: 6 }}>
+          {part.content ? (
+            <JsonBlock value={part.content} raw />
+          ) : (
+            <JsonBlock value={part.metadata ?? {}} />
+          )}
+        </div>
       </details>
     );
   }
@@ -278,9 +209,7 @@ function PartBlock({ part }: { part: ConversationMessagePart }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {label}
-      <pre style={preStyle}>
-        {JSON.stringify({ content: part.content, metadata: part.metadata }, null, 2)}
-      </pre>
+      <JsonBlock value={{ content: part.content, metadata: part.metadata }} />
     </div>
   );
 }

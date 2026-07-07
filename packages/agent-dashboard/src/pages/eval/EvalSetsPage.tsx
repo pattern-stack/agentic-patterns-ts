@@ -13,24 +13,12 @@ import type { EvalSetSummary } from "../../api/types";
 import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
-import { Spinner } from "../../components/atoms/Spinner";
-import { AlertIcon } from "../../components/atoms/icons";
+import { AsyncState } from "../../components/kit/AsyncState";
+import { PageHeader } from "../../components/kit/PageHeader";
 import { DataTable } from "../../components/organisms/DataTable";
 import { fetchEvalSets } from "../../lib/evalApi";
+import { relTime } from "../../lib/format";
 import { SetEditModal } from "./SetEditModal";
-
-// pages never share code (playground-redesign.md) — lifted local.
-function relative(dateStr: string | undefined | null): string {
-  if (!dateStr) return "—";
-  const then = new Date(dateStr).getTime();
-  if (Number.isNaN(then)) return String(dateStr);
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  const abs = Math.abs(diffSec);
-  if (abs < 60) return `${diffSec}s ago`;
-  if (abs < 3600) return `${Math.round(diffSec / 60)}m ago`;
-  if (abs < 86400) return `${Math.round(diffSec / 3600)}h ago`;
-  return `${Math.round(diffSec / 86400)}d ago`;
-}
 
 /** Split buckets in canonical order; `""` is the untagged bucket. */
 const SPLIT_ORDER: ReadonlyArray<{ key: string; label: string }> = [
@@ -71,24 +59,19 @@ export function EvalSetsPage() {
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Eval Sets</h1>
-        <div style={{ display: "flex", gap: 10 }}>
-          <Button size="sm" onClick={() => setShowNew(true)}>
-            New set
-          </Button>
-          <Button variant="ghost" size="sm" onClick={load}>
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Eval Sets"
+        actions={
+          <>
+            <Button size="sm" onClick={() => setShowNew(true)}>
+              New set
+            </Button>
+            <Button variant="ghost" size="sm" onClick={load}>
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       {showNew && (
         <SetEditModal
@@ -101,60 +84,31 @@ export function EvalSetsPage() {
         />
       )}
 
-      {state.kind === "loading" && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            padding: "48px 0",
-            color: "var(--fg-muted)",
-          }}
-        >
-          <Spinner />
-          <span>Loading eval sets...</span>
-        </div>
-      )}
-
-      {state.kind === "error" && (
-        <Card
-          style={{ borderColor: "var(--red)", display: "flex", alignItems: "flex-start", gap: 12 }}
-        >
-          <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-              Failed to load eval sets
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{state.message}</div>
-          </div>
-        </Card>
-      )}
-
-      {state.kind === "unconfigured" && (
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval persistence is not configured
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable eval
-            queries.
-          </div>
-        </Card>
+      {state.kind !== "ok" && (
+        <AsyncState
+          kind={state.kind}
+          loading="Loading eval sets..."
+          error={
+            state.kind === "error"
+              ? { title: "Failed to load eval sets", message: state.message }
+              : undefined
+          }
+        />
       )}
 
       {state.kind === "ok" && state.sets.length === 0 && (
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            No eval sets yet
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Run <code>ap eval</code> against a case bank, or capture an exchange from Chat, to
-            populate this list.
-          </div>
-        </Card>
+        <AsyncState
+          kind="empty"
+          empty={{
+            title: "No eval sets yet",
+            body: (
+              <>
+                Run <code>ap eval</code> against a case bank, or capture an exchange from Chat, to
+                populate this list.
+              </>
+            ),
+          }}
+        />
       )}
 
       {state.kind === "ok" && state.sets.length > 0 && (
@@ -176,14 +130,12 @@ export function EvalSetsPage() {
                     style={{ display: "flex", flexDirection: "column", gap: 3, padding: "2px 0" }}
                     title={row.description ?? undefined}
                   >
-                    <span style={{ fontWeight: 500, color: "var(--fg-default)" }}>
-                      {row.name ?? "—"}
-                    </span>
+                    <span style={{ fontWeight: 500, color: "var(--ink)" }}>{row.name ?? "—"}</span>
                     {row.description && (
                       <span
                         style={{
                           fontSize: 12,
-                          color: "var(--fg-muted)",
+                          color: "var(--mute)",
                           lineHeight: 1.4,
                           maxWidth: 440,
                           overflow: "hidden",
@@ -211,7 +163,7 @@ export function EvalSetsPage() {
               {
                 key: "createdTs",
                 header: "Created",
-                render: (row) => relative(row.createdTs),
+                render: (row) => relTime(row.createdTs),
               },
             ]}
             data={state.sets}
@@ -227,11 +179,11 @@ export function EvalSetsPage() {
 /** Per-split count badges — only non-zero buckets render; `test` is toned. */
 function SplitCounts({ counts }: { counts: Record<string, number> }) {
   const present = SPLIT_ORDER.filter((b) => (counts[b.key] ?? 0) > 0);
-  if (present.length === 0) return <span style={{ color: "var(--fg-subtle)" }}>—</span>;
+  if (present.length === 0) return <span style={{ color: "var(--ink-3)" }}>—</span>;
   return (
     <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6 }}>
       {present.map((b) => (
-        <Badge key={b.key || "untagged"} tone={b.key === "test" ? "yellow" : "muted"}>
+        <Badge key={b.key || "untagged"} tone={b.key === "test" ? "warn" : "mute"}>
           {b.label} {counts[b.key]}
         </Badge>
       ))}

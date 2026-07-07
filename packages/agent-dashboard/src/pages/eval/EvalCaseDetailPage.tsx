@@ -3,120 +3,30 @@
  *
  * One fetch (`fetchEvalCaseDetail`) returns the banked case and every run that
  * evaluated it (newest-first). The case's input/expected render as pretty JSON
- * (the `CaseDetail` `preStyle` idiom); the history is a `DataTable` whose rows
- * link to their run and expand to show that run's actual answer against the
- * case's expected. Case editing lands in WI-5.
+ * (the kit `JsonBlock` idiom); the history is a `DataTable` whose rows link to
+ * their run and expand to show that run's actual answer against the case's
+ * expected. Case editing lands in WI-5.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { EvalCaseHistoryRow, EvalCaseRow } from "../../api/types";
-import { Markdown } from "../../chat/atoms";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
-import { Chip } from "../../components/atoms/Chip";
-import { Spinner } from "../../components/atoms/Spinner";
-import { AlertIcon } from "../../components/atoms/icons";
+import { AnswerPanel } from "../../components/kit/AnswerPanel";
+import { AsyncState } from "../../components/kit/AsyncState";
+import { JsonBlock } from "../../components/kit/JsonBlock";
+import { sectionMicroHeadingStyle } from "../../components/kit/SectionHeading";
 import { DataTable } from "../../components/organisms/DataTable";
 import { fetchEvalCaseDetail, safeParseAnswer } from "../../lib/evalApi";
+import { formatMs, relTime, shortId } from "../../lib/format";
 import { CaseEditModal } from "./CaseEditModal";
 
-const preStyle = {
-  margin: 0,
-  padding: 10,
-  background: "var(--bg-inset)",
-  borderRadius: 6,
-  fontSize: 12,
-  fontFamily: "var(--font-mono)",
-  overflowX: "auto" as const,
-  whiteSpace: "pre-wrap" as const,
-  wordBreak: "break-word" as const,
-};
-
-const sectionHeadingStyle = {
-  fontSize: 12,
-  fontWeight: 600,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
-  color: "var(--fg-subtle)",
-  marginBottom: 8,
-};
-
-// Inset panel for rendered markdown — `preStyle` chrome without monospace/pre-wrap.
-const mdPanelStyle = {
-  margin: 0,
-  padding: "2px 12px",
-  background: "var(--bg-inset)",
-  borderRadius: 6,
-  fontSize: 13,
-  overflowX: "auto" as const,
-  wordBreak: "break-word" as const,
-};
-
-function pretty(value: unknown): string {
-  if (value === undefined) return "—";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function isStringArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.every((x) => typeof x === "string");
-}
-
-/**
- * The run's answer — markdown when persisted as an array of lines (canvas
- * evals), pretty JSON otherwise. Fail border preserved either way.
- */
-function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
-  const value = safeParseAnswer(finalAnswer);
-  if (isStringArray(value)) {
-    return (
-      <div
-        style={
-          pass === false ? { ...mdPanelStyle, borderLeft: "3px solid var(--red)" } : mdPanelStyle
-        }
-      >
-        <Markdown content={value.join("\n")} />
-      </div>
-    );
-  }
-  return (
-    <pre style={pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle}>
-      {pretty(value)}
-    </pre>
-  );
-}
-
-function relative(dateStr: string | undefined | null): string {
-  if (!dateStr) return "—";
-  const then = new Date(dateStr).getTime();
-  if (Number.isNaN(then)) return String(dateStr);
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  const abs = Math.abs(diffSec);
-  if (abs < 60) return `${diffSec}s ago`;
-  if (abs < 3600) return `${Math.round(diffSec / 60)}m ago`;
-  if (abs < 86400) return `${Math.round(diffSec / 3600)}h ago`;
-  return `${Math.round(diffSec / 86400)}d ago`;
-}
-
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
-}
-
-function formatElapsed(ms: number | null): string {
-  if (ms === null) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
 function passTone(pass: boolean | null): BadgeTone {
-  if (pass === true) return "green";
-  if (pass === false) return "red";
-  return "muted";
+  if (pass === true) return "ok";
+  if (pass === false) return "err";
+  return "mute";
 }
 
 function passLabel(pass: boolean | null): string {
@@ -166,80 +76,26 @@ export function EvalCaseDetailPage() {
   const backLink = (
     <Link
       to={id ? `/eval/sets/${id}` : "/eval/sets"}
-      style={{ color: "var(--fg-muted)", fontSize: 13, textDecoration: "none" }}
+      style={{ color: "var(--mute)", fontSize: 13, textDecoration: "none" }}
     >
       ← {id ?? "Eval sets"}
     </Link>
   );
 
-  if (state.kind === "loading") {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          padding: "48px 0",
-          color: "var(--fg-muted)",
-        }}
-      >
-        <Spinner />
-        <span>Loading eval case...</span>
-      </div>
-    );
-  }
-
-  if (state.kind === "not-found") {
+  if (state.kind !== "ok") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval case not found
-          </div>
-          <div style={{ fontSize: 14 }}>
-            No case "{caseId}" in set "{id}".
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "unconfigured") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval persistence is not configured
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable eval
-            queries.
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "error") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card
-          style={{ borderColor: "var(--red)", display: "flex", alignItems: "flex-start", gap: 12 }}
-        >
-          <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-              Failed to load eval case
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{state.message}</div>
-          </div>
-        </Card>
+        <AsyncState
+          kind={state.kind}
+          loading="Loading eval case..."
+          notFound={{ title: "Eval case not found", body: `No case "${caseId}" in set "${id}".` }}
+          error={
+            state.kind === "error"
+              ? { title: "Failed to load eval case", message: state.message }
+              : undefined
+          }
+        />
       </div>
     );
   }
@@ -263,8 +119,8 @@ export function EvalCaseDetailPage() {
           <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 15 }}>{caseRow.caseId}</span>
           </h1>
-          <Badge tone={heldOut ? "yellow" : "muted"}>{caseRow.split ?? "untagged"}</Badge>
-          {heldOut && <Badge tone="yellow">held-out</Badge>}
+          <Badge tone={heldOut ? "warn" : "mute"}>{caseRow.split ?? "untagged"}</Badge>
+          {heldOut && <Badge tone="warn">held-out</Badge>}
         </div>
         <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
           Edit
@@ -288,25 +144,25 @@ export function EvalCaseDetailPage() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
           {caseRow.tags && caseRow.tags.length > 0 ? (
             caseRow.tags.map((t) => (
-              <Chip key={t} tone="mono">
+              <Badge key={t} tone="mute" mono>
                 {t}
-              </Chip>
+              </Badge>
             ))
           ) : (
-            <span style={{ fontSize: 13, color: "var(--fg-subtle)" }}>no tags</span>
+            <span style={{ fontSize: 13, color: "var(--ink-3)" }}>no tags</span>
           )}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
           <div>
-            <div style={sectionHeadingStyle}>Input</div>
-            <pre style={preStyle}>{pretty(caseRow.input)}</pre>
+            <div style={sectionMicroHeadingStyle()}>Input</div>
+            <JsonBlock value={caseRow.input} />
           </div>
           <div>
-            <div style={sectionHeadingStyle}>Expected</div>
+            <div style={sectionMicroHeadingStyle()}>Expected</div>
             {caseRow.expected === null || caseRow.expected === undefined ? (
-              <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>no expected value</div>
+              <div style={{ color: "var(--ink-2)", fontSize: 13 }}>no expected value</div>
             ) : (
-              <pre style={preStyle}>{pretty(caseRow.expected)}</pre>
+              <JsonBlock value={caseRow.expected} />
             )}
           </div>
         </div>
@@ -315,9 +171,10 @@ export function EvalCaseDetailPage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Run history</h2>
         {history.length === 0 ? (
-          <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            This case has not been evaluated in any run yet.
-          </Card>
+          <AsyncState
+            kind="empty"
+            empty={{ title: "This case has not been evaluated in any run yet." }}
+          />
         ) : (
           <Card padded={false}>
             <DataTable<EvalCaseHistoryRow>
@@ -331,13 +188,13 @@ export function EvalCaseDetailPage() {
                     </span>
                   ),
                 },
-                { key: "tsStart", header: "Started", render: (row) => relative(row.tsStart) },
+                { key: "tsStart", header: "Started", render: (row) => relTime(row.tsStart) },
                 { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
                 { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
                 {
                   key: "split",
                   header: "Split",
-                  render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
+                  render: (row) => <Badge tone="mute">{row.split ?? "untagged"}</Badge>,
                 },
                 {
                   key: "pass",
@@ -349,9 +206,9 @@ export function EvalCaseDetailPage() {
                   header: "Run",
                   render: (row) =>
                     row.runStatus === "error" ? (
-                      <Badge tone="red">error</Badge>
+                      <Badge tone="err">error</Badge>
                     ) : (
-                      <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                      <span style={{ color: "var(--ink-3)" }}>—</span>
                     ),
                 },
                 {
@@ -364,7 +221,7 @@ export function EvalCaseDetailPage() {
                   key: "elapsedMs",
                   header: "Elapsed",
                   align: "right",
-                  render: (row) => formatElapsed(row.elapsedMs),
+                  render: (row) => formatMs(row.elapsedMs),
                 },
               ]}
               data={history}
@@ -375,18 +232,16 @@ export function EvalCaseDetailPage() {
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <div>
-                      <div style={sectionHeadingStyle}>Expected</div>
+                      <div style={sectionMicroHeadingStyle()}>Expected</div>
                       {caseRow.expected === null || caseRow.expected === undefined ? (
-                        <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>
-                          no expected value
-                        </div>
+                        <div style={{ color: "var(--ink-2)", fontSize: 13 }}>no expected value</div>
                       ) : (
-                        <pre style={preStyle}>{pretty(caseRow.expected)}</pre>
+                        <JsonBlock value={caseRow.expected} />
                       )}
                     </div>
                     <div>
-                      <div style={sectionHeadingStyle}>Actual</div>
-                      <ActualAnswer finalAnswer={row.finalAnswer} pass={row.pass} />
+                      <div style={sectionMicroHeadingStyle()}>Actual</div>
+                      <AnswerPanel value={safeParseAnswer(row.finalAnswer)} pass={row.pass} />
                     </div>
                   </div>
                   <Link

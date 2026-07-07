@@ -117,7 +117,7 @@ interface ServerConfig {
   adminService: AdminServiceProtocol;
   eventBus: AgentEventBus;
   sseExporter: SSEExporterLike;
-  store?: ConversationStoreLike; // optional persistence
+  store?: ConversationStore;     // optional persistence (@agentic-patterns/runtime)
   staticDir?: string;             // optional static SPA mount
   cors?: CORSConfig;              // defaults to origin: "*"
 }

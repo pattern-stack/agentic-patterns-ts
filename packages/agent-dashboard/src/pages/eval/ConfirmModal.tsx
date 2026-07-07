@@ -50,15 +50,15 @@ export function ConfirmModal({
             size="sm"
             onClick={handleConfirm}
             disabled={busy}
-            style={{ background: "var(--red)", borderColor: "var(--red)", color: "#0d1117" }}
+            style={{ background: "var(--err)", borderColor: "var(--err)", color: "var(--paper)" }}
           >
             {busy ? "Working…" : confirmLabel}
           </Button>
         </>
       }
     >
-      <div style={{ fontSize: 14, color: "var(--fg-default)" }}>{message}</div>
-      {error && <div style={{ fontSize: 13, color: "var(--red)" }}>{error}</div>}
+      <div style={{ fontSize: 14, color: "var(--ink)" }}>{message}</div>
+      {error && <div style={{ fontSize: 13, color: "var(--err)" }}>{error}</div>}
     </Modal>
   );
 }

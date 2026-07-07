@@ -1,0 +1,37 @@
+/*
+ * Theme: blue-dark (dark) — cool family, dark mode. DEFAULT THEME (the
+ * dashboard's current "dark cockpit" look — existing users see no change).
+ * Source: swe-brain apps/frontend/src/styles/theme-swe-brain-blue-dark.css
+ * (`:root[data-theme="swe-brain-blue-dark"]`), ported verbatim (this was
+ * already the dashboard's pre-split forced-dark palette). Deep-blue charcoal
+ * canvas, cool off-white ink, brightened blueberry accent.
+ */
+:root[data-theme="blue-dark"] {
+  color-scheme: dark;
+
+  --background: hsl(222 28% 9%);
+  --foreground: hsl(216 24% 90%);
+  --card: hsl(222 24% 12%);
+  --secondary: hsl(222 18% 17%);
+  --accent: hsl(240 62% 66%);
+  --muted: hsl(222 18% 15%);
+  --muted-foreground: hsl(216 12% 60%);
+  --border: hsl(222 14% 24%);
+  --destructive: hsl(4 70% 62%);
+  --status-completed: hsl(168 44% 52%);
+  --warn: oklch(0.74 0.14 75);
+
+  --hover-bg: 222 16% 18%;
+  --row-selected-bg: 240 48% 28%;
+  --focus-ring: 216 16% 80%;
+
+  --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45), 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --chalk-inset: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  --category-1: hsl(240 62% 68%); /* brand — blueberry (= accent) */
+  --category-2: hsl(282 44% 68%); /* flow — cool violet */
+  --category-3: hsl(168 44% 54%); /* emit — teal-green */
+  --category-4: hsl(255 54% 68%); /* generate — periwinkle */
+}

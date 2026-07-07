@@ -37,6 +37,12 @@ export default defineConfig({
       "/conversations": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/messages": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/agents": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      // `/roles` and `/capabilities` collide with the SPA's own routes
+      // (`/roles/:id`, `/capabilities/:id`) exactly like `/agents` above —
+      // same htmlNavBypass treatment (port-map.md §1, S4 browser-validation
+      // note: Build pages 404'd in dev without these two).
+      "/roles": { target: "http://localhost:3456", bypass: htmlNavBypass },
+      "/capabilities": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/hooks": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/health": { target: "http://localhost:3456", bypass: htmlNavBypass },
       "/eval": { target: "http://localhost:3456", bypass: htmlNavBypass },

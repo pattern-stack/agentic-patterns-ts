@@ -5,7 +5,6 @@ export type {
   AgentRegistration,
   AdminServiceProtocol,
   SSEExporterLike,
-  ConversationStoreLike,
   CORSConfig,
 } from "./config.js";
 export { agentEventToSSE, type SSEMessage } from "./sse.js";

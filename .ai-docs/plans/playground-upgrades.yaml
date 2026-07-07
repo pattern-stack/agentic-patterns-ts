@@ -1,0 +1,129 @@
+# Playground Upgrades — port swe-brain agentic surfaces + board-wide styling level-up
+# Gate 0: user approved e2e execution in-session (2026-07-06, "execute these upgrades e2e").
+# Spec of record: .ai-docs/stacks/playground-upgrades/port-map.md (section refs below).
+# Excluded by user decision: Agent Composer / any authoring UI.
+
+plan_key: playground-upgrades
+repo: pattern-stack/agentic-patterns-ts
+tracker: none            # driven from spec paths; PRs are the outward artifact (lead decision)
+gate_policy:
+  gate0: approved-in-session
+  gate1: auto            # per-slice strategy = port-map section; no tracker halt
+  gate25: opus reviewer per wave + full-stack review before submit
+phase_models:            # from .claude/sdlc.yml
+  implementer: sonnet
+  validator: opus
+  reviewer: opus
+
+stack:                   # final linear stack, dependency order (topologically valid)
+  - pg/s1-styling-foundation
+  - pg/s3-tool-invoke-endpoint
+  - pg/s5-run-history
+  - pg/s7-conversation-persistence
+  - pg/s2-six-themes
+  - pg/s4-tool-workbench
+  - pg/s6-run-picker
+  - pg/s8-console-lenses-polish
+
+waves:
+  - id: wave1            # parallel worktrees off main
+    slices: [S1, S3, S5]
+  - id: wave2            # parallel worktrees off wave1 tip (S5), restacked linearly after
+    slices: [S7, S2, S4, S6]
+  - id: wave3            # capstone off wave2 tip
+    slices: [S8]
+validation_per_wave:
+  - bun run check on the restacked wave tip
+  - opus validator review of each slice diff
+  - browser-validation agents: ap playground examples + vite dev per port-map "Browser validation" sections
+
+locked_decisions:        # resolved from synthesis open questions
+  - Workbench tool invokes publish agent.tool.start/end bus events (visible on /live); synthetic workbench runId.
+  - Chalk themes: --font-hand falls back to the sans stack; no external font links (self-host later if wanted).
+  - Blast radius stays an honest-optional overlay; core Capability.blastRadius metadata is a separate track (NOT this stack).
+  - Batch GET /conversations/:id/full deferred; parts N+1 accepted in S8.
+  - S5 must empirically verify RunStoreExporter does not double-write runs rows for eval executions (acceptance criterion).
+  - --category-1..4 semantics settled in S2 PR (mirror swe-brain brand/flow/emit/generate).
+
+slices:
+  - id: S1
+    branch: pg/s1-styling-foundation
+    title: "Styling foundation: one atom set, one token vocabulary, shared page kit"
+    size: L
+    depends_on: []
+    packages: [dashboard]
+    spec: port-map.md sections 7.1, 7.2, 7.4
+    notes: >
+      Rewrite legacy atoms in place on cockpit tokens (30 importers upgrade without moving);
+      ui/atoms.tsx becomes re-exports; extract components/kit/* + lib/format.ts + useSortedRows;
+      kill hard-coded colors; CSS-class hover/focus discipline; delete dead AgentsPage.tsx,
+      react-markdown/remark-gfm deps, T.statusVar. Keep deprecated tone aliases in Badge for one slice.
+    acceptance: dashboard typecheck+lint+tests green; browser pass shows no light/dark regressions.
+
+  - id: S3
+    branch: pg/s3-tool-invoke-endpoint
+    title: "Server: direct tool invoke endpoint"
+    size: S
+    depends_on: []
+    packages: [server]
+    spec: port-map.md section 2.2
+    endpoint: "POST /capabilities/:id/tools/:toolName/invoke → {ok, result?, error?, ms} | 404"
+    acceptance: route tests (success, Zod rejection, unknown tool 404, tool-throw); curl smoke vs ap playground examples, no model key.
+
+  - id: S5
+    branch: pg/s5-run-history
+    title: "Server: run history — RunStore wiring + /admin/runs routes"
+    size: M
+    depends_on: []
+    packages: [runtime, server, cli]   # lockstep release train
+    spec: port-map.md section 3.1
+    endpoints:
+      - "GET /admin/runs?limit&status&agent&since → {runs} | 503"
+      - "GET /admin/runs/:id → {run} | 404 | 503"
+      - "GET /admin/runs/:id/events → {runId, events ASC} | 404 | 503"
+    acceptance: runtime/server tests; smoke = run examples agent, restart server, persisted run + ordered events fetchable; eval double-write verified absent.
+
+  - id: S7
+    branch: pg/s7-conversation-persistence
+    title: "Server: SQLite ConversationStore + conversation routes (fix phantom endpoints)"
+    size: M
+    depends_on: [S5]                   # shared files: playground.ts, config.ts, app.ts
+    packages: [runtime, server, cli]
+    spec: port-map.md section 4.1
+    acceptance: existing ConversationsPage + ConversationDetailPage come alive with ZERO UI changes; /chat streaming regression-tested; schema v4→v5 additive.
+
+  - id: S2
+    branch: pg/s2-six-themes
+    title: "Six-theme system + theme picker"
+    size: M
+    depends_on: [S1]
+    packages: [dashboard]
+    spec: port-map.md section 7.3
+    acceptance: all 6 themes x system/light/dark flip live on every page; no flash-of-default on reload; ?theme= override non-persisted; BLAST_COLOR behind tokens.
+
+  - id: S4
+    branch: pg/s4-tool-workbench
+    title: "Tool Workbench on /capabilities + family tabs"
+    size: M
+    depends_on: [S1, S3]
+    packages: [dashboard]
+    spec: port-map.md sections 2.1, 2.3, 2.4, 2.5
+    acceptance: tree→Construction|Run→invoke round-trip in browser; coerce/omit-empty semantics pinned by lib/toolParams + ToolRunner unit tests; family tabs across Build pages.
+
+  - id: S6
+    branch: pg/s6-run-picker
+    title: "Run picker + persisted-run replay on /run"
+    size: M
+    depends_on: [S1, S5]
+    packages: [dashboard]
+    spec: port-map.md sections 3.2, 3.3, 3.4, 3.5
+    acceptance: pick persisted run → Play replays through untouched buildGraph/eventsToSteps/useRunReplay; persistedToEventLike pinned by fixture test from a real events dump; live mode not regressed.
+
+  - id: S8
+    branch: pg/s8-console-lenses-polish
+    title: "Agent Console + Agent Lens run lenses + honesty banners + final polish sweep"
+    size: L
+    depends_on: [S1, S2, S4, S6, S7]
+    packages: [dashboard]
+    spec: port-map.md sections 4.2, 5, 5.1, 5.2, 6, 7.4 (finish)
+    acceptance: sessions menu + read-only replay + trace rail on /chat (agent_step nesting, CaptureCasePanel, abort semantics NOT regressed); Runs lens on /agents/:id with HonestyBanner fallback; alias bridge + ui/atoms shim deleted behind a clean grep gate; full six-theme browser sweep.

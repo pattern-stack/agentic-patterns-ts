@@ -1,0 +1,43 @@
+/*
+ * Theme: blue (light) — cool family, light mode.
+ * Source: swe-brain apps/frontend/src/styles/theme-swe-brain-blue.css
+ * (`:root[data-theme="swe-brain-blue"]`), ported verbatim (this theme's
+ * light block was already the dashboard's pre-split light palette — no
+ * reconciliation needed). Cool blue paper canvas, cool blue-slate ink,
+ * blueberry accent.
+ */
+:root[data-theme="blue"] {
+  color-scheme: light;
+
+  --background: hsl(218 30% 98%);
+  --foreground: hsl(222 22% 18%);
+  --card: hsl(216 36% 99%);
+  --secondary: hsl(216 24% 94%);
+  --accent: hsl(240 58% 56%);
+  --muted: hsl(216 28% 96%);
+  --muted-foreground: hsl(220 12% 46%);
+  --border: hsl(216 20% 86%);
+  --destructive: hsl(4 65% 52%);
+  --status-completed: hsl(168 42% 38%);
+  /* canonical-amber-warn exception: --warn stays this amber regardless of
+     family temperature — mode-only (light vs dark), never family-tuned. */
+  --warn: oklch(0.68 0.13 75);
+
+  /* T.state hsl TRIPLES — bare (not full colors); ui/tokens.ts T.state wraps
+     these in hsl() at call sites. Keep as triples in every theme file. */
+  --hover-bg: 216 24% 94%;
+  --row-selected-bg: 240 55% 94%;
+  --focus-ring: 222 22% 22%;
+
+  --shadow-1: 0 1px 0 rgba(30, 34, 60, 0.06);
+  --shadow-2: 0 4px 14px rgba(30, 34, 60, 0.07), 0 1px 0 rgba(30, 34, 60, 0.05);
+  --shadow-3: 0 14px 36px rgba(30, 34, 60, 0.11), 0 2px 4px rgba(30, 34, 60, 0.05);
+  --chalk-inset: inset 0 -1px 0 rgba(30, 34, 60, 0.06);
+
+  /* Category palette (brand/flow/emit/generate — port-map §7.3 open question
+     #3, settled here): mirrors swe-brain's role-tint slots, re-toned cool. */
+  --category-1: hsl(240 58% 56%); /* brand — blueberry (= accent) */
+  --category-2: hsl(282 42% 56%); /* flow — cool violet */
+  --category-3: hsl(168 40% 40%); /* emit — teal-green */
+  --category-4: hsl(255 50% 56%); /* generate — periwinkle */
+}

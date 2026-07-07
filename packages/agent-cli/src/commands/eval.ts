@@ -9,8 +9,9 @@
  * row + per-case run row + `eval_result` annotation — #132's persistence seam,
  * verbatim), captures per-case traces through the shared bus (#133:
  * `ctx.eventBus` + `ctx.traceId = evalRunId` ⇒ per-case ids
- * `${evalRunId}:${caseId}`), prints a live per-case line plus an aggregate with
- * per-split pass rates, and exits non-zero on gate failure (CI-friendly).
+ * `eval:${evalRunId}:${caseId}` — runEval's `EVAL_TRACE_PREFIX` marker),
+ * prints a live per-case line plus an aggregate with per-split pass rates,
+ * and exits non-zero on gate failure (CI-friendly).
  *
  * Exit-code taxonomy: 0 gate pass · 1 gate failure (`process.exitCode`) ·
  * 2 usage/config error (`process.exit`). `--judge` (E6/#141) appends the

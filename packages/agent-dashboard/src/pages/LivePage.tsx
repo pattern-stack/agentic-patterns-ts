@@ -22,27 +22,27 @@ export function LivePage() {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <h1 style={{ fontSize: 20, fontWeight: 600 }}>Live Events</h1>
           {connected ? (
-            <Badge tone="green" variant="outline">
+            <Badge tone="ok" variant="outline">
               <span
                 style={{
                   display: "inline-block",
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: "var(--green)",
+                  background: "var(--ok)",
                 }}
               />
               connected
             </Badge>
           ) : (
-            <Badge tone="yellow" variant="outline">
-              <Spinner size={10} color="var(--yellow)" thickness={1.5} />
+            <Badge tone="warn" variant="outline">
+              <Spinner size={10} color="var(--warn)" thickness={1.5} />
               reconnecting…
             </Badge>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Badge tone="muted" variant="outline">
+          <Badge tone="mute" variant="outline">
             {events.length} events
           </Badge>
           <Button variant="ghost" size="sm" onClick={clear}>
@@ -58,8 +58,8 @@ export function LivePage() {
             gap: 8,
             marginBottom: 12,
             padding: "10px 14px",
-            color: "var(--red)",
-            borderColor: "var(--red)",
+            color: "var(--err)",
+            borderColor: "var(--err)",
             fontSize: 13,
           }}
           padded={false}

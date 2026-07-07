@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           width: 220,
           display: "flex",
           flexDirection: "column",
-          background: "var(--bg-surface)",
+          background: "var(--fill)",
           borderRight: "1px solid var(--border)",
           padding: "20px 0",
           flexShrink: 0,
@@ -52,7 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             padding: "0 20px 24px",
             fontSize: 15,
             fontWeight: 600,
-            color: "var(--fg-default)",
+            color: "var(--ink)",
             letterSpacing: "-0.01em",
           }}
         >
@@ -67,7 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 fontWeight: 600,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
-                color: "var(--fg-subtle)",
+                color: "var(--ink-3)",
               }}
             >
               {group.heading}
@@ -81,8 +81,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   display: "block",
                   padding: "8px 20px",
                   fontSize: 14,
-                  color: isActive ? "var(--fg-default)" : "var(--fg-muted)",
-                  background: isActive ? "var(--bg-surface-hover)" : "transparent",
+                  color: isActive ? "var(--ink)" : "var(--ink-2)",
+                  background: isActive ? "var(--fill-2)" : "transparent",
                   borderLeft: isActive ? "2px solid var(--accent)" : "2px solid transparent",
                   textDecoration: "none",
                 })}

@@ -6,9 +6,11 @@ import type {
   AdminServiceProtocol,
   AgentEventBus,
   AgentLike,
+  ConversationStore,
   EvalStore,
   EventStore,
   RunResult,
+  RunStore,
   RunnerProtocol,
 } from "@agentic-patterns/runtime";
 
@@ -98,14 +100,6 @@ export interface SSEExporterLike {
 }
 
 /**
- * Conversation store interface — structural typing for ConversationStore.
- */
-export interface ConversationStoreLike {
-  get(id: string): Promise<unknown>;
-  list(): Promise<unknown[]>;
-}
-
-/**
  * CORS configuration passed to the Hono cors middleware.
  *
  * Default is `origin: "*"` for local development. Production deployments
@@ -145,11 +139,28 @@ export interface ServerConfig {
   readonly adminService: AdminServiceProtocol;
   readonly eventBus: AgentEventBus;
   readonly sseExporter: SSEExporterLike;
-  readonly store?: ConversationStoreLike;
+  /**
+   * Optional structured conversation store — enables `Conversation` to
+   * persist request/response messages (wired into `POST /conversations`,
+   * `routes/conversations.ts`) AND enables the four `/admin/conversations`,
+   * `/conversations/:id`, `/conversations/:id/messages`, `/messages/:id/parts`
+   * read routes (503 persistence-not-configured grammar otherwise).
+   */
+  readonly store?: ConversationStore;
   /** Optional durable event log; enables historical query routes when present. */
   readonly eventStore?: EventStore;
   /** Optional eval store; enables /eval read routes when present (503 otherwise). */
   readonly evalStore?: EvalStore;
+  /**
+   * Optional run-history store; enables `/admin/runs` read routes when
+   * present (503 otherwise). An `EvalStore` (and `EventStore`) already IS a
+   * `RunStore` via extension — an embedder that only wires `evalStore` still
+   * gets run history for free (`app.ts` falls back to it when this is unset).
+   * Prefer setting this explicitly when the embedder's `evalStore` and "the
+   * store chat/run executions should persist to" are conceptually different
+   * instances.
+   */
+  readonly runStore?: RunStore;
   /** Optional eval execution seam; enables POST /eval/runs when present (503 otherwise). */
   readonly evalExecution?: EvalExecutionConfig;
   readonly staticDir?: string;

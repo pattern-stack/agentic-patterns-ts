@@ -14,6 +14,7 @@ import { evalRoutes } from "./routes/eval.js";
 import { eventRoutes } from "./routes/events.js";
 import { healthRoutes } from "./routes/health.js";
 import { hookRoutes } from "./routes/hooks.js";
+import { runsRoutes } from "./routes/runs.js";
 
 /**
  * Create a configured Hono app with all routes.
@@ -32,11 +33,14 @@ export function createServer(config: ServerConfig): Hono {
   // Routes
   app.route("/", healthRoutes());
   app.route("/", agentRoutes(config.agents));
-  app.route("/", compositionRoutes(config.agents));
-  app.route("/", conversationRoutes(config.agents, conversations, config.eventBus));
+  app.route("/", compositionRoutes(config.agents, config.eventBus));
+  app.route("/", conversationRoutes(config.agents, conversations, config.eventBus, config.store));
   app.route("/", adminRoutes(config));
   app.route("/", hookRoutes(config.eventBus));
   app.route("/", eventRoutes(config.eventStore, config.eventBus));
+  // `EvalStore` IS a `RunStore` (extension) — an embedder that wires
+  // `evalStore` but not the explicit `runStore` slot still gets run history.
+  app.route("/", runsRoutes(config.runStore ?? config.evalStore));
   app.route(
     "/",
     evalRoutes({

@@ -45,7 +45,7 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(0, 0, 0, 0.5)",
+        background: "color-mix(in oklch, var(--ink) 45%, transparent)",
         display: "flex",
         alignItems: "flex-start",
         justifyContent: "center",
@@ -62,13 +62,13 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
         aria-label={title}
         tabIndex={-1}
         style={{
-          background: "var(--bg-surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 10,
+          background: "var(--paper)",
+          border: "1px solid var(--line)",
+          borderRadius: "var(--radius-lg)",
           width: "100%",
           maxWidth: 520,
           outline: "none",
-          boxShadow: "0 12px 40px rgba(0, 0, 0, 0.35)",
+          boxShadow: "var(--shadow-3)",
         }}
       >
         <div
@@ -77,7 +77,7 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
             alignItems: "center",
             justifyContent: "space-between",
             padding: "14px 18px",
-            borderBottom: "1px solid var(--border)",
+            borderBottom: "1px solid var(--line)",
           }}
         >
           <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
@@ -95,7 +95,7 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
               justifyContent: "flex-end",
               gap: 8,
               padding: "12px 18px",
-              borderTop: "1px solid var(--border)",
+              borderTop: "1px solid var(--line)",
             }}
           >
             {footer}

@@ -18,12 +18,15 @@ import type {
   EvalRunRow,
   JoinedEvalResultRow,
 } from "../../api/types";
-import { Markdown } from "../../chat/atoms";
-import { Badge, type BadgeTone } from "../../components/atoms/Badge";
+import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
-import { Spinner } from "../../components/atoms/Spinner";
-import { AlertIcon } from "../../components/atoms/icons";
+import { AnswerPanel } from "../../components/kit/AnswerPanel";
+import { AsyncState } from "../../components/kit/AsyncState";
+import { JsonBlock } from "../../components/kit/JsonBlock";
+import { PageHeader } from "../../components/kit/PageHeader";
+import { sectionMicroHeadingStyle } from "../../components/kit/SectionHeading";
+import { Stat } from "../../components/kit/Stat";
 import { DataTable } from "../../components/organisms/DataTable";
 import { fetchEvalCases, fetchEvalRunDetail, safeParseAnswer } from "../../lib/evalApi";
 import {
@@ -32,70 +35,13 @@ import {
   alignResults,
   summarizeComparison,
 } from "../../lib/evalCompare";
+import { statusTone } from "../../lib/format";
 import { TraceSection } from "./CaseDetail";
 
-const preStyle = {
-  margin: 0,
-  padding: 10,
-  background: "var(--bg-inset)",
-  borderRadius: 6,
-  fontSize: 12,
-  fontFamily: "var(--font-mono)",
-  overflowX: "auto" as const,
-  whiteSpace: "pre-wrap" as const,
-  wordBreak: "break-word" as const,
-};
-
-const mutedStyle = { color: "var(--fg-muted)", fontSize: 13 };
-
-// Inset panel for rendered markdown — `preStyle` chrome without monospace/pre-wrap.
-const mdPanelStyle = {
-  margin: 0,
-  padding: "2px 12px",
-  background: "var(--bg-inset)",
-  borderRadius: 6,
-  fontSize: 13,
-  overflowX: "auto" as const,
-  wordBreak: "break-word" as const,
-};
-
-const sectionHeadingStyle = {
-  fontSize: 12,
-  fontWeight: 600,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
-  color: "var(--fg-subtle)",
-  marginBottom: 8,
-};
-
-function pretty(value: unknown): string {
-  if (value === undefined) return "—";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function isStringArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.every((x) => typeof x === "string");
-}
+const mutedStyle = { color: "var(--mute)", fontSize: 13 };
 
 function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 7) : "—";
-}
-
-function statusTone(status: EvalRunRow["status"]): BadgeTone {
-  switch (status) {
-    case "ok":
-      return "green";
-    case "error":
-      return "red";
-    case "running":
-      return "emerald";
-    default:
-      return "neutral";
-  }
 }
 
 function scoresSummary(scores: JoinedEvalResultRow["scores"] | undefined): string {
@@ -107,26 +53,26 @@ function scoresSummary(scores: JoinedEvalResultRow["scores"] | undefined): strin
 }
 
 function resultBadge(r: JoinedEvalResultRow | null) {
-  if (!r) return <Badge tone="muted">not run</Badge>;
-  if (r.pass === true) return <Badge tone="green">pass</Badge>;
-  if (r.pass === false) return <Badge tone="red">fail</Badge>;
-  return <Badge tone="muted">ungated</Badge>;
+  if (!r) return <Badge tone="mute">not run</Badge>;
+  if (r.pass === true) return <Badge tone="ok">pass</Badge>;
+  if (r.pass === false) return <Badge tone="err">fail</Badge>;
+  return <Badge tone="mute">ungated</Badge>;
 }
 
 function deltaBadge(kind: DeltaKind) {
   switch (kind) {
     case "regression":
-      return <Badge tone="red">regression</Badge>;
+      return <Badge tone="err">regression</Badge>;
     case "improvement":
-      return <Badge tone="green">improvement</Badge>;
+      return <Badge tone="ok">improvement</Badge>;
     case "same-pass":
     case "same-fail":
-      return <Badge tone="muted">same</Badge>;
+      return <Badge tone="mute">same</Badge>;
     case "ungated":
-      return <Badge tone="muted">ungated</Badge>;
+      return <Badge tone="mute">ungated</Badge>;
     case "a-only":
     case "b-only":
-      return <Badge tone="muted">not run</Badge>;
+      return <Badge tone="mute">not run</Badge>;
   }
 }
 
@@ -199,79 +145,32 @@ export function EvalComparePage() {
   }, [aId, bId]);
 
   const backLink = (
-    <Link to="/eval" style={{ color: "var(--fg-muted)", fontSize: 13, textDecoration: "none" }}>
+    <Link to="/eval" style={{ color: "var(--mute)", fontSize: 13, textDecoration: "none" }}>
       ← Eval runs
     </Link>
   );
 
-  if (state.kind === "loading") {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          padding: "48px 0",
-          color: "var(--fg-muted)",
-        }}
-      >
-        <Spinner />
-        <span>Loading compare...</span>
-      </div>
-    );
-  }
-
-  if (state.kind === "unconfigured") {
+  if (state.kind !== "ok") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval persistence is not configured
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable eval
-            queries.
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "not-found") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval run not found
-          </div>
-          <div style={{ fontSize: 14 }}>
-            No eval run with id {state.missingIds.map((id) => `"${id}"`).join(" and ")}.
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "error") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card
-          style={{ borderColor: "var(--red)", display: "flex", alignItems: "flex-start", gap: 12 }}
-        >
-          <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-              Failed to load compare
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{state.message}</div>
-          </div>
-        </Card>
+        <AsyncState
+          kind={state.kind === "not-found" ? "not-found" : state.kind}
+          loading="Loading compare..."
+          notFound={
+            state.kind === "not-found"
+              ? {
+                  title: "Eval run not found",
+                  body: `No eval run with id ${state.missingIds.map((id) => `"${id}"`).join(" and ")}.`,
+                }
+              : undefined
+          }
+          error={
+            state.kind === "error"
+              ? { title: "Failed to load compare", message: state.message }
+              : undefined
+          }
+        />
       </div>
     );
   }
@@ -283,33 +182,27 @@ export function EvalComparePage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {backLink}
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Compare</h1>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => aId && bId && navigate(`/eval/compare/${bId}/${aId}`)}
-        >
-          Swap
-        </Button>
+      <PageHeader
+        title="Compare"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => aId && bId && navigate(`/eval/compare/${bId}/${aId}`)}
+          >
+            Swap
+          </Button>
+        }
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: -12 }}>
+        {backLink}
       </div>
 
       {differentSets && (
         <Card
-          style={{
-            borderColor: "var(--yellow)",
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 12,
-          }}
+          style={{ borderColor: "var(--warn)", display: "flex", alignItems: "flex-start", gap: 12 }}
         >
-          <span style={{ color: "var(--yellow)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+          <div style={{ fontSize: 13, color: "var(--mute)" }}>
             Runs are from different sets — case alignment may be sparse.
           </div>
         </Card>
@@ -328,21 +221,21 @@ export function EvalComparePage() {
             gap: 16,
           }}
         >
-          <Stat label="Both passed" value={summary.bothPassed} color="var(--green)" />
+          <Stat label="Both passed" value={summary.bothPassed} tone="ok" />
           <Stat
             label="Both failed"
             value={summary.bothFailed}
-            color={summary.bothFailed > 0 ? "var(--red)" : undefined}
+            tone={summary.bothFailed > 0 ? "err" : undefined}
           />
           <Stat
             label="Regressions"
             value={summary.onlyAPassed}
-            color={summary.onlyAPassed > 0 ? "var(--red)" : undefined}
+            tone={summary.onlyAPassed > 0 ? "err" : undefined}
           />
           <Stat
             label="Improvements"
             value={summary.onlyBPassed}
-            color={summary.onlyBPassed > 0 ? "var(--green)" : undefined}
+            tone={summary.onlyBPassed > 0 ? "ok" : undefined}
           />
           <Stat label="Only in A" value={summary.aOnly} />
           <Stat label="Only in B" value={summary.bOnly} />
@@ -401,74 +294,34 @@ function ProvenanceCard({ label, run }: { label: string; run: EvalRunRow }) {
         <Badge tone={statusTone(run.status)}>{run.status}</Badge>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-        <Badge tone="muted">variant · {run.variant ?? "—"}</Badge>
-        <Badge tone="muted">target · {run.targetId ?? "—"}</Badge>
-        <Badge tone="muted">split · {run.split ?? "untagged"}</Badge>
-        <Badge tone="muted">model · {run.model ?? "—"}</Badge>
-        <Badge tone="muted" title={run.gitSha ?? undefined}>
+        <Badge tone="mute">variant · {run.variant ?? "—"}</Badge>
+        <Badge tone="mute">target · {run.targetId ?? "—"}</Badge>
+        <Badge tone="mute">split · {run.split ?? "untagged"}</Badge>
+        <Badge tone="mute">model · {run.model ?? "—"}</Badge>
+        <Badge tone="mute" title={run.gitSha ?? undefined}>
           sha · {shortSha(run.gitSha)}
         </Badge>
-        <Badge tone="muted">started · {new Date(run.tsStart).toLocaleString()}</Badge>
+        <Badge tone="mute">started · {new Date(run.tsStart).toLocaleString()}</Badge>
       </div>
     </Card>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string | number;
-  color?: string;
-}) {
-  return (
-    <div>
-      <div style={{ fontSize: 12, color: "var(--fg-muted)", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: color ?? "var(--fg-default)" }}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
-/**
- * The run's answer — markdown when persisted as an array of lines (canvas
- * evals), pretty JSON otherwise. Fail border preserved either way.
- */
-function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
-  const value = safeParseAnswer(finalAnswer);
-  if (isStringArray(value)) {
-    return (
-      <div
-        style={
-          pass === false ? { ...mdPanelStyle, borderLeft: "3px solid var(--red)" } : mdPanelStyle
-        }
-      >
-        <Markdown content={value.join("\n")} />
-      </div>
-    );
-  }
-  return (
-    <pre style={pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle}>
-      {pretty(value)}
-    </pre>
   );
 }
 
 function SideActualPanel({ label, result }: { label: string; result: JoinedEvalResultRow | null }) {
   return (
     <div>
-      <div style={sectionHeadingStyle}>{label} · Actual</div>
+      <div style={sectionMicroHeadingStyle()}>{label} · Actual</div>
       {!result ? (
         <div style={mutedStyle}>not run in this eval run</div>
       ) : result.runStatus === "error" ? (
-        <pre style={{ ...preStyle, borderLeft: "3px solid var(--red)", color: "var(--red)" }}>
-          {result.runError ?? "(no error message recorded)"}
-        </pre>
+        <JsonBlock
+          value={result.runError ?? "(no error message recorded)"}
+          raw
+          errorTinted
+          style={{ color: "var(--err)" }}
+        />
       ) : (
-        <ActualAnswer finalAnswer={result.finalAnswer} pass={result.pass} />
+        <AnswerPanel value={safeParseAnswer(result.finalAnswer)} pass={result.pass} />
       )}
     </div>
   );
@@ -477,7 +330,7 @@ function SideActualPanel({ label, result }: { label: string; result: JoinedEvalR
 function SideScoresPanel({ label, result }: { label: string; result: JoinedEvalResultRow | null }) {
   return (
     <div>
-      <div style={sectionHeadingStyle}>{label} · Scores</div>
+      <div style={sectionMicroHeadingStyle()}>{label} · Scores</div>
       {!result ? (
         <div style={mutedStyle}>not run in this eval run</div>
       ) : !result.scores || result.scores.length === 0 ? (
@@ -490,11 +343,9 @@ function SideScoresPanel({ label, result }: { label: string; result: JoinedEvalR
               style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
             >
               <span style={{ fontFamily: "var(--font-mono)" }}>{score.name}</span>
-              <span style={{ color: "var(--fg-muted)" }}>{score.value ?? "—"}</span>
+              <span style={{ color: "var(--mute)" }}>{score.value ?? "—"}</span>
               {score.passed !== undefined && (
-                <Badge tone={score.passed ? "green" : "red"}>
-                  {score.passed ? "pass" : "fail"}
-                </Badge>
+                <Badge tone={score.passed ? "ok" : "err"}>{score.passed ? "pass" : "fail"}</Badge>
               )}
             </div>
           ))}
@@ -507,25 +358,22 @@ function SideScoresPanel({ label, result }: { label: string; result: JoinedEvalR
 function CompareCaseExpanded({
   row,
   caseRow,
-}: {
-  row: ComparisonCaseRow;
-  caseRow: EvalCaseRow | undefined;
-}) {
+}: { row: ComparisonCaseRow; caseRow: EvalCaseRow | undefined }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {caseRow && (
         <details>
-          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--mute)" }}>
             Input / Expected
           </summary>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 6 }}>
             <div>
-              <div style={sectionHeadingStyle}>Input</div>
-              <pre style={preStyle}>{pretty(caseRow.input)}</pre>
+              <div style={sectionMicroHeadingStyle()}>Input</div>
+              <JsonBlock value={caseRow.input} />
             </div>
             <div>
-              <div style={sectionHeadingStyle}>Expected</div>
-              <pre style={preStyle}>{pretty(caseRow.expected)}</pre>
+              <div style={sectionMicroHeadingStyle()}>Expected</div>
+              <JsonBlock value={caseRow.expected} />
             </div>
           </div>
         </details>
@@ -543,11 +391,11 @@ function CompareCaseExpanded({
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div>
-          <div style={sectionHeadingStyle}>A · Trace</div>
+          <div style={sectionMicroHeadingStyle()}>A · Trace</div>
           <TraceSection traceId={row.a?.traceId ?? null} />
         </div>
         <div>
-          <div style={sectionHeadingStyle}>B · Trace</div>
+          <div style={sectionMicroHeadingStyle()}>B · Trace</div>
           <TraceSection traceId={row.b?.traceId ?? null} />
         </div>
       </div>

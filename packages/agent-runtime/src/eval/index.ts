@@ -18,7 +18,7 @@ export { type Scorer, exactMatch, predicateScorer } from "./scorer.js";
 
 export { type EvalTarget, isNodeShape, isAgentLikeShape, resolveEvalTarget } from "./target.js";
 
-export { type EvalRunContext, type EvalSpec, runEval } from "./run-eval.js";
+export { EVAL_TRACE_PREFIX, type EvalRunContext, type EvalSpec, runEval } from "./run-eval.js";
 
 export {
   assertSplitSelectable,

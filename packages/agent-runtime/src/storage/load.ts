@@ -20,6 +20,7 @@
  * back to an in-memory-only setup otherwise.
  */
 
+import type { SQLiteConversationStore } from "./conversation-store.js";
 import type { EvalStore } from "./eval-store.js";
 import type { EventStore, EventStoreOptions } from "./event-store.js";
 import type { RunStore } from "./run-store.js";
@@ -272,6 +273,54 @@ export async function loadEvalStore(opts: LoadEventStoreOptions): Promise<LoadEv
     return {
       unavailable: true,
       reason: `EvalStore init failed: ${(err as Error).message ?? "unknown"}`,
+    };
+  }
+}
+
+/** Result of {@link loadConversationStore}: store + diagnostic info. */
+export interface LoadConversationStoreResult {
+  /** Live store if a SQLite driver was resolvable. */
+  store?: SQLiteConversationStore;
+  /** True when no driver could be loaded or initialization failed. */
+  unavailable: boolean;
+  /** Human-readable reason; surfaced in the CLI banner. */
+  reason: string;
+}
+
+/**
+ * Attempt to instantiate a {@link SQLiteConversationStore} backed by SQLite.
+ * Exact mirror of {@link loadEvalStore} — same driver resolution,
+ * `SQLiteConversationStore` instead of `EvalStore`. Since
+ * `SQLiteConversationStore extends EvalStore`, the returned store also
+ * satisfies `EvalStore`/`RunStore`/`EventStore` — callers that previously
+ * used `loadEvalStore()` to back `ServerConfig.eventStore`/`evalStore`/
+ * `runStore` can swap in this loader and additionally wire `ServerConfig.store`
+ * from the same instance.
+ */
+export async function loadConversationStore(
+  opts: LoadEventStoreOptions,
+): Promise<LoadConversationStoreResult> {
+  const resolved = await resolveDatabase();
+  if ("reason" in resolved) {
+    return { unavailable: true, reason: resolved.reason };
+  }
+
+  const { SQLiteConversationStore } = await import("./conversation-store.js");
+  try {
+    const store = new SQLiteConversationStore({
+      ...opts,
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
+      Database: resolved.Database as any,
+    });
+    return {
+      store,
+      unavailable: false,
+      reason: `connected to ${opts.path} via ${resolved.driver}`,
+    };
+  } catch (err) {
+    return {
+      unavailable: true,
+      reason: `SQLiteConversationStore init failed: ${(err as Error).message ?? "unknown"}`,
     };
   }
 }

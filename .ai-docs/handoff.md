@@ -1,14 +1,33 @@
-# Handoff — 2026-07-05 (pm)
+# Handoff — 2026-07-06 (pm)
 
-**Branch:** `main` (clean; all session work merged + published)
-**Last action:** Shipped the session — `@agentic-patterns/core@0.7.0`, `runtime`/`server`/`cli@0.11.1` live on npm (verified via dist-tags). PRs #178 (credential preflight / ExecutionService), #179 (no framework-default model), #180 (bump.sh two-track) merged; dashboard work landed as #181/#182.
-**Next action:** No work mid-flight. Pick one of the parked items below, or start fresh.
+**Branch:** `pg/s8-console-lenses-polish` (stack tip; main is clean)
+**Last action:** Shipped the **playground-upgrades** stack — 8 stacked PRs **#191→#198**, all CI-green, awaiting review/merge. Ported swe-brain's agentic surfaces into the playground (minus the Composer, by decision) + a board-wide styling level-up.
+**Next action:** Slice PRs #191→#198 merge sequentially into the feature branch `feat/playground-upgrades`; the user merges the umbrella PR into main and publishes. After merge to main: runtime+server+cli changed → lockstep version bump (`bump.sh --lockstep`), dashboard/core per policy.
 **Obstacles:** none blocking.
 
-## Notes
-- **Parked design fork:** should `ap run`/`ap eval` adopt per-agent resolver mode (like `playground`) so agents own their model everywhere? Undecided. Today run/eval use the env-ladder (one global model), so `.withModel()` is honored in playground/gateway but IGNORED in run/eval.
-- **Model default removed (breaking, #179):** `Agent.getModel()` / `Role.defaultModel` are now `string | undefined`. Unset ⇒ the runner supplies the model (tier/env/gateway) or fails loud. Declare models explicitly. See [[project_no-framework-model-default]].
-- **Credential preflight (#178):** `agent-cli`'s `ExecutionService` wraps `createRunner` for run/eval/playground — loud signal when no key, interactive fix, Bifrost gateway via `AP_GATEWAY_*`. See [[project_runner-credential-preflight]].
-- **Gateway (Bifrost):** `.env` has `AP_GATEWAY_BASE_URL=…findtempo.co/v1` + Basic auth. Catalog is **Gemini + OpenAI only, no Claude** — agents run through it must declare a `gemini/*` or `openai/*` id (e.g. `gemini/gemini-3.1-flash-lite`). Needs `@ai-sdk/openai-compatible@1.x` (NOT 3.x — spec-v4, rejected by ai@5). No agents wired to the gateway yet. See [[reference_bifrost-dev-gateway]].
-- **Release tooling:** `scripts/bump.sh` is now two-track — `bash scripts/bump.sh --lockstep <spec> [--core <spec>]` (justfile `bump-lockstep`/`bump-core`/`bump-both`). Old all-four positional form is gone. Then `git add packages/*/package.json bun.lock && publish.sh check`. See [[project_versioning-policy]].
-- **Untracked artifacts** (not this session's work): `docs/build/`, `docs/.docusaurus/`, `packages/agent-cli/.DS_Store`, `.ai-docs/research/adk-plugin.md` — safe to ignore or gitignore.
+## The stack (all validated: paired opus reviews + browser agents per wave)
+| PR | Slice | What |
+|---|---|---|
+| #191 | S1 | Styling foundation — one atom set on cockpit tokens, shared `components/kit/*`, ~600 dup lines deleted |
+| #192 | S3 | `POST /capabilities/:id/tools/:toolName/invoke` — direct tool exec, no model |
+| #193 | S5 | Run persistence + `/admin/runs*` routes; `eval:` trace prefix + `shouldTrack` seam (double-write fix); NodeBackedRunner now publishes run lifecycle to the shared bus (promoted agents persist) |
+| #194 | S7 | SQLiteConversationStore (schema v5) + real conversation routes (pages were calling phantom endpoints); traceId/runId threading; **exec-based BEGIN/COMMIT** (bun:sqlite shim has no `.transaction()` — silent message loss under bun, caught by browser validation) |
+| #195 | S2 | Six themes (blue/earth/chalk × light/dark), family×mode picker, before-paint script, `?theme=` override |
+| #196 | S4 | Tool Workbench on /capabilities + FamilyTabs + **Toolsmith** example agent (key-free demo); vite proxy +/roles +/capabilities |
+| #197 | S6 | Run picker + persisted-run replay through the constellation; honest "(request not persisted)" |
+| #198 | S8 | Agent Console (SessionsMenu, read-only replay, trace rail w/ TraceWaterfall+TraceLog), AgentLensPage Runs lens + HonestyBanner, final sweep (legacy tones + alias bridge + ui/atoms shim deleted) |
+
+Spec of record: `.ai-docs/stacks/playground-upgrades/port-map.md` (rides #191). Plan: `.ai-docs/plans/playground-upgrades.yaml`.
+
+## Notes / follow-up candidates
+- **⚠️ A wave-1 browser agent killed the user's canvas playground that was on :3456** (canvas-builder/canvas-workbench agents, separate work). Port freed; relaunch invocation unknown — user must restart it.
+- **RunMeta doesn't capture the request text** → run picker/replay show "(request not persisted)". Schema v6 candidate: stamp the user message onto the runs row at `message.start`.
+- **Promoted-run replays are thin** (message start/chunk/complete only) — pipeline *stage* steps don't reach the persisted-events path; check whether NodeBackedRunner's relayed step events survive the OBSERVABILITY profile / SQLiteExporter.
+- Kit `DropdownMenu` doesn't auto-close on row pick (Sessions + RunPicker, consistent); 320px trace rail wraps step descriptions hard — both cosmetic.
+- Parts N+1 on session replay accepted; batch `GET /conversations/:id/full` if it hurts.
+- `core Capability.blastRadius` metadata is a separate track (blast UI renders honest-unknown until then).
+- **better-sqlite3 ABI**: built for node 22; default node 25 breaks persistence → run the CLI under **bun** (or rebuild). Documented symptom: "EvalStore init failed", memory-only mode.
+- `?agent=`/`?since=` filter grammar on /admin/runs is lenient (silently ignores invalid) — deliberate.
+- Pre-existing local state left untouched: modified `skills/build-on-agentic-patterns/SKILL.md` in the working tree (not this session's work) + an old stash on `feat/gateway-basic-auth`.
+- Untracked leftovers: `.ai-docs/research/adk-plugin.md` (pre-existing). `docs/build/`, `docs/.docusaurus/` were removed this session (generated artifacts that broke repo-root lint).
+- biome now ignores `.claude/worktrees/` (#198) — repo-root `bun run check` no longer false-fails while agent worktrees exist.

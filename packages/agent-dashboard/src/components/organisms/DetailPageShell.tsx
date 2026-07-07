@@ -40,20 +40,20 @@ export function DetailPageShell({
             return (
               <span key={`${c.label}-${i}`} style={{ display: "inline-flex", gap: 6 }}>
                 {c.to && !last ? (
-                  <Link to={c.to} style={{ color: "var(--fg-muted)", textDecoration: "none" }}>
+                  <Link to={c.to} style={{ color: "var(--ink-2)", textDecoration: "none" }}>
                     {c.label}
                   </Link>
                 ) : (
                   <span
                     style={{
-                      color: last ? "var(--fg-default)" : "var(--fg-muted)",
+                      color: last ? "var(--ink)" : "var(--ink-2)",
                       fontWeight: last ? 600 : 400,
                     }}
                   >
                     {c.label}
                   </span>
                 )}
-                {!last && <span style={{ color: "var(--fg-subtle)" }}>/</span>}
+                {!last && <span style={{ color: "var(--ink-3)" }}>/</span>}
               </span>
             );
           })}
@@ -64,7 +64,7 @@ export function DetailPageShell({
               display: "flex",
               alignItems: "center",
               gap: 8,
-              color: "var(--fg-muted)",
+              color: "var(--ink-2)",
               fontSize: 13,
             }}
           >
@@ -95,7 +95,7 @@ export function Labeled({
           fontSize: 11,
           textTransform: "uppercase",
           letterSpacing: "0.06em",
-          color: "var(--fg-subtle)",
+          color: "var(--ink-3)",
           fontWeight: 600,
           marginBottom: 6,
         }}

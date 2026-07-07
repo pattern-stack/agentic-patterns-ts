@@ -1,26 +1,34 @@
+/**
+ * Chip atom — small inline tag, rewritten on cockpit tokens (port-map §7.1).
+ * Same tone vocabulary and visuals as before; the underlying CSS vars are now
+ * the cockpit's native names (`--ink-2`, `--fill`, `--line`, `--accent-soft`,
+ * `--err-soft`) instead of the admin bridge's muted-text/inset-surface/border
+ * aliases it read through previously — same resolved colors today, no
+ * dependency on the bridge now that it's deleted (S8).
+ */
 import type { CSSProperties, ReactNode } from "react";
 
 export type ChipTone = "neutral" | "accent" | "mono" | "warn";
 
 const TONES: Record<ChipTone, CSSProperties> = {
   neutral: {
-    color: "var(--fg-muted)",
-    background: "var(--bg-inset)",
-    borderColor: "var(--border)",
+    color: "var(--ink-2)",
+    background: "var(--fill)",
+    borderColor: "var(--line)",
   },
   accent: {
-    color: "var(--accent-ink, var(--accent))",
+    color: "var(--accent-ink)",
     background: "var(--accent-soft)",
     borderColor: "var(--accent)",
   },
   mono: {
-    color: "var(--fg-muted)",
-    background: "var(--bg-inset)",
-    borderColor: "var(--border)",
+    color: "var(--ink-2)",
+    background: "var(--fill)",
+    borderColor: "var(--line)",
     fontFamily: "var(--font-mono)",
   },
   warn: {
-    color: "var(--err-ink, var(--err))",
+    color: "var(--err-ink)",
     background: "var(--err-soft)",
     borderColor: "var(--err)",
   },
@@ -46,8 +54,8 @@ export function Chip({
         alignItems: "center",
         gap: 4,
         padding: "1px 7px",
-        borderRadius: 5,
-        fontSize: "var(--fz-tiny, 11px)",
+        borderRadius: "var(--radius-sm)",
+        fontSize: "var(--fz-tiny)",
         lineHeight: 1.5,
         border: "1px solid",
         whiteSpace: "nowrap",

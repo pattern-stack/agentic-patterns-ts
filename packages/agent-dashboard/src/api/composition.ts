@@ -167,6 +167,16 @@ export type CapabilityDetail = CapabilityBlock & {
   sharesToolboxWith: string[];
 };
 
+/** Uniform envelope `POST /capabilities/:id/tools/:tool/invoke` returns (S3,
+ *  port-map §2.2) — mirrors the server response shape exactly. */
+export interface ToolRunResult {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+  /** server-side execution time in ms (excludes network). */
+  ms: number;
+}
+
 // --------------------------------------------------------------------------
 // Client methods
 // --------------------------------------------------------------------------
@@ -206,4 +216,44 @@ export const compositionApi = {
   capabilities: () => fetchJSON<CapabilitySummary[]>("/capabilities"),
   capability: (id: string) =>
     fetchJSON<CapabilityDetail>(`/capabilities/${encodeURIComponent(id)}`),
+  /** Direct tool invoke (S3, Tool Workbench) — bypasses the agent loop and the
+   *  model entirely: the server calls `toolbox.execute()` straight. A 404
+   *  (unknown capability/tool — a wiring error, never a normal outcome) is
+   *  folded into the same `ToolRunResult` envelope as a failed run instead of
+   *  throwing, matching swe-brain's `run-tool.ts` semantics. */
+  invokeTool: async (
+    capId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolRunResult> => {
+    // `fetch` itself can REJECT (server down, network drop, CORS failure) —
+    // distinct from a resolved-but-non-2xx Response (handled below). Without
+    // this try/catch, that rejection propagated out of the async function
+    // as an unhandled promise rejection: `ToolRunner.run()`'s bare
+    // `try { setResult(await …) } finally { … }` has no `catch`, so no error
+    // ever reached `result` — the button silently re-enabled with no error
+    // box. Folding it into the same envelope here fixes every caller at the
+    // one seam, matching the non-2xx branch's existing behavior.
+    try {
+      const response = await fetch(
+        `/capabilities/${encodeURIComponent(capId)}/tools/${encodeURIComponent(toolName)}/invoke`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ args }),
+        },
+      );
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        return {
+          ok: false,
+          error: body?.error ?? `HTTP ${response.status}: ${response.statusText}`,
+          ms: 0,
+        };
+      }
+      return (await response.json()) as ToolRunResult;
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e), ms: 0 };
+    }
+  },
 };

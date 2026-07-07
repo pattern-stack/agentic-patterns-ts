@@ -3,40 +3,42 @@
  *
  * Each event row shows time, type badge, and a one-line summary. Clicking
  * a row expands it in place to show the full event payload as formatted
- * JSON — the canonical drill-down for observability work.
+ * JSON — the canonical drill-down for observability work. The toggle button
+ * wears `.ap-row-btn` (styles/atoms.css) for its hover tint — port-map §7.1
+ * replaces the old onMouseEnter/onMouseLeave inline-style mutation with CSS.
  */
 
 import { useEffect, useRef, useState } from "react";
 import type { StreamEvent } from "../../hooks/useEventStream";
-import { Badge, type BadgeTone } from "../atoms/Badge";
+import { Badge, type Tone } from "../atoms/Badge";
 
-const TYPE_TONES: Record<string, BadgeTone> = {
-  "agent.step.start": "purple",
-  "agent.step.end": "purple",
-  "step.start": "purple",
-  "step.end": "purple",
+const TYPE_TONES: Record<string, Tone> = {
+  "agent.step.start": "violet",
+  "agent.step.end": "violet",
+  "step.start": "violet",
+  "step.end": "violet",
   "agent.tool.start": "accent",
   "agent.tool.end": "accent",
   "agent.tool.intent": "accent",
-  "agent.tool.rejected": "red",
+  "agent.tool.rejected": "err",
   "agent.tool.progress": "accent",
-  "agent.llm.start": "yellow",
-  "agent.llm.end": "yellow",
-  "agent.message.start": "emerald",
-  "agent.message.chunk": "emerald",
-  "agent.message.complete": "emerald",
-  "agent.message.cancel": "muted",
-  "agent.reasoning": "purple",
-  "agent.thinking.start": "purple",
-  "agent.iteration.start": "neutral",
-  "agent.iteration.end": "neutral",
-  "agent.conversation.start": "emerald",
-  "agent.conversation.end": "muted",
-  "agent.error": "red",
+  "agent.llm.start": "warn",
+  "agent.llm.end": "warn",
+  "agent.message.start": "ok",
+  "agent.message.chunk": "ok",
+  "agent.message.complete": "ok",
+  "agent.message.cancel": "mute",
+  "agent.reasoning": "violet",
+  "agent.thinking.start": "violet",
+  "agent.iteration.start": "mute",
+  "agent.iteration.end": "mute",
+  "agent.conversation.start": "ok",
+  "agent.conversation.end": "mute",
+  "agent.error": "err",
 };
 
-function toneForType(type: string): BadgeTone {
-  return TYPE_TONES[type] ?? "neutral";
+function toneForType(type: string): Tone {
+  return TYPE_TONES[type] ?? "mute";
 }
 
 function formatTime(timestamp: string): string {
@@ -91,39 +93,32 @@ export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStr
     <div
       ref={containerRef}
       style={{
-        background: "var(--bg-surface)",
-        borderRadius: 8,
+        background: "var(--paper)",
+        borderRadius: "var(--radius-lg)",
         height,
         overflow: "auto",
       }}
     >
       {events.length === 0 && (
-        <div
-          style={{
-            padding: 32,
-            textAlign: "center",
-            color: "var(--fg-muted)",
-            fontSize: 14,
-          }}
-        >
+        <div style={{ padding: 32, textAlign: "center", color: "var(--ink-2)", fontSize: 14 }}>
           Waiting for events...
         </div>
       )}
       {events.map((event) => {
         const isOpen = expanded.has(event.id);
         return (
-          <div key={event.id} style={{ borderBottom: "1px solid var(--border-muted)" }}>
+          <div key={event.id} style={{ borderBottom: "1px solid var(--line-2)" }}>
             <button
               type="button"
               onClick={() => toggle(event.id)}
               aria-expanded={isOpen}
+              className="ap-row-btn"
               style={{
                 width: "100%",
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
                 padding: "6px 14px",
-                background: "transparent",
                 border: "none",
                 textAlign: "left",
                 color: "inherit",
@@ -131,25 +126,13 @@ export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStr
                 fontSize: 13,
                 cursor: "pointer",
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "var(--bg-surface-hover)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-              }}
             >
-              <span
-                style={{
-                  width: 12,
-                  color: "var(--fg-subtle)",
-                  fontFamily: "var(--font-mono)",
-                }}
-              >
+              <span style={{ width: 12, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
                 {isOpen ? "▾" : "▸"}
               </span>
               <span
                 style={{
-                  color: "var(--fg-muted)",
+                  color: "var(--ink-2)",
                   fontSize: 12,
                   fontFamily: "var(--font-mono)",
                   minWidth: 90,
@@ -160,7 +143,7 @@ export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStr
               <Badge tone={toneForType(event.type)}>{event.type.replace("agent.", "")}</Badge>
               <span
                 style={{
-                  color: "var(--fg-default)",
+                  color: "var(--ink)",
                   overflow: "hidden",
                   whiteSpace: "nowrap",
                   textOverflow: "ellipsis",
@@ -175,8 +158,8 @@ export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStr
                 style={{
                   margin: 0,
                   padding: "8px 14px 12px 40px",
-                  background: "var(--bg-inset)",
-                  color: "var(--fg-muted)",
+                  background: "var(--background)",
+                  color: "var(--ink-2)",
                   fontFamily: "var(--font-mono)",
                   fontSize: 11,
                   whiteSpace: "pre-wrap",

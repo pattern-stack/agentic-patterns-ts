@@ -28,9 +28,7 @@ export function RenderedPromptView({
           borderBottom: "1px solid var(--border)",
         }}
       >
-        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--fg-default)" }}>
-          Delivered prompt
-        </span>
+        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>Delivered prompt</span>
         {renderPath === "joined" && (
           <Chip
             tone="warn"
@@ -50,14 +48,12 @@ export function RenderedPromptView({
             key={`${s.name}-${i}`}
             style={{
               padding: "12px 16px",
-              borderBottom: i < sections.length - 1 ? "1px solid var(--border-muted)" : "none",
+              borderBottom: i < sections.length - 1 ? "1px solid var(--line-2)" : "none",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <Chip tone={SOURCE_TONE[s.source]}>{s.source}</Chip>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--fg-muted)" }}>
-                {s.name}
-              </span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--ink-2)" }}>{s.name}</span>
             </div>
             <pre
               style={{
@@ -65,7 +61,7 @@ export function RenderedPromptView({
                 fontFamily: "var(--font-mono)",
                 fontSize: 12,
                 lineHeight: 1.55,
-                color: "var(--fg-muted)",
+                color: "var(--ink-2)",
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
               }}
@@ -83,7 +79,7 @@ export function RenderedPromptView({
 export function CoherenceNotice({ warnings }: { warnings: CoherenceWarning[] }) {
   if (warnings.length === 0) {
     return (
-      <div style={{ fontSize: 13, color: "var(--fg-subtle)" }}>
+      <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
         No coherence warnings — awareness domains and capabilities line up.
       </div>
     );
@@ -103,7 +99,7 @@ export function CoherenceNotice({ warnings }: { warnings: CoherenceWarning[] }) 
           }}
         >
           <Chip tone="warn">{w.kind === "domain-unreachable" ? "unreachable" : "undescribed"}</Chip>
-          <div style={{ fontSize: 13, color: "var(--fg-default)" }}>
+          <div style={{ fontSize: 13, color: "var(--ink)" }}>
             <strong>{w.subject}</strong> — {w.detail}
           </div>
         </div>
