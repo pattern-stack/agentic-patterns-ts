@@ -15,7 +15,10 @@
  * never imported, so any AgentLike introspects safely.
  */
 
+import type { AgentEventBus } from "@agentic-patterns/runtime";
+import { createEvent } from "@agentic-patterns/runtime";
 import { Hono } from "hono";
+import { ZodError } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { AgentRegistration } from "../config.js";
 
@@ -34,6 +37,9 @@ interface ToolboxLike {
   description?: string;
   tools?: Record<string, unknown>;
   getToolSchemas?: () => ToolSchemaLike[];
+  getToolNames?: () => string[];
+  /** Zod-parses `args` against the tool's schema, then runs it. Throws on unknown tool or bad args. */
+  execute?: (name: string, args: unknown) => Promise<unknown>;
 }
 interface ManualLike {
   toPrompt?: () => string;
@@ -150,6 +156,30 @@ function provenanceFor(
 function toolSchemasOf(toolbox: ToolboxLike | undefined): ToolSchemaLike[] {
   if (typeof toolbox?.getToolSchemas === "function") return toolbox.getToolSchemas();
   return [];
+}
+
+/** Names of every tool a toolbox declares — prefers the real accessor, falls
+ *  back to the `tools` record for older/duck-typed toolboxes. */
+function toolNamesOf(toolbox: ToolboxLike | undefined): string[] {
+  if (typeof toolbox?.getToolNames === "function") return toolbox.getToolNames();
+  return Object.keys(toolbox?.tools ?? {});
+}
+
+/** Random id for a synthetic tool-call/run correlation (crypto when available). */
+function randomId(): string {
+  if (typeof globalThis !== "undefined" && "crypto" in globalThis) {
+    return (globalThis as unknown as { crypto: { randomUUID(): string } }).crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Friendly one-liner for a tool failure — flattens ZodError issues (verbatim
+ *  semantics from swe-brain's `formatToolError`). */
+function formatToolError(err: unknown): string {
+  if (err instanceof ZodError) {
+    return err.issues.map((i) => `${i.path.join(".") || "(arg)"}: ${i.message}`).join("; ");
+  }
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** Serialize one capability slot — toolbox tools carry JSON-schema params. */
@@ -535,7 +565,7 @@ function agentCompositionPayload(reg: AgentRegistration, agent: unknown) {
   };
 }
 
-export function compositionRoutes(agents: AgentRegistration[]): Hono {
+export function compositionRoutes(agents: AgentRegistration[], eventBus?: AgentEventBus): Hono {
   const app = new Hono();
 
   // GET /agents/:id/composition — the DECLARED instance's introspection (what
@@ -676,6 +706,102 @@ export function compositionRoutes(agents: AgentRegistration[]): Hono {
       usedBy: { roles: [...entry.roleIds], agents: [...entry.agentIds] },
       sharesToolboxWith: sharesToolboxWith(entry, entries),
     });
+  });
+
+  // POST /capabilities/:id/tools/:toolName/invoke — the Tool Workbench's
+  // direct-invoke door (port-map.md §2.2). Resolves the capability with the
+  // IDENTICAL derivation as GET /capabilities/:id above (same
+  // `buildCapabilityEntries(buildRoleEntries(agents))` call), so a deep link
+  // that resolved there always resolves here too.
+  //
+  // DELIBERATE DESIGN NOTE: this bypasses the agent loop AND the gate chain
+  // entirely — it calls `toolbox.execute` straight, with no intent event, no
+  // gate check, no model in the loop (mirrors swe-brain's ADR-0023 Hard Rule
+  // #7 note). That's fine today because every tool reachable from the
+  // playground's capability registry is read-only or draft-only; the moment a
+  // real write/external actuator is registered here, THIS is the route that
+  // needs a gate, not the agent runner.
+  app.post("/capabilities/:id/tools/:toolName/invoke", async (c) => {
+    const entries = buildCapabilityEntries(buildRoleEntries(agents));
+    const entry = entries.find((e) => e.id === c.req.param("id"));
+    if (!entry) return c.json({ error: `Capability "${c.req.param("id")}" not found` }, 404);
+
+    const toolName = c.req.param("toolName");
+    const toolbox = entry.cap.toolbox;
+    if (
+      !toolbox ||
+      typeof toolbox.execute !== "function" ||
+      !toolNamesOf(toolbox).includes(toolName)
+    ) {
+      return c.json({ error: `Capability "${entry.id}" has no tool "${toolName}"` }, 404);
+    }
+
+    const body = (await c.req.json().catch(() => ({}))) as { args?: unknown };
+    const args = (body?.args ?? {}) as Record<string, unknown>;
+
+    // Synthetic correlation ids — this invoke has no enclosing agent run, so
+    // it mints its own so the pair shows up on /live and the event log as a
+    // one-tool-call "run" (locked decision, port-map.md §1.1 / §2.2).
+    const toolCallId = randomId();
+    const runId = `workbench:${randomId()}`;
+    const started = Date.now();
+
+    if (eventBus) {
+      await eventBus.publish(
+        createEvent("agent.tool.start", {
+          spanId: toolCallId,
+          traceId: runId,
+          runId,
+          toolCallId,
+          toolName,
+          arguments: args,
+        }),
+      );
+    }
+
+    try {
+      // Call as a METHOD (`toolbox.execute(...)`, not a detached reference) —
+      // the real Toolbox.execute reads `this.tools`, so losing the receiver
+      // here would throw on every call.
+      const result = await toolbox.execute(toolName, args);
+      const ms = Date.now() - started;
+      if (eventBus) {
+        await eventBus.publish(
+          createEvent("agent.tool.end", {
+            spanId: toolCallId,
+            traceId: runId,
+            runId,
+            toolCallId,
+            toolName,
+            arguments: args,
+            result,
+            durationMs: ms,
+            resultTokens: 0,
+          }),
+        );
+      }
+      return c.json({ ok: true, result, ms });
+    } catch (err) {
+      const ms = Date.now() - started;
+      const message = formatToolError(err);
+      if (eventBus) {
+        await eventBus.publish(
+          createEvent("agent.tool.end", {
+            spanId: toolCallId,
+            traceId: runId,
+            runId,
+            toolCallId,
+            toolName,
+            arguments: args,
+            result: undefined,
+            error: message,
+            durationMs: ms,
+            resultTokens: 0,
+          }),
+        );
+      }
+      return c.json({ ok: false, error: message, ms });
+    }
   });
 
   return app;
