@@ -20,6 +20,7 @@ import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
+import { JsonBlock } from "../../components/kit/JsonBlock";
 import { Segmented } from "../../components/kit/Segmented";
 import { DetailPageShell, Labeled } from "../../components/organisms/DetailPageShell";
 import { CoherenceNotice, RenderedPromptView } from "../../components/organisms/RenderedPromptView";
@@ -34,19 +35,7 @@ function DataBlock({ label, value }: { label: string; value: Record<string, unkn
       {empty ? (
         <span style={{ fontSize: 13, color: "var(--fg-subtle)" }}>— none —</span>
       ) : (
-        <pre
-          style={{
-            margin: 0,
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            lineHeight: 1.5,
-            color: "var(--fg-muted)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {JSON.stringify(value, null, 2)}
-        </pre>
+        <JsonBlock value={value} />
       )}
     </Labeled>
   );
