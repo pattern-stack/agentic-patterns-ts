@@ -167,6 +167,16 @@ export type CapabilityDetail = CapabilityBlock & {
   sharesToolboxWith: string[];
 };
 
+/** Uniform envelope `POST /capabilities/:id/tools/:tool/invoke` returns (S3,
+ *  port-map §2.2) — mirrors the server response shape exactly. */
+export interface ToolRunResult {
+  ok: boolean;
+  result?: unknown;
+  error?: string;
+  /** server-side execution time in ms (excludes network). */
+  ms: number;
+}
+
 // --------------------------------------------------------------------------
 // Client methods
 // --------------------------------------------------------------------------
@@ -206,4 +216,32 @@ export const compositionApi = {
   capabilities: () => fetchJSON<CapabilitySummary[]>("/capabilities"),
   capability: (id: string) =>
     fetchJSON<CapabilityDetail>(`/capabilities/${encodeURIComponent(id)}`),
+  /** Direct tool invoke (S3, Tool Workbench) — bypasses the agent loop and the
+   *  model entirely: the server calls `toolbox.execute()` straight. A 404
+   *  (unknown capability/tool — a wiring error, never a normal outcome) is
+   *  folded into the same `ToolRunResult` envelope as a failed run instead of
+   *  throwing, matching swe-brain's `run-tool.ts` semantics. */
+  invokeTool: async (
+    capId: string,
+    toolName: string,
+    args: Record<string, unknown>,
+  ): Promise<ToolRunResult> => {
+    const response = await fetch(
+      `/capabilities/${encodeURIComponent(capId)}/tools/${encodeURIComponent(toolName)}/invoke`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ args }),
+      },
+    );
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      return {
+        ok: false,
+        error: body?.error ?? `HTTP ${response.status}: ${response.statusText}`,
+        ms: 0,
+      };
+    }
+    return (await response.json()) as ToolRunResult;
+  },
 };

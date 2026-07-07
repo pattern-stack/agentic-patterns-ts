@@ -13,6 +13,7 @@ import type { RosterAgent } from "../../api/composition";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
+import { FamilyTabs } from "../../components/molecules/FamilyTabs";
 import { DetailPageShell } from "../../components/organisms/DetailPageShell";
 import { useAdminData } from "../../hooks/useAdminData";
 
@@ -40,101 +41,116 @@ export function AgentsRosterPage() {
       return next;
     });
 
+  const familyTabs = (
+    <div style={{ marginBottom: 16 }}>
+      <FamilyTabs />
+    </div>
+  );
+
   if (loading) {
     return (
-      <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            color: "var(--fg-muted)",
-            padding: 40,
-          }}
-        >
-          <Spinner /> Loading agents…
-        </div>
-      </DetailPageShell>
+      <>
+        {familyTabs}
+        <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              color: "var(--fg-muted)",
+              padding: 40,
+            }}
+          >
+            <Spinner /> Loading agents…
+          </div>
+        </DetailPageShell>
+      </>
     );
   }
   if (error || !data) {
     return (
-      <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
-        <Card style={{ borderColor: "var(--err)", color: "var(--err)" }}>
-          {error ?? "Agents not found."}
-        </Card>
-      </DetailPageShell>
+      <>
+        {familyTabs}
+        <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
+          <Card style={{ borderColor: "var(--err)", color: "var(--err)" }}>
+            {error ?? "Agents not found."}
+          </Card>
+        </DetailPageShell>
+      </>
     );
   }
 
   return (
-    <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
-      <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-        {data.length} situated instance{data.length === 1 ? "" : "s"} across {groups.length} role
-        {groups.length === 1 ? "" : "s"} — click a role to see its agents.
-      </div>
+    <>
+      {familyTabs}
+      <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
+        <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+          {data.length} situated instance{data.length === 1 ? "" : "s"} across {groups.length} role
+          {groups.length === 1 ? "" : "s"} — click a role to see its agents.
+        </div>
 
-      {groups.length === 0 ? (
-        <Card style={{ color: "var(--fg-subtle)" }}>No agents registered.</Card>
-      ) : (
-        groups.map(([role, agents]) => {
-          const isOpen = open.has(role);
-          const notReady = agents.filter((a) => !a.readiness.ready).length;
-          return (
-            <Card key={role} padded={false} style={{ overflow: "hidden" }}>
-              <button
-                type="button"
-                onClick={() => toggle(role)}
-                aria-expanded={isOpen}
-                style={{
-                  all: "unset",
-                  boxSizing: "border-box",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  width: "100%",
-                  padding: "14px 16px",
-                }}
-              >
-                <span
-                  aria-hidden
+        {groups.length === 0 ? (
+          <Card style={{ color: "var(--fg-subtle)" }}>No agents registered.</Card>
+        ) : (
+          groups.map(([role, agents]) => {
+            const isOpen = open.has(role);
+            const notReady = agents.filter((a) => !a.readiness.ready).length;
+            return (
+              <Card key={role} padded={false} style={{ overflow: "hidden" }}>
+                <button
+                  type="button"
+                  onClick={() => toggle(role)}
+                  aria-expanded={isOpen}
                   style={{
-                    display: "inline-block",
-                    transform: isOpen ? "rotate(90deg)" : "none",
-                    transition: "transform 0.15s ease",
-                    color: "var(--fg-muted)",
-                    fontSize: 11,
-                  }}
-                >
-                  ▶
-                </span>
-                <span style={{ fontWeight: 600, color: "var(--fg-default)" }}>{role}</span>
-                <Chip tone="neutral">
-                  {agents.length} agent{agents.length === 1 ? "" : "s"}
-                </Chip>
-                {notReady > 0 && <Chip tone="warn">{notReady} not ready</Chip>}
-              </button>
-
-              {isOpen && (
-                <div
-                  style={{
+                    all: "unset",
+                    boxSizing: "border-box",
+                    cursor: "pointer",
                     display: "flex",
-                    flexDirection: "column",
+                    alignItems: "center",
                     gap: 10,
-                    padding: "0 16px 16px",
+                    width: "100%",
+                    padding: "14px 16px",
                   }}
                 >
-                  {agents.map((a) => (
-                    <AgentCard key={a.id} agent={a} navigate={navigate} />
-                  ))}
-                </div>
-              )}
-            </Card>
-          );
-        })
-      )}
-    </DetailPageShell>
+                  <span
+                    aria-hidden
+                    style={{
+                      display: "inline-block",
+                      transform: isOpen ? "rotate(90deg)" : "none",
+                      transition: "transform 0.15s ease",
+                      color: "var(--fg-muted)",
+                      fontSize: 11,
+                    }}
+                  >
+                    ▶
+                  </span>
+                  <span style={{ fontWeight: 600, color: "var(--fg-default)" }}>{role}</span>
+                  <Chip tone="neutral">
+                    {agents.length} agent{agents.length === 1 ? "" : "s"}
+                  </Chip>
+                  {notReady > 0 && <Chip tone="warn">{notReady} not ready</Chip>}
+                </button>
+
+                {isOpen && (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                      padding: "0 16px 16px",
+                    }}
+                  >
+                    {agents.map((a) => (
+                      <AgentCard key={a.id} agent={a} navigate={navigate} />
+                    ))}
+                  </div>
+                )}
+              </Card>
+            );
+          })
+        )}
+      </DetailPageShell>
+    </>
   );
 }
 
