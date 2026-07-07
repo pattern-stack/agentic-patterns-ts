@@ -171,6 +171,24 @@ describe("sequentialAgent", () => {
     expect(res.output.outputs.three).toBe("SAW-EVERYTHING"); // stage 1's section reached stage 3
   });
 
+  it("a TYPED stage spec seats without casts (AgentStage variance)", async () => {
+    const Shape = z.object({ verdict: z.string() }).strict();
+    const runner = new MockRunner().addResponse("*", { content: "x", object: { verdict: "ok" } });
+    // The point of this test is the TYPES: a fully-typed spec in the stages array
+    // must compile with no `as` casts (TOut is contravariant in the callbacks).
+    const typed = {
+      agent: makeAgent("typed"),
+      output: Shape,
+      stop: (out: { verdict: string }) => (out.verdict === "stop" ? "stopped" : null),
+      onEmit: (out: { verdict: string }) => {
+        void out.verdict;
+      },
+    };
+    const res = await sequentialAgent([typed]).run("go", { runner });
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs.typed).toEqual({ verdict: "ok" });
+  });
+
   it("renderSharedState: the task alone, then task + prior sections", () => {
     expect(renderSharedState("do it", [])).toBe("do it");
     const two = renderSharedState("do it", [{ name: "a", output: { k: 1 } }]);
