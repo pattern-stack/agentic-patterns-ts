@@ -88,7 +88,8 @@ export interface AgentStageSpec<TOut = unknown> {
   readonly writes?: ReadonlyArray<{ readonly key: string }>;
 }
 
-export type AgentStage = AgentLike | AgentStageSpec;
+// biome-ignore lint/suspicious/noExplicitAny: TOut appears contravariantly in the stage callbacks (onEmit/stop), so AgentStageSpec<T> would never assign to AgentStageSpec<unknown> — `any` is the deliberate variance escape so typed specs seat WITHOUT casts (the SequentialBuilder precedent).
+export type AgentStage = AgentLike | AgentStageSpec<any>;
 
 export interface SequentialAgentOpts {
   readonly name?: string;
