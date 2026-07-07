@@ -46,7 +46,7 @@ function RoleListView() {
             display: "flex",
             gap: 10,
             alignItems: "center",
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
             padding: 40,
           }}
         >
@@ -68,7 +68,7 @@ function RoleListView() {
   return (
     <DetailPageShell breadcrumb={[{ label: "Roles" }]}>
       {data.length === 0 ? (
-        <Card style={{ color: "var(--fg-subtle)" }}>No roles discovered.</Card>
+        <Card style={{ color: "var(--ink-3)" }}>No roles discovered.</Card>
       ) : (
         data.map((r) => (
           <Card
@@ -77,11 +77,9 @@ function RoleListView() {
             style={{ cursor: "pointer" }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 600, color: "var(--fg-default)", fontSize: 15 }}>
-                {r.name}
-              </span>
+              <span style={{ fontWeight: 600, color: "var(--ink)", fontSize: 15 }}>{r.name}</span>
               <Chip tone="mono">{r.defaultModel}</Chip>
-              <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+              <span style={{ fontSize: 13, color: "var(--ink-2)" }}>
                 {r.agents.length} {r.agents.length === 1 ? "agent" : "agents"}
               </span>
               {r.similarTo.length > 0 && (
@@ -103,7 +101,7 @@ function RoleListView() {
 
 /** Compact cell for a per-instance delta field (background/awareness/mission). */
 function MatrixCell({ children }: { children: ReactNode }) {
-  return <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>{children}</span>;
+  return <span style={{ fontSize: 13, color: "var(--ink-2)" }}>{children}</span>;
 }
 
 function instanceRows(agents: RoleInstance[]) {
@@ -131,16 +129,16 @@ function InstantiationMatrix({ agents }: { agents: RoleInstance[] }) {
   const headerCell = {
     padding: "8px 12px",
     textAlign: "left" as const,
-    color: "var(--fg-subtle)",
+    color: "var(--ink-3)",
     fontWeight: 600,
     fontSize: 11,
     textTransform: "uppercase" as const,
     letterSpacing: "0.06em",
-    borderBottom: "1px solid var(--border-muted)",
+    borderBottom: "1px solid var(--line-2)",
   };
   const bodyCell = {
     padding: "10px 12px",
-    borderBottom: "1px solid var(--border-muted)",
+    borderBottom: "1px solid var(--line-2)",
     fontSize: 13,
     verticalAlign: "top" as const,
   };
@@ -162,7 +160,7 @@ function InstantiationMatrix({ agents }: { agents: RoleInstance[] }) {
             <tr>
               <td
                 colSpan={headers.length}
-                style={{ ...bodyCell, color: "var(--fg-subtle)", textAlign: "center" }}
+                style={{ ...bodyCell, color: "var(--ink-3)", textAlign: "center" }}
               >
                 No agents instantiate this role.
               </td>
@@ -210,7 +208,7 @@ function RoleDetailView({ id }: { id: string }) {
             display: "flex",
             gap: 10,
             alignItems: "center",
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
             padding: 40,
           }}
         >
@@ -242,7 +240,7 @@ function RoleDetailView({ id }: { id: string }) {
             fontSize: 20,
             fontWeight: 600,
             letterSpacing: "-0.02em",
-            color: "var(--fg-default)",
+            color: "var(--ink)",
           }}
         >
           {data.name}
@@ -260,7 +258,7 @@ function RoleDetailView({ id }: { id: string }) {
                 </Link>
               ))}
             </div>
-            <div style={{ marginTop: 6, fontSize: 12, color: "var(--fg-subtle)" }}>
+            <div style={{ marginTop: 6, fontSize: 12, color: "var(--ink-3)" }}>
               structurally similar — not merged (see docs §10)
             </div>
           </div>
@@ -269,9 +267,7 @@ function RoleDetailView({ id }: { id: string }) {
 
       {/* slot stack — owned here */}
       <div>
-        <div style={{ fontWeight: 600, marginBottom: 12, color: "var(--fg-default)" }}>
-          Slot stack
-        </div>
+        <div style={{ fontWeight: 600, marginBottom: 12, color: "var(--ink)" }}>Slot stack</div>
         <SlotStack
           persona={data.persona}
           judgments={data.judgments}

@@ -1,7 +1,7 @@
 /* Chat organism styles — bubbles, avatars, streaming cursor, tool-call cards,
-   thinking disclosure, composer, waiting dots. Token-driven (theme.css vars) so
-   the whole thread re-tones with the active light/dark theme. Scoped under
-   .chat-root so nothing leaks into the rest of the cockpit. */
+   thinking disclosure, composer, waiting dots. Token-driven (tokens-base.css +
+   theme-<id>.css vars) so the whole thread re-tones with the active theme.
+   Scoped under .chat-root so nothing leaks into the rest of the cockpit. */
 
 .chat-root {
   display: flex;

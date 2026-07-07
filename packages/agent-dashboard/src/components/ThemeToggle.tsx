@@ -57,8 +57,8 @@ export function ThemeToggle() {
             padding: "6px 10px",
             fontSize: T.fz.tiny,
             fontFamily: "inherit",
-            color: "var(--fg-muted)",
-            background: "var(--bg-inset)",
+            color: "var(--ink-2)",
+            background: "var(--background)",
             border: "1px solid var(--border)",
             borderRadius: T.radius.md,
             cursor: "pointer",
@@ -79,7 +79,7 @@ export function ThemeToggle() {
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.06em",
-              color: "var(--fg-subtle)",
+              color: "var(--ink-3)",
               marginBottom: 6,
             }}
           >
@@ -105,7 +105,7 @@ export function ThemeToggle() {
                     borderRadius: T.radius.sm,
                     cursor: "pointer",
                     background: active ? "var(--accent-soft)" : "transparent",
-                    color: active ? "var(--accent-ink)" : "var(--fg-default)",
+                    color: active ? "var(--accent-ink)" : "var(--ink)",
                     textAlign: "left",
                   }}
                 >
@@ -123,7 +123,7 @@ export function ThemeToggle() {
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.06em",
-              color: "var(--fg-subtle)",
+              color: "var(--ink-3)",
               marginBottom: 6,
             }}
           >

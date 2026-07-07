@@ -30,15 +30,13 @@ function SlotCard({
             fontSize: 11,
             textTransform: "uppercase",
             letterSpacing: "0.06em",
-            color: "var(--fg-subtle)",
+            color: "var(--ink-3)",
             fontWeight: 600,
           }}
         >
           {kind}
         </span>
-        {name && (
-          <span style={{ fontWeight: 600, color: "var(--fg-default)", fontSize: 14 }}>{name}</span>
-        )}
+        {name && <span style={{ fontWeight: 600, color: "var(--ink)", fontSize: 14 }}>{name}</span>}
         {provenance && (
           <span style={{ marginLeft: "auto" }}>
             <ProvenanceChip tier={provenance.tier} sourcePath={provenance.sourcePath} />
@@ -50,7 +48,7 @@ function SlotCard({
           style={{
             fontSize: 13,
             lineHeight: 1.55,
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
             whiteSpace: "pre-wrap",
             fontFamily: "var(--font-sans)",
           }}

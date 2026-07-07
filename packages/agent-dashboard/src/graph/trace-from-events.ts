@@ -57,7 +57,14 @@ export interface EventLike {
  * fixture + repro notes.
  */
 export function persistedToEventLike(row: PersistedEvent, i: number): EventLike {
-  return { type: row.type, seq: i + 1, ...(row.data as Record<string, unknown>) };
+  // Spread `row.data` FIRST, then set `type`/`seq` — `row.data` (the full
+  // camelCase `AgentEvent`) already carries its own `type` field equal to the
+  // promoted `row.type` column (every `AgentEvent` variant's `type` IS the
+  // dotted event name — `events/types.ts` `BaseEvent`), so the previous
+  // ordering (`type` before the spread) was harmless in practice; ordering it
+  // this way instead makes the promoted column the deliberate source of
+  // truth rather than relying on that equality holding.
+  return { ...(row.data as Record<string, unknown>), type: row.type, seq: i + 1 };
 }
 
 /** Persisted `run` row (subset) — what the RunTrace envelope needs. */

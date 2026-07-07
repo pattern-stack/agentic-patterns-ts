@@ -1,8 +1,9 @@
 /*
  * Layout for the /chat route. The cockpit design tokens are now GLOBAL (see
- * styles/theme.css), so the previous scoped token re-declarations were removed;
- * only the layout the chat surface needs survives here. The .chat-route must
- * itself fill its bounded parent for the inner scroll to work.
+ * styles/tokens-base.css + the six styles/theme-<id>.css files), so the
+ * previous scoped token re-declarations were removed; only the layout the
+ * chat surface needs survives here. The .chat-route must itself fill its
+ * bounded parent for the inner scroll to work.
  */
 .chat-route {
   display: flex;

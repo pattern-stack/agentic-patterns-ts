@@ -57,7 +57,7 @@ export function AgentsRosterPage() {
               display: "flex",
               gap: 10,
               alignItems: "center",
-              color: "var(--fg-muted)",
+              color: "var(--ink-2)",
               padding: 40,
             }}
           >
@@ -84,13 +84,13 @@ export function AgentsRosterPage() {
     <>
       {familyTabs}
       <DetailPageShell breadcrumb={[{ label: "Agents" }]} maxWidth={960}>
-        <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+        <div style={{ fontSize: 13, color: "var(--ink-2)" }}>
           {data.length} situated instance{data.length === 1 ? "" : "s"} across {groups.length} role
           {groups.length === 1 ? "" : "s"} — click a role to see its agents.
         </div>
 
         {groups.length === 0 ? (
-          <Card style={{ color: "var(--fg-subtle)" }}>No agents registered.</Card>
+          <Card style={{ color: "var(--ink-3)" }}>No agents registered.</Card>
         ) : (
           groups.map(([role, agents]) => {
             const isOpen = open.has(role);
@@ -118,13 +118,13 @@ export function AgentsRosterPage() {
                       display: "inline-block",
                       transform: isOpen ? "rotate(90deg)" : "none",
                       transition: "transform 0.15s ease",
-                      color: "var(--fg-muted)",
+                      color: "var(--ink-2)",
                       fontSize: 11,
                     }}
                   >
                     ▶
                   </span>
-                  <span style={{ fontWeight: 600, color: "var(--fg-default)" }}>{role}</span>
+                  <span style={{ fontWeight: 600, color: "var(--ink)" }}>{role}</span>
                   <Chip tone="neutral">
                     {agents.length} agent{agents.length === 1 ? "" : "s"}
                   </Chip>
@@ -157,9 +157,9 @@ export function AgentsRosterPage() {
 function AgentCard({ agent: a, navigate }: { agent: RosterAgent; navigate: NavigateFunction }) {
   return (
     <Card onClick={() => navigate(`/agents/${a.id}`)} style={{ cursor: "pointer" }}>
-      <div style={{ fontWeight: 600, color: "var(--fg-default)" }}>{a.name}</div>
+      <div style={{ fontWeight: 600, color: "var(--ink)" }}>{a.name}</div>
       {a.description && (
-        <div style={{ marginTop: 6, fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.5 }}>
+        <div style={{ marginTop: 6, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>
           {a.description}
         </div>
       )}
@@ -180,7 +180,7 @@ function AgentCard({ agent: a, navigate }: { agent: RosterAgent; navigate: Navig
           <Chip tone="neutral">
             <span
               aria-hidden
-              style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)" }}
+              style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ok)" }}
             />
             ready
           </Chip>

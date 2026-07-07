@@ -1,7 +1,8 @@
 /**
  * Global reset + base element styles. The design-token foundation now lives in
- * styles/theme.css (the cockpit two-layer token system + the legacy alias
- * bridge), imported BEFORE this file in main.tsx. This file owns only the reset,
+ * styles/tokens-base.css + the six styles/theme-<id>.css files (the cockpit
+ * two-layer token system — see tokens-base.css's header for the split),
+ * imported BEFORE this file in main.tsx. This file owns only the reset,
  * base element styles, and the admin-atom keyframes.
  */
 
@@ -15,8 +16,8 @@
 
 body {
   font-family: var(--font-sans);
-  background: var(--bg-canvas);
-  color: var(--fg-default);
+  background: var(--background);
+  color: var(--ink);
   font-size: var(--fz-md);
   line-height: var(--lh-base);
   font-feature-settings: "cv11", "ss01", "tnum";

@@ -42,7 +42,7 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
-        background: "var(--bg-inset)",
+        background: "var(--background)",
         border: "1px solid var(--border)",
         borderRadius: 8,
         overflow: "hidden",
@@ -64,13 +64,13 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
             fontWeight: 600,
             textTransform: "uppercase",
             letterSpacing: "0.08em",
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
           }}
         >
           Universe
         </span>
         {comp && (
-          <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--fg-subtle)" }}>
+          <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--ink-3)" }}>
             {toolCount} tool{toolCount === 1 ? "" : "s"}
           </span>
         )}
@@ -78,7 +78,7 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
 
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px" }}>
         {!agentId && <Hint>Select an agent to see what it can do.</Hint>}
-        {error && <div style={{ fontSize: 12, color: "var(--red)" }}>{error}</div>}
+        {error && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
         {comp && comp.capabilities.length === 0 && (
           <Hint>This agent declares no capabilities.</Hint>
         )}
@@ -93,12 +93,8 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
                 marginBottom: 5,
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-default)" }}>
-                {cap.name}
-              </span>
-              <span
-                style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--fg-subtle)" }}
-              >
+              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{cap.name}</span>
+              <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--ink-3)" }}>
                 {cap.tools.length} tool{cap.tools.length === 1 ? "" : "s"}
               </span>
             </div>
@@ -114,7 +110,7 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
                   borderRadius: 5,
                   fontFamily: "var(--font-mono)",
                   fontSize: 12,
-                  color: "var(--fg-muted)",
+                  color: "var(--ink-2)",
                 }}
               >
                 <span
@@ -123,7 +119,7 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
                     width: 5,
                     height: 5,
                     borderRadius: "50%",
-                    background: "var(--fg-subtle)",
+                    background: "var(--ink-3)",
                     flex: "none",
                   }}
                 />
@@ -131,7 +127,7 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
               </div>
             ))}
             {cap.plays.length > 0 && (
-              <div style={{ fontSize: 11, color: "var(--fg-subtle)", padding: "3px 6px" }}>
+              <div style={{ fontSize: 11, color: "var(--ink-3)", padding: "3px 6px" }}>
                 plays: {cap.plays.join(", ")}
               </div>
             )}
@@ -143,5 +139,5 @@ export function AgentUniverse({ agentId }: { agentId: string | null }) {
 }
 
 function Hint({ children }: { children: React.ReactNode }) {
-  return <div style={{ fontSize: 12, color: "var(--fg-subtle)", lineHeight: 1.5 }}>{children}</div>;
+  return <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.5 }}>{children}</div>;
 }

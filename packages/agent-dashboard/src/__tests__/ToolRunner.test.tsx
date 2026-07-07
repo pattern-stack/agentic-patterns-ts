@@ -147,4 +147,28 @@ describe("ToolRunner (rendered)", () => {
     await screen.findByText("text: Required");
     expect(screen.getByText(/error · 1ms/)).toBeTruthy();
   });
+
+  // Scope-addendum fix: a REJECTED fetch (server down / network drop — as
+  // opposed to a resolved-but-non-2xx Response, covered above) used to
+  // propagate out of `compositionApi.invokeTool` as an unhandled rejection —
+  // `ToolRunner.run()`'s bare `try {…} finally {…}` has no `catch`, so no
+  // error ever reached `result`: the button silently re-enabled with no
+  // error box. `invokeTool` now catches the rejection and folds it into the
+  // same `{ok:false, error}` envelope.
+  it("folds a network-level fetch rejection into the error box (not an unhandled rejection)", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ToolRunner capId="toolsmith-utilities" tool={tool} />);
+
+    fireEvent.change(screen.getByPlaceholderText("string"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run tool" }));
+
+    await screen.findByText("Failed to fetch");
+    expect(screen.getByText(/error · 0ms/)).toBeTruthy();
+    // the button re-enables afterward either way — the fix is the visible error box.
+    const button = screen.getByRole("button", { name: "Run tool" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+  });
 });

@@ -20,12 +20,12 @@ import { Card } from "../atoms/Card";
 
 const CATEGORY_TONES: Record<HookCategory, BadgeTone> = {
   tool: "accent",
-  permission: "yellow",
-  compact: "purple",
-  session: "muted",
-  stop: "red",
-  notification: "emerald",
-  other: "neutral",
+  permission: "warn",
+  compact: "violet",
+  session: "mute",
+  stop: "err",
+  notification: "ok",
+  other: "mute",
 };
 
 function toneForHook(hookName: string): BadgeTone {
@@ -80,17 +80,17 @@ export function SessionCard({ session }: SessionCardProps) {
         <span
           style={{
             width: 12,
-            color: "var(--fg-subtle)",
+            color: "var(--ink-3)",
             fontFamily: "var(--font-mono)",
           }}
         >
           {open ? "▾" : "▸"}
         </span>
-        <Badge tone="emerald" variant="outline" title={session.sessionId}>
+        <Badge tone="ok" variant="outline" title={session.sessionId}>
           <span style={{ fontFamily: "var(--font-mono)" }}>{truncateId(session.sessionId)}</span>
         </Badge>
         {session.source === "resume" && (
-          <Badge tone="purple" variant="outline" title="SessionStart fired with source=resume">
+          <Badge tone="violet" variant="outline" title="SessionStart fired with source=resume">
             resumed
           </Badge>
         )}
@@ -98,7 +98,7 @@ export function SessionCard({ session }: SessionCardProps) {
           <span
             title={session.cwd}
             style={{
-              color: "var(--fg-muted)",
+              color: "var(--ink-2)",
               fontFamily: "var(--font-mono)",
               fontSize: 12,
               overflow: "hidden",
@@ -110,7 +110,7 @@ export function SessionCard({ session }: SessionCardProps) {
             {session.cwd}
           </span>
         )}
-        <Badge tone="muted">{session.events.length} events</Badge>
+        <Badge tone="mute">{session.events.length} events</Badge>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {countEntries.map(([hook, n]) => (
             <Badge key={hook} tone={toneForHook(hook)}>
@@ -124,7 +124,7 @@ export function SessionCard({ session }: SessionCardProps) {
             display: "flex",
             gap: 8,
             alignItems: "center",
-            color: "var(--fg-subtle)",
+            color: "var(--ink-3)",
             fontSize: 12,
             fontFamily: "var(--font-mono)",
           }}
@@ -133,7 +133,7 @@ export function SessionCard({ session }: SessionCardProps) {
           <span>{formatTime(session.firstSeen)}</span>
           <span>→</span>
           <span>{formatTime(session.lastSeen)}</span>
-          <Badge tone="muted" variant="outline">
+          <Badge tone="mute" variant="outline">
             {duration}
           </Badge>
         </div>
@@ -149,8 +149,8 @@ function SessionTimeline({ events }: { events: SessionEvent[] }) {
       <div
         style={{
           padding: "12px 16px",
-          borderTop: "1px solid var(--border-muted)",
-          color: "var(--fg-muted)",
+          borderTop: "1px solid var(--line-2)",
+          color: "var(--ink-2)",
           fontSize: 13,
         }}
       >
@@ -159,7 +159,7 @@ function SessionTimeline({ events }: { events: SessionEvent[] }) {
     );
   }
   return (
-    <div style={{ borderTop: "1px solid var(--border-muted)" }}>
+    <div style={{ borderTop: "1px solid var(--line-2)" }}>
       {events.map((event) => (
         <TimelineRow key={event.id} event={event} />
       ))}
@@ -171,7 +171,7 @@ function TimelineRow({ event }: { event: SessionEvent }) {
   const [open, setOpen] = useState(false);
   const summary = summarizeHook(event);
   return (
-    <div style={{ borderBottom: "1px solid var(--border-muted)" }}>
+    <div style={{ borderBottom: "1px solid var(--line-2)" }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -194,7 +194,7 @@ function TimelineRow({ event }: { event: SessionEvent }) {
         <span
           style={{
             width: 12,
-            color: "var(--fg-subtle)",
+            color: "var(--ink-3)",
             fontFamily: "var(--font-mono)",
           }}
         >
@@ -202,7 +202,7 @@ function TimelineRow({ event }: { event: SessionEvent }) {
         </span>
         <span
           style={{
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
             fontSize: 12,
             fontFamily: "var(--font-mono)",
             minWidth: 90,
@@ -212,13 +212,13 @@ function TimelineRow({ event }: { event: SessionEvent }) {
         </span>
         <Badge tone={toneForHook(event.hookName)}>{event.hookName}</Badge>
         {event.toolName && (
-          <Badge tone="muted" variant="outline">
+          <Badge tone="mute" variant="outline">
             {event.toolName}
           </Badge>
         )}
         {event.runnerCorrelationId && (
           <Badge
-            tone="purple"
+            tone="violet"
             variant="filled"
             title={`runner_correlation_id: ${event.runnerCorrelationId}`}
           >
@@ -227,7 +227,7 @@ function TimelineRow({ event }: { event: SessionEvent }) {
         )}
         <span
           style={{
-            color: "var(--fg-default)",
+            color: "var(--ink)",
             overflow: "hidden",
             whiteSpace: "nowrap",
             textOverflow: "ellipsis",
@@ -244,8 +244,8 @@ function TimelineRow({ event }: { event: SessionEvent }) {
           style={{
             margin: 0,
             padding: "8px 14px 12px 52px",
-            background: "var(--bg-inset)",
-            color: "var(--fg-muted)",
+            background: "var(--background)",
+            color: "var(--ink-2)",
             fontFamily: "var(--font-mono)",
             fontSize: 11,
             whiteSpace: "pre-wrap",

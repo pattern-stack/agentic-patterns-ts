@@ -182,39 +182,55 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
     const inputTokens = options?.inputTokens ?? 0;
     const outputTokens = options?.outputTokens ?? 0;
 
-    this._addMessageStmt.run(
-      messageId,
-      conversationId,
-      kind,
-      options?.runId ?? null,
-      inputTokens,
-      outputTokens,
-      nowIso,
-    );
-
-    const storedParts: StoredMessagePart[] = parts.map((p, index) => {
-      const partId = generateId();
-      const metadata = p.metadata ?? {};
-      this._addPartStmt.run(
-        partId,
+    // One message INSERT + N part INSERTs + the conversation's `touch` UPDATE
+    // must land atomically. Transactions run via explicit `exec("BEGIN")` /
+    // `COMMIT` / `ROLLBACK`, NOT `db.transaction()`: the driver contract the
+    // stores are written against is prepare/exec/close only (see `load.ts`
+    // `wrapBunDatabase` — the bun:sqlite adapter exposes exactly that surface,
+    // and `.transaction()` would throw at runtime under Bun even though
+    // better-sqlite3 tests pass under Node). All statements are synchronous,
+    // so nothing can interleave between BEGIN and COMMIT.
+    this._db.exec("BEGIN");
+    let storedParts: StoredMessagePart[];
+    try {
+      this._addMessageStmt.run(
         messageId,
-        p.type,
-        p.content ?? null,
-        JSON.stringify(metadata),
-        index,
+        conversationId,
+        kind,
+        options?.runId ?? null,
+        inputTokens,
+        outputTokens,
+        nowIso,
       );
-      return {
-        id: partId,
-        messageId,
-        type: p.type,
-        content: p.content,
-        metadata,
-        position: index,
-        createdAt: now,
-      };
-    });
 
-    this._touchConvStmt.run(nowIso, conversationId);
+      storedParts = parts.map((p, index) => {
+        const partId = generateId();
+        const metadata = p.metadata ?? {};
+        this._addPartStmt.run(
+          partId,
+          messageId,
+          p.type,
+          p.content ?? null,
+          JSON.stringify(metadata),
+          index,
+        );
+        return {
+          id: partId,
+          messageId,
+          type: p.type,
+          content: p.content,
+          metadata,
+          position: index,
+          createdAt: now,
+        };
+      });
+
+      this._touchConvStmt.run(nowIso, conversationId);
+      this._db.exec("COMMIT");
+    } catch (err) {
+      this._db.exec("ROLLBACK");
+      throw err;
+    }
 
     return {
       id: messageId,
@@ -248,7 +264,14 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
   }
 
   async listConversations(limit?: number): Promise<StoredConversationSummary[]> {
-    const rows = this._listConvStmt.all({ limit: limit ?? -1 }) as RawSummaryRow[];
+    // `limit ?? -1` is WRONG here: `??` only substitutes on null/undefined, so
+    // `listConversations(0)` would pass `{ limit: 0 }` straight through to
+    // `LIMIT @limit` → zero rows — diverging from `InMemoryConversationStore`
+    // (below), which treats `0` (falsy, not just absent) as "no cap" via its
+    // `limit > 0` guard. `limit && limit > 0` normalizes both falsy cases
+    // (`0` and `undefined`) to "all" (`-1`), matching the in-memory contract.
+    const effectiveLimit = limit && limit > 0 ? limit : -1;
+    const rows = this._listConvStmt.all({ limit: effectiveLimit }) as RawSummaryRow[];
     return rows.map((r) => ({
       conversationId: r.conversationId,
       agentName: r.agentName,

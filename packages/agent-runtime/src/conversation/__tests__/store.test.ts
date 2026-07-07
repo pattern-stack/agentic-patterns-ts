@@ -246,6 +246,19 @@ describe("InMemoryConversationStore", () => {
       expect(await store.listConversations(1)).toHaveLength(1);
     });
 
+    // Protocol-consistency pin (both implementations must agree): `0` is
+    // falsy but not `undefined` — a store that substitutes it via `?? `
+    // instead of a `limit > 0` guard would treat `listConversations(0)` as
+    // "return zero rows" instead of "no cap". `SQLiteConversationStore`'s
+    // counterpart test (`storage/__tests__/conversation-store.test.ts`) pins
+    // the same contract against the SQL-backed implementation.
+    it("treats limit 0 the same as omitted — returns all conversations", async () => {
+      const store = new InMemoryConversationStore();
+      await store.createConversation("agent-a", "model-a");
+      await store.createConversation("agent-b", "model-b");
+      expect(await store.listConversations(0)).toHaveLength(2);
+    });
+
     it("returns an empty array when there are no conversations", async () => {
       const store = new InMemoryConversationStore();
       expect(await store.listConversations()).toEqual([]);

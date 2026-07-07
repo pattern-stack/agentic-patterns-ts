@@ -70,30 +70,30 @@ function ClaudeCodeLoaded({ initialEvents }: { initialEvents: StreamEvent[] }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <h1 style={{ fontSize: 20, fontWeight: 600 }}>Claude Code Sessions</h1>
           {connected ? (
-            <Badge tone="green" variant="outline">
+            <Badge tone="ok" variant="outline">
               <span
                 style={{
                   display: "inline-block",
                   width: 6,
                   height: 6,
                   borderRadius: "50%",
-                  background: "var(--green)",
+                  background: "var(--ok)",
                 }}
               />
               connected
             </Badge>
           ) : (
-            <Badge tone="yellow" variant="outline">
-              <Spinner size={10} color="var(--yellow)" thickness={1.5} />
+            <Badge tone="warn" variant="outline">
+              <Spinner size={10} color="var(--warn)" thickness={1.5} />
               reconnecting…
             </Badge>
           )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Badge tone="muted" variant="outline">
+          <Badge tone="mute" variant="outline">
             {sessions.length} session{sessions.length === 1 ? "" : "s"}
           </Badge>
-          <Badge tone="muted" variant="outline">
+          <Badge tone="mute" variant="outline">
             {totalEvents} event{totalEvents === 1 ? "" : "s"}
           </Badge>
           <Button variant="ghost" size="sm" onClick={clear}>
@@ -110,8 +110,8 @@ function ClaudeCodeLoaded({ initialEvents }: { initialEvents: StreamEvent[] }) {
             gap: 8,
             marginBottom: 12,
             padding: "10px 14px",
-            color: "var(--red)",
-            borderColor: "var(--red)",
+            color: "var(--err)",
+            borderColor: "var(--err)",
             fontSize: 13,
           }}
           padded={false}
@@ -146,15 +146,15 @@ function EmptyState() {
           alignItems: "center",
           gap: 6,
           padding: "36px 16px",
-          color: "var(--fg-muted)",
+          color: "var(--ink-2)",
           fontSize: 13,
           textAlign: "center",
         }}
       >
-        <span style={{ fontWeight: 600, color: "var(--fg-default)" }}>
+        <span style={{ fontWeight: 600, color: "var(--ink)" }}>
           No Claude Code sessions observed yet
         </span>
-        <span style={{ color: "var(--fg-subtle)", maxWidth: 520 }}>
+        <span style={{ color: "var(--ink-3)", maxWidth: 520 }}>
           Install the @agentic-patterns plugin in a project and open Claude Code there. Hook events
           will stream in as the session runs.
         </span>
@@ -173,11 +173,11 @@ function HydratingState() {
           justifyContent: "center",
           gap: 10,
           padding: "36px 16px",
-          color: "var(--fg-muted)",
+          color: "var(--ink-2)",
           fontSize: 13,
         }}
       >
-        <Spinner size={12} color="var(--fg-muted)" thickness={1.5} />
+        <Spinner size={12} color="var(--ink-2)" thickness={1.5} />
         <span>Loading recent sessions…</span>
       </div>
     </Card>

@@ -35,6 +35,8 @@ import {
 } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
 import type { RunRow, RunSummary } from "../api/types";
+import { Badge } from "../components/atoms/Badge";
+import { Button } from "../components/atoms/Button";
 import { DropdownMenu } from "../components/kit/DropdownMenu";
 import { inputStyle } from "../components/kit/Field";
 import { Segmented } from "../components/kit/Segmented";
@@ -55,9 +57,13 @@ import { eventsToSteps, persistedToEventLike } from "../graph/trace-from-events"
 import type { CapabilityMeta } from "../graph/types";
 import { useRunReplay } from "../graph/use-run-replay";
 import { relTime, shortId } from "../lib/format";
-import { MAX_RUN_CHIPS, pinSelectedRun, sortRunsNewestFirst } from "../lib/runPicker";
+import {
+  MAX_RUN_CHIPS,
+  pickOrDeselectRun,
+  pinSelectedRun,
+  sortRunsNewestFirst,
+} from "../lib/runPicker";
 import { fetchRun, fetchRunEvents, fetchRuns } from "../lib/runsApi";
-import { Badge, Button } from "../ui/atoms";
 import { T } from "../ui/tokens";
 
 const TOOL_INDEX = buildToolIndex();
@@ -257,6 +263,12 @@ export function RunSurfacePage() {
 
   const convIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Monotonic pick-token: rapid-clicking two run chips fires two concurrent
+  // `pickRun` calls whose `Promise.all` can resolve in EITHER order — without
+  // this, the last one to RETURN wins the state commit, not the last one
+  // CLICKED. Each call captures the token at its own start; only the call
+  // whose token still matches the ref when it resolves is allowed to commit.
+  const pickTokenRef = useRef(0);
 
   const isLive = streaming || liveEvents.length > 0;
   // Narrowable replay handle (precedence: live > replay > demo) — a separately
@@ -309,6 +321,7 @@ export function RunSurfacePage() {
   // engine resets on runKey change) — Play replays through the untouched
   // buildGraph -> eventsToSteps -> useRunReplay stack.
   const pickRun = useCallback(async (runId: string) => {
+    const token = ++pickTokenRef.current;
     abortRef.current?.abort();
     setStreaming(false);
     setLiveEvents([]);
@@ -316,6 +329,9 @@ export function RunSurfacePage() {
     setReplayLoading(true);
     try {
       const [runRes, eventsRes] = await Promise.all([fetchRun(runId), fetchRunEvents(runId)]);
+      // A newer pickRun call started after this one — its resolution (or a
+      // still-pending one) owns the state now; drop this stale result.
+      if (token !== pickTokenRef.current) return;
       if (runRes.kind === "unconfigured" || eventsRes.kind === "unconfigured") {
         setError("run history is not configured on this server");
         return;
@@ -329,10 +345,25 @@ export function RunSurfacePage() {
       setRunKey(runId);
       setSelectedNodeId(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load run");
+      if (token === pickTokenRef.current) {
+        setError(e instanceof Error ? e.message : "Failed to load run");
+      }
     } finally {
-      setReplayLoading(false);
+      if (token === pickTokenRef.current) setReplayLoading(false);
     }
+  }, []);
+
+  // Return to the demo sample trace (port-map §3.4 acceptance: "switch back
+  // to demo" — there was previously NO way back short of a full reload).
+  // Invalidates any in-flight `pickRun` so a stale resolution can't resurrect
+  // the replay right after this clears it.
+  const returnToDemo = useCallback(() => {
+    pickTokenRef.current += 1;
+    setReplayLoading(false);
+    setReplayRun(null);
+    setRunKey("demo");
+    setSelectedNodeId(null);
+    setError(null);
   }, []);
 
   // fetch the selected agent's declared composition (for composition mode) + its
@@ -496,18 +527,48 @@ export function RunSurfacePage() {
                 key={r.runId}
                 run={r}
                 active={r.runId === activeRunId}
-                onClick={() => void pickRun(r.runId)}
+                // Clicking the ALREADY-active chip deselects it — the only
+                // way back to demo mode before this was a full page reload
+                // (port-map §3.4's "switch back to demo" acceptance).
+                onClick={() => {
+                  const next = pickOrDeselectRun(r.runId, activeRunId);
+                  if (next === null) returnToDemo();
+                  else void pickRun(next);
+                }}
               />
             ))}
             {hiddenRunCount > 0 && (
               <RunPickerMenu
                 runs={runs}
                 activeRunId={activeRunId}
-                onPick={(id) => void pickRun(id)}
+                onPick={(id) => {
+                  const next = pickOrDeselectRun(id, activeRunId);
+                  if (next === null) returnToDemo();
+                  else void pickRun(next);
+                }}
               />
             )}
             {replayLoading && (
               <span style={{ fontSize: T.fz.micro, color: "var(--mute)" }}>loading…</span>
+            )}
+            {isReplay && (
+              <button
+                type="button"
+                onClick={returnToDemo}
+                title="Return to the demo sample trace"
+                style={{
+                  fontFamily: T.font.mono,
+                  fontSize: T.fz.micro,
+                  padding: "3px 9px",
+                  borderRadius: T.radius.pill,
+                  border: "1px solid var(--line)",
+                  background: "transparent",
+                  color: "var(--mute)",
+                  cursor: "pointer",
+                }}
+              >
+                ↺ demo
+              </button>
             )}
           </div>
         )}
