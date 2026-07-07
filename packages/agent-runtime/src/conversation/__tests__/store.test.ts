@@ -158,6 +158,19 @@ describe("InMemoryConversationStore", () => {
     expect(parts[1]!.metadata).toEqual({ source: "test" });
   });
 
+  it("should assign position by insertion index", async () => {
+    const store = new InMemoryConversationStore();
+    const conv = await store.createConversation("Agent", "model");
+
+    const msg = await store.addMessage(conv.id, "request", [
+      { type: "user_prompt", content: "Hello" },
+      { type: "context", content: "extra" },
+    ]);
+
+    expect(msg.parts[0]!.position).toBe(0);
+    expect(msg.parts[1]!.position).toBe(1);
+  });
+
   it("should return empty array for unknown message parts", async () => {
     const store = new InMemoryConversationStore();
     const parts = await store.getMessageParts("nonexistent");
@@ -197,5 +210,45 @@ describe("InMemoryConversationStore", () => {
     const resParts = await store.getMessageParts(resMsg.id);
     expect(resParts).toHaveLength(1);
     expect(resParts[0]!.content).toBe("4");
+  });
+
+  describe("listConversations", () => {
+    it("lists newest-created first with messageCount/tokenCount/lastMessageAt aggregates", async () => {
+      const store = new InMemoryConversationStore();
+      const a = await store.createConversation("agent-a", "model-a");
+      await new Promise((r) => setTimeout(r, 2));
+      const b = await store.createConversation("agent-b", "model-b");
+
+      await store.addMessage(a.id, "request", [{ type: "user_prompt", content: "hi" }]);
+      await store.addMessage(a.id, "response", [{ type: "text", content: "hello" }], {
+        inputTokens: 10,
+        outputTokens: 5,
+      });
+
+      const summaries = await store.listConversations();
+      expect(summaries.map((s) => s.conversationId)).toEqual([b.id, a.id]);
+
+      const summaryA = summaries.find((s) => s.conversationId === a.id);
+      expect(summaryA?.messageCount).toBe(2);
+      expect(summaryA?.tokenCount).toBe(15);
+      expect(summaryA?.status).toBe("active");
+
+      const summaryB = summaries.find((s) => s.conversationId === b.id);
+      expect(summaryB?.messageCount).toBe(0);
+      expect(summaryB?.tokenCount).toBe(0);
+      expect(summaryB?.lastMessageAt).toBeUndefined();
+    });
+
+    it("honors limit", async () => {
+      const store = new InMemoryConversationStore();
+      await store.createConversation("agent-a", "model-a");
+      await store.createConversation("agent-b", "model-b");
+      expect(await store.listConversations(1)).toHaveLength(1);
+    });
+
+    it("returns an empty array when there are no conversations", async () => {
+      const store = new InMemoryConversationStore();
+      expect(await store.listConversations()).toEqual([]);
+    });
   });
 });

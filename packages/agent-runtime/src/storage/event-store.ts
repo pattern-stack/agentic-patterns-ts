@@ -210,7 +210,61 @@ const SCHEMA_V4 = `
 ALTER TABLE eval_run ADD COLUMN scorer TEXT;
 `;
 
-const TARGET_SCHEMA_VERSION = 4;
+/**
+ * v5 — adds the conversation-persistence layer (#S7 `SQLiteConversationStore`):
+ * `conversations` (one row per multi-turn session), `conversation_messages`
+ * (request/response turns, `run_id` linking a message to its `runs` row —
+ * same no-hard-FK convention as `eval_result.run_id`), and
+ * `conversation_message_parts` (the structured content of a message, with an
+ * explicit `position` int the dashboard sorts by — the in-memory
+ * `ConversationStore` protocol has no such column, `conversation/store.ts`).
+ * Purely additive, same downgrade caveat as v2/v3/v4: a v5 DB opened by a
+ * pre-#S7 runtime throws below (its `TARGET_SCHEMA_VERSION` is still 4).
+ * `seq` (not the public `id`) is the ordering key — an autoincrement int
+ * mirrors `events.id`'s ordering role, kept separate from the public UUID
+ * `id` TEXT column so it never leaks into the wire API.
+ */
+const SCHEMA_V5 = `
+CREATE TABLE IF NOT EXISTS conversations (
+  id          TEXT PRIMARY KEY,
+  agent_name  TEXT NOT NULL,
+  model       TEXT NOT NULL,
+  metadata    TEXT NOT NULL DEFAULT '{}',
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_agent   ON conversations(agent_name);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  seq             INTEGER PRIMARY KEY AUTOINCREMENT,
+  id              TEXT NOT NULL UNIQUE,
+  conversation_id TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  run_id          TEXT,
+  input_tokens    INTEGER NOT NULL DEFAULT 0,
+  output_tokens   INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_messages_conv ON conversation_messages(conversation_id, seq);
+CREATE INDEX IF NOT EXISTS idx_conv_messages_run  ON conversation_messages(run_id) WHERE run_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS conversation_message_parts (
+  seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+  id         TEXT NOT NULL UNIQUE,
+  message_id TEXT NOT NULL,
+  type       TEXT NOT NULL,
+  content    TEXT,
+  metadata   TEXT NOT NULL DEFAULT '{}',
+  position   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_parts_message ON conversation_message_parts(message_id, position);
+`;
+
+const TARGET_SCHEMA_VERSION = 5;
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -418,6 +472,11 @@ export class EventStore {
     if (version < 4) {
       this._db.exec(SCHEMA_V4);
       version = 4;
+    }
+
+    if (version < 5) {
+      this._db.exec(SCHEMA_V5);
+      version = 5;
     }
 
     if (version !== TARGET_SCHEMA_VERSION) {

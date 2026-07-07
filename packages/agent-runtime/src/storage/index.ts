@@ -24,8 +24,15 @@ export { createEvalResultRecorder } from "./eval-recorder.js";
 export type { EvalRecorderMeta, EvalResultLike } from "./eval-recorder.js";
 export { EventStore } from "./event-store.js";
 export type { EventStoreOptions, PersistedEvent, SessionSummary } from "./event-store.js";
-export { loadEvalStore, loadEventStore, loadRunStore } from "./load.js";
+export { SQLiteConversationStore } from "./conversation-store.js";
+export {
+  loadConversationStore,
+  loadEvalStore,
+  loadEventStore,
+  loadRunStore,
+} from "./load.js";
 export type {
+  LoadConversationStoreResult,
   LoadEvalStoreResult,
   LoadEventStoreOptions,
   LoadEventStoreResult,

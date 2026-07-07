@@ -39,6 +39,16 @@ export interface Exchange {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly timestamp: Date;
+  /**
+   * The underlying `RunStore` run id this exchange's execution landed under
+   * (the runner's internally-generated `runId`, captured off the first
+   * streamed event — `RunOptions` has no slot to hand a runId IN, only
+   * `traceId`/`parentSpanId`). Only populated by `stream()` (the SSE/live
+   * path `RunStoreExporter` observes); `send()` has no event stream to read
+   * it from. Threaded onto `StoredMessage.runId` so the Console trace rail
+   * can jump straight to `GET /admin/runs/:runId/events`.
+   */
+  readonly runId?: string;
 }
 
 /**
@@ -219,15 +229,28 @@ export class Conversation {
     let totalInput = 0;
     let totalOutput = 0;
     let error: Error | undefined;
+    // The runner's OWN internally-generated runId (distinct from this
+    // method's local `runId` above, which only labels Conversation's own
+    // conversation.start/end events) — RunOptions has no slot to pass a
+    // runId IN, so it's captured off the first event the runner yields.
+    // Every AgentEvent carries `runId` (BaseEvent), so the first one wins.
+    let capturedRunId: string | undefined;
 
     try {
       for await (const event of this.runner.stream(this.agent, message, {
         messageHistory,
         toolExecutor: this._toolExecutor,
         eventBus: options?.eventBus,
+        // traceId fix: without this, the runner falls back to `effectiveTraceId
+        // = options?.traceId ?? runId` and stamps every run event with ITS OWN
+        // runId as the trace id — disjoint from this method's `agent.conversation.
+        // start/end` events (traceId = invocationId, above). Passing traceId
+        // here joins both event families onto one trace.
+        traceId,
         ...(options?.maxIterations != null ? { maxIterations: options.maxIterations } : {}),
       })) {
         yield event;
+        capturedRunId ??= event.runId;
 
         // Accumulate response data from events
         if (event.type === "agent.message.chunk") {
@@ -252,6 +275,7 @@ export class Conversation {
       inputTokens: totalInput,
       outputTokens: totalOutput,
       timestamp: new Date(),
+      runId: capturedRunId,
     };
 
     this._history.push(exchange);
@@ -314,15 +338,19 @@ export class Conversation {
       this._storeConversationId = conv.id;
     }
 
-    await this._store.addMessage(this._storeConversationId, "request", [
-      { type: "user_prompt", content: exchange.user },
-    ]);
+    await this._store.addMessage(
+      this._storeConversationId,
+      "request",
+      [{ type: "user_prompt", content: exchange.user }],
+      { runId: exchange.runId },
+    );
 
     await this._store.addMessage(
       this._storeConversationId,
       "response",
       [{ type: "text", content: exchange.assistant }],
       {
+        runId: exchange.runId,
         inputTokens: exchange.inputTokens,
         outputTokens: exchange.outputTokens,
       },
