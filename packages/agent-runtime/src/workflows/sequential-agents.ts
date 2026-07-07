@@ -13,9 +13,10 @@
  *  - The Scratchpad IS the implicitly passed context layer: each stage's
  *    emission lands in a slot (auto-created per stage, or a caller-provided
  *    one), and every LATER stage's prompt is rendered from the pipeline input
- *    plus ALL prior emissions — no hand-threading, ADK-style "the next agent
- *    sees what happened". A stage may override `prompt` to render a WINDOWED
- *    view instead (large payloads should live in slots its `tail` writes).
+ *    plus the immediately-PRIOR emission (visibility follows the chain — a
+ *    curation stage's cuts stay cut; `opts.render = renderSharedState` opts a
+ *    sequence into ADK-session-style all-prior visibility). A stage may override `prompt` to render a WINDOWED
+ *    view instead (large payloads should live in slots its `onEmit` writes).
  *  - Because slots are run-scoped, the same sharing holds across `Loop`
  *    iterations for free: `Loop({ body: sequentialAgent([...]) })` re-enters
  *    with the pad intact. (Subagent teams — `delegateTo` — do NOT see the pad
@@ -25,7 +26,7 @@
  *    InputShape/OutputShape mapping across the sequence is a declared
  *    fast-follow (open: a shape may not exist on every INSTANCE of an agent).
  *  - `stop` turns an emission into a short-circuit: later stages are skipped
- *    and the result carries `{ stage, reason }` — the control plane. `tail`
+ *    and the result carries `{ stage, reason }` — the control plane. `onEmit`
  *    (the fused deterministic follow-through of a stage's decision) may also
  *    stop by RETURNING a reason string.
  *  - Tool-using stages just work: the executor is created per stage from the
@@ -44,11 +45,11 @@ import { createToolboxExecutor } from "../runner/toolbox-executor.js";
 import { AgentStep } from "./agent-step.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
 import {
-  createScratchpad,
-  slot,
   type ScratchpadAccess,
   type ScratchpadReader,
   type Slot,
+  createScratchpad,
+  slot,
 } from "./slot.js";
 
 // ---------------------------------------------------------------------------
@@ -71,15 +72,12 @@ export interface AgentStageSpec<TOut = unknown> {
   // biome-ignore lint/suspicious/noExplicitAny: Slot<T> is invariant (its `merge` param); the emission write is dynamically typed by design — the SequentialBuilder precedent.
   readonly slot?: Slot<any>;
   /**
-   * The stage's fused deterministic tail — code that REALIZES the agent's
-   * decision (writes derived slots, executes the read, enforces floors). May
-   * return a string to STOP the sequence with that reason.
+   * The stage's fused deterministic follow-through — code that REALIZES the
+   * agent's decision (writes derived slots, executes the read, enforces
+   * floors). Contract: RETURN A STRING to stop the sequence with that reason;
+   * any other return value is ignored.
    */
-  readonly tail?: (
-    output: TOut,
-    pad: ScratchpadAccess,
-    ctx: NodeRunContext,
-  ) => void | string | Promise<void | string>;
+  readonly onEmit?: (output: TOut, pad: ScratchpadAccess, ctx: NodeRunContext) => unknown;
   /** Emission-level stop rule (clarify/refuse lanes): a string stops the sequence. */
   readonly stop?: (output: TOut, state: ScratchpadReader) => string | null;
   /** Tool/2-tier loop cap for this stage (AgentStep semantics). */
@@ -96,7 +94,9 @@ export interface SequentialAgentOpts {
   readonly name?: string;
   /**
    * The implicit state render used for stages without a custom `prompt`.
-   * Default: {@link renderSharedState}.
+   * Default: {@link renderPriorEmission} — visibility follows the CHAIN (a
+   * curation stage's cuts stay cut). Pass {@link renderSharedState} for
+   * ADK-session-style all-prior visibility.
    */
   readonly render?: (input: unknown, completed: ReadonlyArray<CompletedStage>) => string;
 }
@@ -110,7 +110,7 @@ export interface CompletedStage {
 export interface SequentialAgentResult {
   /** Every completed stage's emission, by stage name. */
   readonly outputs: Record<string, unknown>;
-  /** Set when a stage's `stop`/`tail` short-circuited the sequence. */
+  /** Set when a stage's `stop`/`onEmit` short-circuited the sequence. */
   readonly stopped: { readonly stage: string; readonly reason: string } | null;
 }
 
@@ -118,7 +118,10 @@ export interface SequentialAgentResult {
 // Defaults
 // ---------------------------------------------------------------------------
 
-/** The default implicit render: the task + every prior emission, ADK-session style. */
+/**
+ * The all-prior render (OPT-IN via `opts.render` — for reviewer-style stages that
+ * should see everything established): the task + EVERY prior emission.
+ */
 export function renderSharedState(
   input: unknown,
   completed: ReadonlyArray<CompletedStage>,
@@ -130,6 +133,22 @@ export function renderSharedState(
       `## ${c.name}\n${typeof c.output === "string" ? c.output : JSON.stringify(c.output, null, 1)}`,
   );
   return `${task}\n\nWHAT PRIOR STAGES ESTABLISHED:\n\n${sections.join("\n\n")}`;
+}
+
+/** The DEFAULT implicit render: the task + the immediately-prior emission only —
+ *  what a stage acts on is what the chain just established (post-curation stages
+ *  don't implicitly resurrect pre-curation detail). Artifacts/big payloads ride
+ *  SLOTS, never emissions. */
+export function renderPriorEmission(
+  input: unknown,
+  completed: ReadonlyArray<CompletedStage>,
+): string {
+  const task = typeof input === "string" ? input : JSON.stringify(input, null, 1);
+  const prior = completed[completed.length - 1];
+  if (prior == null) return task;
+  const body =
+    typeof prior.output === "string" ? prior.output : JSON.stringify(prior.output, null, 1);
+  return `${task}\n\nWHAT THE PRIOR STAGE ESTABLISHED (${prior.name}):\n${body}`;
 }
 
 function isSpec(stage: AgentStage): stage is AgentStageSpec {
@@ -190,7 +209,7 @@ export function sequentialAgent(
     name: opts.name ?? "sequential-agents",
     async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<SequentialAgentResult>> {
       const scratchpad = ctx.scratchpad ?? createScratchpad();
-      const render = opts.render ?? renderSharedState;
+      const render = opts.render ?? renderPriorEmission;
       const completed: CompletedStage[] = [];
       const outputs: Record<string, unknown> = {};
       let tokensIn = 0;
@@ -252,10 +271,10 @@ export function sequentialAgent(
         const stopReason = spec.stop?.(res.output, scratchpad.reader()) ?? null;
         if (stopReason != null) return done({ stage: name, reason: stopReason });
 
-        if (spec.tail != null) {
+        if (spec.onEmit != null) {
           try {
-            const tailStop = await spec.tail(res.output, scratchpad, { ...ctx, scratchpad });
-            if (typeof tailStop === "string") return done({ stage: name, reason: tailStop });
+            const emitStop = await spec.onEmit(res.output, scratchpad, { ...ctx, scratchpad });
+            if (typeof emitStop === "string") return done({ stage: name, reason: emitStop });
           } catch (error) {
             return {
               output: undefined as never,

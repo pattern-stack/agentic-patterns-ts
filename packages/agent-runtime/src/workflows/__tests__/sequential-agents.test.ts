@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
-import { sequentialAgent, renderSharedState } from "../sequential-agents.js";
+import { renderSharedState, sequentialAgent } from "../sequential-agents.js";
 import { createScratchpad, slot } from "../slot.js";
 
 function makeAgent(name: string): AgentLike {
@@ -19,8 +19,8 @@ describe("sequentialAgent", () => {
   it("shares context implicitly: a later stage's prompt carries the earlier emission", async () => {
     const runner = new MockRunner()
       // Registered FIRST (substring matching is insertion-ordered): fires ONLY when the
-      // implicit render carried stage 1's section — i.e. proves the context flowed.
-      .addResponse("## finder", { content: "BETA-CONCLUSION" })
+      // implicit render carried stage 1's emission — i.e. proves the context flowed.
+      .addResponse("PRIOR STAGE ESTABLISHED (finder)", { content: "BETA-CONCLUSION" })
       .addResponse("the task", { content: "ALPHA-FINDING" });
 
     const node = sequentialAgent([makeAgent("finder"), makeAgent("concluder")]);
@@ -76,7 +76,7 @@ describe("sequentialAgent", () => {
     expect(res.output.outputs).toEqual({ interpret: "AMBIGUOUS" });
   });
 
-  it("tail runs the stage's deterministic follow-through and may stop by returning a reason", async () => {
+  it("onEmit runs the stage's deterministic follow-through and may stop by returning a reason", async () => {
     const runner = new MockRunner().addResponse("*", { content: "big-universe" });
     const derived = slot<number | null>({ key: "derived.count", scope: "run", init: () => null });
     const pad = createScratchpad();
@@ -84,7 +84,7 @@ describe("sequentialAgent", () => {
     const node = sequentialAgent([
       {
         agent: makeAgent("resolve"),
-        tail: (out, p) => {
+        onEmit: (out, p) => {
           p.set(derived, String(out).length);
           return "over-budget: narrow the ask";
         },
@@ -106,7 +106,7 @@ describe("sequentialAgent", () => {
     const view = slot<string | null>({ key: "view", scope: "run", init: () => null });
 
     const node = sequentialAgent([
-      { agent: makeAgent("a"), tail: (out, p) => void p.set(view, String(out)) },
+      { agent: makeAgent("a"), onEmit: (out, p) => void p.set(view, String(out)) },
       { agent: makeAgent("b"), prompt: (state) => `WINDOW[${state.get(view)}]` },
     ]);
     const res = await node.run("first", { runner });
@@ -143,6 +143,34 @@ describe("sequentialAgent", () => {
     ).not.toThrow();
   });
 
+  it("default visibility follows the CHAIN: stage 3 does NOT implicitly see stage 1", async () => {
+    const runner = new MockRunner()
+      .addResponse("ONE-OUT", { content: "LEAKED" }) // fires only if stage 1's emission leaks forward
+      .addResponse("TWO-OUT", { content: "CHAIN-OK" }) // stage 3: sees the PRIOR (stage 2) emission
+      .addResponse("the task", { content: "ONE-OUT" }) // stage 1
+      .addResponse("isolated", { content: "TWO-OUT" }); // stage 2 (custom prompt, isolated)
+    const node = sequentialAgent([
+      makeAgent("one"),
+      { agent: makeAgent("two"), prompt: () => "isolated" },
+      makeAgent("three"),
+    ]);
+    const res = await node.run("the task", { runner });
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs.three).toBe("CHAIN-OK");
+  });
+
+  it("opts.render = renderSharedState opts into all-prior visibility", async () => {
+    const runner = new MockRunner()
+      .addResponse("## one", { content: "SAW-EVERYTHING" })
+      .addResponse("*", { content: "X" });
+    const node = sequentialAgent([makeAgent("one"), makeAgent("two"), makeAgent("three")], {
+      render: renderSharedState,
+    });
+    const res = await node.run("task", { runner });
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs.three).toBe("SAW-EVERYTHING"); // stage 1's section reached stage 3
+  });
+
   it("renderSharedState: the task alone, then task + prior sections", () => {
     expect(renderSharedState("do it", [])).toBe("do it");
     const two = renderSharedState("do it", [{ name: "a", output: { k: 1 } }]);
@@ -156,7 +184,7 @@ describe("sequentialAgent", () => {
     const counter = slot<number>({ key: "n", scope: "run", init: () => 0 });
     const pad = createScratchpad();
     const node = sequentialAgent([
-      { agent: makeAgent("inc"), tail: (_o, p) => void p.update(counter, (n) => n + 1) },
+      { agent: makeAgent("inc"), onEmit: (_o, p) => void p.update(counter, (n) => n + 1) },
     ]);
     await node.run("a", { runner, scratchpad: pad });
     await node.run("b", { runner, scratchpad: pad });
