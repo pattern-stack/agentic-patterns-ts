@@ -241,6 +241,83 @@ export interface SplitAggregate {
 }
 
 /**
+ * Run-history types — hand-mirrored from `@agentic-patterns/runtime`'s
+ * `RunStore`/`EventStore` row types (the `ConversationSummary` precedent
+ * above), per house rule (port-map §3.1/3.2). Wire shapes served by the
+ * `/admin/runs*` routes (`packages/agent-server/src/routes/runs.ts`).
+ *
+ * IMPORTANT DEVIATION from the port-map's aspirational spec: neither
+ * `RunSummary` nor `RunRow` carries the user's original request/question text.
+ * The runtime's `RunMeta`/`RunOutcome` (`storage/run-store.ts`) never captured
+ * it — only `systemPrompt` (rendered prompt) and `finalAnswer` are persisted.
+ * Consumers (RunPickerMenu, RunSurfacePage replay) render an honest
+ * "request not persisted" note instead of fabricating one — see
+ * `lib/runPicker.ts` and `pages/RunSurfacePage.tsx`.
+ */
+
+/** Run-list projection — mirror of runtime `RunSummary` (cheap columns only). */
+export interface RunSummary {
+  runId: string;
+  traceId: string | null;
+  tsStart: string;
+  tsEnd: string | null;
+  agentName: string | null;
+  model: string | null;
+  status: "running" | "ok" | "error";
+  finishReason: string | null;
+  toolCalls: number | null;
+  iterations: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  elapsedMs: number | null;
+  answerLength: number;
+  hasPrompt: boolean;
+}
+
+/** Full run row — mirror of runtime `RunRow` (`GET /admin/runs/:id`). */
+export interface RunRow {
+  runId: string;
+  traceId: string | null;
+  tsStart: string;
+  tsEnd: string | null;
+  agentName: string | null;
+  model: string | null;
+  systemPrompt: string | null;
+  agentConfig: Record<string, unknown> | null;
+  finalAnswer: string | null;
+  toolCalls: number | null;
+  iterations: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  finishReason: string | null;
+  elapsedMs: number | null;
+  status: "running" | "ok" | "error";
+  error: string | null;
+  stepMetrics: unknown;
+  metadata: Record<string, unknown> | null;
+}
+
+/**
+ * One persisted event row — mirror of runtime `PersistedEvent`
+ * (`storage/event-store.ts`). `data` is the FULL original camelCase
+ * `AgentEvent` object (the exact shape the live SSE path carries) —
+ * `graph/trace-from-events.ts`'s `persistedToEventLike` adapts this into the
+ * fold's `EventLike` shape.
+ */
+export interface PersistedEvent {
+  id: number;
+  type: string;
+  timestamp: string;
+  traceId: string | null;
+  runId: string | null;
+  spanId: string | null;
+  ccSessionId: string | null;
+  ccHookName: string | null;
+  ccCwd: string | null;
+  data: Record<string, unknown>;
+}
+
+/**
  * One run that evaluated a given case — mirror of `EvalStore`'s
  * `EvalCaseHistoryRow`. `split` is the RUN's label, not the case's bank split.
  * Served by `GET /eval/sets/:id/cases/:caseId`.

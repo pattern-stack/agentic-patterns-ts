@@ -7,12 +7,16 @@
  * Chain ⇄ Composition toggle up top. Clicking a trace row seeks the graph; Play
  * walks both in lockstep (replay); a live run drains the cursor as SSE arrives.
  *
- * Two trace sources, ONE renderer:
+ * THREE trace sources, ONE renderer (precedence: streaming/live > replay-of-
+ * persisted > demo, port-map §3.4):
  *   • LIVE — pick an agent, send a message; `streamMessage` events flatten
  *     through `toEventLike` into the fold, and the engine drains the cursor at a
  *     paced cadence as they arrive (`live`). The answer streams into the panel.
- *   • DEMO — before any live run, the deterministic `SAMPLE_EVENTS` play through
- *     the exact same stack (browser-verifiable without a model).
+ *   • REPLAY — pick a persisted run from the run picker; its events fetch via
+ *     `runsApi` and adapt through `persistedToEventLike` into the SAME fold,
+ *     idling at cursor -1 until Play (S6).
+ *   • DEMO — before any live/replayed run, the deterministic `SAMPLE_EVENTS`
+ *     play through the exact same stack (browser-verifiable without a model).
  * The Chain ⇄ Composition toggle swaps the GRAPH (executed chain vs. the agent's
  * full declared surface) while the same trace overlays both.
  *
@@ -30,6 +34,8 @@ import {
   streamMessage,
 } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
+import type { RunRow, RunSummary } from "../api/types";
+import { DropdownMenu } from "../components/kit/DropdownMenu";
 import { inputStyle } from "../components/kit/Field";
 import { Segmented } from "../components/kit/Segmented";
 import { ConstellationGraph } from "../constellation/ConstellationGraph";
@@ -45,9 +51,12 @@ import {
   SAMPLE_REQUEST,
   SAMPLE_SYSTEM_PROMPT,
 } from "../graph/sample-run-trace";
-import { eventsToSteps } from "../graph/trace-from-events";
+import { eventsToSteps, persistedToEventLike } from "../graph/trace-from-events";
 import type { CapabilityMeta } from "../graph/types";
 import { useRunReplay } from "../graph/use-run-replay";
+import { relTime, shortId } from "../lib/format";
+import { MAX_RUN_CHIPS, pinSelectedRun, sortRunsNewestFirst } from "../lib/runPicker";
+import { fetchRun, fetchRunEvents, fetchRuns } from "../lib/runsApi";
 import { Badge, Button } from "../ui/atoms";
 import { T } from "../ui/tokens";
 
@@ -57,6 +66,19 @@ const DEMO_META: RunMeta = {
   answer: SAMPLE_ANSWER,
   systemPrompt: SAMPLE_SYSTEM_PROMPT,
 };
+
+/** Honest degradation (port-map §6): neither RunSummary nor RunRow persists
+ *  the user's original request text on this runtime version — see
+ *  `api/types.ts`'s `RunRow` doc comment. Render this instead of fabricating one. */
+const REQUEST_NOT_PERSISTED =
+  "(request not available — this server doesn't persist the run's original prompt yet)";
+const REQUEST_NOT_PERSISTED_SHORT = "(request not persisted)";
+
+/** A replayed persisted run: the fetched row + its events adapted to the fold's shape. */
+interface ReplayRun {
+  run: RunRow;
+  events: EventLite[];
+}
 
 type GraphMode = "chain" | "composition";
 const MODES: { value: GraphMode; label: string; title: string }[] = [
@@ -81,6 +103,138 @@ function toCapabilityMeta(caps: { name: string; tools: { name: string }[] }[]): 
 
 const bare = (t: unknown) => String(t).replace(/^(agent|pattern)\./, "");
 
+/* ── run picker (port-map §3.4, ported from swe-brain LiveRunSurface.tsx:74-163) ── */
+
+/** One run chip's tooltip/detail line — model · tool calls · status · relative time. */
+function runChipTitle(r: RunSummary): string {
+  const tools = r.toolCalls ?? 0;
+  return `${r.model ?? "model?"} · ${tools} tool call${tools === 1 ? "" : "s"} · ${r.status} · ${relTime(r.tsStart)}`;
+}
+
+/** An inline topbar chip for one run — click to replay it. */
+function RunChip({
+  run,
+  active,
+  onClick,
+}: {
+  run: RunSummary;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={runChipTitle(run)}
+      aria-label={`Run ${shortId(run.runId, 6)}`}
+      style={{
+        fontFamily: T.font.mono,
+        fontSize: T.fz.micro,
+        padding: "3px 9px",
+        borderRadius: T.radius.pill,
+        border: `1px solid ${active ? "var(--accent)" : "var(--line)"}`,
+        background: active ? "var(--accent-soft)" : "var(--fill)",
+        color: active ? "var(--accent-ink)" : "var(--ink-2)",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {shortId(run.runId, 6)} · {run.toolCalls ?? 0}t
+    </button>
+  );
+}
+
+/** One row of the overflow dropdown's run list. */
+function RunPickerRow({
+  run,
+  active,
+  onPick,
+}: {
+  run: RunSummary;
+  active: boolean;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(run.runId)}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "8px 12px",
+        background: active ? "var(--accent-soft)" : "transparent",
+        border: "none",
+        borderBottom: "1px solid var(--line)",
+        cursor: "pointer",
+      }}
+    >
+      <div style={{ fontFamily: T.font.mono, fontSize: T.fz.micro, color: "var(--ink-2)" }}>
+        {shortId(run.runId)} · {run.toolCalls ?? 0}t · {run.model ?? "model?"} ·{" "}
+        {relTime(run.tsStart)}
+      </div>
+      <div
+        style={{
+          fontSize: T.fz.micro,
+          color: "var(--mute)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {REQUEST_NOT_PERSISTED_SHORT}
+      </div>
+    </button>
+  );
+}
+
+/**
+ * Run-picker overflow: a compact "N ▾" chip (kit `DropdownMenu`'s backdrop(z25)
+ * + right-anchored panel(z30, w300, maxH360, `--shadow-3`) pattern) that opens
+ * the full run list, so the topbar stays at `MAX_RUN_CHIPS` inline chips
+ * instead of an unbounded strip.
+ */
+function RunPickerMenu({
+  runs,
+  activeRunId,
+  onPick,
+}: {
+  runs: RunSummary[];
+  activeRunId: string | null;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <DropdownMenu
+      align="right"
+      width={300}
+      maxHeight={360}
+      trigger={({ toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={`All runs (${runs.length})`}
+          style={{
+            fontFamily: T.font.mono,
+            fontSize: T.fz.micro,
+            padding: "3px 9px",
+            borderRadius: T.radius.pill,
+            border: "1px solid var(--line)",
+            background: "var(--fill)",
+            color: "var(--ink-2)",
+            cursor: "pointer",
+          }}
+        >
+          {runs.length} ▾
+        </button>
+      )}
+    >
+      {runs.map((r) => (
+        <RunPickerRow key={r.runId} run={r} active={r.runId === activeRunId} onPick={onPick} />
+      ))}
+    </DropdownMenu>
+  );
+}
+
 export function RunSurfacePage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -95,10 +249,21 @@ export function RunSurfacePage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // run picker + persisted-run replay (S6) — third source state, see module doc.
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [runsUnconfigured, setRunsUnconfigured] = useState(false);
+  const [replayRun, setReplayRun] = useState<ReplayRun | null>(null);
+  const [replayLoading, setReplayLoading] = useState(false);
+
   const convIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const isLive = streaming || liveEvents.length > 0;
+  // Narrowable replay handle (precedence: live > replay > demo) — a separately
+  // derived `isReplay` boolean wouldn't let TS narrow `replayRun` at each use
+  // site, so this IS the narrowing check everywhere replay fields are read.
+  const activeReplay: ReplayRun | null = isLive ? null : replayRun;
+  const isReplay = activeReplay !== null;
 
   // load agents once
   useEffect(() => {
@@ -117,6 +282,59 @@ export function RunSurfacePage() {
     };
   }, []);
 
+  // run-history list for the picker (S6). Refetched after a live run finishes
+  // so the new run appears — never auto-switches into replay (port-map §3.4).
+  const refreshRuns = useCallback(() => {
+    fetchRuns({ limit: 20 })
+      .then((res) => {
+        if (res.kind === "unconfigured") {
+          setRunsUnconfigured(true);
+          setRuns([]);
+          return;
+        }
+        setRunsUnconfigured(false);
+        setRuns(sortRunsNewestFirst(res.data));
+      })
+      .catch(() => {
+        // list fetch failures degrade silently — the picker just stays empty;
+        // live + demo modes are unaffected (honest-degradation §6).
+      });
+  }, []);
+  useEffect(() => {
+    refreshRuns();
+  }, [refreshRuns]);
+
+  // Picking a run: abort any active stream, clear live state, fetch the run +
+  // its events, adapt through persistedToEventLike, and idle at cursor -1 (the
+  // engine resets on runKey change) — Play replays through the untouched
+  // buildGraph -> eventsToSteps -> useRunReplay stack.
+  const pickRun = useCallback(async (runId: string) => {
+    abortRef.current?.abort();
+    setStreaming(false);
+    setLiveEvents([]);
+    setError(null);
+    setReplayLoading(true);
+    try {
+      const [runRes, eventsRes] = await Promise.all([fetchRun(runId), fetchRunEvents(runId)]);
+      if (runRes.kind === "unconfigured" || eventsRes.kind === "unconfigured") {
+        setError("run history is not configured on this server");
+        return;
+      }
+      if (runRes.kind === "not-found" || eventsRes.kind === "not-found") {
+        setError(`run "${shortId(runId)}" was not found (it may have expired)`);
+        return;
+      }
+      const events = eventsRes.data.events.map(persistedToEventLike);
+      setReplayRun({ run: runRes.data, events });
+      setRunKey(runId);
+      setSelectedNodeId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load run");
+    } finally {
+      setReplayLoading(false);
+    }
+  }, []);
+
   // fetch the selected agent's declared composition (for composition mode) + its
   // full introspection with per-slot provenance (for the inspector's Provenance tab)
   useEffect(() => {
@@ -133,15 +351,26 @@ export function RunSurfacePage() {
     };
   }, [selectedId]);
 
-  const events: EventLite[] = isLive ? liveEvents : SAMPLE_EVENTS;
+  const events: EventLite[] = isLive
+    ? liveEvents
+    : activeReplay
+      ? activeReplay.events
+      : SAMPLE_EVENTS;
   // stable ref (only changes when live/caps change) so the graph memo doesn't churn.
+  // Replay has no composition data for the replayed run's (possibly different)
+  // agent — caps stays empty, so `source` below falls back to chain mode, same
+  // as any other caps-less state; the Composition toggle simply no-ops during
+  // replay rather than fabricating a graph for a run that may belong to a
+  // different agent than the one currently selected in the dropdown.
   const caps = useMemo<CapabilityMeta[]>(
-    () => (isLive ? (liveCaps ?? []) : SAMPLE_CAPABILITIES),
-    [isLive, liveCaps],
+    () => (isLive ? (liveCaps ?? []) : isReplay ? [] : SAMPLE_CAPABILITIES),
+    [isLive, isReplay, liveCaps],
   );
   const agentName = isLive
     ? (agents.find((a) => a.id === selectedId)?.name ?? "agent")
-    : "retrieval-analyst";
+    : activeReplay
+      ? (activeReplay.run.agentName ?? "agent")
+      : "retrieval-analyst";
 
   const source = useMemo<GraphSource>(
     () =>
@@ -169,14 +398,23 @@ export function RunSurfacePage() {
       .join("");
   }, [liveEvents]);
 
-  const runMeta: RunMeta = isLive ? { request: sentMsg, answer: liveAnswer } : DEMO_META;
+  const runMeta: RunMeta = isLive
+    ? { request: sentMsg, answer: liveAnswer }
+    : activeReplay
+      ? {
+          request: REQUEST_NOT_PERSISTED,
+          answer: activeReplay.run.finalAnswer ?? "",
+          systemPrompt: activeReplay.run.systemPrompt ?? undefined,
+        }
+      : DEMO_META;
   const selectedNode = selectedNodeId
     ? (graph.nodes.find((n) => n.id === selectedNodeId) ?? null)
     : null;
 
   // real /composition per-slot provenance, keyed by graph node id (for the
   // inspector) — only in LIVE mode, where the graph IS the selected agent's; the
-  // demo graph is a fixed sample unrelated to the picked agent, so it derives.
+  // demo/replay graphs aren't necessarily the currently-selected agent's, so
+  // they derive no provenance either.
   const provenance = useMemo(
     () => (isLive ? buildProvenanceMap(graph.nodes, comp?.role) : {}),
     [isLive, comp, graph],
@@ -190,6 +428,7 @@ export function RunSurfacePage() {
       convIdRef.current = conv;
       setSentMsg(content);
       setLiveEvents([]);
+      setReplayRun(null); // a fresh send always supersedes any picked replay
       setRunKey(String(Date.now()));
       setStreaming(true);
       setInput("");
@@ -199,13 +438,18 @@ export function RunSurfacePage() {
         for await (const ev of streamMessage(conv, content, undefined, ac.signal)) {
           setLiveEvents((prev) => [...prev, toEventLike(ev)]);
         }
+        // the run just finished and is now persisted — refresh the picker's
+        // list so it appears, but do NOT auto-switch into replay (that would
+        // reset the cursor and re-dim the constellation you just watched
+        // finish; port-map §3.4, swe-brain-tested behavior).
+        refreshRuns();
       } catch (e) {
         if (!ac.signal.aborted) setError(e instanceof Error ? e.message : "Stream failed");
       } finally {
         setStreaming(false);
       }
     },
-    [selectedId, streaming],
+    [selectedId, streaming, refreshRuns],
   );
 
   const selectAgent = (id: string) => {
@@ -216,14 +460,58 @@ export function RunSurfacePage() {
     setLiveEvents([]);
     setLiveCaps(null);
     setComp(null);
+    setReplayRun(null);
     setRunKey("demo");
   };
+
+  const activeRunId = activeReplay ? activeReplay.run.runId : null;
+  const visibleRunChips = pinSelectedRun(runs, activeRunId, MAX_RUN_CHIPS);
+  const hiddenRunCount = runs.length - visibleRunChips.length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Live Run</h1>
-        <Badge tone={isLive ? "run" : "mute"}>{isLive ? "live" : "demo · sample trace"}</Badge>
+        <Badge tone={isLive ? "run" : isReplay ? "accent" : "mute"}>
+          {isLive ? "live" : isReplay ? "replay" : "demo · sample trace"}
+        </Badge>
+
+        {/* run picker (S6): newest-first inline chips + overflow dropdown. Honest
+            degradation when persistence is off — the note replaces the picker,
+            live + demo modes are unaffected. */}
+        {runsUnconfigured ? (
+          <span
+            style={{ fontSize: T.fz.micro, color: "var(--mute)" }}
+            title="start `ap playground` with AP_PERSISTENCE != 0 to enable run history"
+          >
+            run history unavailable — persistence not configured
+          </span>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {runs.length === 0 && (
+              <span style={{ fontSize: T.fz.micro, color: "var(--mute)" }}>no runs yet</span>
+            )}
+            {visibleRunChips.map((r) => (
+              <RunChip
+                key={r.runId}
+                run={r}
+                active={r.runId === activeRunId}
+                onClick={() => void pickRun(r.runId)}
+              />
+            ))}
+            {hiddenRunCount > 0 && (
+              <RunPickerMenu
+                runs={runs}
+                activeRunId={activeRunId}
+                onPick={(id) => void pickRun(id)}
+              />
+            )}
+            {replayLoading && (
+              <span style={{ fontSize: T.fz.micro, color: "var(--mute)" }}>loading…</span>
+            )}
+          </div>
+        )}
+
         <div style={{ flex: 1 }} />
         <Segmented
           options={MODES}

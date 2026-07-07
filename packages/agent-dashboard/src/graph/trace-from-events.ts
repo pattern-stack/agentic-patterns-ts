@@ -15,6 +15,7 @@
  * store (which pulls bun:sqlite). The row shapes below are structural, matching
  * the JSON the /api/runs/:id endpoint returns.
  */
+import type { PersistedEvent } from "../api/types";
 import type { BlastRadius, RunTrace, TraceStep } from "./types";
 
 /** Persisted `event` row (subset) — promoted columns + the camelCase payload blob. */
@@ -31,6 +32,32 @@ export interface EventLike {
   payload_json?: string;
   // live SSE objects carry camelCase fields directly:
   [k: string]: unknown;
+}
+
+/**
+ * Adapt one persisted run-history event row (`GET /admin/runs/:id/events`,
+ * `api/types.ts PersistedEvent`) into the fold's `EventLike` shape (port-map
+ * §3.3 — the load-bearing adapter for S6's replay path).
+ *
+ * `PersistedEvent.data` is the FULL original camelCase `AgentEvent` — the
+ * exact object the live SSE path carries (`agentName`, `toolName`,
+ * `arguments`, `result`, `durationMs`, `inputTokens`/`outputTokens`, …). It
+ * carries neither `payload_json` nor `run_id` (snake_case), so `normalize()`
+ * below treats the whole spread object as the camelCase payload `p` — the
+ * accessor chains (promoted column -> camelCase payload -> snake_case
+ * fallback) already tolerate it directly, no new branch needed. `seq` is
+ * assigned by ordinal position (1-based) since the route returns rows ASC by
+ * `id` (insert order) already.
+ *
+ * Verified against a real production event dump (message.start ->
+ * iteration.start -> llm.start/end -> tool.intent/start/end -> iteration.end
+ * -> llm.start/end -> iteration.end -> message.complete) captured via the
+ * actual `AgentRunner` + `SQLiteExporter` + `RunStoreExporter` stack — see
+ * `__tests__/trace-from-events.test.ts`'s `persistedToEventLike` suite for the
+ * fixture + repro notes.
+ */
+export function persistedToEventLike(row: PersistedEvent, i: number): EventLike {
+  return { type: row.type, seq: i + 1, ...(row.data as Record<string, unknown>) };
 }
 
 /** Persisted `run` row (subset) — what the RunTrace envelope needs. */
