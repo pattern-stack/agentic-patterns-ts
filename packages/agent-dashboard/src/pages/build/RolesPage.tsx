@@ -13,13 +13,21 @@ import type { RoleDetail, RoleInstance, RoleSummary } from "../../api/compositio
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
+import { FamilyTabs } from "../../components/molecules/FamilyTabs";
 import { DetailPageShell, Labeled } from "../../components/organisms/DetailPageShell";
 import { SlotStack } from "../../components/organisms/SlotStack";
 import { useAdminData } from "../../hooks/useAdminData";
 
 export function RolesPage() {
   const { id } = useParams();
-  return id ? <RoleDetailView id={id} /> : <RoleListView />;
+  return (
+    <>
+      <div style={{ marginBottom: 16 }}>
+        <FamilyTabs />
+      </div>
+      {id ? <RoleDetailView id={id} /> : <RoleListView />}
+    </>
+  );
 }
 
 // --------------------------------------------------------------------------

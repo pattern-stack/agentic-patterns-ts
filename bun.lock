@@ -16,6 +16,7 @@
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@agentic-patterns/runtime": "workspace:^",
+        "zod": "^3.23.0",
       },
     },
     "packages/agent-cli": {
