@@ -11,54 +11,15 @@ import { Markdown } from "../../chat/atoms";
 import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Spinner } from "../../components/atoms/Spinner";
+import { AnswerPanel } from "../../components/kit/AnswerPanel";
+import { JsonBlock } from "../../components/kit/JsonBlock";
+import { sectionMicroHeadingStyle } from "../../components/kit/SectionHeading";
 import { EventStream } from "../../components/organisms/EventStream";
 import type { StreamEvent } from "../../hooks/useEventStream";
 import { safeParseAnswer } from "../../lib/evalApi";
 import { fetchTraceEvents } from "../../lib/eventApi";
 
-const preStyle = {
-  margin: 0,
-  padding: 10,
-  background: "var(--bg-inset)",
-  borderRadius: 6,
-  fontSize: 12,
-  fontFamily: "var(--font-mono)",
-  overflowX: "auto" as const,
-  whiteSpace: "pre-wrap" as const,
-  wordBreak: "break-word" as const,
-};
-
-const mutedStyle = { color: "var(--fg-muted)", fontSize: 13 };
-
-// Inset panel for rendered markdown — the `preStyle` box chrome without the
-// monospace/pre-wrap (the markdown tags own their own layout).
-const mdPanelStyle = {
-  margin: 0,
-  padding: "2px 12px",
-  background: "var(--bg-inset)",
-  borderRadius: 6,
-  fontSize: 13,
-  overflowX: "auto" as const,
-  wordBreak: "break-word" as const,
-};
-
-const sectionHeadingStyle = {
-  fontSize: 12,
-  fontWeight: 600,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
-  color: "var(--fg-subtle)",
-  marginBottom: 8,
-};
-
-function pretty(value: unknown): string {
-  if (value === undefined) return "—";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
+const mutedStyle = { color: "var(--mute)", fontSize: 13 };
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
@@ -74,31 +35,6 @@ function explanationMd(detail: EvalScoreLike["detail"]): string | null {
   return isStringArray(lines) && lines.length > 0 ? lines.join("\n") : null;
 }
 
-/**
- * The run's answer. Canvas evals persist markdown as an array of lines
- * (`safeParseAnswer` yields a `string[]`) — render those as markdown; every
- * other shape stays pretty-printed JSON. The fail border is preserved either way.
- */
-function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
-  const value = safeParseAnswer(finalAnswer);
-  if (isStringArray(value)) {
-    return (
-      <div
-        style={
-          pass === false ? { ...mdPanelStyle, borderLeft: "3px solid var(--red)" } : mdPanelStyle
-        }
-      >
-        <Markdown content={value.join("\n")} />
-      </div>
-    );
-  }
-  return (
-    <pre style={pass === false ? { ...preStyle, borderLeft: "3px solid var(--red)" } : preStyle}>
-      {pretty(value)}
-    </pre>
-  );
-}
-
 interface CaseDetailProps {
   result: JoinedEvalResultRow;
   caseRow: EvalCaseRow | undefined;
@@ -109,42 +45,39 @@ export function CaseDetail({ result, caseRow }: CaseDetailProps) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {caseRow && (
         <details>
-          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
-            Input
-          </summary>
-          <pre style={{ ...preStyle, marginTop: 6 }}>{pretty(caseRow.input)}</pre>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--mute)" }}>Input</summary>
+          <div style={{ marginTop: 6 }}>
+            <JsonBlock value={caseRow.input} />
+          </div>
         </details>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div>
-          <div style={sectionHeadingStyle}>Expected</div>
+          <div style={sectionMicroHeadingStyle()}>Expected</div>
           {caseRow ? (
-            <pre style={preStyle}>{pretty(caseRow.expected)}</pre>
+            <JsonBlock value={caseRow.expected} />
           ) : (
             <div style={mutedStyle}>expected unavailable — case not in bank</div>
           )}
         </div>
         <div>
-          <div style={sectionHeadingStyle}>Actual</div>
+          <div style={sectionMicroHeadingStyle()}>Actual</div>
           {result.runStatus === "error" ? (
-            <pre
-              style={{
-                ...preStyle,
-                borderLeft: "3px solid var(--red)",
-                color: "var(--red)",
-              }}
-            >
-              {result.runError ?? "(no error message recorded)"}
-            </pre>
+            <JsonBlock
+              value={result.runError ?? "(no error message recorded)"}
+              raw
+              errorTinted
+              style={{ color: "var(--err)" }}
+            />
           ) : (
-            <ActualAnswer finalAnswer={result.finalAnswer} pass={result.pass} />
+            <AnswerPanel value={safeParseAnswer(result.finalAnswer)} pass={result.pass} />
           )}
         </div>
       </div>
 
       <div>
-        <div style={sectionHeadingStyle}>Scores</div>
+        <div style={sectionMicroHeadingStyle()}>Scores</div>
         {!result.scores || result.scores.length === 0 ? (
           <div style={mutedStyle}>no scores recorded</div>
         ) : (
@@ -157,7 +90,7 @@ export function CaseDetail({ result, caseRow }: CaseDetailProps) {
       </div>
 
       <div>
-        <div style={sectionHeadingStyle}>Trace</div>
+        <div style={sectionMicroHeadingStyle()}>Trace</div>
         <TraceSection traceId={result.traceId} />
       </div>
     </div>
@@ -171,24 +104,37 @@ function ScoreRow({ score }: { score: EvalScoreLike }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
         <span style={{ fontFamily: "var(--font-mono)" }}>{score.name}</span>
-        <span style={{ color: "var(--fg-muted)" }}>
+        <span style={{ color: "var(--mute)" }}>
           {typeof score.value === "number" ? Number(score.value.toFixed(3)) : (score.value ?? "—")}
         </span>
         {score.passed !== undefined && (
-          <Badge tone={score.passed ? "green" : "red"}>{score.passed ? "pass" : "fail"}</Badge>
+          <Badge tone={score.passed ? "ok" : "err"}>{score.passed ? "pass" : "fail"}</Badge>
         )}
       </div>
       {mdExplanation && (
-        <div style={{ ...mdPanelStyle, marginTop: 2 }}>
+        <div
+          style={{
+            margin: 0,
+            marginTop: 2,
+            padding: "2px 12px",
+            background: "var(--background)",
+            borderRadius: "var(--radius-sm)",
+            fontSize: 13,
+            overflowX: "auto",
+            wordBreak: "break-word",
+          }}
+        >
           <Markdown content={mdExplanation} />
         </div>
       )}
       {extra && (
         <details>
-          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
+          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--mute)" }}>
             {mdExplanation ? "raw detail" : "details"}
           </summary>
-          <pre style={{ ...preStyle, marginTop: 4 }}>{pretty(extra)}</pre>
+          <div style={{ marginTop: 4 }}>
+            <JsonBlock value={extra} />
+          </div>
         </details>
       )}
     </div>
@@ -227,12 +173,12 @@ export function TraceSection({ traceId }: { traceId: string | null }) {
             Load trace
           </Button>
         )}
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg-muted)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--mute)" }}>
           {traceId}
         </span>
       </div>
       {state.kind === "error" && (
-        <div style={{ color: "var(--red)", fontSize: 13 }}>{state.message}</div>
+        <div style={{ color: "var(--err)", fontSize: 13 }}>{state.message}</div>
       )}
       {state.kind === "loaded" &&
         (state.events.length === 0 ? (

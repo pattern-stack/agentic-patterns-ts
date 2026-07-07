@@ -140,10 +140,7 @@ export function AgentsRosterPage() {
 
 function AgentCard({ agent: a, navigate }: { agent: RosterAgent; navigate: NavigateFunction }) {
   return (
-    <Card
-      onClick={() => navigate(`/agents/${a.id}`)}
-      style={{ cursor: "pointer", background: "var(--bg-subtle, transparent)" }}
-    >
+    <Card onClick={() => navigate(`/agents/${a.id}`)} style={{ cursor: "pointer" }}>
       <div style={{ fontWeight: 600, color: "var(--fg-default)" }}>{a.name}</div>
       {a.description && (
         <div style={{ marginTop: 6, fontSize: 13, color: "var(--fg-muted)", lineHeight: 1.5 }}>

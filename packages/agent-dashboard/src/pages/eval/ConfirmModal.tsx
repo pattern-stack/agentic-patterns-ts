@@ -50,7 +50,7 @@ export function ConfirmModal({
             size="sm"
             onClick={handleConfirm}
             disabled={busy}
-            style={{ background: "var(--red)", borderColor: "var(--red)", color: "#0d1117" }}
+            style={{ background: "var(--err)", borderColor: "var(--err)", color: "var(--paper)" }}
           >
             {busy ? "Working…" : confirmLabel}
           </Button>

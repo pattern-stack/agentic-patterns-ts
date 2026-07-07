@@ -15,53 +15,26 @@ import type { EvalRunRow, EvalSplit } from "../../api/types";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
-import { Spinner } from "../../components/atoms/Spinner";
-import { AlertIcon } from "../../components/atoms/icons";
+import { AsyncState } from "../../components/kit/AsyncState";
+import { Field, inputStyle } from "../../components/kit/Field";
+import { PageHeader } from "../../components/kit/PageHeader";
 import { DataTable } from "../../components/organisms/DataTable";
+import { useSortedRows } from "../../hooks/useSortedRows";
 import { type EvalRunFilters, fetchEvalRuns, filterRuns } from "../../lib/evalApi";
+import { relTime, shortId, statusTone } from "../../lib/format";
 import { RunLauncher } from "./RunLauncher";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
 
-// pages never share code (playground-redesign.md) — lifted from ConversationsPage as-is.
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
-}
-
-function relative(dateStr: string | undefined | null): string {
-  if (!dateStr) return "—";
-  const then = new Date(dateStr).getTime();
-  if (Number.isNaN(then)) return String(dateStr);
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  const abs = Math.abs(diffSec);
-  if (abs < 60) return `${diffSec}s ago`;
-  if (abs < 3600) return `${Math.round(diffSec / 60)}m ago`;
-  if (abs < 86400) return `${Math.round(diffSec / 3600)}h ago`;
-  return `${Math.round(diffSec / 86400)}d ago`;
-}
-
-function statusTone(status: EvalRunRow["status"]): BadgeTone {
-  switch (status) {
-    case "ok":
-      return "green";
-    case "error":
-      return "red";
-    case "running":
-      return "emerald";
-    default:
-      return "neutral";
-  }
-}
-
 function passRateTone(rate: number): BadgeTone {
-  if (rate >= 0.999) return "green";
-  if (rate >= 0.5) return "yellow";
-  return "red";
+  if (rate >= 0.999) return "ok";
+  if (rate >= 0.5) return "warn";
+  return "err";
 }
 
 /** Runs-list pass cell: "9/12" + a pass-rate badge; ungated (or summary-less) runs show "—". */
 function PassCell({ summary }: { summary: EvalRunRow["summary"] }) {
   if (!summary || summary.passRate === null) {
-    return <span style={{ color: "var(--fg-subtle)" }}>—</span>;
+    return <span style={{ color: "var(--ink-3)" }}>—</span>;
   }
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -71,10 +44,6 @@ function PassCell({ summary }: { summary: EvalRunRow["summary"] }) {
       <Badge tone={passRateTone(summary.passRate)}>{Math.round(summary.passRate * 100)}%</Badge>
     </span>
   );
-}
-
-function getField(row: EvalRunRow, key: string): string {
-  return String((row as unknown as Record<string, unknown>)[key] ?? "");
 }
 
 const SPLIT_OPTIONS: Array<EvalSplit | "untagged"> = ["train", "dev", "test", "untagged"];
@@ -88,8 +57,6 @@ type LoadState =
 export function EvalRunsPage() {
   const navigate = useNavigate();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
-  const [sortKey, setSortKey] = useState("tsStart");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filters, setFilters] = useState<EvalRunFilters>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -134,22 +101,7 @@ export function EvalRunsPage() {
     filters.set || filters.target || filters.variant || filters.split,
   );
   const filtered = filterRuns(runs, filters);
-
-  const handleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
-  };
-
-  const sorted = [...filtered].sort((a, b) => {
-    const cmp = getField(a, sortKey).localeCompare(getField(b, sortKey), undefined, {
-      numeric: true,
-    });
-    return sortDir === "asc" ? cmp : -cmp;
-  });
+  const { sorted, sortKey, sortDir, handleSort } = useSortedRows(filtered, "tsStart", "desc");
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -176,104 +128,75 @@ export function EvalRunsPage() {
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 20,
-        }}
-      >
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Eval Runs</h1>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-          <RunLauncher />
-          <Button variant="ghost" size="sm" onClick={load}>
-            Refresh
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="Eval Runs"
+        actions={
+          <>
+            <RunLauncher />
+            <Button variant="ghost" size="sm" onClick={load}>
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
-      {state.kind === "loading" && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            padding: "48px 0",
-            color: "var(--fg-muted)",
+      {state.kind !== "ok" && (
+        <AsyncState
+          kind={state.kind}
+          loading="Loading eval runs..."
+          unconfigured={{
+            title: "Eval persistence is not configured",
+            body: (
+              <>
+                Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable
+                eval queries.
+              </>
+            ),
           }}
-        >
-          <Spinner />
-          <span>Loading eval runs...</span>
-        </div>
-      )}
-
-      {state.kind === "error" && (
-        <Card
-          style={{ borderColor: "var(--red)", display: "flex", alignItems: "flex-start", gap: 12 }}
-        >
-          <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-              Failed to load eval runs
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{state.message}</div>
-          </div>
-        </Card>
-      )}
-
-      {state.kind === "unconfigured" && (
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval persistence is not configured
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable eval
-            queries.
-          </div>
-        </Card>
+          error={
+            state.kind === "error"
+              ? { title: "Failed to load eval runs", message: state.message }
+              : undefined
+          }
+        />
       )}
 
       {state.kind === "ok" && runs.length === 0 && (
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            No eval runs yet
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Run <code>ap eval</code> against a case bank to populate this list.
-          </div>
-        </Card>
+        <AsyncState
+          kind="empty"
+          empty={{
+            title: "No eval runs yet",
+            body: (
+              <>
+                Run <code>ap eval</code> against a case bank to populate this list.
+              </>
+            ),
+          }}
+        />
       )}
 
       {state.kind === "ok" && runs.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
             <FilterSelect
-              id="eval-filter-set"
               label="Set"
               value={filters.set ?? ""}
               options={facets.sets}
               onChange={(v) => setFilters((f) => ({ ...f, set: v || undefined }))}
             />
             <FilterSelect
-              id="eval-filter-target"
               label="Target"
               value={filters.target ?? ""}
               options={facets.targets}
               onChange={(v) => setFilters((f) => ({ ...f, target: v || undefined }))}
             />
             <FilterSelect
-              id="eval-filter-variant"
               label="Variant"
               value={filters.variant ?? ""}
               options={facets.variants}
               onChange={(v) => setFilters((f) => ({ ...f, variant: v || undefined }))}
             />
             <FilterSelect
-              id="eval-filter-split"
               label="Split"
               value={filters.split ?? ""}
               options={SPLIT_OPTIONS}
@@ -302,12 +225,12 @@ export function EvalRunsPage() {
                 alignItems: "center",
                 gap: 12,
                 padding: "10px 14px",
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
+                background: "var(--paper)",
+                border: "1px solid var(--line)",
+                borderRadius: "var(--radius-lg)",
               }}
             >
-              <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+              <span style={{ fontSize: 13, color: "var(--mute)" }}>
                 {selected.size} of 2 selected
               </span>
               <Button size="sm" disabled={selected.size !== 2} onClick={handleCompare}>
@@ -320,9 +243,7 @@ export function EvalRunsPage() {
           )}
 
           {filtered.length === 0 ? (
-            <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-              No runs match the current filters.
-            </Card>
+            <AsyncState kind="empty" empty={{ title: "No runs match the current filters." }} />
           ) : (
             <Card padded={false}>
               <DataTable<EvalRunRow>
@@ -359,7 +280,7 @@ export function EvalRunsPage() {
                   {
                     key: "split",
                     header: "Split",
-                    render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
+                    render: (row) => <Badge tone="mute">{row.split ?? "untagged"}</Badge>,
                   },
                   {
                     key: "status",
@@ -375,7 +296,7 @@ export function EvalRunsPage() {
                   {
                     key: "tsStart",
                     header: "Started",
-                    render: (row) => relative(row.tsStart),
+                    render: (row) => relTime(row.tsStart),
                   },
                 ]}
                 data={sorted}
@@ -394,46 +315,19 @@ export function EvalRunsPage() {
 }
 
 function FilterSelect({
-  id,
   label,
   value,
   options,
   onChange,
 }: {
-  id: string;
   label: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
 }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <label
-        htmlFor={id}
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--fg-muted)",
-        }}
-      >
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          padding: "6px 10px",
-          fontSize: 13,
-          fontFamily: "inherit",
-          background: "var(--bg-surface)",
-          color: "var(--fg-default)",
-          border: "1px solid var(--border)",
-          borderRadius: 6,
-        }}
-      >
+    <Field label={label}>
+      <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
         <option value="">All</option>
         {options.map((o) => (
           <option key={o} value={o}>
@@ -441,6 +335,6 @@ function FilterSelect({
           </option>
         ))}
       </select>
-    </div>
+    </Field>
   );
 }

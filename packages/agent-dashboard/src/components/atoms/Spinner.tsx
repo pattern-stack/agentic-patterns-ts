@@ -17,7 +17,7 @@ interface SpinnerProps {
 
 export function Spinner({
   size = 14,
-  color = "var(--accent-emerald)",
+  color = "var(--accent)",
   thickness = 2,
   style,
 }: SpinnerProps) {

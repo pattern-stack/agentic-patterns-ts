@@ -1,0 +1,44 @@
+/**
+ * Interactive-state classes for the cockpit atoms (port-map §7.1 — "the
+ * structural fix"). Atoms still compute their per-variant/per-tone colors as
+ * inline styles (they're data-driven — tone, variant, size), but `:hover` and
+ * `:focus-visible` can't be expressed inline, so each interactive atom writes
+ * its colors into a couple of CSS custom properties and wears one of these
+ * classes so the pseudo-classes below can react to them. Global
+ * `:focus-visible` ring + `tr[tabindex]` hover live in globals.css.
+ */
+
+/* Button (components/atoms/Button.tsx) — variant colors arrive via
+   --btn-bg/--btn-bg-hover/--btn-fg/--btn-border custom props. */
+.ap-btn {
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border: 1px solid var(--btn-border);
+}
+.ap-btn:hover:not(:disabled) {
+  background: var(--btn-bg-hover, var(--btn-bg));
+}
+
+/* Card, when rendered with an onClick (components/atoms/Card.tsx adds this
+   class automatically) — a plain bordered surface becomes an affordance.
+   The resting background comes from `--card-bg` (set inline per `inset`);
+   `:hover` overrides it as a plain class rule so it isn't shadowed by an
+   inline `background` declaration. */
+.ap-card--interactive {
+  background: var(--card-bg);
+  cursor: pointer;
+}
+.ap-card--interactive:hover {
+  background: hsl(var(--hover-bg));
+}
+
+/* Row-level toggle buttons (EventStream event rows, SessionCard header /
+   timeline rows) — replaces the old onMouseEnter/onMouseLeave inline-style
+   mutation with a plain CSS hover. The component sets no inline `background`
+   at all, so both states are fully class-owned. */
+.ap-row-btn {
+  background: transparent;
+}
+.ap-row-btn:hover {
+  background: hsl(var(--hover-bg));
+}

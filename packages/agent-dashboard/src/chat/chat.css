@@ -469,12 +469,12 @@
 .chat-root .md-table th {
   font-weight: 600;
   white-space: nowrap;
-  background: var(--bg-inset);
-  color: var(--fg-default);
+  background: var(--background);
+  color: var(--ink);
 }
 .chat-root .md-table td {
-  color: var(--fg-muted);
+  color: var(--ink-2);
 }
 .chat-root .md-table tbody tr:hover td {
-  background: var(--bg-surface-hover);
+  background: var(--fill-2);
 }

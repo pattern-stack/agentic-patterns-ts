@@ -5,10 +5,11 @@
  * fresh summary so the caller can reload.
  */
 
-import { type CSSProperties, type ReactNode, useState } from "react";
+import { useState } from "react";
 import type { EvalSetSummary } from "../../api/types";
 import { Button } from "../../components/atoms/Button";
 import { Modal } from "../../components/atoms/Modal";
+import { Field, inputStyle } from "../../components/kit/Field";
 import { createEvalSet, updateEvalSet } from "../../lib/evalApi";
 
 interface SetEditModalProps {
@@ -102,42 +103,13 @@ export function SetEditModal({ mode, initial, onClose, onSaved }: SetEditModalPr
       </Field>
 
       {save.kind === "unconfigured" && (
-        <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+        <div style={{ fontSize: 13, color: "var(--mute)" }}>
           Eval persistence is not configured on this server.
         </div>
       )}
       {save.kind === "error" && (
-        <div style={{ fontSize: 13, color: "var(--red)" }}>{save.message}</div>
+        <div style={{ fontSize: 13, color: "var(--err)" }}>{save.message}</div>
       )}
     </Modal>
   );
 }
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--fg-muted)",
-        }}
-      >
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-const inputStyle: CSSProperties = {
-  padding: "6px 10px",
-  fontSize: 13,
-  fontFamily: "inherit",
-  background: "var(--bg-inset)",
-  color: "var(--fg-default)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-};

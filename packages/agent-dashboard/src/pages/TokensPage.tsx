@@ -1,102 +1,51 @@
 import { useState } from "react";
 import type { TokenUsageGroup } from "../api/types";
 import { Badge } from "../components/atoms/Badge";
-import { Button } from "../components/atoms/Button";
 import { Card } from "../components/atoms/Card";
-import { Spinner } from "../components/atoms/Spinner";
-import { AlertIcon } from "../components/atoms/icons";
+import { AsyncState } from "../components/kit/AsyncState";
+import { PageHeader } from "../components/kit/PageHeader";
+import { Segmented } from "../components/kit/Segmented";
 import { DataTable } from "../components/organisms/DataTable";
 import { useAdminData } from "../hooks/useAdminData";
+import { useSortedRows } from "../hooks/useSortedRows";
 
-function getField(row: TokenUsageGroup, key: string): string {
-  return String((row as unknown as Record<string, unknown>)[key] ?? "");
-}
+const GROUP_BY_OPTIONS: { value: "agent" | "model"; label: string }[] = [
+  { value: "agent", label: "By Agent" },
+  { value: "model", label: "By Model" },
+];
 
 export function TokensPage() {
   const [groupBy, setGroupBy] = useState<"agent" | "model">("agent");
   const { data, loading, error } = useAdminData<TokenUsageGroup[]>(
     `/admin/tokens?group_by=${groupBy}`,
   );
-  const [sortKey, setSortKey] = useState("key");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
-  const handleSort = (key: string) => {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
-    }
-  };
-
-  const sorted = [...(data ?? [])].sort((a, b) => {
-    const cmp = getField(a, sortKey).localeCompare(getField(b, sortKey), undefined, {
-      numeric: true,
-    });
-    return sortDir === "asc" ? cmp : -cmp;
-  });
+  const { sorted, sortKey, sortDir, handleSort } = useSortedRows(data ?? [], "key");
 
   const header = (
-    <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
-      <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Tokens</h1>
-      <div style={{ display: "flex", gap: 4 }}>
-        <Button
+    <PageHeader
+      title="Tokens"
+      actions={
+        <Segmented
+          options={GROUP_BY_OPTIONS}
+          value={groupBy}
+          onChange={setGroupBy}
           size="sm"
-          variant={groupBy === "agent" ? "primary" : "ghost"}
-          onClick={() => setGroupBy("agent")}
-        >
-          By Agent
-        </Button>
-        <Button
-          size="sm"
-          variant={groupBy === "model" ? "primary" : "ghost"}
-          onClick={() => setGroupBy("model")}
-        >
-          By Model
-        </Button>
-      </div>
-    </div>
+          aria-label="Group by"
+        />
+      }
+    />
   );
 
-  if (loading) {
+  if (loading || error) {
     return (
       <div>
         {header}
         <Card>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-              color: "var(--fg-muted)",
-              padding: "24px 0",
-            }}
-          >
-            <Spinner />
-            <span>Loading token usage...</span>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div>
-        {header}
-        <Card style={{ borderColor: "var(--red)" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              color: "var(--red)",
-            }}
-          >
-            <AlertIcon size={18} />
-            <span>Error: {error}</span>
-          </div>
+          <AsyncState
+            kind={loading ? "loading" : "error"}
+            loading="Loading token usage..."
+            error={error ? { title: "Error", message: error } : undefined}
+          />
         </Card>
       </div>
     );
@@ -106,22 +55,12 @@ export function TokensPage() {
     return (
       <div>
         {header}
-        <Card>
-          <div
-            style={{
-              textAlign: "center",
-              color: "var(--fg-muted)",
-              padding: "24px 0",
-            }}
-          >
-            No token usage recorded yet
-          </div>
-        </Card>
+        <AsyncState kind="empty" empty={{ title: "No token usage recorded yet" }} />
       </div>
     );
   }
 
-  const keyTone = groupBy === "agent" ? "emerald" : "accent";
+  const keyTone = groupBy === "agent" ? "ok" : "accent";
   const keyLabel = groupBy === "agent" ? "agent" : "model";
 
   return (
@@ -157,7 +96,7 @@ export function TokensPage() {
               header: "Total",
               align: "right",
               render: (row) => (
-                <Badge tone="emerald" variant="filled">
+                <Badge tone="ok" variant="filled">
                   {row.totalTokens.toLocaleString()}
                 </Badge>
               ),

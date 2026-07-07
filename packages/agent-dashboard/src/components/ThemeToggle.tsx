@@ -46,7 +46,7 @@ export function ThemeToggle() {
               border: "none",
               borderRadius: "var(--radius-sm)",
               background: active ? "var(--accent)" : "transparent",
-              color: active ? "#fff" : "var(--fg-muted)",
+              color: active ? "var(--paper)" : "var(--fg-muted)",
               transition: "background var(--motion-fast) var(--ease-out)",
             }}
           >

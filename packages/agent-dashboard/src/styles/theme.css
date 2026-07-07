@@ -117,6 +117,16 @@
   --warn-ink: color-mix(in oklch, var(--warn) 55%, var(--foreground));
   --pen: color-mix(in oklch, var(--accent) 75%, var(--foreground));
   --violet: color-mix(in oklch, var(--accent) 58%, var(--err));
+  --violet-soft: color-mix(in oklch, var(--violet) 15%, var(--card));
+  --violet-ink: color-mix(in oklch, var(--violet) 60%, var(--foreground));
+
+  /* Blast-radius palette (graph/catalog.ts BLAST_COLOR) — read reuses --mute
+     (no tint = "safe"); write/external get dedicated hues so the constellation's
+     corner dot never hard-codes oklch. Per-theme retuning lands in S2 (§7.3
+     --category-* slots); these are the S1 token-ization of the existing values. */
+  --blast-read: var(--mute);
+  --blast-write: oklch(0.6 0.13 155);
+  --blast-external: oklch(0.66 0.15 75);
 
   /* ══ ALIAS BRIDGE — dashboard legacy token names → cockpit tokens. These
        reference the cockpit vars (never hardcode), so light mode flips them. ══ */
