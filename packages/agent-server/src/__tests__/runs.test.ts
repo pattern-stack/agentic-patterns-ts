@@ -109,6 +109,13 @@ describe("runs routes", () => {
       expect(body.runs.map((r) => r.runId)).toEqual([runningRunId, okRunId]);
     });
 
+    it("treats ?agent= (empty string) as absent — no filter, not a filter to the empty agent name", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/admin/runs?agent=");
+      const body = (await res.json()) as { runs: { runId: string }[] };
+      expect(body.runs.map((r) => r.runId)).toEqual([runningRunId, errorRunId, okRunId]);
+    });
+
     it("filters by since", async () => {
       const app = mkApp(store);
       const res = await app.request("/admin/runs?since=2026-05-11T18:04:00Z");

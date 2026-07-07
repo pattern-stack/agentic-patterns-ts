@@ -127,7 +127,10 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     instantiate: reg.instantiate,
     instantiateDefaults: reg.instantiateDefaults,
     evals: reg.evals,
-    runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner) : llmRunner,
+    // Thread the shared bus so a promoted agent's `stream()` lifecycle
+    // (message.start/.complete) is bus-visible too — otherwise RunStoreExporter
+    // never sees it and `/admin/runs` stays empty for promoted-pipeline chats.
+    runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner, eventBus) : llmRunner,
   }));
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
   // the conversation route already builds executors per request.

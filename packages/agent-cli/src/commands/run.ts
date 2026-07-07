@@ -55,7 +55,9 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
   const { runner: llmRunner } = await svc.resolveRunner({ eventBus, verbose: false }, opts.agents);
   // A promoted registration (asAgent()) runs its node instead of LLM-looping;
   // the shared LLM runner still drives any nested AgentSteps as its inner runner.
-  const runner = isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner) : llmRunner;
+  // Thread `eventBus` so a promoted agent's stream() lifecycle is bus-visible
+  // too (parity with `llmRunner`, which already got it via resolveRunner()).
+  const runner = isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner, eventBus) : llmRunner;
 
   const conversation = new Conversation(reg.agent, runner, {
     toolExecutor: createToolboxExecutor(reg.agent),

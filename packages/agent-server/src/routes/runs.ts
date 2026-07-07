@@ -35,7 +35,9 @@ export function runsRoutes(runStore: RunStore | undefined): Hono {
 
     const since = parseDate(c.req.query("since"));
     const limit = parseInt10(c.req.query("limit"), 50, 1, 500);
-    const agentName = c.req.query("agent") ?? undefined;
+    // `?agent=` (empty string) means "no filter", same as omitting it entirely
+    // — `||` (not `??`) so the empty string also falls through to `undefined`.
+    const agentName = c.req.query("agent") || undefined;
 
     const runs = runStore.listRuns({ limit, status: status.value, agentName, since });
     return c.json({ runs });
