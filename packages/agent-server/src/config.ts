@@ -6,6 +6,7 @@ import type {
   AdminServiceProtocol,
   AgentEventBus,
   AgentLike,
+  ConversationStore,
   EvalStore,
   EventStore,
   RunResult,
@@ -99,14 +100,6 @@ export interface SSEExporterLike {
 }
 
 /**
- * Conversation store interface — structural typing for ConversationStore.
- */
-export interface ConversationStoreLike {
-  get(id: string): Promise<unknown>;
-  list(): Promise<unknown[]>;
-}
-
-/**
  * CORS configuration passed to the Hono cors middleware.
  *
  * Default is `origin: "*"` for local development. Production deployments
@@ -146,7 +139,14 @@ export interface ServerConfig {
   readonly adminService: AdminServiceProtocol;
   readonly eventBus: AgentEventBus;
   readonly sseExporter: SSEExporterLike;
-  readonly store?: ConversationStoreLike;
+  /**
+   * Optional structured conversation store — enables `Conversation` to
+   * persist request/response messages (wired into `POST /conversations`,
+   * `routes/conversations.ts`) AND enables the four `/admin/conversations`,
+   * `/conversations/:id`, `/conversations/:id/messages`, `/messages/:id/parts`
+   * read routes (503 persistence-not-configured grammar otherwise).
+   */
+  readonly store?: ConversationStore;
   /** Optional durable event log; enables historical query routes when present. */
   readonly eventStore?: EventStore;
   /** Optional eval store; enables /eval read routes when present (503 otherwise). */

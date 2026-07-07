@@ -9,10 +9,12 @@
 export type {
   ConversationStore,
   StoredConversation,
+  StoredConversationSummary,
   StoredMessage,
   StoredMessagePart,
 } from "../conversation/store.js";
 export { InMemoryConversationStore } from "../conversation/store.js";
+export { SQLiteConversationStore } from "../storage/conversation-store.js";
 
 export { EventStore } from "../storage/event-store.js";
 export type { EventStoreOptions, PersistedEvent, SessionSummary } from "../storage/event-store.js";

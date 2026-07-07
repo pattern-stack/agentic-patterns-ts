@@ -49,6 +49,27 @@ export interface StoredMessagePart {
   readonly type: string;
   readonly content?: string;
   readonly metadata: Record<string, unknown>;
+  /**
+   * Ordinal position within the owning message (0-based insertion order).
+   * The dashboard sorts parts by this column (`ConversationMessagePart.position`,
+   * `agent-dashboard/src/api/types.ts`); optional so pre-#S7 producers of this
+   * protocol (and any other implementation) aren't forced to supply it.
+   */
+  readonly position?: number;
+  /** Creation time — shares the owning message's `createdAt` (written atomically). */
+  readonly createdAt?: Date;
+}
+
+/** Cheap list projection for `listConversations` — no message/part blobs. */
+export interface StoredConversationSummary {
+  readonly conversationId: string;
+  readonly agentName: string;
+  readonly model: string;
+  readonly status: "active" | "completed" | "error";
+  readonly messageCount: number;
+  readonly tokenCount: number;
+  readonly startedAt: Date;
+  readonly lastMessageAt?: Date;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,6 +105,13 @@ export interface ConversationStore {
   getMessages(conversationId: string, limit?: number): Promise<StoredMessage[]>;
 
   getMessageParts(messageId: string): Promise<StoredMessagePart[]>;
+
+  /**
+   * All conversations, newest first (by `createdAt`), with cheap aggregates
+   * (`messageCount`/`tokenCount`/`lastMessageAt`) folded in — the projection
+   * `GET /admin/conversations` serves. `limit` omitted -> all.
+   */
+  listConversations(limit?: number): Promise<StoredConversationSummary[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -152,12 +180,15 @@ export class InMemoryConversationStore implements ConversationStore {
     }
 
     const messageId = generateId();
-    const storedParts: StoredMessagePart[] = parts.map((p) => ({
+    const now = new Date();
+    const storedParts: StoredMessagePart[] = parts.map((p, index) => ({
       id: generateId(),
       messageId,
       type: p.type,
       content: p.content,
       metadata: p.metadata ?? {},
+      position: index,
+      createdAt: now,
     }));
 
     const msg: StoredMessage = {
@@ -167,7 +198,7 @@ export class InMemoryConversationStore implements ConversationStore {
       runId: options?.runId,
       inputTokens: options?.inputTokens ?? 0,
       outputTokens: options?.outputTokens ?? 0,
-      createdAt: new Date(),
+      createdAt: now,
       parts: storedParts,
     };
 
@@ -186,5 +217,27 @@ export class InMemoryConversationStore implements ConversationStore {
 
   async getMessageParts(messageId: string): Promise<StoredMessagePart[]> {
     return this._parts.get(messageId) ?? [];
+  }
+
+  async listConversations(limit?: number): Promise<StoredConversationSummary[]> {
+    const all = [...this._conversations.values()].sort(
+      (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+    );
+    const sliced = limit !== undefined && limit > 0 ? all.slice(0, limit) : all;
+    return sliced.map((conv) => {
+      const msgs = this._messages.get(conv.id) ?? [];
+      const tokenCount = msgs.reduce((sum, m) => sum + m.inputTokens + m.outputTokens, 0);
+      const lastMessageAt = msgs.length > 0 ? msgs[msgs.length - 1]?.createdAt : undefined;
+      return {
+        conversationId: conv.id,
+        agentName: conv.agentName,
+        model: conv.model,
+        status: "active" as const,
+        messageCount: msgs.length,
+        tokenCount,
+        startedAt: conv.createdAt,
+        lastMessageAt,
+      };
+    });
   }
 }

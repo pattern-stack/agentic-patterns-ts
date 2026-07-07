@@ -1,10 +1,26 @@
 /**
- * Conversation routes — create conversations and stream messages via SSE.
+ * Conversation routes — create conversations, stream messages via SSE, and
+ * (spec `.ai-docs/stacks/playground-upgrades/port-map.md` § 4.1) read back
+ * persisted conversations/messages/parts once a `ConversationStore` is wired.
+ *
+ * The four read routes reuse the `runs.ts` 503 persistence-not-configured
+ * grammar. Response shapes are hand-shaped to the dashboard's mirrored
+ * contract (`agent-dashboard/src/api/types.ts` `ConversationSummary` /
+ * `ConversationDetail` / `ConversationMessage` / `ConversationMessagePart`) —
+ * several fields there (`agentConfigId`, message-level `metadata`, lifecycle
+ * `status`/`error`/`completedAt`) have no equivalent in this runtime's
+ * `ConversationStore` protocol; they're synthesized as constants/`null`
+ * (honest-degradation §6 of the port-map — never invent, always say "not
+ * modeled") rather than left undefined.
  */
 
-import type { AgentEventBus } from "@agentic-patterns/runtime";
+import type {
+  AgentEventBus,
+  ConversationStore,
+  StoredMessagePart,
+} from "@agentic-patterns/runtime";
 import { Conversation, createToolboxExecutor } from "@agentic-patterns/runtime";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
 import { agentEventToSSE } from "../sse.js";
@@ -19,6 +35,7 @@ export function conversationRoutes(
   agents: AgentRegistration[],
   conversations: Map<string, ConversationEntry>,
   eventBus: AgentEventBus,
+  store: ConversationStore | undefined,
 ): Hono {
   const app = new Hono();
 
@@ -37,10 +54,114 @@ export function conversationRoutes(
     const toolExecutor = createToolboxExecutor(
       reg.agent as unknown as Parameters<typeof createToolboxExecutor>[0],
     );
-    const conversation = new Conversation(reg.agent, reg.runner, { toolExecutor });
+    // `store` (when configured) makes `Conversation._persistExchange` actually
+    // write request/response messages — previously accepted and never used.
+    const conversation = new Conversation(reg.agent, reg.runner, { toolExecutor, store });
     conversations.set(conversation.id, { conversation, agentId });
 
     return c.json({ id: conversation.id, agent_id: agentId }, 201);
+  });
+
+  // GET /admin/conversations — ConversationSummary[]
+  app.get("/admin/conversations", async (c) => {
+    if (!store) return notConfigured(c);
+    const summaries = await store.listConversations();
+    return c.json(
+      summaries.map((s) => ({
+        conversationId: s.conversationId,
+        agentName: s.agentName,
+        messageCount: s.messageCount,
+        tokenCount: s.tokenCount,
+        startedAt: s.startedAt.toISOString(),
+        lastMessageAt: s.lastMessageAt?.toISOString(),
+        status: s.status,
+      })),
+    );
+  });
+
+  // GET /conversations/:id — ConversationDetail
+  app.get("/conversations/:id", async (c) => {
+    if (!store) return notConfigured(c);
+    const id = c.req.param("id");
+    const conv = await store.getConversation(id);
+    if (!conv) {
+      return c.json({ error: `conversation "${id}" not found` }, 404);
+    }
+    const messages = await store.getMessages(id);
+    const tokenCount = messages.reduce((sum, m) => sum + m.inputTokens + m.outputTokens, 0);
+    const lastMessage = messages.at(-1);
+    return c.json({
+      id: conv.id,
+      // Our system has no per-conversation "agent config" concept (swe-brain's
+      // Drizzle row carries one; this framework only tracks agentName/model) —
+      // honestly null, never invented.
+      agentConfigId: null,
+      // No lifecycle tracking is wired yet (nothing ever transitions a
+      // conversation away from "active" in this slice) — constant, not faked.
+      status: "active",
+      agentName: conv.agentName,
+      model: conv.model,
+      tokenCount,
+      messageCount: messages.length,
+      startedAt: conv.createdAt.toISOString(),
+      completedAt: null,
+      error: null,
+      createdAt: conv.createdAt.toISOString(),
+      updatedAt: (lastMessage?.createdAt ?? conv.updatedAt).toISOString(),
+    });
+  });
+
+  // GET /conversations/:id/messages — ConversationMessage[] ASC, no 404 for an
+  // unknown id (mirrors ConversationStore.getMessages: empty array, no throw).
+  app.get("/conversations/:id/messages", async (c) => {
+    if (!store) return notConfigured(c);
+    const id = c.req.param("id");
+    const messages = await store.getMessages(id);
+    return c.json(
+      messages.map((m) => ({
+        id: m.id,
+        conversationId: m.conversationId,
+        kind: m.kind,
+        runId: m.runId ?? null,
+        inputTokens: m.inputTokens,
+        outputTokens: m.outputTokens,
+        content: derivePreviewContent(m.parts),
+        // No message-level metadata concept in the protocol (only parts carry
+        // metadata) — honestly null rather than merging parts' metadata into
+        // a shape nothing actually models.
+        metadata: null,
+        createdAt: m.createdAt.toISOString(),
+        // No message-update path exists — updatedAt mirrors createdAt.
+        updatedAt: m.createdAt.toISOString(),
+      })),
+    );
+  });
+
+  // GET /messages/:id/parts — ConversationMessagePart[] ASC by position, no
+  // 404 for an unknown id (mirrors ConversationStore.getMessageParts).
+  app.get("/messages/:id/parts", async (c) => {
+    if (!store) return notConfigured(c);
+    const id = c.req.param("id");
+    const parts = await store.getMessageParts(id);
+    return c.json(
+      parts.map((p) => {
+        // Parts share their owning message's createdAt (written atomically,
+        // never independently updated) — protocol producers that predate
+        // #S7's `StoredMessagePart.createdAt` addition fall back to "now"
+        // rather than surfacing `undefined` over the wire.
+        const createdAt = (p.createdAt ?? new Date()).toISOString();
+        return {
+          id: p.id,
+          messageId: p.messageId,
+          type: p.type,
+          content: p.content ?? null,
+          metadata: p.metadata,
+          position: p.position ?? 0,
+          createdAt,
+          updatedAt: createdAt,
+        };
+      }),
+    );
   });
 
   // POST /conversations/:id/messages — send message, stream SSE response
@@ -89,4 +210,36 @@ export function conversationRoutes(
   });
 
   return app;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers (file-local — small helpers are deliberately not shared across
+// route files, the `routes/runs.ts` precedent)
+// ---------------------------------------------------------------------------
+
+function notConfigured(c: Context): Response {
+  return c.json(
+    {
+      error: "persistence not configured",
+      hint: "start `ap playground` with AP_PERSISTENCE != 0 to enable conversation history queries",
+    },
+    503,
+  );
+}
+
+/**
+ * `ConversationMessage.content` (`agent-dashboard/src/api/types.ts`) is a
+ * denormalized preview — the protocol's `StoredMessage` only carries the
+ * full `parts` array. `Conversation._persistExchange` always writes a single
+ * `user_prompt`/`text` part per message, so joining every part's content
+ * with non-empty text reconstructs exactly that; a future multi-part
+ * producer degrades gracefully to a multi-line preview rather than losing
+ * content.
+ */
+function derivePreviewContent(parts: StoredMessagePart[]): string | null {
+  const joined = parts
+    .map((p) => p.content)
+    .filter((c): c is string => typeof c === "string" && c.length > 0)
+    .join("\n\n");
+  return joined.length > 0 ? joined : null;
 }

@@ -11,6 +11,7 @@ export { InMemoryConversationStore } from "./store.js";
 export type {
   ConversationStore,
   StoredConversation,
+  StoredConversationSummary,
   StoredMessage,
   StoredMessagePart,
 } from "./store.js";
