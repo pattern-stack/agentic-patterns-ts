@@ -55,10 +55,14 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
 
   const replayRunId = source.kind === "replay" ? source.runId : null;
   useEffect(() => {
-    if (source.kind !== "replay") return;
-    if (!replayRunId) {
+    if (source.kind !== "replay" || !replayRunId) {
+      // Reset ALL replay state on any non-fetching source: a fast flip back to
+      // live (or to a run-less exchange) mid-fetch would otherwise strand
+      // replayLoading/replayError — the in-flight promise's cleanup is
+      // cancelled-gated and never fires for the new source.
       setReplaySteps(null);
       setReplayError(null);
+      setReplayLoading(false);
       return;
     }
     let cancelled = false;
@@ -157,7 +161,13 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
         )}
         {steps &&
           steps.length > 0 &&
-          (lens === "waterfall" ? <TraceWaterfall steps={steps} /> : <TraceLog steps={steps} />)}
+          // Keyed by run identity: seq restarts at 1 per run, so an unkeyed
+          // waterfall would carry row-expand state from one run into the next.
+          (lens === "waterfall" ? (
+            <TraceWaterfall key={replayRunId ?? "live"} steps={steps} />
+          ) : (
+            <TraceLog key={replayRunId ?? "live"} steps={steps} />
+          ))}
       </div>
     </aside>
   );

@@ -656,10 +656,12 @@ function RunsLens({ agentName }: { agentName: string }) {
             aria-label="Trace lens"
           />
           <Card padded={false} style={{ padding: "14px 15px" }}>
+            {/* Keyed by run: seq restarts per run, so expand state would
+                otherwise bleed across the run <select>. */}
             {traceLens === "waterfall" ? (
-              <TraceWaterfall steps={steps} />
+              <TraceWaterfall key={runId ?? "sample"} steps={steps} />
             ) : (
-              <TraceLog steps={steps} />
+              <TraceLog key={runId ?? "sample"} steps={steps} />
             )}
           </Card>
         </>
