@@ -32,6 +32,16 @@
  * knowing what either means. Absent → no metadata, byte-identical to
  * pre-#149 behavior.
  *
+ * `shouldTrack` (optional, S5 — the metadataFor idiom): a per-run predicate on
+ * the `message.start` event — return `false` and NO row is opened (and no
+ * accumulator, so every later event for that runId falls through the existing
+ * `if (!acc) return` guards; nothing resurrects the run). The seam a host
+ * uses to exclude runs another writer already persists — the playground skips
+ * eval-owned runs (`event.traceId.startsWith(EVAL_TRACE_PREFIX)`,
+ * `eval/run-eval.ts`) because `createEvalResultRecorder` writes their `runs`
+ * row; tracking them here too would double-write the same case execution.
+ * Absent → track everything, byte-identical to prior behavior.
+ *
  * Best-effort like SQLiteExporter: every handler body is try/caught into an
  * `onError` callback (default stderr) — a misbehaving store must never break
  * the bus.
@@ -93,6 +103,7 @@ export class RunStoreExporter extends BaseExporter {
   private readonly _reportError: (err: unknown, event: BaseEvent) => void;
   private readonly _maxOpenRuns: number;
   private readonly _metadataFor?: (event: MessageStartEvent) => Record<string, unknown> | undefined;
+  private readonly _shouldTrack?: (event: MessageStartEvent) => boolean;
   private readonly _open = new Map<string, RunAccumulator>();
 
   constructor(opts: {
@@ -102,11 +113,16 @@ export class RunStoreExporter extends BaseExporter {
     maxOpenRuns?: number;
     /** Per-run metadata seam (#149) — merged into `RunMeta.metadata` on `startRun()`. */
     metadataFor?: (event: MessageStartEvent) => Record<string, unknown> | undefined;
+    /** Per-run tracking predicate (S5) — `false` skips the run entirely (no
+     *  row, no accumulator; later events fall through the `!acc` guards).
+     *  Absent → track everything. See the module doc for the eval use case. */
+    shouldTrack?: (event: MessageStartEvent) => boolean;
   }) {
     super();
     this._store = opts.store;
     this._maxOpenRuns = opts.maxOpenRuns ?? 1000;
     this._metadataFor = opts.metadataFor;
+    this._shouldTrack = opts.shouldTrack;
     this._reportError =
       opts.onError ??
       ((err, event) => {
@@ -118,6 +134,9 @@ export class RunStoreExporter extends BaseExporter {
   /** @internal */
   async _onMessageStart(event: MessageStartEvent): Promise<void> {
     try {
+      if (this._shouldTrack && !this._shouldTrack(event)) {
+        return; // untracked: no row, no accumulator — later events no-op via `!acc`
+      }
       this._evictOldestIfFull();
       const model =
         typeof event.agentConfig?.model === "string" ? event.agentConfig.model : undefined;

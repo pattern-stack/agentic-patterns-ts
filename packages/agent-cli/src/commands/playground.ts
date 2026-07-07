@@ -19,9 +19,11 @@ import { fileURLToPath } from "node:url";
 
 import {
   AgentEventBus,
+  EVAL_TRACE_PREFIX,
   InMemoryAdminService,
   InMemoryEventCollector,
   NodeBackedRunner,
+  RunStoreExporter,
   SQLiteExporter,
   SSEExporter,
   createToolboxExecutor,
@@ -125,7 +127,10 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     instantiate: reg.instantiate,
     instantiateDefaults: reg.instantiateDefaults,
     evals: reg.evals,
-    runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner) : llmRunner,
+    // Thread the shared bus so a promoted agent's `stream()` lifecycle
+    // (message.start/.complete) is bus-visible too — otherwise RunStoreExporter
+    // never sees it and `/admin/runs` stays empty for promoted-pipeline chats.
+    runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner, eventBus) : llmRunner,
   }));
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
   // the conversation route already builds executors per request.
@@ -142,6 +147,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     sseExporter,
     eventStore: store,
     evalStore: store,
+    runStore: store,
     evalExecution: {
       runner: llmRunner,
       model: process.env.AGENT_MODEL ?? tier,
@@ -453,11 +459,23 @@ interface PersistenceAttachment {
 
 /**
  * Try to construct an `EvalStore` (an `EvalStore` IS an `EventStore` IS a
- * `RunStore` — the same instance backs both `ServerConfig.eventStore` and
- * `ServerConfig.evalStore`, and `ap eval` writes the very same db) and
- * attach a `SQLiteExporter` to the bus. Soft-degrades to in-memory when:
+ * `RunStore` — the same instance backs `ServerConfig.eventStore`,
+ * `ServerConfig.evalStore`, AND `ServerConfig.runStore`, and `ap eval` writes
+ * the very same db) and attach both a `SQLiteExporter` (durable event log)
+ * and a `RunStoreExporter` (one `runs` row per chat/run execution — today
+ * only eval executions wrote `runs` rows, via `createEvalResultRecorder`) to
+ * the bus. Eval-owned runs are EXCLUDED from the exporter via `shouldTrack`
+ * (their per-case traceIds carry `runEval`'s `eval:` marker,
+ * `EVAL_TRACE_PREFIX`): a dashboard-launched `POST /eval/runs` executes cases
+ * on this same shared bus, and each case's `runs` row is already written by
+ * `createEvalResultRecorder` — bus-tracking them too would double-write.
+ * Soft-degrades to in-memory when:
  *   - `AP_PERSISTENCE=0` is set, or
  *   - `better-sqlite3` cannot be loaded.
+ *
+ * Boot hygiene: `sweepRunning()` closes any `runs` rows left `'running'` by a
+ * previous process that died mid-run (crash, kill -9) before this process's
+ * own runs start landing — otherwise those orphans linger "running" forever.
  */
 async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<PersistenceAttachment> {
   if (process.env.AP_PERSISTENCE === "0") {
@@ -479,7 +497,20 @@ async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<Persiste
   const sqliteExporter = new SQLiteExporter({ store: result.store });
   sqliteExporter.attach(eventBus);
 
-  return { store: result.store, banner: `${dbPath} (${result.store.count()} events)` };
+  const runStoreExporter = new RunStoreExporter({
+    store: result.store,
+    // Eval-owned runs persist via createEvalResultRecorder — skip them here.
+    shouldTrack: (e) => !e.traceId?.startsWith(EVAL_TRACE_PREFIX),
+  });
+  runStoreExporter.attach(eventBus);
+
+  const swept = result.store.sweepRunning();
+  const sweptNote = swept > 0 ? `; swept ${swept} orphaned run(s)` : "";
+
+  return {
+    store: result.store,
+    banner: `${dbPath} (${result.store.count()} events)${sweptNote}`,
+  };
 }
 
 function parsePositiveInt(s: string | undefined): number | undefined {

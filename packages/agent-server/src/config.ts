@@ -9,6 +9,7 @@ import type {
   EvalStore,
   EventStore,
   RunResult,
+  RunStore,
   RunnerProtocol,
 } from "@agentic-patterns/runtime";
 
@@ -150,6 +151,16 @@ export interface ServerConfig {
   readonly eventStore?: EventStore;
   /** Optional eval store; enables /eval read routes when present (503 otherwise). */
   readonly evalStore?: EvalStore;
+  /**
+   * Optional run-history store; enables `/admin/runs` read routes when
+   * present (503 otherwise). An `EvalStore` (and `EventStore`) already IS a
+   * `RunStore` via extension — an embedder that only wires `evalStore` still
+   * gets run history for free (`app.ts` falls back to it when this is unset).
+   * Prefer setting this explicitly when the embedder's `evalStore` and "the
+   * store chat/run executions should persist to" are conceptually different
+   * instances.
+   */
+  readonly runStore?: RunStore;
   /** Optional eval execution seam; enables POST /eval/runs when present (503 otherwise). */
   readonly evalExecution?: EvalExecutionConfig;
   readonly staticDir?: string;
