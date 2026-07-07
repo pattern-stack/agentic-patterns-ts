@@ -19,7 +19,7 @@ import type { RunOptions, RunResult, RunnerProtocol } from "../../runner/types.j
 import { RunStore } from "../../storage/run-store.js";
 import { AgentStep } from "../../workflows/agent-step.js";
 import type { Node, NodeResult, NodeRunContext } from "../../workflows/node.js";
-import { runEval } from "../run-eval.js";
+import { EVAL_TRACE_PREFIX, runEval } from "../run-eval.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -176,7 +176,7 @@ describe("runEval — no eventBus (back-compat, byte-identical)", () => {
 // ---------------------------------------------------------------------------
 
 describe("runEval — eventBus set, caller traceId base", () => {
-  it("per-case ids are `${base}:${case.id}`, threaded into nodeCtx and stamped on the result", async () => {
+  it("per-case ids are `eval:${base}:${case.id}` (EVAL_TRACE_PREFIX marker), threaded into nodeCtx and stamped on the result", async () => {
     const spy = new SpyNode();
     const bus = new AgentEventBus();
     const report = await runEval(
@@ -191,10 +191,13 @@ describe("runEval — eventBus set, caller traceId base", () => {
       { runner: new MockRunner(), eventBus: bus, traceId: "run-7" },
     );
 
-    expect(spy.seenCtx.map((c) => c.traceId)).toEqual(["run-7:a", "run-7:b"]);
-    expect(report.results[0]?.traceId).toBe("run-7:a");
-    expect(report.results[1]?.traceId).toBe("run-7:b");
+    expect(spy.seenCtx.map((c) => c.traceId)).toEqual(["eval:run-7:a", "eval:run-7:b"]);
+    expect(report.results[0]?.traceId).toBe("eval:run-7:a");
+    expect(report.results[1]?.traceId).toBe("eval:run-7:b");
     expect(report.results[0]?.traceId).not.toBe(report.results[1]?.traceId);
+    // The marker is the documented convention (EVAL_TRACE_PREFIX) hosts use to
+    // recognize eval-owned runs on a shared bus (RunStoreExporter.shouldTrack).
+    expect(report.results[0]?.traceId?.startsWith(EVAL_TRACE_PREFIX)).toBe(true);
   });
 });
 

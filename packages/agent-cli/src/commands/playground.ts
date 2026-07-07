@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   AgentEventBus,
+  EVAL_TRACE_PREFIX,
   InMemoryAdminService,
   InMemoryEventCollector,
   NodeBackedRunner,
@@ -460,7 +461,12 @@ interface PersistenceAttachment {
  * the very same db) and attach both a `SQLiteExporter` (durable event log)
  * and a `RunStoreExporter` (one `runs` row per chat/run execution — today
  * only eval executions wrote `runs` rows, via `createEvalResultRecorder`) to
- * the bus. Soft-degrades to in-memory when:
+ * the bus. Eval-owned runs are EXCLUDED from the exporter via `shouldTrack`
+ * (their per-case traceIds carry `runEval`'s `eval:` marker,
+ * `EVAL_TRACE_PREFIX`): a dashboard-launched `POST /eval/runs` executes cases
+ * on this same shared bus, and each case's `runs` row is already written by
+ * `createEvalResultRecorder` — bus-tracking them too would double-write.
+ * Soft-degrades to in-memory when:
  *   - `AP_PERSISTENCE=0` is set, or
  *   - `better-sqlite3` cannot be loaded.
  *
@@ -488,7 +494,11 @@ async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<Persiste
   const sqliteExporter = new SQLiteExporter({ store: result.store });
   sqliteExporter.attach(eventBus);
 
-  const runStoreExporter = new RunStoreExporter({ store: result.store });
+  const runStoreExporter = new RunStoreExporter({
+    store: result.store,
+    // Eval-owned runs persist via createEvalResultRecorder — skip them here.
+    shouldTrack: (e) => !e.traceId?.startsWith(EVAL_TRACE_PREFIX),
+  });
   runStoreExporter.attach(eventBus);
 
   const swept = result.store.sweepRunning();

@@ -272,7 +272,9 @@ describe("POST /eval/runs — happy path", () => {
     const rows = store.evalRunResults(body.runId);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
-      expect(row.traceId).toBe(`${body.runId}:${row.caseId}`);
+      // `eval:` marker = EVAL_TRACE_PREFIX (run-eval.ts) — eval-owned runs
+      // are recognizable on a shared bus (RunStoreExporter.shouldTrack).
+      expect(row.traceId).toBe(`eval:${body.runId}:${row.caseId}`);
       const runRow = store.getRun(row.runId as string);
       expect(runRow?.metadata?.evalRunId).toBe(body.runId);
       expect(runRow?.metadata?.caseId).toBe(row.caseId);

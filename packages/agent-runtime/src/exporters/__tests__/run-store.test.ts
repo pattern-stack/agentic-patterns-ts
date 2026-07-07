@@ -258,6 +258,40 @@ describe("RunStoreExporter", () => {
     localStore.close();
   });
 
+  it("shouldTrack seam (S5) — false suppresses the row; later events don't resurrect it", async () => {
+    const localStore = new RunStore({ path: ":memory:", Database });
+    const localBus = new AgentEventBus();
+    const guarded = new RunStoreExporter({
+      store: localStore,
+      shouldTrack: (event) => !event.traceId.startsWith("eval:"),
+    });
+    guarded.attach(localBus);
+
+    const runId = "run-untracked";
+    await localBus.publish(messageStart({ runId, traceId: "eval:run-7:c1" }));
+    expect(localStore.getRun(runId)).toBeNull(); // no row opened
+
+    // The full later lifecycle falls through the `!acc` guards — no row
+    // appears, nothing throws, and the terminal event has nothing to finalize.
+    await localBus.publish(llmEnd({ runId, traceId: "eval:run-7:c1" }));
+    await localBus.publish(toolEnd({ runId, traceId: "eval:run-7:c1" }));
+    await localBus.publish(iterationEnd({ runId, traceId: "eval:run-7:c1" }));
+    await localBus.publish(messageComplete({ runId, traceId: "eval:run-7:c1", content: "done" }));
+    expect(localStore.getRun(runId)).toBeNull();
+    expect(localStore.listRuns()).toHaveLength(0);
+
+    // A tracked run on the same exporter still lands normally.
+    await localBus.publish(messageStart({ runId: "run-tracked", traceId: "chat-trace" }));
+    await localBus.publish(
+      messageComplete({ runId: "run-tracked", traceId: "chat-trace", content: "hi" }),
+    );
+    expect(localStore.getRun("run-tracked")?.status).toBe("ok");
+    expect(localStore.listRuns()).toHaveLength(1);
+
+    guarded.detach(localBus);
+    localStore.close();
+  });
+
   it("does not throw if the store rejects a write — bus stays healthy", async () => {
     const failing = {
       startRun: vi.fn(() => {

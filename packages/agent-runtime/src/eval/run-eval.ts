@@ -30,6 +30,24 @@ import {
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
+// Trace-id convention
+// ---------------------------------------------------------------------------
+
+/**
+ * Marker prefix on every per-case traceId runEval mints when an `eventBus` is
+ * set: `eval:${traceBase}:${case.id}`. THE documented convention for
+ * recognizing eval-owned runner activity on a shared bus — hosts that attach
+ * bus-driven writers (e.g. the playground's `RunStoreExporter`) use
+ * `traceId.startsWith(EVAL_TRACE_PREFIX)` to skip eval sub-runs, because
+ * eval cases already persist their own `runs` row via
+ * `createEvalResultRecorder` (a second bus-driven row would be a double-write).
+ * The full traceId (prefix included) is stamped on `EvalResult.traceId`, the
+ * recorder's `runs` row, and every bus event of the case — one consistent
+ * value end-to-end, so trace drill-downs (events-by-traceId) keep joining.
+ */
+export const EVAL_TRACE_PREFIX = "eval:";
+
+// ---------------------------------------------------------------------------
 // Spec / context
 // ---------------------------------------------------------------------------
 
@@ -37,19 +55,25 @@ export interface EvalRunContext {
   readonly runner: RunnerProtocol; // INJECTED — MockRunner in tests
   readonly hooks?: PatternHooks;
   readonly toolExecutor?: ToolExecutor;
-  /** Suite-level trace base. With `eventBus` set, per-case ids are `${traceId}:${case.id}`
-   *  (base minted via generateId() when absent); without a bus it threads to every
-   *  node.run unchanged, exactly as before #133. E4 passes the eval_run id here. */
+  /** Suite-level trace base. With `eventBus` set, per-case ids are
+   *  `eval:${traceId}:${case.id}` (base minted via generateId() when absent) —
+   *  see {@link EVAL_TRACE_PREFIX} for the marker convention. Without a bus it
+   *  threads to every node.run unchanged, exactly as before #133. E4 passes
+   *  the eval_run id here. */
   readonly traceId?: string;
   /**
    * NEW (#133, doc §5): observability bus for eval runs. When set, runEval mints a
-   * per-case traceId, delivers bus + traceId into each LLM leaf's RunOptions (via a
-   * per-case runner wrapper — AgentRunner honors RunOptions.eventBus), and stamps the
-   * traceId onto the EvalResult. Attach a RunStoreExporter to this bus and each case
-   * also lands RunStore `runs` row(s) — the E2 fusion. Absent → byte-identical to
-   * pre-#133 behavior. NOTE: AgentRunner rebinds its instance bus to a per-call
-   * RunOptions.eventBus (agent-runner.ts:283) — pass the runner's own shared bus
-   * (the playground pattern) unless you intend that redirect.
+   * per-case traceId (`eval:`-prefixed — {@link EVAL_TRACE_PREFIX}), delivers bus +
+   * traceId into each LLM leaf's RunOptions (via a per-case runner wrapper —
+   * AgentRunner honors RunOptions.eventBus), and stamps the traceId onto the
+   * EvalResult. Attach a RunStoreExporter to this bus and each case also lands
+   * RunStore `runs` row(s) — the E2 fusion. If your host ALSO persists cases via
+   * `createEvalResultRecorder` (the playground), give the exporter
+   * `shouldTrack: (e) => !e.traceId?.startsWith(EVAL_TRACE_PREFIX)` or each case
+   * writes two rows. Absent → byte-identical to pre-#133 behavior. NOTE:
+   * AgentRunner rebinds its instance bus to a per-call RunOptions.eventBus
+   * (agent-runner.ts:283) — pass the runner's own shared bus (the playground
+   * pattern) unless you intend that redirect.
    */
   readonly eventBus?: AgentEventBus;
 }
@@ -236,7 +260,9 @@ export async function runEval<TIn, TOut, TExpected = unknown>(
   const traceBase = bus ? (ctx.traceId ?? generateId()) : undefined;
 
   for (const evalCase of spec.cases) {
-    const caseTraceId = traceBase === undefined ? undefined : `${traceBase}:${evalCase.id}`;
+    // `eval:`-prefixed per-case id — see EVAL_TRACE_PREFIX for the convention.
+    const caseTraceId =
+      traceBase === undefined ? undefined : `${EVAL_TRACE_PREFIX}${traceBase}:${evalCase.id}`;
     const nodeCtx = {
       runner: bus && caseTraceId ? withEvalBus(ctx.runner, bus, caseTraceId) : ctx.runner,
       hooks: ctx.hooks,

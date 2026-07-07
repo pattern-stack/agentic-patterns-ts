@@ -64,7 +64,8 @@ function seedResult(
 ): void {
   const runId = store.startRun({
     agentName: "dealbrain/curator",
-    traceId: `${evalRunId}:${caseId}`,
+    // `eval:` marker = runEval's EVAL_TRACE_PREFIX per-case traceId convention.
+    traceId: `eval:${evalRunId}:${caseId}`,
     metadata: { evalRunId, caseId },
   });
   store.finishRun(runId, {
@@ -412,7 +413,7 @@ describe("eval routes", () => {
       expect(byCase.get("case-01")?.finalAnswer).toBe('"4"');
       expect(byCase.get("case-01")?.inputTokens).toBe(100);
       expect(byCase.get("case-01")?.outputTokens).toBe(10);
-      expect(byCase.get("case-01")?.traceId).toBe(`${runAId}:case-01`);
+      expect(byCase.get("case-01")?.traceId).toBe(`eval:${runAId}:case-01`);
       expect(byCase.get("case-01")?.runStatus).toBe("ok");
       expect(byCase.get("case-03")?.runStatus).toBe("error");
 

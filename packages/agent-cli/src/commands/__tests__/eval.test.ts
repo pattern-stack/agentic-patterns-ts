@@ -282,7 +282,7 @@ describe("ap eval — happy path", () => {
       for (const row of rows) {
         expect(row.pass).toBe(true);
         expect(row.scores).toBeTruthy();
-        expect(row.traceId).toBe(`${evalRun.id}:${row.caseId}`);
+        expect(row.traceId).toBe(`eval:${evalRun.id}:${row.caseId}`);
         expect(row.finalAnswer).toBeTruthy();
 
         const runRow = store.getRun(row.runId as string);
@@ -782,8 +782,8 @@ describe("ap eval — trace-event capture (SQLiteExporter + shared bus)", () => 
       const run = store.listEvalRuns()[0];
       if (!run) throw new Error("unreachable");
       const events = store.recent({ limit: 100 });
-      const c1Events = events.filter((e) => e.traceId === `${run.id}:c1`);
-      const c2Events = events.filter((e) => e.traceId === `${run.id}:c2`);
+      const c1Events = events.filter((e) => e.traceId === `eval:${run.id}:c1`);
+      const c2Events = events.filter((e) => e.traceId === `eval:${run.id}:c2`);
       expect(c1Events.length).toBeGreaterThan(0);
       expect(c2Events.length).toBeGreaterThan(0);
     } finally {
