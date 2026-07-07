@@ -117,6 +117,16 @@ export {
 } from "./loop.js";
 
 export {
+  type AgentStage,
+  type AgentStageSpec,
+  type CompletedStage,
+  type SequentialAgentsOpts,
+  type SequentialAgentsResult,
+  renderSharedState,
+  sequentialAgents,
+} from "./sequential-agents.js";
+
+export {
   type RetryFailure,
   type RetryPredicate,
   type RetryBackoff,
