@@ -26,16 +26,17 @@ export function useSortedRows<T>(
 
   const handleSort = useCallback(
     (key: string) => {
-      setSortKey((cur) => {
-        if (cur === key) {
-          setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-          return cur;
-        }
+      // Sibling set-calls, never a set inside another updater: StrictMode
+      // double-invokes updaters, so a nested toggle enqueues twice and
+      // cancels itself (same-column clicks stop flipping direction in dev).
+      if (key === sortKey) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(key);
         setSortDir(initialDir);
-        return key;
-      });
+      }
     },
-    [initialDir],
+    [sortKey, initialDir],
   );
 
   const sorted = useMemo(() => {
