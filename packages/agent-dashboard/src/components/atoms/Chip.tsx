@@ -2,9 +2,9 @@
  * Chip atom — small inline tag, rewritten on cockpit tokens (port-map §7.1).
  * Same tone vocabulary and visuals as before; the underlying CSS vars are now
  * the cockpit's native names (`--ink-2`, `--fill`, `--line`, `--accent-soft`,
- * `--err-soft`) instead of the legacy alias bridge (`--fg-muted`, `--bg-inset`,
- * `--border`) it read through previously — same resolved colors today, no
- * dependency on the bridge once it's deleted (S8).
+ * `--err-soft`) instead of the admin bridge's muted-text/inset-surface/border
+ * aliases it read through previously — same resolved colors today, no
+ * dependency on the bridge now that it's deleted (S8).
  */
 import type { CSSProperties, ReactNode } from "react";
 

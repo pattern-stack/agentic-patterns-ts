@@ -12,14 +12,11 @@
       (function () {
         var LIGHT_FOR = { blue: "blue", earth: "earth", chalk: "chalky" };
         var DARK_FOR = { blue: "blue-dark", earth: "earth-dark", chalk: "chalkboard" };
-        var THEME_IDS = {
-          blue: 1,
-          "blue-dark": 1,
-          earth: 1,
-          "earth-dark": 1,
-          chalky: 1,
-          chalkboard: 1,
-        };
+        // Array + indexOf (not an object-literal lookup) so an arbitrary
+        // `?theme=` query value can never resolve to an inherited
+        // Object.prototype member (e.g. `?theme=toString` truthily "passing"
+        // a `{}[q]` check) — mirrors `ui/theme-mode.ts`'s `Set.has` guard.
+        var THEME_IDS = ["blue", "blue-dark", "earth", "earth-dark", "chalky", "chalkboard"];
         function prefersDarkOS() {
           try {
             return window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -61,7 +58,7 @@
         var override = null;
         try {
           var q = new URLSearchParams(window.location.search).get("theme");
-          if (q && THEME_IDS[q]) override = q;
+          if (q && THEME_IDS.indexOf(q) !== -1) override = q;
         } catch (e) {
           /* no-op */
         }

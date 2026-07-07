@@ -4,7 +4,12 @@
  */
 import { describe, expect, it } from "vitest";
 import type { RunSummary } from "../api/types";
-import { MAX_RUN_CHIPS, pinSelectedRun, sortRunsNewestFirst } from "../lib/runPicker";
+import {
+  MAX_RUN_CHIPS,
+  pickOrDeselectRun,
+  pinSelectedRun,
+  sortRunsNewestFirst,
+} from "../lib/runPicker";
 
 function mkRun(runId: string, tsStart: string): RunSummary {
   return {
@@ -94,5 +99,16 @@ describe("pinSelectedRun", () => {
 
   it("empty runs list returns empty regardless of selection", () => {
     expect(pinSelectedRun([], "anything")).toEqual([]);
+  });
+});
+
+describe("pickOrDeselectRun", () => {
+  it("selects a run that isn't currently active", () => {
+    expect(pickOrDeselectRun("a", null)).toBe("a");
+    expect(pickOrDeselectRun("a", "b")).toBe("a");
+  });
+
+  it("clicking the ALREADY-active run deselects it (null = return to demo)", () => {
+    expect(pickOrDeselectRun("a", "a")).toBeNull();
   });
 });

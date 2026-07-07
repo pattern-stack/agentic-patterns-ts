@@ -1,7 +1,8 @@
 /**
  * Typed wrapper over CSS custom properties (vendored from swe-brain's Agent
- * Plane). All values are references — the CSS vars in theme.css remain the
- * source of truth. Import T in components; never hard-code hex/px elsewhere.
+ * Plane). All values are references — the CSS vars in styles/tokens-base.css
+ * + styles/theme-<id>.css remain the source of truth. Import T in
+ * components; never hard-code hex/px elsewhere.
  */
 export const T = {
   fz: {

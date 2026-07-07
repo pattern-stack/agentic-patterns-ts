@@ -12,9 +12,9 @@ interface ToolRow extends ToolAnalytics {
 }
 
 function healthTone(successRate: number): BadgeTone {
-  if (successRate >= 0.95) return "green";
-  if (successRate >= 0.8) return "yellow";
-  return "red";
+  if (successRate >= 0.95) return "ok";
+  if (successRate >= 0.8) return "warn";
+  return "err";
 }
 
 function getField(row: ToolRow, key: string): string {
@@ -61,7 +61,7 @@ export function ToolsPage() {
             justifyContent: "center",
             gap: 10,
             padding: 48,
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
           }}
         >
           <Spinner />
@@ -75,13 +75,13 @@ export function ToolsPage() {
     return (
       <div>
         {title}
-        <Card style={{ borderColor: "var(--red)" }}>
+        <Card style={{ borderColor: "var(--err)" }}>
           <div
             style={{
               display: "flex",
               alignItems: "center",
               gap: 10,
-              color: "var(--red)",
+              color: "var(--err)",
             }}
           >
             <AlertIcon size={18} />
@@ -100,7 +100,7 @@ export function ToolsPage() {
           <div
             style={{
               textAlign: "center",
-              color: "var(--fg-muted)",
+              color: "var(--ink-2)",
               padding: 12,
             }}
           >
@@ -126,10 +126,10 @@ export function ToolsPage() {
                     display: "inline-flex",
                     alignItems: "center",
                     gap: 8,
-                    color: "var(--fg-default)",
+                    color: "var(--ink)",
                   }}
                 >
-                  <span style={{ color: "var(--fg-subtle)" }}>
+                  <span style={{ color: "var(--ink-3)" }}>
                     <WrenchIcon size={14} />
                   </span>
                   <span style={{ fontFamily: "var(--font-mono)" }}>{row.toolName}</span>
@@ -142,7 +142,7 @@ export function ToolsPage() {
               header: "Errors",
               align: "right",
               render: (row) => (
-                <Badge tone={row.totalErrors > 0 ? "red" : "muted"}>{row.totalErrors}</Badge>
+                <Badge tone={row.totalErrors > 0 ? "err" : "mute"}>{row.totalErrors}</Badge>
               ),
             },
             {
@@ -179,9 +179,7 @@ export function ToolsPage() {
 function ToolAgentBreakdown({ tool }: { tool: ToolRow }) {
   if (!tool.agentBreakdown.length) {
     return (
-      <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>
-        No per-agent breakdown available.
-      </div>
+      <div style={{ color: "var(--ink-2)", fontSize: 13 }}>No per-agent breakdown available.</div>
     );
   }
   const total = tool.agentBreakdown.reduce((n, a) => n + a.callCount, 0) || 1;
@@ -193,7 +191,7 @@ function ToolAgentBreakdown({ tool }: { tool: ToolRow }) {
           fontSize: 11,
           textTransform: "uppercase",
           letterSpacing: 0.5,
-          color: "var(--fg-subtle)",
+          color: "var(--ink-3)",
         }}
       >
         {tool.toolName} usage by agent
@@ -210,17 +208,17 @@ function ToolAgentBreakdown({ tool }: { tool: ToolRow }) {
                 gap: 12,
                 fontFamily: "var(--font-mono)",
                 fontSize: 12,
-                color: "var(--fg-muted)",
+                color: "var(--ink-2)",
               }}
             >
-              <Badge tone="emerald">{a.agentName}</Badge>
-              <span style={{ color: "var(--fg-default)" }}>{a.callCount} calls</span>
-              <span style={{ color: "var(--fg-subtle)" }}>{pct}%</span>
+              <Badge tone="ok">{a.agentName}</Badge>
+              <span style={{ color: "var(--ink)" }}>{a.callCount} calls</span>
+              <span style={{ color: "var(--ink-3)" }}>{pct}%</span>
               <div
                 style={{
                   flex: 1,
                   height: 4,
-                  background: "var(--bg-surface-hover)",
+                  background: "var(--fill-2)",
                   borderRadius: 2,
                   overflow: "hidden",
                 }}
@@ -229,7 +227,7 @@ function ToolAgentBreakdown({ tool }: { tool: ToolRow }) {
                   style={{
                     width: `${pct}%`,
                     height: "100%",
-                    background: "var(--accent-emerald)",
+                    background: "var(--accent)",
                   }}
                 />
               </div>

@@ -27,12 +27,11 @@
  * block here; `data-theme` is ALWAYS one of the six concrete ids by the time
  * any stylesheet rule needs to match (index.html before-paint script).
  *
- * An ALIAS BRIDGE at the bottom of :root maps the dashboard's legacy token
- * names (--bg-*, --fg-*, --green/--red/--yellow/--purple, --accent-emerald…)
- * onto the cockpit tokens, so every admin page adopts the active theme with no
- * per-file edit. TRANSITIONAL — deleted in S8 once
- * `grep -rn "--bg-\|--fg-\|var(--green)\|var(--red)\|var(--yellow)\|var(--purple)\|accent-emerald" src/`
- * is clean.
+ * The alias bridge that used to live at the bottom of :root (mapping the
+ * dashboard's legacy admin token names onto these cockpit tokens) is GONE —
+ * every call site was swept onto the cockpit names directly in S8, behind a
+ * clean grep gate over src/ for the legacy prefixes/names. Do not resurrect
+ * legacy token names; add real cockpit tokens instead.
  */
 :root {
   /* ── Fonts ────────────────────────────────────────── */
@@ -117,26 +116,6 @@
   --blast-read: var(--mute);
   --blast-write: var(--category-3);
   --blast-external: var(--category-4);
-
-  /* ══ ALIAS BRIDGE — dashboard legacy token names → cockpit tokens. These
-       reference the cockpit vars (never hardcode), so every theme flips them. ══ */
-  --bg-canvas: var(--background);
-  --bg-surface: var(--fill);
-  --bg-surface-hover: var(--fill-2);
-  --bg-inset: var(--background);
-  --border-muted: var(--line-2);
-  --fg-default: var(--ink);
-  --fg-muted: var(--ink-2);
-  --fg-subtle: var(--ink-3);
-  --green: var(--ok);
-  --red: var(--err);
-  --yellow: var(--warn);
-  --purple: var(--violet);
-  --accent-emerald: var(--accent);
-  --accent-emerald-dim: var(--accent-soft);
-  /* --accent, --card, --border, --foreground, --muted, --muted-foreground,
-     --secondary, --destructive, --status-completed, --background, --font-sans,
-     --font-mono are already cockpit tokens (set per-theme) and consumed directly. */
 }
 
 html,

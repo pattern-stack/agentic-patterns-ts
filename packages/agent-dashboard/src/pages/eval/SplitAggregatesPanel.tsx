@@ -82,7 +82,7 @@ export function SplitAggregatesPanel({ filters }: SplitAggregatesPanelProps) {
         }}
       >
         <div style={{ fontSize: 14, fontWeight: 600 }}>Split aggregates</div>
-        <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+        <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
           {scoped ? "scoped to the active filters" : "all results"}
         </div>
       </div>
@@ -93,7 +93,7 @@ export function SplitAggregatesPanel({ filters }: SplitAggregatesPanelProps) {
             display: "flex",
             alignItems: "center",
             gap: 8,
-            color: "var(--fg-muted)",
+            color: "var(--ink-2)",
             fontSize: 13,
           }}
         >
@@ -103,13 +103,13 @@ export function SplitAggregatesPanel({ filters }: SplitAggregatesPanelProps) {
       )}
 
       {state.kind === "error" && (
-        <div style={{ color: "var(--red)", fontSize: 13 }}>
+        <div style={{ color: "var(--err)", fontSize: 13 }}>
           Failed to load split aggregates: {state.message}
         </div>
       )}
 
       {state.kind === "ok" && state.aggregates.length === 0 && (
-        <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>no scored results yet</div>
+        <div style={{ color: "var(--ink-2)", fontSize: 13 }}>no scored results yet</div>
       )}
 
       {state.kind === "ok" && state.aggregates.length > 0 && (
@@ -131,12 +131,12 @@ export function SplitAggregatesPanel({ filters }: SplitAggregatesPanelProps) {
             gap: 10,
           }}
         >
-          <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>Overfit gap (train − test)</div>
+          <div style={{ fontSize: 12, color: "var(--ink-2)" }}>Overfit gap (train − test)</div>
           <div
             style={{
               fontSize: 18,
               fontWeight: 600,
-              color: gap.gapPts > 0 ? "var(--red)" : "var(--fg-default)",
+              color: gap.gapPts > 0 ? "var(--err)" : "var(--ink)",
             }}
           >
             {gap.gapPts > 0 ? "+" : ""}
@@ -152,17 +152,17 @@ function SplitBucketRow({ bucket }: { bucket: SplitAggregate }) {
   const pct = bucket.passRate === null ? null : Math.round(bucket.passRate * 100);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <Badge tone="muted" style={{ minWidth: 72, justifyContent: "center" }}>
+      <Badge tone="mute" style={{ minWidth: 72, justifyContent: "center" }}>
         {bucket.split ?? "untagged"}
       </Badge>
-      <div style={{ fontSize: 12, color: "var(--fg-muted)", minWidth: 150 }}>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", minWidth: 150 }}>
         {bucket.passed}/{bucket.results} passed · {bucket.failed} failed
       </div>
       <div
         style={{
           flex: 1,
           height: 8,
-          background: "var(--bg-inset)",
+          background: "var(--background)",
           borderRadius: 999,
           overflow: "hidden",
         }}
@@ -171,7 +171,7 @@ function SplitBucketRow({ bucket }: { bucket: SplitAggregate }) {
           style={{
             width: `${pct ?? 0}%`,
             height: "100%",
-            background: "var(--green)",
+            background: "var(--ok)",
           }}
         />
       </div>

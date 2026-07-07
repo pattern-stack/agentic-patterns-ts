@@ -1,8 +1,8 @@
 /**
  * Card atom — surface container, rewritten on cockpit tokens (port-map §7.1).
- * Default surface moved from the legacy `--bg-surface` (`--fill` alias, a
- * secondary/filled tone) to `--paper` — the cockpit's standard raised-card
- * tone already used by RunSurfacePage / NodeInspector / ConstellationNode, so
+ * Default surface moved from the legacy admin bridge's filled-surface alias
+ * (`--fill` today) to `--paper` — the cockpit's standard raised-card tone
+ * already used by RunSurfacePage / NodeInspector / ConstellationNode, so
  * every BUILD/EVAL card now matches the RUN surfaces it sits next to.
  * `inset` keeps its recessed-panel meaning (canvas-toned, softer border).
  * When rendered with an `onClick`, wears `.ap-card--interactive` so

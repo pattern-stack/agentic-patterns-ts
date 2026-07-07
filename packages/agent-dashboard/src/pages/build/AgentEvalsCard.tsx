@@ -13,10 +13,12 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AgentEvalRef } from "../../api/composition";
 import type { EvalRunRow } from "../../api/types";
+import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { fetchEvalRuns } from "../../lib/evalApi";
+import { statusTone } from "../../lib/format";
 import { RunLaunchModal } from "../eval/RunLaunchModal";
 
 type LatestRunState =
@@ -31,29 +33,27 @@ function passRateLabel(run: EvalRunRow): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-function statusTone(status: EvalRunRow["status"]): "neutral" | "accent" | "warn" {
-  if (status === "error") return "warn";
-  if (status === "running") return "accent";
-  return "neutral";
-}
-
 function LatestRunLine({ state }: { state: LatestRunState }) {
   if (state.kind === "loading") {
-    return <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>loading…</span>;
+    return <span style={{ fontSize: 12, color: "var(--ink-3)" }}>loading…</span>;
   }
   if (state.kind === "unconfigured") {
-    return <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>store not configured</span>;
+    return <span style={{ fontSize: 12, color: "var(--ink-3)" }}>store not configured</span>;
   }
   if (state.kind === "none") {
-    return <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>no runs yet</span>;
+    return <span style={{ fontSize: 12, color: "var(--ink-3)" }}>no runs yet</span>;
   }
   const run = state.run;
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-      <Chip tone={statusTone(run.status)}>{run.status}</Chip>
-      <span style={{ color: "var(--fg-default)", fontWeight: 600 }}>{passRateLabel(run)}</span>
+      {/* The local statusTone (neutral|accent|warn, Chip-only) folded into
+          lib/format's canonical statusTone (ok|run|err|mute, port-map §7.2) —
+          rendered via Badge to match every other status pill in the app
+          (ConversationsPage, EvalRunsPage, EvalRunDetailPage, …). */}
+      <Badge tone={statusTone(run.status)}>{run.status}</Badge>
+      <span style={{ color: "var(--ink)", fontWeight: 600 }}>{passRateLabel(run)}</span>
       {run.summary && (
-        <span style={{ color: "var(--fg-subtle)" }}>
+        <span style={{ color: "var(--ink-3)" }}>
           {run.summary.passed}/{run.summary.cases}
         </span>
       )}
@@ -109,8 +109,8 @@ export function AgentEvalsCard({
   return (
     <Card>
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
-        <span style={{ fontWeight: 600, color: "var(--fg-default)", flex: 1 }}>Evals</span>
-        <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>graded by · declared</span>
+        <span style={{ fontWeight: 600, color: "var(--ink)", flex: 1 }}>Evals</span>
+        <span style={{ fontSize: 12, color: "var(--ink-3)" }}>graded by · declared</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column" }}>
         {evals.map((ref, i) => (
@@ -143,7 +143,7 @@ export function AgentEvalsCard({
               </Button>
             </div>
             {ref.grades && (
-              <div style={{ fontSize: 12, color: "var(--fg-muted)", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.5 }}>
                 {ref.grades}
               </div>
             )}

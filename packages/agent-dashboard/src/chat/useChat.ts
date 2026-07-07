@@ -16,6 +16,7 @@
 import { useCallback, useRef, useState } from "react";
 import { type SendOptions, createConversation, streamMessage } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
+import type { EventLike } from "../graph/trace-from-events";
 import { type ChatMessage, applyParts } from "./model";
 
 export interface UseChatResult {
@@ -27,6 +28,14 @@ export interface UseChatResult {
   send: (content: string) => Promise<void>;
   abort: () => void;
   reset: () => void;
+  /**
+   * The raw event stream for the CURRENT (most recent) live turn — reset at
+   * the start of every `send()`. Console's trace rail (port-map §4.2.3) feeds
+   * this through `eventsToSteps` for the live-turn waterfall/log; the fold
+   * already tolerates the live camelCase shape (`graph/trace-from-events.ts`).
+   * Purely additive — no existing consumer of `useChat` reads this field.
+   */
+  traceEvents: EventLike[];
 }
 
 export function useChat(agentId: string | null, runOptions?: SendOptions): UseChatResult {
@@ -34,6 +43,7 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [traceEvents, setTraceEvents] = useState<EventLike[]>([]);
   const convIdRef = useRef<string | null>(null);
   // keep run options current without re-creating `send` each render.
   const runOptionsRef = useRef<SendOptions | undefined>(runOptions);
@@ -61,6 +71,7 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
         { id: assistantId, role: "assistant", parts: [], at: Date.now(), streaming: true },
       ]);
       setStreaming(true);
+      setTraceEvents([]); // this turn's trace rail starts fresh
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
@@ -76,6 +87,7 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
 
         for await (const ev of streamMessage(convId, q, runOptionsRef.current, ctrl.signal)) {
           const e = toEventLike(ev);
+          setTraceEvents((prev) => [...prev, e]);
           patch(assistantId, (m) => {
             const r = applyParts(m.parts, e);
             return { ...m, parts: r.parts, ...(r.meta ?? {}) };
@@ -106,7 +118,8 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     setMessages([]);
     setStreaming(false);
     setError(null);
+    setTraceEvents([]);
   }, []);
 
-  return { messages, streaming, error, conversationId, send, abort, reset };
+  return { messages, streaming, error, conversationId, send, abort, reset, traceEvents };
 }

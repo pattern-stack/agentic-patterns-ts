@@ -1,37 +1,20 @@
 /**
  * Badge atom — small label pill, rewritten on cockpit tokens (port-map §7.1).
  *
- * Two tone vocabularies live here on purpose: `Tone` is the cockpit's semantic
- * set (ok/err/warn/accent/mute/run/violet — the same one `components/kit`,
- * `Chip`, and `Stat` speak), `LegacyTone` is the pre-cockpit admin-surface
- * names still passed at ~30 call sites. `LEGACY_TONE_MAP` resolves the latter
- * onto the former so every existing caller keeps working unchanged; sweep the
- * legacy names at call sites in S8 (see port-map §7.1 migration table), then
- * delete the alias map.
+ * `Tone` is the cockpit's one semantic set (ok/err/warn/accent/mute/run/violet
+ * — the same vocabulary `components/kit`, `Chip`, and `Stat` speak). The
+ * pre-cockpit admin-surface tone names (`green`/`red`/`yellow`/`purple`/
+ * `emerald`/`neutral`/`muted`) and their `LEGACY_TONE_MAP` resolver were swept
+ * off every call site and deleted in S8 (port-map §7.1 migration table) —
+ * `BadgeTone` is just `Tone` now.
  */
 
 import type { CSSProperties, ReactNode } from "react";
 import { T } from "../../ui/tokens";
 
 export type Tone = "ok" | "err" | "warn" | "accent" | "mute" | "run" | "violet";
-/** @deprecated legacy admin-surface tone names — mapped onto {@link Tone}. */
-export type LegacyTone = "neutral" | "green" | "red" | "yellow" | "purple" | "emerald" | "muted";
-export type BadgeTone = Tone | LegacyTone;
+export type BadgeTone = Tone;
 export type BadgeVariant = "outline" | "filled";
-
-const LEGACY_TONE_MAP: Record<LegacyTone, Tone> = {
-  neutral: "mute",
-  muted: "mute",
-  green: "ok",
-  emerald: "ok",
-  red: "err",
-  yellow: "warn",
-  purple: "violet",
-};
-
-export function resolveTone(tone: BadgeTone): Tone {
-  return tone in LEGACY_TONE_MAP ? LEGACY_TONE_MAP[tone as LegacyTone] : (tone as Tone);
-}
 
 /** Soft tinted background per tone — the outline/default Badge look. */
 const TONE_SOFT_BG: Record<Tone, string> = {
@@ -81,11 +64,10 @@ export function Badge({
   title,
   style,
 }: BadgeProps) {
-  const resolved = resolveTone(tone);
   const visual: CSSProperties =
     variant === "filled"
-      ? { background: TONE_SOLID[resolved], color: "var(--paper)" }
-      : { background: TONE_SOFT_BG[resolved], color: TONE_INK[resolved] };
+      ? { background: TONE_SOLID[tone], color: "var(--paper)" }
+      : { background: TONE_SOFT_BG[tone], color: TONE_INK[tone] };
 
   return (
     <span

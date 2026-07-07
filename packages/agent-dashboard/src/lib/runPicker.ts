@@ -35,3 +35,16 @@ export function pinSelectedRun(
   }
   return top;
 }
+
+/**
+ * Clicking a run chip/row: if it's already the active replay, DESELECT it
+ * (the caller returns to demo mode) — otherwise select it. Pulled out as
+ * pure decision logic (port-map §3.4's "switch back to demo" acceptance,
+ * which had no affordance at all before this — clicking the active chip
+ * used to just re-fetch the same run) so it's unit-testable without
+ * rendering `RunSurfacePage`. Returns the run id to replay, or `null` to
+ * mean "return to demo".
+ */
+export function pickOrDeselectRun(runId: string, activeRunId: string | null): string | null {
+  return runId === activeRunId ? null : runId;
+}

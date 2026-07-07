@@ -4,7 +4,7 @@
  * on `streaming`. Optional; ChatPanel renders it only when `onSend` is provided.
  */
 import { type KeyboardEvent, useRef, useState } from "react";
-import { Button } from "../ui/atoms";
+import { Button } from "../components/atoms/Button";
 
 export function ChatComposer({
   onSend,

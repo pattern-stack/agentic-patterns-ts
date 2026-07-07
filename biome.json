@@ -42,7 +42,8 @@
       "demo/",
       "packages/agent-cli/assets/dashboard/",
       "packages/agent-cli/assets/plugin-template/",
-      "**/__fixtures__/**"
+      "**/__fixtures__/**",
+      ".claude/worktrees/"
     ]
   }
 }

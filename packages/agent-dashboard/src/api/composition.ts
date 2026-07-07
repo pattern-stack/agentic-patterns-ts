@@ -226,22 +226,34 @@ export const compositionApi = {
     toolName: string,
     args: Record<string, unknown>,
   ): Promise<ToolRunResult> => {
-    const response = await fetch(
-      `/capabilities/${encodeURIComponent(capId)}/tools/${encodeURIComponent(toolName)}/invoke`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args }),
-      },
-    );
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      return {
-        ok: false,
-        error: body?.error ?? `HTTP ${response.status}: ${response.statusText}`,
-        ms: 0,
-      };
+    // `fetch` itself can REJECT (server down, network drop, CORS failure) —
+    // distinct from a resolved-but-non-2xx Response (handled below). Without
+    // this try/catch, that rejection propagated out of the async function
+    // as an unhandled promise rejection: `ToolRunner.run()`'s bare
+    // `try { setResult(await …) } finally { … }` has no `catch`, so no error
+    // ever reached `result` — the button silently re-enabled with no error
+    // box. Folding it into the same envelope here fixes every caller at the
+    // one seam, matching the non-2xx branch's existing behavior.
+    try {
+      const response = await fetch(
+        `/capabilities/${encodeURIComponent(capId)}/tools/${encodeURIComponent(toolName)}/invoke`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ args }),
+        },
+      );
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null;
+        return {
+          ok: false,
+          error: body?.error ?? `HTTP ${response.status}: ${response.statusText}`,
+          ms: 0,
+        };
+      }
+      return (await response.json()) as ToolRunResult;
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e), ms: 0 };
     }
-    return (await response.json()) as ToolRunResult;
   },
 };

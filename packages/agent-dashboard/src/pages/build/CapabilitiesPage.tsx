@@ -67,7 +67,7 @@ function CapabilitiesList() {
               display: "flex",
               gap: 10,
               alignItems: "center",
-              color: "var(--fg-muted)",
+              color: "var(--ink-2)",
               padding: 40,
             }}
           >
@@ -84,7 +84,7 @@ function CapabilitiesList() {
         <DetailPageShell breadcrumb={[{ label: "Capabilities" }]}>
           {data.length === 0 ? (
             <Card>
-              <span style={{ fontSize: 13, color: "var(--fg-subtle)" }}>
+              <span style={{ fontSize: 13, color: "var(--ink-3)" }}>
                 No capabilities discovered.
               </span>
             </Card>
@@ -95,13 +95,13 @@ function CapabilitiesList() {
                 onClick={() => navigate(`/capabilities/${encodeURIComponent(c.id)}`)}
                 style={{ cursor: "pointer" }}
               >
-                <div style={{ fontWeight: 600, color: "var(--fg-default)" }}>{c.name}</div>
+                <div style={{ fontWeight: 600, color: "var(--ink)" }}>{c.name}</div>
                 {c.description && (
                   <div
                     style={{
                       marginTop: 6,
                       fontSize: 14,
-                      color: "var(--fg-muted)",
+                      color: "var(--ink-2)",
                       lineHeight: 1.5,
                     }}
                   >
@@ -120,7 +120,7 @@ function CapabilitiesList() {
                   <Chip tone="mono">{c.toolbox.name}</Chip>
                   <Chip tone="neutral">{c.toolbox.toolCount} tools</Chip>
                   {c.sharesToolboxWith.length > 0 && <Chip tone="neutral">shares toolbox</Chip>}
-                  <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
+                  <span style={{ fontSize: 12, color: "var(--ink-3)" }}>
                     used by {c.usedBy.roles.length} roles · {c.usedBy.agents.length} agents
                   </span>
                 </div>
@@ -217,11 +217,11 @@ function ToolWorkbench({ id }: { id: string }) {
           flex: "none",
         }}
       >
-        <Link to="/capabilities" style={{ color: "var(--fg-muted)", textDecoration: "none" }}>
+        <Link to="/capabilities" style={{ color: "var(--ink-2)", textDecoration: "none" }}>
           Capabilities
         </Link>
-        <span style={{ color: "var(--fg-subtle)" }}>/</span>
-        <span style={{ color: "var(--fg-default)", fontWeight: 600 }}>{cap?.name ?? id}</span>
+        <span style={{ color: "var(--ink-3)" }}>/</span>
+        <span style={{ color: "var(--ink)", fontWeight: 600 }}>{cap?.name ?? id}</span>
       </nav>
       <div style={{ marginBottom: 12, flex: "none" }}>
         <FamilyTabs />

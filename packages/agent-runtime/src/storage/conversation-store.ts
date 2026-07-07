@@ -182,39 +182,52 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
     const inputTokens = options?.inputTokens ?? 0;
     const outputTokens = options?.outputTokens ?? 0;
 
-    this._addMessageStmt.run(
-      messageId,
-      conversationId,
-      kind,
-      options?.runId ?? null,
-      inputTokens,
-      outputTokens,
-      nowIso,
-    );
-
-    const storedParts: StoredMessagePart[] = parts.map((p, index) => {
-      const partId = generateId();
-      const metadata = p.metadata ?? {};
-      this._addPartStmt.run(
-        partId,
+    // One message INSERT + N part INSERTs + the conversation's `touch` UPDATE
+    // must land atomically — better-sqlite3 is synchronous, so the whole
+    // write set runs inside one `db.transaction()` (sync API; the enclosing
+    // method stays `async` for the protocol, it just has nothing left to
+    // `await` after this call). Without this, a mid-loop failure (e.g. the
+    // Nth part's JSON.stringify or a constraint violation) could leave an
+    // orphan message with a partial part set and a stale conversation
+    // `updated_at`.
+    const insertAll = this._db.transaction(() => {
+      this._addMessageStmt.run(
         messageId,
-        p.type,
-        p.content ?? null,
-        JSON.stringify(metadata),
-        index,
+        conversationId,
+        kind,
+        options?.runId ?? null,
+        inputTokens,
+        outputTokens,
+        nowIso,
       );
-      return {
-        id: partId,
-        messageId,
-        type: p.type,
-        content: p.content,
-        metadata,
-        position: index,
-        createdAt: now,
-      };
-    });
 
-    this._touchConvStmt.run(nowIso, conversationId);
+      const storedParts: StoredMessagePart[] = parts.map((p, index) => {
+        const partId = generateId();
+        const metadata = p.metadata ?? {};
+        this._addPartStmt.run(
+          partId,
+          messageId,
+          p.type,
+          p.content ?? null,
+          JSON.stringify(metadata),
+          index,
+        );
+        return {
+          id: partId,
+          messageId,
+          type: p.type,
+          content: p.content,
+          metadata,
+          position: index,
+          createdAt: now,
+        };
+      });
+
+      this._touchConvStmt.run(nowIso, conversationId);
+
+      return storedParts;
+    });
+    const storedParts = insertAll();
 
     return {
       id: messageId,
@@ -248,7 +261,14 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
   }
 
   async listConversations(limit?: number): Promise<StoredConversationSummary[]> {
-    const rows = this._listConvStmt.all({ limit: limit ?? -1 }) as RawSummaryRow[];
+    // `limit ?? -1` is WRONG here: `??` only substitutes on null/undefined, so
+    // `listConversations(0)` would pass `{ limit: 0 }` straight through to
+    // `LIMIT @limit` → zero rows — diverging from `InMemoryConversationStore`
+    // (below), which treats `0` (falsy, not just absent) as "no cap" via its
+    // `limit > 0` guard. `limit && limit > 0` normalizes both falsy cases
+    // (`0` and `undefined`) to "all" (`-1`), matching the in-memory contract.
+    const effectiveLimit = limit && limit > 0 ? limit : -1;
+    const rows = this._listConvStmt.all({ limit: effectiveLimit }) as RawSummaryRow[];
     return rows.map((r) => ({
       conversationId: r.conversationId,
       agentName: r.agentName,

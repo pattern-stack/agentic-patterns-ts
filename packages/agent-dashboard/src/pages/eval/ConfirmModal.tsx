@@ -57,8 +57,8 @@ export function ConfirmModal({
         </>
       }
     >
-      <div style={{ fontSize: 14, color: "var(--fg-default)" }}>{message}</div>
-      {error && <div style={{ fontSize: 13, color: "var(--red)" }}>{error}</div>}
+      <div style={{ fontSize: 14, color: "var(--ink)" }}>{message}</div>
+      {error && <div style={{ fontSize: 13, color: "var(--err)" }}>{error}</div>}
     </Modal>
   );
 }
