@@ -20,6 +20,7 @@ import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
+import { Segmented } from "../../components/kit/Segmented";
 import { DetailPageShell, Labeled } from "../../components/organisms/DetailPageShell";
 import { CoherenceNotice, RenderedPromptView } from "../../components/organisms/RenderedPromptView";
 import { SlotStack } from "../../components/organisms/SlotStack";
@@ -51,30 +52,16 @@ function DataBlock({ label, value }: { label: string; value: Record<string, unkn
   );
 }
 
-/** Clickable mode chip — declared vs delivered. Plain Chip in a button shell so
- *  the toggle stays keyboard-accessible without inventing a new atom. */
-function ModeChip({
-  active,
-  onClick,
-  children,
-  title,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  title?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
-    >
-      <Chip tone={active ? "accent" : "neutral"}>{children}</Chip>
-    </button>
-  );
-}
+type LensMode = "declared" | "delivered";
+
+const LENS_MODE_OPTIONS: { value: LensMode; label: string; title: string }[] = [
+  { value: "declared", label: "declared", title: "The statically exported instance" },
+  {
+    value: "delivered",
+    label: "delivered",
+    title: "The instance an entrypoint would compose for the context below",
+  },
+];
 
 export function AgentLensPage() {
   const { id = "" } = useParams();
@@ -210,22 +197,17 @@ export function AgentLensPage() {
                 Instantiation delta
               </span>
               {canInstantiate && (
-                <>
-                  <ModeChip
-                    active={!showingDelivered}
-                    onClick={() => setMode("declared")}
-                    title="The statically exported instance"
-                  >
-                    declared
-                  </ModeChip>
-                  <ModeChip
-                    active={showingDelivered}
-                    onClick={() => (delivered ? setMode("delivered") : compose())}
-                    title="The instance an entrypoint would compose for the context below"
-                  >
-                    delivered
-                  </ModeChip>
-                </>
+                <Segmented<LensMode>
+                  options={LENS_MODE_OPTIONS}
+                  value={showingDelivered ? "delivered" : "declared"}
+                  onChange={(next) => {
+                    if (next === "declared") setMode("declared");
+                    else if (delivered) setMode("delivered");
+                    else compose();
+                  }}
+                  size="sm"
+                  aria-label="Instance view"
+                />
               )}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

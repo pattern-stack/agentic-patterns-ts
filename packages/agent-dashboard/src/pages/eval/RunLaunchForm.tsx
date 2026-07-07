@@ -11,11 +11,12 @@
  * knows the set.
  */
 
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { listAgents } from "../../api/chat-client";
 import type { EvalSetSummary, EvalSplit } from "../../api/types";
 import { Button } from "../../components/atoms/Button";
+import { Field, inputStyle } from "../../components/kit/Field";
 import {
   BUILTIN_SCORERS,
   type ScorerOption,
@@ -170,7 +171,7 @@ export function RunLaunchForm({
 
   if (!presetSetId && sets.kind === "unconfigured") {
     return (
-      <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+      <div style={{ fontSize: 13, color: "var(--mute)" }}>
         Eval persistence is not configured — start <code>ap playground</code> with{" "}
         <code>AP_PERSISTENCE != 0</code>.
       </div>
@@ -181,10 +182,10 @@ export function RunLaunchForm({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <LauncherField label="Set">
+      <Field label="Set">
         {presetSetId ? (
           <div
-            style={{ ...selectStyle, color: "var(--fg-muted)", fontFamily: "var(--font-mono)" }}
+            style={{ ...inputStyle, color: "var(--mute)", fontFamily: "var(--font-mono)" }}
             aria-label="Set"
           >
             {presetSetLabel ?? presetSetId}
@@ -193,7 +194,7 @@ export function RunLaunchForm({
           <select
             value={setId}
             onChange={(e) => setSetId(e.target.value)}
-            style={selectStyle}
+            style={inputStyle}
             aria-label="Set"
           >
             <option value="">Select a set…</option>
@@ -206,14 +207,14 @@ export function RunLaunchForm({
           </select>
         )}
         {!presetSetId && sets.kind === "error" && (
-          <div style={{ fontSize: 12, color: "var(--red)" }}>{sets.message}</div>
+          <div style={{ fontSize: 12, color: "var(--err)" }}>{sets.message}</div>
         )}
-      </LauncherField>
+      </Field>
 
-      <LauncherField label="Target">
+      <Field label="Target">
         {presetTargetId ? (
           <div
-            style={{ ...selectStyle, color: "var(--fg-muted)", fontFamily: "var(--font-mono)" }}
+            style={{ ...inputStyle, color: "var(--mute)", fontFamily: "var(--font-mono)" }}
             aria-label="Target"
           >
             {presetTargetLabel ?? presetTargetId}
@@ -222,7 +223,7 @@ export function RunLaunchForm({
           <select
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
-            style={selectStyle}
+            style={inputStyle}
             aria-label="Target"
           >
             <option value="">Select a target…</option>
@@ -235,25 +236,25 @@ export function RunLaunchForm({
           </select>
         )}
         {!presetTargetId && agents.kind === "error" && (
-          <div style={{ fontSize: 12, color: "var(--red)" }}>{agents.message}</div>
+          <div style={{ fontSize: 12, color: "var(--err)" }}>{agents.message}</div>
         )}
-      </LauncherField>
+      </Field>
 
-      <LauncherField label="Variant (optional)">
+      <Field label="Variant (optional)">
         <input
           value={variant}
           onChange={(e) => setVariant(e.target.value)}
-          style={selectStyle}
+          style={inputStyle}
           aria-label="Variant"
           placeholder="e.g. candidate"
         />
-      </LauncherField>
+      </Field>
 
-      <LauncherField label="Split">
+      <Field label="Split">
         <select
           value={split}
           onChange={(e) => setSplit(e.target.value as "" | EvalSplit)}
-          style={selectStyle}
+          style={inputStyle}
           aria-label="Split"
         >
           {SPLIT_OPTIONS.map((o) => (
@@ -262,7 +263,7 @@ export function RunLaunchForm({
             </option>
           ))}
         </select>
-      </LauncherField>
+      </Field>
 
       {split === "test" && (
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
@@ -275,11 +276,11 @@ export function RunLaunchForm({
         </label>
       )}
 
-      <LauncherField label="Scorer">
+      <Field label="Scorer">
         <select
           value={scorer}
           onChange={(e) => setScorer(e.target.value)}
-          style={selectStyle}
+          style={inputStyle}
           aria-label="Scorer"
         >
           {scorers.map((s) => (
@@ -288,9 +289,9 @@ export function RunLaunchForm({
             </option>
           ))}
         </select>
-      </LauncherField>
+      </Field>
 
-      {launchError && <div style={{ fontSize: 13, color: "var(--red)" }}>{launchError}</div>}
+      {launchError && <div style={{ fontSize: 13, color: "var(--err)" }}>{launchError}</div>}
 
       <Button disabled={!canRun} onClick={handleRun}>
         {launching ? "Starting…" : "Run"}
@@ -298,32 +299,3 @@ export function RunLaunchForm({
     </div>
   );
 }
-
-function LauncherField({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          color: "var(--fg-muted)",
-        }}
-      >
-        {label}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-const selectStyle: CSSProperties = {
-  padding: "6px 10px",
-  fontSize: 13,
-  fontFamily: "inherit",
-  background: "var(--bg-surface)",
-  color: "var(--fg-default)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-};

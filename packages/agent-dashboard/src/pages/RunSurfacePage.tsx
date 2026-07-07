@@ -30,6 +30,8 @@ import {
   streamMessage,
 } from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
+import { inputStyle } from "../components/kit/Field";
+import { Segmented } from "../components/kit/Segmented";
 import { ConstellationGraph } from "../constellation/ConstellationGraph";
 import { LiveTracePanel } from "../constellation/LiveTracePanel";
 import { NodeInspector, type RunMeta, buildProvenanceMap } from "../constellation/NodeInspector";
@@ -57,51 +59,14 @@ const DEMO_META: RunMeta = {
 };
 
 type GraphMode = "chain" | "composition";
-const MODES: { value: GraphMode; label: string }[] = [
-  { value: "chain", label: "Chain" },
-  { value: "composition", label: "Composition" },
+const MODES: { value: GraphMode; label: string; title: string }[] = [
+  { value: "chain", label: "Chain", title: "Execution chain — the agents/tools that actually ran" },
+  {
+    value: "composition",
+    label: "Composition",
+    title: "Declared composition — the agent's full capabilities, lit as used",
+  },
 ];
-
-function ModeToggle({ mode, onChange }: { mode: GraphMode; onChange: (m: GraphMode) => void }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 3,
-        background: "var(--fill)",
-        padding: 3,
-        borderRadius: T.radius.md,
-      }}
-    >
-      {MODES.map((m) => (
-        <button
-          key={m.value}
-          type="button"
-          onClick={() => onChange(m.value)}
-          title={
-            m.value === "chain"
-              ? "Execution chain — the agents/tools that actually ran"
-              : "Declared composition — the agent's full capabilities, lit as used"
-          }
-          style={{
-            border: "none",
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: T.fz.micro,
-            padding: "5px 12px",
-            borderRadius: T.radius.sm,
-            background: mode === m.value ? "var(--paper)" : "transparent",
-            color: mode === m.value ? "var(--ink)" : "var(--mute)",
-            fontWeight: mode === m.value ? 600 : 500,
-            boxShadow: mode === m.value ? T.shadow.s1 : "none",
-          }}
-        >
-          {m.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** Map the API's declared composition to the CapabilityMeta the graph builder wants. */
 function toCapabilityMeta(caps: { name: string; tools: { name: string }[] }[]): CapabilityMeta[] {
@@ -260,7 +225,13 @@ export function RunSurfacePage() {
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Live Run</h1>
         <Badge tone={isLive ? "run" : "mute"}>{isLive ? "live" : "demo · sample trace"}</Badge>
         <div style={{ flex: 1 }} />
-        <ModeToggle mode={mode} onChange={setMode} />
+        <Segmented
+          options={MODES}
+          value={mode}
+          onChange={setMode}
+          size="sm"
+          aria-label="Graph mode"
+        />
         {!isLive && (
           <Button variant="default" onClick={replay.playing ? replay.pause : replay.play}>
             {replay.playing ? "⏸ Pause" : "▶ Play"}
@@ -278,16 +249,7 @@ export function RunSurfacePage() {
           value={selectedId ?? ""}
           onChange={(e) => selectAgent(e.target.value)}
           disabled={!agents.length || streaming}
-          style={{
-            fontFamily: "inherit",
-            fontSize: 13,
-            background: "var(--fill)",
-            color: "var(--ink)",
-            border: "1px solid var(--line)",
-            borderRadius: T.radius.sm,
-            padding: "7px 10px",
-            minWidth: 170,
-          }}
+          style={{ ...inputStyle, minWidth: 170 }}
         >
           {agents.length === 0 && <option value="">No agents registered</option>}
           {agents.map((a) => (
@@ -307,17 +269,7 @@ export function RunSurfacePage() {
           }}
           disabled={!selectedId || streaming}
           placeholder={selectedId ? "Ask the agent something…" : "Select an agent to start."}
-          style={{
-            flex: 1,
-            minWidth: 220,
-            fontFamily: "inherit",
-            fontSize: 13,
-            background: "var(--fill)",
-            color: "var(--ink)",
-            border: "1px solid var(--line)",
-            borderRadius: T.radius.sm,
-            padding: "8px 12px",
-          }}
+          style={{ ...inputStyle, flex: 1, minWidth: 220, padding: "8px 12px" }}
         />
         <Button onClick={() => void send(input)} disabled={!selectedId || streaming}>
           Send
@@ -327,7 +279,7 @@ export function RunSurfacePage() {
             Abort
           </Button>
         )}
-        {error && <span style={{ fontSize: 12, color: "var(--red)" }}>{error}</span>}
+        {error && <span style={{ fontSize: 12, color: "var(--err)" }}>{error}</span>}
       </div>
 
       <div style={{ display: "flex", gap: 16, minHeight: 540 }}>

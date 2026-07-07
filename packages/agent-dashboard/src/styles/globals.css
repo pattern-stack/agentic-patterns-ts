@@ -32,6 +32,30 @@ a:hover {
   text-decoration: underline;
 }
 
+/* ── Hover / focus discipline (port-map §7.1) ────────────────────────────────
+   Interactive elements get a consistent keyboard focus ring; text inputs are
+   deliberately excluded (a ring around every keystroke target is noisy — the
+   border/background state already signals focus there). `tr[tabindex]` is the
+   CSS replacement for DataTable/EventStream's old JS onMouseEnter hover
+   mutation: any row wired for click/keyboard activation gets the SAME hover +
+   focus-visible treatment for free, from the DOM attribute alone. */
+:where(button, a, select, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid hsl(var(--focus-ring));
+  outline-offset: 2px;
+}
+
+tr[tabindex] {
+  cursor: pointer;
+}
+tr[tabindex]:hover {
+  background: hsl(var(--hover-bg));
+}
+tr[tabindex]:focus-visible {
+  background: hsl(var(--hover-bg));
+  outline: 2px solid hsl(var(--focus-ring));
+  outline-offset: -2px;
+}
+
 /* Cursor used in ChatPanel while a response is streaming. */
 @keyframes apdash-blink {
   0%,

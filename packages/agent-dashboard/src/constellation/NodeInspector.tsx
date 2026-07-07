@@ -11,6 +11,7 @@
  */
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { Segmented } from "../components/kit/Segmented";
 import type { ConstNode } from "../graph/constellation-model";
 import type { TraceStep } from "../graph/types";
 import { T } from "../ui/tokens";
@@ -432,38 +433,14 @@ export function NodeInspector({
 
         {/* segmented tabs */}
         <div style={{ padding: "12px 16px 0" }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 3,
-              background: "var(--fill)",
-              padding: 3,
-              borderRadius: T.radius.md,
-            }}
-          >
-            {TABS.map((t) => (
-              <button
-                key={t.value}
-                type="button"
-                onClick={() => setTab(t.value)}
-                style={{
-                  flex: 1,
-                  border: "none",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontSize: T.fz.micro,
-                  padding: "5px 8px",
-                  borderRadius: T.radius.sm,
-                  background: tab === t.value ? "var(--paper)" : "transparent",
-                  color: tab === t.value ? "var(--ink)" : "var(--mute)",
-                  fontWeight: tab === t.value ? 600 : 500,
-                  boxShadow: tab === t.value ? T.shadow.s1 : "none",
-                }}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            options={TABS}
+            value={tab}
+            onChange={setTab}
+            size="sm"
+            fullWidth
+            aria-label="Inspector tab"
+          />
         </div>
 
         <div

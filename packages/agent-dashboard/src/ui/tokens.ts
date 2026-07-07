@@ -64,28 +64,6 @@ export const T = {
     accent: { color: "var(--accent)", soft: "var(--accent-soft)", ink: "var(--accent-ink)" },
     mute: { color: "var(--mute)", soft: "var(--fill)", ink: "var(--ink-2)" },
   } satisfies Record<string, { color: string; soft: string; ink: string }>,
-  statusVar: {
-    pending: { bg: "--status-pending-bg", ink: "--status-pending-ink", dot: "--status-pending" },
-    running: { bg: "--status-running-bg", ink: "--status-running-ink", dot: "--status-running" },
-    waiting: { bg: "--status-waiting-bg", ink: "--status-waiting-ink", dot: "--status-waiting" },
-    completed: {
-      bg: "--status-completed-bg",
-      ink: "--status-completed-ink",
-      dot: "--status-completed",
-    },
-    failed: { bg: "--status-failed-bg", ink: "--status-failed-ink", dot: "--status-failed" },
-    timed_out: {
-      bg: "--status-timed_out-bg",
-      ink: "--status-timed_out-ink",
-      dot: "--status-timed_out",
-    },
-    canceled: {
-      bg: "--status-canceled-bg",
-      ink: "--status-canceled-ink",
-      dot: "--status-canceled",
-    },
-  } satisfies Record<string, { bg: string; ink: string; dot: string }>,
 } as const;
 
-export type StatusVariant = keyof typeof T.statusVar;
 export type ToneVariant = keyof typeof T.tone;

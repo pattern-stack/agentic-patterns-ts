@@ -13,10 +13,11 @@
  * operator is actually looking at.
  */
 
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EvalSetSummary, EvalSplit } from "../api/types";
 import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
+import { Field, inputStyle } from "../components/kit/Field";
 import { type CaptureFromSessionResponse, captureFromSession, fetchEvalSets } from "../lib/evalApi";
 import type { ChatMessage, Part } from "./model";
 
@@ -126,7 +127,7 @@ export function CaptureCasePanel({
 
   if (conversationId == null || exchangeCount === 0) {
     return (
-      <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+      <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
         Send a message first, then capture it as an eval case.
       </div>
     );
@@ -194,14 +195,14 @@ export function CaptureCasePanel({
         flexDirection: "column",
         gap: 8,
         padding: 10,
-        border: "1px solid var(--border)",
-        borderRadius: 8,
-        background: "var(--bg-surface)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius-lg)",
+        background: "var(--paper)",
         maxWidth: 420,
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--fg-default)" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>
           Capture as eval case
         </div>
         <Button variant="ghost" size="sm" onClick={handleCollapse}>
@@ -212,13 +213,13 @@ export function CaptureCasePanel({
       {setsState.kind === "loading" && <Spinner size={14} />}
 
       {setsState.kind === "unconfigured" && (
-        <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+        <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
           Eval persistence isn't configured on this server.
         </div>
       )}
 
       {setsState.kind === "error" && (
-        <div style={{ fontSize: 12, color: "var(--red)" }}>{setsState.message}</div>
+        <div style={{ fontSize: 12, color: "var(--err)" }}>{setsState.message}</div>
       )}
 
       {setsState.kind === "loaded" && showOutcome && (
@@ -227,7 +228,7 @@ export function CaptureCasePanel({
             <div
               style={{
                 fontSize: 12,
-                color: submit.data.created ? "var(--accent-emerald)" : "var(--fg-muted)",
+                color: submit.data.created ? "var(--accent)" : "var(--ink-2)",
               }}
             >
               {submit.data.created ? "Created new case " : "Updated existing case "}
@@ -237,12 +238,12 @@ export function CaptureCasePanel({
             </div>
           )}
           {submit.kind === "unconfigured" && (
-            <div style={{ fontSize: 12, color: "var(--fg-muted)" }}>
+            <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
               Eval persistence isn't configured on this server.
             </div>
           )}
           {submit.kind === "error" && (
-            <div style={{ fontSize: 12, color: "var(--red)" }}>{submit.message}</div>
+            <div style={{ fontSize: 12, color: "var(--err)" }}>{submit.message}</div>
           )}
           <Button variant="ghost" size="sm" onClick={resetToForm}>
             Capture another
@@ -258,7 +259,7 @@ export function CaptureCasePanel({
               value={exchange}
               onChange={(e) => setExchange(Number(e.target.value))}
               disabled={disabled || isBusy}
-              style={selectStyle}
+              style={inputStyle}
             >
               {Array.from({ length: exchangeCount }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
@@ -274,7 +275,7 @@ export function CaptureCasePanel({
               value={selectedSetId}
               onChange={(e) => setSelectedSetId(e.target.value)}
               disabled={disabled || isBusy}
-              style={selectStyle}
+              style={inputStyle}
             >
               <option value="">Select a set…</option>
               {setsState.sets.map((s) => (
@@ -294,7 +295,7 @@ export function CaptureCasePanel({
                   value={newSlug}
                   onChange={(e) => setNewSlug(e.target.value)}
                   disabled={disabled || isBusy}
-                  style={selectStyle}
+                  style={inputStyle}
                   placeholder="e.g. curator-smoke"
                 />
               </Field>
@@ -304,7 +305,7 @@ export function CaptureCasePanel({
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   disabled={disabled || isBusy}
-                  style={selectStyle}
+                  style={inputStyle}
                 />
               </Field>
               <Field label="Description (optional)">
@@ -313,7 +314,7 @@ export function CaptureCasePanel({
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                   disabled={disabled || isBusy}
-                  style={selectStyle}
+                  style={inputStyle}
                 />
               </Field>
             </>
@@ -325,7 +326,7 @@ export function CaptureCasePanel({
               value={split}
               onChange={(e) => setSplit(e.target.value as EvalSplit)}
               disabled={disabled || isBusy}
-              style={selectStyle}
+              style={inputStyle}
             >
               {SPLIT_OPTIONS.map((s) => (
                 <option key={s} value={s}>
@@ -342,7 +343,7 @@ export function CaptureCasePanel({
               onChange={(e) => setExpected(e.target.value)}
               disabled={disabled || isBusy}
               rows={4}
-              style={{ ...selectStyle, resize: "vertical", fontFamily: "inherit" }}
+              style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
             />
           </Field>
 
@@ -360,26 +361,3 @@ export function CaptureCasePanel({
     </div>
   );
 }
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 11 }}>
-      <span
-        style={{ color: "var(--fg-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}
-      >
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-const selectStyle: CSSProperties = {
-  padding: "6px 8px",
-  fontSize: 13,
-  fontFamily: "inherit",
-  background: "var(--bg-inset)",
-  color: "var(--fg-default)",
-  border: "1px solid var(--border)",
-  borderRadius: 6,
-};

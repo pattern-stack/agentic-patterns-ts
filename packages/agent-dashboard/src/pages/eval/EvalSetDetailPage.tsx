@@ -13,12 +13,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { EvalCaseRow, EvalRunRow, EvalSetSummary } from "../../api/types";
-import { Badge, type BadgeTone } from "../../components/atoms/Badge";
+import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
-import { Spinner } from "../../components/atoms/Spinner";
-import { AlertIcon } from "../../components/atoms/icons";
+import { AsyncState } from "../../components/kit/AsyncState";
 import { DataTable } from "../../components/organisms/DataTable";
 import {
   type EvalRunFilters,
@@ -28,46 +27,18 @@ import {
   fetchEvalSet,
   filterRuns,
 } from "../../lib/evalApi";
+import { relTime, shortId, statusTone } from "../../lib/format";
 import { CaseEditModal } from "./CaseEditModal";
 import { ConfirmModal } from "./ConfirmModal";
 import { RunLaunchModal } from "./RunLaunchModal";
 import { SetEditModal } from "./SetEditModal";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
 
-function relative(dateStr: string | undefined | null): string {
-  if (!dateStr) return "—";
-  const then = new Date(dateStr).getTime();
-  if (Number.isNaN(then)) return String(dateStr);
-  const diffSec = Math.round((Date.now() - then) / 1000);
-  const abs = Math.abs(diffSec);
-  if (abs < 60) return `${diffSec}s ago`;
-  if (abs < 3600) return `${Math.round(diffSec / 60)}m ago`;
-  if (abs < 86400) return `${Math.round(diffSec / 3600)}h ago`;
-  return `${Math.round(diffSec / 86400)}d ago`;
-}
-
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
-}
-
 /** Truncated one-line preview of an unknown JSON payload. */
 function preview(value: unknown, max = 80): string {
   if (value === null || value === undefined) return "—";
   const s = typeof value === "string" ? value : JSON.stringify(value);
   return s.length > max ? `${s.slice(0, max)}…` : s;
-}
-
-function statusTone(status: EvalRunRow["status"]): BadgeTone {
-  switch (status) {
-    case "ok":
-      return "green";
-    case "error":
-      return "red";
-    case "running":
-      return "emerald";
-    default:
-      return "neutral";
-  }
 }
 
 /** Split buckets in canonical order; `null` groups the untagged cases. */
@@ -146,82 +117,28 @@ export function EvalSetDetailPage() {
   }, [load]);
 
   const backLink = (
-    <Link
-      to="/eval/sets"
-      style={{ color: "var(--fg-muted)", fontSize: 13, textDecoration: "none" }}
-    >
+    <Link to="/eval/sets" style={{ color: "var(--mute)", fontSize: 13, textDecoration: "none" }}>
       ← Eval sets
     </Link>
   );
 
-  if (state.kind === "loading") {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          padding: "48px 0",
-          color: "var(--fg-muted)",
-        }}
-      >
-        <Spinner />
-        <span>Loading eval set...</span>
-      </div>
-    );
-  }
-
-  if (state.kind === "not-found") {
+  if (state.kind !== "ok") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval set not found
-          </div>
-          <div style={{ fontSize: 14 }}>
-            {id ? <>No eval set with id "{id}".</> : "No eval set id given."}
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "unconfigured") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval persistence is not configured
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable eval
-            queries.
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "error") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card
-          style={{ borderColor: "var(--red)", display: "flex", alignItems: "flex-start", gap: 12 }}
-        >
-          <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-              Failed to load eval set
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{state.message}</div>
-          </div>
-        </Card>
+        <AsyncState
+          kind={state.kind}
+          loading="Loading eval set..."
+          notFound={{
+            title: "Eval set not found",
+            body: id ? <>No eval set with id "{id}".</> : "No eval set id given.",
+          }}
+          error={
+            state.kind === "error"
+              ? { title: "Failed to load eval set", message: state.message }
+              : undefined
+          }
+        />
       </div>
     );
   }
@@ -242,7 +159,7 @@ export function EvalSetDetailPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {backLink}
           <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>{set.name ?? set.id}</h1>
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--fg-muted)" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--mute)" }}>
             {set.id}
           </span>
         </div>
@@ -307,22 +224,20 @@ export function EvalSetDetailPage() {
 
       <Card>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          <Badge tone="muted">cases · {set.caseCount}</Badge>
+          <Badge tone="mute">cases · {set.caseCount}</Badge>
           {SPLIT_GROUPS.map((g) => {
             const n = set.splitCounts[g.key ?? ""] ?? 0;
             if (n === 0) return null;
             return (
-              <Badge key={g.label} tone={g.heldOut ? "yellow" : "muted"}>
+              <Badge key={g.label} tone={g.heldOut ? "warn" : "mute"}>
                 {g.label} · {n}
               </Badge>
             );
           })}
-          <Badge tone="muted">created · {relative(set.createdTs)}</Badge>
+          <Badge tone="mute">created · {relTime(set.createdTs)}</Badge>
         </div>
         {set.description && (
-          <div style={{ marginTop: 10, fontSize: 14, color: "var(--fg-muted)" }}>
-            {set.description}
-          </div>
+          <div style={{ marginTop: 10, fontSize: 14, color: "var(--mute)" }}>{set.description}</div>
         )}
       </Card>
 
@@ -332,9 +247,7 @@ export function EvalSetDetailPage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Cases</h2>
         {cases.length === 0 ? (
-          <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            This set has no cases yet.
-          </Card>
+          <AsyncState kind="empty" empty={{ title: "This set has no cases yet." }} />
         ) : (
           SPLIT_GROUPS.map((group) => {
             const groupCases = cases.filter((c) => c.split === group.key);
@@ -345,7 +258,7 @@ export function EvalSetDetailPage() {
                   <span style={{ fontSize: 13, fontWeight: 600 }}>
                     {group.label} ({groupCases.length})
                   </span>
-                  {group.heldOut && <Badge tone="yellow">held-out</Badge>}
+                  {group.heldOut && <Badge tone="warn">held-out</Badge>}
                 </div>
                 <Card padded={false}>
                   <DataTable<EvalCaseRow>
@@ -365,7 +278,7 @@ export function EvalSetDetailPage() {
                         header: "Expected",
                         render: (row) =>
                           row.expected === null || row.expected === undefined ? (
-                            <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                            <span style={{ color: "var(--ink-3)" }}>—</span>
                           ) : (
                             preview(row.expected, 48)
                           ),
@@ -383,7 +296,7 @@ export function EvalSetDetailPage() {
                               ))}
                             </span>
                           ) : (
-                            <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                            <span style={{ color: "var(--ink-3)" }}>—</span>
                           ),
                       },
                       {
@@ -435,9 +348,7 @@ export function EvalSetDetailPage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Runs against this set</h2>
         {runs.length === 0 ? (
-          <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            No runs against this set yet.
-          </Card>
+          <AsyncState kind="empty" empty={{ title: "No runs against this set yet." }} />
         ) : (
           <Card padded={false}>
             <DataTable<EvalRunRow>
@@ -456,14 +367,14 @@ export function EvalSetDetailPage() {
                 {
                   key: "split",
                   header: "Split",
-                  render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
+                  render: (row) => <Badge tone="mute">{row.split ?? "untagged"}</Badge>,
                 },
                 {
                   key: "status",
                   header: "Status",
                   render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
                 },
-                { key: "tsStart", header: "Started", render: (row) => relative(row.tsStart) },
+                { key: "tsStart", header: "Started", render: (row) => relTime(row.tsStart) },
               ]}
               data={runs}
               rowKey={(row) => row.id}

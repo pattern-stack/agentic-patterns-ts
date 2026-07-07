@@ -61,6 +61,7 @@ export function SessionCard({ session }: SessionCardProps) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        className="ap-row-btn"
         style={{
           width: "100%",
           display: "flex",
@@ -68,7 +69,6 @@ export function SessionCard({ session }: SessionCardProps) {
           flexWrap: "wrap",
           gap: 10,
           padding: "12px 16px",
-          background: "transparent",
           border: "none",
           textAlign: "left",
           color: "inherit",
@@ -176,13 +176,13 @@ function TimelineRow({ event }: { event: SessionEvent }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        className="ap-row-btn"
         style={{
           width: "100%",
           display: "flex",
           alignItems: "center",
           gap: 10,
           padding: "6px 14px 6px 28px",
-          background: "transparent",
           border: "none",
           textAlign: "left",
           color: "inherit",

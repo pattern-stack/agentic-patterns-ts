@@ -23,11 +23,12 @@ import { Link, useParams } from "react-router-dom";
 import type { EvalCaseRow, EvalRunRow, EvalRunSummary, JoinedEvalResultRow } from "../../api/types";
 import { Badge, type BadgeTone } from "../../components/atoms/Badge";
 import { Card } from "../../components/atoms/Card";
-import { Spinner } from "../../components/atoms/Spinner";
-import { AlertIcon } from "../../components/atoms/icons";
+import { AsyncState } from "../../components/kit/AsyncState";
+import { Stat } from "../../components/kit/Stat";
 import { DataTable } from "../../components/organisms/DataTable";
 import { type StreamedCaseResult, useEvalRunStream } from "../../hooks/useEvalRunStream";
 import { fetchEvalCases, fetchEvalRunDetail } from "../../lib/evalApi";
+import { formatDuration, formatMs, statusTone } from "../../lib/format";
 import { CaseDetail } from "./CaseDetail";
 
 /** `StreamedCaseResult` -> the `JoinedEvalResultRow` shape the table renders. */
@@ -67,38 +68,10 @@ function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 7) : "—";
 }
 
-function formatDuration(startedAt: string, completedAt: string | null): string | null {
-  if (!completedAt) return null;
-  const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (Number.isNaN(ms) || ms < 0) return null;
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 1000)}s`;
-}
-
-function formatElapsed(ms: number | null): string {
-  if (ms === null) return "—";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-function statusTone(status: EvalRunRow["status"]): BadgeTone {
-  switch (status) {
-    case "ok":
-      return "green";
-    case "error":
-      return "red";
-    case "running":
-      return "emerald";
-    default:
-      return "neutral";
-  }
-}
-
 function passTone(pass: boolean | null): BadgeTone {
-  if (pass === true) return "green";
-  if (pass === false) return "red";
-  return "muted";
+  if (pass === true) return "ok";
+  if (pass === false) return "err";
+  return "mute";
 }
 
 function passLabel(pass: boolean | null): string {
@@ -219,79 +192,28 @@ export function EvalRunDetailPage() {
   }, [streamStatus, load]);
 
   const backLink = (
-    <Link to="/eval" style={{ color: "var(--fg-muted)", fontSize: 13, textDecoration: "none" }}>
+    <Link to="/eval" style={{ color: "var(--mute)", fontSize: 13, textDecoration: "none" }}>
       ← Eval runs
     </Link>
   );
 
-  if (state.kind === "loading") {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 10,
-          padding: "48px 0",
-          color: "var(--fg-muted)",
-        }}
-      >
-        <Spinner />
-        <span>Loading eval run...</span>
-      </div>
-    );
-  }
-
-  if (state.kind === "not-found") {
+  if (state.kind !== "ok") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval run not found
-          </div>
-          <div style={{ fontSize: 14 }}>
-            {id ? <>No eval run with id "{id}".</> : "No eval run id given."}
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "unconfigured") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card style={{ textAlign: "center", padding: 40, color: "var(--fg-muted)" }}>
-          <div style={{ fontWeight: 600, color: "var(--fg-default)", marginBottom: 6 }}>
-            Eval persistence is not configured
-          </div>
-          <div style={{ fontSize: 14 }}>
-            Start <code>ap playground</code> with <code>AP_PERSISTENCE != 0</code> to enable eval
-            queries.
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  if (state.kind === "error") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {backLink}
-        <Card
-          style={{ borderColor: "var(--red)", display: "flex", alignItems: "flex-start", gap: 12 }}
-        >
-          <span style={{ color: "var(--red)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div>
-            <div style={{ fontWeight: 600, color: "var(--red)", marginBottom: 4 }}>
-              Failed to load eval run
-            </div>
-            <div style={{ color: "var(--fg-muted)", fontSize: 14 }}>{state.message}</div>
-          </div>
-        </Card>
+        <AsyncState
+          kind={state.kind}
+          loading="Loading eval run..."
+          notFound={{
+            title: "Eval run not found",
+            body: id ? <>No eval run with id "{id}".</> : "No eval run id given.",
+          }}
+          error={
+            state.kind === "error"
+              ? { title: "Failed to load eval run", message: state.message }
+              : undefined
+          }
+        />
       </div>
     );
   }
@@ -308,7 +230,7 @@ export function EvalRunDetailPage() {
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 14 }}>{run.id}</span>
         </h1>
         <Badge tone={statusTone(run.status)}>{run.status}</Badge>
-        {streamStatus === "detached" && <Badge tone="muted">watching (detached)</Badge>}
+        {streamStatus === "detached" && <Badge tone="mute">watching (detached)</Badge>}
       </div>
 
       <Card>
@@ -322,7 +244,7 @@ export function EvalRunDetailPage() {
               <Badge tone="accent">set · {run.setId}</Badge>
             </Link>
           ) : (
-            <Badge tone="muted">set · —</Badge>
+            <Badge tone="mute">set · —</Badge>
           )}
           {run.targetId ? (
             <Link
@@ -330,27 +252,27 @@ export function EvalRunDetailPage() {
               style={{ textDecoration: "none" }}
               title="View this agent"
             >
-              <Badge tone="muted">target · {run.targetId}</Badge>
+              <Badge tone="mute">target · {run.targetId}</Badge>
             </Link>
           ) : (
-            <Badge tone="muted">target · —</Badge>
+            <Badge tone="mute">target · —</Badge>
           )}
-          <Badge tone="muted">variant · {run.variant ?? "—"}</Badge>
-          <Badge tone="muted">split · {run.split ?? "untagged"}</Badge>
-          <Badge tone="muted">model · {run.model ?? "—"}</Badge>
-          {run.scorer != null && <Badge tone="muted">scorer · {run.scorer}</Badge>}
-          <Badge tone="muted" title={run.gitSha ?? undefined}>
+          <Badge tone="mute">variant · {run.variant ?? "—"}</Badge>
+          <Badge tone="mute">split · {run.split ?? "untagged"}</Badge>
+          <Badge tone="mute">model · {run.model ?? "—"}</Badge>
+          {run.scorer != null && <Badge tone="mute">scorer · {run.scorer}</Badge>}
+          <Badge tone="mute" title={run.gitSha ?? undefined}>
             sha · {shortSha(run.gitSha)}
           </Badge>
-          <Badge tone="muted">started · {new Date(run.tsStart).toLocaleString()}</Badge>
-          {duration && <Badge tone="muted">{duration}</Badge>}
+          <Badge tone="mute">started · {new Date(run.tsStart).toLocaleString()}</Badge>
+          {duration && <Badge tone="mute">{duration}</Badge>}
         </div>
       </Card>
 
       {run.status === "running" && progress && (
         <Card>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ fontSize: 13, color: "var(--fg-muted)", whiteSpace: "nowrap" }}>
+            <div style={{ fontSize: 13, color: "var(--mute)", whiteSpace: "nowrap" }}>
               {progress.completed}
               {progress.total !== null ? ` / ${progress.total}` : ""} cases
             </div>
@@ -358,7 +280,7 @@ export function EvalRunDetailPage() {
               style={{
                 flex: 1,
                 height: 8,
-                background: "var(--bg-inset)",
+                background: "var(--background)",
                 borderRadius: 999,
                 overflow: "hidden",
               }}
@@ -387,17 +309,17 @@ export function EvalRunDetailPage() {
           }}
         >
           <Stat label="Cases" value={summary.cases} />
-          <Stat label="Passed" value={summary.passed} color="var(--green)" />
+          <Stat label="Passed" value={summary.passed} tone="ok" />
           <Stat
             label="Failed"
             value={summary.failed}
-            color={summary.failed > 0 ? "var(--red)" : undefined}
+            tone={summary.failed > 0 ? "err" : undefined}
           />
           <Stat label="Ungated" value={summary.ungated} />
           <Stat
             label="Errored"
             value={summary.errored}
-            color={summary.errored > 0 ? "var(--red)" : undefined}
+            tone={summary.errored > 0 ? "err" : undefined}
           />
           <Stat
             label="Pass Rate"
@@ -433,9 +355,9 @@ export function EvalRunDetailPage() {
               header: "Run",
               render: (row) =>
                 row.runStatus === "error" ? (
-                  <Badge tone="red">error</Badge>
+                  <Badge tone="err">error</Badge>
                 ) : (
-                  <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                  <span style={{ color: "var(--ink-3)" }}>—</span>
                 ),
             },
             {
@@ -448,7 +370,7 @@ export function EvalRunDetailPage() {
               key: "elapsedMs",
               header: "Elapsed",
               align: "right",
-              render: (row) => formatElapsed(row.elapsedMs),
+              render: (row) => formatMs(row.elapsedMs),
             },
           ]}
           data={mergedResults}
@@ -458,25 +380,6 @@ export function EvalRunDetailPage() {
           renderExpanded={(row) => <CaseDetail result={row} caseRow={casesById.get(row.caseId)} />}
         />
       </Card>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  color,
-}: {
-  label: string;
-  value: string | number;
-  color?: string;
-}) {
-  return (
-    <div>
-      <div style={{ fontSize: 12, color: "var(--fg-muted)", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 600, color: color ?? "var(--fg-default)" }}>
-        {value}
-      </div>
     </div>
   );
 }
