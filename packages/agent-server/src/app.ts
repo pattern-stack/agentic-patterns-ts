@@ -4,6 +4,7 @@
 
 import { Hono } from "hono";
 import type { ServerConfig } from "./config.js";
+import { docsRoutes } from "./docs/index.js";
 import { corsMiddleware } from "./middleware/cors.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { adminRoutes } from "./routes/admin.js";
@@ -51,6 +52,11 @@ export function createServer(config: ServerConfig): Hono {
       conversations,
     }),
   );
+
+  // Docs LAST — it introspects `app.routes`, so every route mounted above (and
+  // the docs routes themselves) appears in /openapi.json, /docs, /llms.txt,
+  // and /mcp/tools.json.
+  app.route("/", docsRoutes(app, config.agents, { info: config.docs }));
 
   return app;
 }
