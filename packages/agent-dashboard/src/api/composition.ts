@@ -161,8 +161,55 @@ export interface CapabilitySummary {
   sharesToolboxWith: string[];
 }
 
-export type CapabilityDetail = CapabilityBlock & {
+/** One manual section as served by `GET /capabilities/:id` — `content` is the
+ *  section's full `toPrompt()` render (the exact text `readManualSection`
+ *  would hand the model, core's `ManualSection.toPrompt()`). */
+export interface ManualSectionSummary {
+  name: string;
+  description: string;
+  content: string;
+  /** Item count, when the section's underlying items are countable. */
+  itemCount?: number;
+}
+
+/**
+ * Enriched manual shape — `GET /capabilities/:id` ONLY (§A, server-side
+ * `manualDetail`). Every other capability-carrying payload (agent
+ * composition, role slots) still serves the lean `{text}` flatten on
+ * `CapabilityBlock.manual` below — this type is deliberately separate so the
+ * two never get confused at the type level.
+ *   - `kind: "text"` — a TextManual (or any manual without sections):
+ *     `text` is the full `toPrompt()` flatten.
+ *   - `kind: "sectioned"` — a SimpleManual/ScopedManual: `sections` mirrors
+ *     `Manual.getAllSections()`, in order — THE progressive-disclosure TOC.
+ */
+export type ManualDetail =
+  | null
+  | { name: string; description: string; kind: "text"; text: string }
+  | { name: string; description: string; kind: "sectioned"; sections: ManualSectionSummary[] };
+
+/** One play, enriched with its description + JSON-schema params — via core's
+ *  `Playbook.getPlaySchemas()`, the SAME zod→json conversion the toolbox's
+ *  own tool schemas go through. Degrades to a bare `{name}` when the
+ *  playbook doesn't expose `getPlaySchemas` (a duck-typed playbook). */
+export interface PlaybookPlay {
+  name: string;
+  description?: string;
+  paramsSchema?: unknown;
+}
+
+/** Enriched playbook shape — `GET /capabilities/:id` ONLY, same lean-elsewhere
+ *  rule as `ManualDetail`. */
+export interface PlaybookDetail {
+  name?: string;
+  description?: string;
+  plays: PlaybookPlay[];
+}
+
+export type CapabilityDetail = Omit<CapabilityBlock, "manual" | "playbook"> & {
   id: string;
+  manual: ManualDetail;
+  playbook: PlaybookDetail | null;
   usedBy: UsedBy;
   sharesToolboxWith: string[];
 };

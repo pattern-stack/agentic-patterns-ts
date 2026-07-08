@@ -41,11 +41,36 @@ interface ToolboxLike {
   /** Zod-parses `args` against the tool's schema, then runs it. Throws on unknown tool or bad args. */
   execute?: (name: string, args: unknown) => Promise<unknown>;
 }
+interface ManualSectionLike {
+  name?: string;
+  description?: string;
+  items?: readonly unknown[];
+  toPrompt?: (headingLevel?: number) => string;
+}
 interface ManualLike {
+  name?: string;
+  description?: string;
   toPrompt?: () => string;
+  /** THE progressive-disclosure contract (core's `Manual.getAllSections()`) —
+   *  present on every core Manual subclass; duck-typed here so a custom
+   *  agent-defined manual that only implements `toPrompt()` still degrades
+   *  gracefully to the flattened "text" shape. */
+  getAllSections?: () => ManualSectionLike[];
+  /** Lesser fallback: section NAMES only, no rich section objects. */
+  listSections?: () => string[];
+}
+interface PlaySchemaLike {
+  name: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
 }
 interface PlaybookLike {
+  name?: string;
+  description?: string;
   plays?: Record<string, unknown>;
+  /** Core's `Playbook.getPlaySchemas()` — reuses the SAME zod→json-schema
+   *  conversion the toolbox's tool schemas go through (`ToolSchema.fromZod`). */
+  getPlaySchemas?: () => PlaySchemaLike[];
 }
 interface CapabilityLike {
   name?: string;
@@ -200,6 +225,92 @@ function capabilityBlock(cap: CapabilityLike, provenance?: ProvenanceChip) {
     },
     manual: typeof cap.manual?.toPrompt === "function" ? { text: cap.manual.toPrompt() } : null,
     playbook: cap.playbook ? { plays: Object.keys(cap.playbook.plays ?? {}) } : null,
+  };
+}
+
+/**
+ * Enriched manual serialization for `GET /capabilities/:id` ONLY — every other
+ * caller of `capabilityBlock` (agent composition, role slots) keeps the lean
+ * `{text}` flatten above; this is deliberately NOT shared, so a role or agent
+ * payload never balloons just because its capability's manual is sectioned.
+ *
+ * Prefers `getAllSections()` (core's `Manual` — TextManual, SimpleManual,
+ * ScopedManual all inherit it), which is THE progressive-disclosure contract
+ * `ManualToolbox` reads from. A manual with zero sections (TextManual, or any
+ * duck-typed manual lacking `getAllSections`) falls back to the current
+ * `toPrompt()` flatten, exactly matching swe-brain's `listSections`-less path.
+ */
+function manualDetail(manual: ManualLike | undefined) {
+  if (!manual) return null;
+  const name = manual.name ?? "Manual";
+  const description = manual.description ?? "";
+
+  let sections: ManualSectionLike[] | undefined;
+  if (typeof manual.getAllSections === "function") {
+    try {
+      sections = manual.getAllSections();
+    } catch {
+      sections = undefined;
+    }
+  } else if (typeof manual.listSections === "function") {
+    try {
+      sections = manual.listSections().map((n) => ({ name: n }));
+    } catch {
+      sections = undefined;
+    }
+  }
+
+  if (sections && sections.length > 0) {
+    return {
+      name,
+      description,
+      kind: "sectioned" as const,
+      sections: sections.map((s) => ({
+        name: s.name ?? "",
+        description: s.description ?? "",
+        content: typeof s.toPrompt === "function" ? s.toPrompt() : "",
+        ...(Array.isArray(s.items) ? { itemCount: s.items.length } : {}),
+      })),
+    };
+  }
+
+  if (typeof manual.toPrompt === "function") {
+    return { name, description, kind: "text" as const, text: manual.toPrompt() };
+  }
+  return null;
+}
+
+/**
+ * Enriched playbook serialization for `GET /capabilities/:id` ONLY — same
+ * lean-elsewhere rule as `manualDetail`. Reuses `Playbook.getPlaySchemas()`
+ * (core) for description + JSON-schema params — the IDENTICAL zod→json
+ * conversion the toolbox's own tool schemas already go through
+ * (`ToolSchema.fromZod`), so a play's param table renders exactly like a
+ * tool's. Absent that method (a duck-typed playbook), plays degrade to bare
+ * names — never a confident-but-wrong schema.
+ */
+function playbookDetail(playbook: PlaybookLike | undefined) {
+  if (!playbook) return null;
+  const names = Object.keys(playbook.plays ?? {});
+  let schemas: PlaySchemaLike[] = [];
+  if (typeof playbook.getPlaySchemas === "function") {
+    try {
+      schemas = playbook.getPlaySchemas();
+    } catch {
+      schemas = [];
+    }
+  }
+  return {
+    ...(playbook.name !== undefined ? { name: playbook.name } : {}),
+    ...(playbook.description !== undefined ? { description: playbook.description } : {}),
+    plays: names.map((playName) => {
+      const schema = schemas.find((s) => s.name === playName);
+      return {
+        name: playName,
+        ...(schema?.description !== undefined ? { description: schema.description } : {}),
+        ...(schema?.parameters !== undefined ? { paramsSchema: schema.parameters } : {}),
+      };
+    }),
   };
 }
 
@@ -703,6 +814,10 @@ export function compositionRoutes(agents: AgentRegistration[], eventBus?: AgentE
     return c.json({
       id: entry.id,
       ...capabilityBlock(entry.cap),
+      // Override the lean flattens above with the enriched, detail-only shapes
+      // (§A) — manual TOC/sections and playbook param schemas.
+      manual: manualDetail(entry.cap.manual),
+      playbook: playbookDetail(entry.cap.playbook),
       usedBy: { roles: [...entry.roleIds], agents: [...entry.agentIds] },
       sharesToolboxWith: sharesToolboxWith(entry, entries),
     });
