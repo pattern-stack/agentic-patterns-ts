@@ -68,8 +68,14 @@ jobs:
         with:
           node-version: 24
 
-      - name: Update npm (trusted publishing needs >= 11.5.1)
-        run: npm install -g npm@latest
+      # Pin npm, do NOT track `@latest`: npm 12.0.0 (2026-07-08) ships a broken
+      # sigstore bundle — `npm publish --provenance` dies with
+      # `Cannot find module 'sigstore'` (libnpmpublish/lib/provenance.js), which
+      # blocked the 0.17.0 release. 11.18.0 is the last-known-good (it published
+      # 0.16.0) and satisfies trusted publishing (>= 11.5.1). Revisit when a fixed
+      # npm 12.x ships.
+      - name: Pin npm (trusted publishing needs >= 11.5.1; npm 12.0.0 breaks provenance)
+        run: npm install -g npm@11.18.0
 
       - run: bun install --frozen-lockfile
 
