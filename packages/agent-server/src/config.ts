@@ -166,4 +166,14 @@ export interface ServerConfig {
   readonly staticDir?: string;
   /** CORS options forwarded to Hono's cors middleware. Defaults to `origin: "*"`. */
   readonly cors?: CORSConfig;
+  /**
+   * Optional metadata stamped onto the generated docs (`/openapi.json`, `/docs`,
+   * `/llms.txt`, `/mcp/tools.json`). Embedders (e.g. the CLI) should pass their
+   * package title + version; defaults are sensible for a bare server.
+   */
+  readonly docs?: {
+    readonly title?: string;
+    readonly version?: string;
+    readonly description?: string;
+  };
 }
