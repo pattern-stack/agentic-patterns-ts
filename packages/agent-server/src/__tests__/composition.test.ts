@@ -12,11 +12,13 @@ import {
   Background,
   Capability,
   Judgment,
+  ManualSection,
   Mission,
   Persona,
   type PlayDefinition,
   Playbook,
   Role,
+  SimpleManual,
   TextManual,
   type ToolDefinition,
   Toolbox,
@@ -81,6 +83,66 @@ const curationCapability = new Capability(
 const triageJudgment = new Judgment({
   domain: "triage",
   heuristics: ["Prefer reversible actions"],
+});
+
+/* -- A sectioned-manual + described-play fixture, for `GET /capabilities/:id`
+ * enrichment (§A) — scoped to its own registration below so it never joins
+ * the default `registrations` catalog and disturbs the id-ordering
+ * assertions other tests pin. */
+class ResearchToolbox extends Toolbox {
+  readonly name = "research-tools";
+  readonly description = "Search a corpus and summarize findings";
+  readonly tools: Record<string, ToolDefinition> = {
+    search: {
+      description: "Search the corpus for a query",
+      parameters: z.object({ query: z.string() }),
+      returns: z.object({ hits: z.array(z.string()) }),
+      execute: async () => ({ hits: [] }),
+    },
+  };
+}
+
+const researchManual = new SimpleManual("Research Manual", "How to search and cite sources", [
+  new ManualSection("Vocabulary", "Key terms used across research plays", [
+    { name: "corpus", description: "The searchable document set" },
+  ]),
+  new ManualSection("Workflows", "Standard research steps", [
+    { name: "search-then-cite", description: "Search first, then cite the source verbatim" },
+  ]),
+]);
+
+class ResearchPlaybook extends Playbook {
+  readonly name = "research-plays";
+  readonly description = "Named research plays";
+  readonly plays: Record<string, PlayDefinition> = {
+    summarize_topic: {
+      description: "Summarize everything known about a topic",
+      parameters: z.object({ topic: z.string(), maxWords: z.number().optional() }),
+      execute: async () => ({ summary: "" }),
+    },
+  };
+}
+
+const researchCapability = new Capability(
+  "Research",
+  "Search and summarize a document corpus",
+  new ResearchToolbox(),
+  researchManual,
+  new ResearchPlaybook(),
+);
+
+function makeAnalystRole(): Role {
+  return new Role({
+    name: "Analyst",
+    persona: new Persona({ identity: "an analyst", tone: "precise" }),
+    capabilities: [researchCapability],
+    defaultModel: "claude-sonnet-4-20250514",
+  });
+}
+
+const analystAgent = new Agent({
+  role: makeAnalystRole(),
+  mission: new Mission({ objective: "Answer research questions" }),
 });
 
 function makeResearcherRole(): Role {
@@ -512,12 +574,71 @@ describe("GET /capabilities/:id", () => {
 
     expect(body.name).toBe("Data Curation");
     expect(body.manual).toBeNull();
-    expect(body.playbook).toEqual({ plays: ["archive_stale"] });
+    // Enriched shape (§A, detail route only): plays carry description +
+    // JSON-schema params via `Playbook.getPlaySchemas()` — the same
+    // zod→json-schema conversion the toolbox's own tool schemas go through.
+    expect(body.playbook.name).toBe("curation-plays");
+    expect(body.playbook.description).toBe("Named curation plays");
+    expect(body.playbook.plays).toEqual([
+      {
+        name: "archive_stale",
+        description: "Archive files not touched recently",
+        paramsSchema: expect.objectContaining({ type: "object" }),
+      },
+    ]);
+    expect(body.playbook.plays[0].paramsSchema.properties.days).toBeDefined();
     const writeTool = body.toolbox.tools.find((t: { name: string }) => t.name === "write_file");
     expect(writeTool.parameters.properties.content).toBeDefined();
     expect(writeTool.returns).toBeUndefined();
     expect(body.usedBy.roles).toEqual(["researcher", "researcher-2"]);
     expect(body.sharesToolboxWith).toEqual(["file-management-file-tools"]);
+  });
+
+  it("falls back to the text-flatten shape for a TextManual (no sections)", async () => {
+    const res = await makeApp().request("/capabilities/file-management-file-tools");
+    expect(res.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+    expect(body.manual).toEqual({
+      name: "File Manual",
+      description: expect.stringContaining("Prefer reads over writes."),
+      kind: "text",
+      text: expect.stringContaining("Prefer reads over writes."),
+    });
+  });
+
+  it("enriches a sectioned manual (SimpleManual) with its real TOC + per-section content", async () => {
+    const app = makeApp([register("analyst", "Analyst", analystAgent)]);
+    const listBody = (await (await app.request("/capabilities")).json()) as { id: string }[];
+    expect(listBody).toHaveLength(1);
+    const capId = listBody[0]?.id as string;
+
+    const res = await app.request(`/capabilities/${capId}`);
+    expect(res.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+    const body = (await res.json()) as any;
+
+    expect(body.manual.kind).toBe("sectioned");
+    expect(body.manual.name).toBe("Research Manual");
+    expect(body.manual.description).toBe("How to search and cite sources");
+    expect(body.manual.sections).toHaveLength(2);
+    expect(body.manual.sections[0]).toEqual({
+      name: "Vocabulary",
+      description: "Key terms used across research plays",
+      content: expect.stringContaining("corpus"),
+      itemCount: 1,
+    });
+    expect(body.manual.sections[1].name).toBe("Workflows");
+    expect(body.manual.sections[1].content).toContain("search-then-cite");
+
+    // Playbook enrichment rides the same route.
+    expect(body.playbook.name).toBe("research-plays");
+    expect(body.playbook.plays).toHaveLength(1);
+    const play = body.playbook.plays[0];
+    expect(play.name).toBe("summarize_topic");
+    expect(play.description).toBe("Summarize everything known about a topic");
+    expect(play.paramsSchema.properties.topic).toBeDefined();
+    expect(play.paramsSchema.properties.maxWords).toBeDefined();
   });
 });
 

@@ -3,9 +3,9 @@
  * `RoleBuilder`/`AgentBuilder`, the SAME primitives `presets/agents/
  * calculator.ts` uses) whose entire point is to carry a demoable
  * `Capability`. `pipeline2` (the other example under this dir) declares NO
- * capabilities, so before this file the Tool Workbench (`/capabilities`) had
- * nothing to inspect or invoke without a live model backend (port-map.md
- * §2.5's "demo gap", closed here).
+ * capabilities, so before this file the capability detail page
+ * (`/capabilities/:id`) had nothing to inspect or invoke without a live
+ * model backend (port-map.md §2.5's "demo gap", closed here).
  *
  * The toolbox below has 3 pure, deterministic tools (string/date/vector — no
  * network, no clock reliance, no randomness) with typed Zod params,
@@ -17,24 +17,35 @@
  *   - the OMIT-EMPTY-OPTIONALS semantics (`slugify` with `uppercase` left
  *     untouched vs. explicitly unchecked)
  *
+ * The Capability also carries a `SimpleManual` (3 sections — Vocabulary,
+ * Workflows, Rules) and a one-play `Playbook` (`slug_and_span`, stitching
+ * `slugify` + `date_diff` into a named recipe), so the capability detail
+ * page's Manual TOC, progressive-disclosure demo, and Playbook section are
+ * all demoable key-free too, not just the Tools section.
+ *
  * Usage: `ap playground examples` discovers this alongside `pipeline2`
  * (default export = the agent `ap` registers).
  *
  * Chatting with `toolsmith` itself still routes through the shared LLM
  * runner like any hand-built Agent (unlike `pipeline2`, this is NOT a
- * promoted pipeline node) — that's irrelevant to the Workbench demo, though:
- * `POST /capabilities/:id/tools/:tool/invoke` (S3) calls `toolbox.execute()`
- * straight, bypassing the agent loop and the model entirely.
+ * promoted pipeline node) — that's irrelevant to the capability detail
+ * page's demos, though: `POST /capabilities/:id/tools/:tool/invoke` (S3)
+ * calls `toolbox.execute()` straight, bypassing the agent loop and the
+ * model entirely.
  */
 
 import {
   AgentBuilder,
   Capability,
   Judgment,
+  ManualSection,
   Mission,
   Persona,
+  type PlayDefinition,
+  Playbook,
   Responsibility,
   RoleBuilder,
+  SimpleManual,
   type ToolDefinition,
   Toolbox,
 } from "@agentic-patterns/core";
@@ -103,11 +114,86 @@ class ToolsmithToolbox extends Toolbox {
 }
 
 // ---------------------------------------------------------------------------
+// Manual — 3 sections, so the capability detail page's TOC + progressive-
+// disclosure demo (Tier 0/1/2 over `ManualToolbox`'s contract) have real,
+// sectioned data to walk through, key-free.
+// ---------------------------------------------------------------------------
+
+const toolsmithManual = new SimpleManual(
+  "Toolsmith Manual",
+  "How to use the string/date/vector utilities correctly.",
+  [
+    new ManualSection("Vocabulary", "Terms used across the utilities.", [
+      { name: "slug", description: "A URL-safe, lowercase, hyphen-separated string" },
+      { name: "ISO date", description: "A YYYY-MM-DD date string, e.g. 2026-01-15" },
+      { name: "2D vector", description: "An {x, y} pair of numbers" },
+    ]),
+    new ManualSection("Workflows", "Standard sequences for common requests.", [
+      {
+        name: "normalize-then-slugify",
+        description:
+          "Prefer passing already-trimmed, already-lowercased text into slugify — the tool's own normalization is a safety net, not the primary one",
+      },
+      {
+        name: "diff-in-days",
+        description:
+          "Always pass `from` before `to` — date_diff returns (to minus from), so swapping the args flips the sign",
+      },
+    ]),
+    new ManualSection("Rules", "Hard constraints on tool use.", [
+      {
+        name: "no side effects",
+        description: "Every tool here is pure — never claim a tool wrote or fetched anything",
+      },
+      {
+        name: "no fabrication",
+        description: "Never report a result the matching tool didn't actually return",
+      },
+    ]),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Playbook — one play stitching two toolbox tools into a named recipe, so
+// the capability detail page's Playbook section has a real described play
+// (name + description + JSON-schema params) to render.
+// ---------------------------------------------------------------------------
+
+class ToolsmithPlaybook extends Playbook {
+  readonly name = "toolsmith-plays";
+  readonly description = "Named recipes that stitch the toolsmith utilities together.";
+  readonly plays: Record<string, PlayDefinition>;
+
+  constructor(toolbox: ToolsmithToolbox) {
+    super();
+    this.plays = {
+      slug_and_span: {
+        description: "Slugify a title and report how many days until a target date, in one call.",
+        parameters: z.object({
+          title: z.string().describe("Text to slugify"),
+          from: z.string().describe("ISO date to measure from"),
+          to: z.string().describe("ISO date to measure to"),
+        }),
+        execute: async (args) => {
+          const { title, from, to } = args as { title: string; from: string; to: string };
+          const [{ slug }, { days }] = (await Promise.all([
+            toolbox.execute("slugify", { text: title }),
+            toolbox.execute("date_diff", { from, to }),
+          ])) as [{ slug: string }, { days: number }];
+          return { slug, days };
+        },
+      },
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Role x Mission — build the agent (the same primitives any hand-built agent
 // uses — see `presets/agents/calculator.ts` for the identical shape)
 // ---------------------------------------------------------------------------
 
 function buildToolsmithAgent() {
+  const toolbox = new ToolsmithToolbox();
   const role = new RoleBuilder("toolsmith")
     .withPersona(
       new Persona({
@@ -127,7 +213,9 @@ function buildToolsmithAgent() {
       new Capability(
         "toolsmith-utilities",
         "Deterministic string, date, and vector utilities — no network, no clock, no randomness.",
-        new ToolsmithToolbox(),
+        toolbox,
+        toolsmithManual,
+        new ToolsmithPlaybook(toolbox),
       ),
     )
     .withResponsibility(
