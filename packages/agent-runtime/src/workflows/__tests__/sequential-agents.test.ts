@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import { type ZodType, z } from "zod";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
+import type {
+  RunOptions,
+  RunResult,
+  RunnerProtocol,
+  StructuredRunResult,
+} from "../../runner/types.js";
+import type { PatternHooks } from "../base.js";
 import { renderSharedState, sequentialAgent } from "../sequential-agents.js";
 import { createScratchpad, slot } from "../slot.js";
 
@@ -207,5 +214,176 @@ describe("sequentialAgent", () => {
     await node.run("a", { runner, scratchpad: pad });
     await node.run("b", { runner, scratchpad: pad });
     expect(pad.get(counter)).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stage-level retry (#201)
+// ---------------------------------------------------------------------------
+
+/**
+ * A stateful runner that FAILS its first `failFirst` calls (by throwing — the
+ * shape a provider error or a starved tool loop takes at the runner boundary,
+ * which `AgentStep` catches into `succeeded:false`), then succeeds. Needed
+ * because `MockRunner` is stateless: the same prompt always yields the same
+ * response, so it cannot model fail-once-then-succeed on an UNCHANGED render —
+ * which is exactly the fresh-transcript retry path under test.
+ */
+class FlakyRunner implements RunnerProtocol {
+  calls = 0;
+  constructor(
+    private readonly failFirst: number,
+    private readonly success: { content?: string; object?: unknown },
+    private readonly makeError: () => Error = () => new Error("provider flake"),
+  ) {}
+
+  async run(_agent: AgentLike, _message: string, _options?: RunOptions): Promise<RunResult> {
+    this.calls += 1;
+    if (this.calls <= this.failFirst) throw this.makeError();
+    return {
+      response: this.success.content ?? "OK",
+      inputTokens: 1,
+      outputTokens: 1,
+      toolCallsCount: 0,
+      iterations: 1,
+      finishReason: "stop",
+    };
+  }
+
+  async runStructured<T>(
+    _agent: AgentLike,
+    _message: string,
+    schema: ZodType<T>,
+    _options?: RunOptions,
+  ): Promise<StructuredRunResult<T>> {
+    this.calls += 1;
+    if (this.calls <= this.failFirst) throw this.makeError();
+    const object = schema.parse(this.success.object);
+    return {
+      response: JSON.stringify(object),
+      inputTokens: 1,
+      outputTokens: 1,
+      toolCallsCount: 0,
+      iterations: 1,
+      finishReason: "stop",
+      object,
+    };
+  }
+}
+
+describe("sequentialAgent: stage retry (#201)", () => {
+  it("retry: N re-runs a pre-emission failure on a fresh transcript until it emits", async () => {
+    const runner = new FlakyRunner(1, { content: "RECOVERED" });
+    const events: string[] = [];
+    const hooks: PatternHooks = {
+      onPatternStart: (e) => void events.push(`start:${e.patternName}`),
+      onIterationStart: (e) => void events.push(`iter:${e.iteration}`),
+      onPatternComplete: (e) => void events.push(`complete:${e.patternName}`),
+    };
+
+    const node = sequentialAgent([{ agent: makeAgent("resolve"), retry: 1 }]);
+    const res = await node.run("go", { runner, hooks });
+
+    expect(res.succeeded).toBe(true);
+    // Identical emission to a clean run — the retry is invisible to downstream shape.
+    expect(res.output.outputs).toEqual({ resolve: "RECOVERED" });
+    expect(res.output.stopped).toBeNull();
+    expect(runner.calls).toBe(2); // failed once, then succeeded
+    // Observable on the bus: the wrapper emitted its lifecycle, one iteration per attempt.
+    expect(events).toContain("start:resolve:retry");
+    expect(events).toContain("iter:0");
+    expect(events).toContain("iter:1");
+    expect(events).toContain("complete:resolve:retry");
+  });
+
+  it("retry omitted: a pre-emission failure aborts the sequence AND emits no pattern events", async () => {
+    const runner = new FlakyRunner(1, { content: "unreachable" });
+    const events: string[] = [];
+    const hooks: PatternHooks = {
+      onPatternStart: (e) => void events.push(e.patternName),
+      onPatternComplete: (e) => void events.push(e.patternName),
+    };
+    const node = sequentialAgent([makeAgent("resolve")]);
+    const res = await node.run("go", { runner, hooks });
+
+    expect(res.succeeded).toBe(false);
+    expect(res.error?.message).toContain("provider flake");
+    expect(runner.calls).toBe(1); // no retry — one attempt, then abort
+    expect(events).toEqual([]); // byte-identical: no Retry wrapper => zero extra bus events
+  });
+
+  it("exhausted retries surface the stage's ORIGINAL failure (not a retry-wrapper error)", async () => {
+    const runner = new FlakyRunner(5, { content: "unreachable" }, () => new Error("still down"));
+    const node = sequentialAgent([{ agent: makeAgent("a"), retry: 2 }]);
+    const res = await node.run("go", { runner });
+
+    expect(res.succeeded).toBe(false);
+    expect(res.error?.message).toBe("still down"); // the leaf's error verbatim, not wrapped
+    expect(runner.calls).toBe(3); // 1 initial + 2 retries
+  });
+
+  it("threads token rollup through the wrapper (success attempt's tokens land in the sequence total)", async () => {
+    // AgentStep's catch reports 0/0 on a thrown failure (pre-existing contract), so a
+    // failed pre-emission attempt contributes 0 tokens; the succeeding attempt's real
+    // tokens must still surface in the sequence rollup via Retry's accumulation.
+    const runner = new FlakyRunner(1, { content: "OK" }); // success => 1 in / 1 out
+    const node = sequentialAgent([{ agent: makeAgent("a"), retry: 1 }]);
+    const res = await node.run("go", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.totalInputTokens).toBe(1);
+    expect(res.totalOutputTokens).toBe(1);
+  });
+
+  it("counts WHOLE agent attempts — it does not multiply runStructured's internal shape retry", async () => {
+    const Shape = z.object({ verdict: z.string() }).strict();
+    const runner = new FlakyRunner(1, { object: { verdict: "ok" } });
+    const node = sequentialAgent([{ agent: makeAgent("judge"), output: Shape, retry: 1 }]);
+    const res = await node.run("judge it", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs.judge).toEqual({ verdict: "ok" });
+    expect(runner.calls).toBe(2); // one whole-agent retry; NOT an added shape-reprompt layer
+  });
+
+  it("tool-loop starvation is retried; stop/onEmit fire once, only on the successful emission", async () => {
+    const starve = () =>
+      new Error(
+        'runStructured: 2-tier fallback got empty tier-1 output (finishReason="max_iterations")',
+      );
+    const runner = new FlakyRunner(1, { content: "EMITTED" }, starve);
+    let stopCalls = 0;
+    let emitCalls = 0;
+    const node = sequentialAgent([
+      {
+        agent: makeAgent("a"),
+        retry: 1,
+        stop: () => {
+          stopCalls += 1;
+          return null;
+        },
+        onEmit: () => {
+          emitCalls += 1;
+        },
+      },
+    ]);
+    const res = await node.run("go", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs.a).toBe("EMITTED");
+    expect(runner.calls).toBe(2); // starved once, then emitted
+    expect(stopCalls).toBe(1); // NOT 2 — the starved attempt never reaches stop/onEmit
+    expect(emitCalls).toBe(1);
+  });
+
+  it("build-time guard: retry must be a non-negative integer", () => {
+    expect(() => sequentialAgent([{ agent: makeAgent("a"), retry: -1 }])).toThrow(
+      /invalid retry -1/,
+    );
+    expect(() => sequentialAgent([{ agent: makeAgent("a"), retry: 1.5 }])).toThrow(
+      /invalid retry 1.5/,
+    );
+    expect(() => sequentialAgent([{ agent: makeAgent("a"), retry: 0 }])).not.toThrow();
+    expect(() => sequentialAgent([{ agent: makeAgent("a"), retry: 3 }])).not.toThrow();
   });
 });

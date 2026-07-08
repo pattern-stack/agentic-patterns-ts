@@ -44,6 +44,7 @@ import type { AgentLike } from "../runner/agent-runner.js";
 import { createToolboxExecutor } from "../runner/toolbox-executor.js";
 import { AgentStep } from "./agent-step.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
+import { retry } from "./retry.js";
 import {
   type ScratchpadAccess,
   type ScratchpadReader,
@@ -82,6 +83,31 @@ export interface AgentStageSpec<TOut = unknown> {
   readonly stop?: (output: TOut, state: ScratchpadReader) => string | null;
   /** Tool/2-tier loop cap for this stage (AgentStep semantics). */
   readonly maxIterations?: number;
+  /**
+   * Re-run this stage's agent (a FRESH attempt — the poisoned transcript is
+   * discarded, the prompt render is unchanged) up to N times when the run fails
+   * BEFORE an emission materializes (agent-run error / no structured output —
+   * e.g. a tool loop that burns `maxIterations` and never emits). Default `0`
+   * (today's behavior: one attempt, and a pre-emission failure aborts the
+   * sequence).
+   *
+   * SCOPE: pre-emission failures only. `runStructured`'s own shape re-prompting
+   * lives inside a single attempt and is NOT multiplied by this. `stop`/`onEmit`
+   * run only after a successful emission, so they never fire on a failed attempt;
+   * an `onEmit`-thrown error is the consumer's tail and is never retried here.
+   * Exhausted retries surface the leaf's ORIGINAL failure shape unchanged.
+   * Reuses the runtime's {@link Retry} node, so opted-in stages emit its
+   * `pattern.*` lifecycle events on the bus (one iteration per attempt).
+   *
+   * COST: `maxIterations` is PER ATTEMPT, so a stage's worst-case cost is
+   * `(retry + 1) × budget` — intended (a fresh do-over gets a fresh budget).
+   * A thrown pre-emission failure carries 0 tokens through `AgentStep`'s catch,
+   * so failed attempts add nothing to the token rollup; the succeeding attempt's
+   * tokens surface as usual.
+   *
+   * Follow-ups (out of scope v1): a `retryOn` predicate; backoff.
+   */
+  readonly retry?: number;
   /** Optional slot-dependency declarations → build-time write-before-read assert. */
   readonly reads?: ReadonlyArray<{ readonly key: string }>;
   /** Extra slots this stage's tail writes (the emission slot is declared automatically). */
@@ -184,6 +210,17 @@ export function sequentialAgent(
     );
   }
 
+  // Build-time assert: `retry` is a non-negative integer (same ethos as the
+  // dupe-name and write-before-read guards — a construction error, not a
+  // silent runtime surprise).
+  specs.forEach((s, i) => {
+    if (s.retry !== undefined && (!Number.isInteger(s.retry) || s.retry < 0)) {
+      throw new Error(
+        `sequentialAgent: stage '${names[i]}' has invalid retry ${s.retry} — must be a non-negative integer`,
+      );
+    }
+  });
+
   // Emission slots: auto per stage unless the caller provided one.
   const emissionSlots = specs.map(
     (s, i) =>
@@ -242,7 +279,16 @@ export function sequentialAgent(
           ...(hasCapabilities ? { toolExecutor: createToolboxExecutor(spec.agent as never) } : {}),
         };
 
-        const res = await step.run(input, stageCtx);
+        // Pre-emission retry: wrap the stage's leaf in the existing `Retry` node
+        // when opted in. `Retry` returns the first success immediately, so `stop`/
+        // `onEmit` below still see exactly one emission; only a run that fails
+        // BEFORE emitting is re-attempted on a fresh transcript. `retry === 0`
+        // runs the leaf directly — byte-identical to today, no extra bus events.
+        const attempts = spec.retry ?? 0;
+        const node =
+          attempts > 0 ? retry(step, { maxAttempts: attempts + 1, name: `${name}:retry` }) : step;
+
+        const res = await node.run(input, stageCtx);
         tokensIn += res.totalInputTokens;
         tokensOut += res.totalOutputTokens;
         if (!res.succeeded) {
