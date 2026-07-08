@@ -21,9 +21,19 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 export const EvalSplitSchema = z.enum(["train", "dev", "test"]);
-/** ML-standard split names (doc §7). Canonical home; storage/eval-store.ts:48 keeps
- *  a structural twin by design (#132 zero-coupling) — drift-guarded by test. */
-export type EvalSplit = z.infer<typeof EvalSplitSchema>; // "train" | "dev" | "test"
+/**
+ * ML-standard split names (doc §7). Canonical home; storage/eval-store.ts:48 keeps
+ * a structural twin by design (#132 zero-coupling) — drift-guarded by test.
+ *
+ * Written as an explicit literal union, NOT `z.infer<typeof EvalSplitSchema>`: a
+ * bare `z.infer` leaks `z.ZodEnum<["train","dev","test"]>` into this package's
+ * published `.d.ts`. A consumer that resolves a DIFFERENT zod major (server pulls
+ * zod 4 via the ai-sdk peer deps; this package builds against zod 3) re-evaluates
+ * that tuple-shaped `ZodEnum` as `tuple[keyof tuple]` — a garbage union
+ * (`3 | ArrayIterator | …`) that breaks assignability at the boundary. A concrete
+ * union crosses losslessly under any zod version. Kept in sync with the schema by
+ * the drift test. */
+export type EvalSplit = "train" | "dev" | "test";
 
 // ---------------------------------------------------------------------------
 // EvalCase
