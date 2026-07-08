@@ -36,9 +36,10 @@ describe("buildOpenApiDocument", () => {
     { method: "POST", path: "/capabilities/:id/tools/:toolName/invoke" },
   ]);
 
-  it("emits a 3.0.3 doc with derived tags + operations", () => {
+  it("emits a 3.1.0 doc with derived tags + operations", () => {
     const { document } = buildOpenApiDocument(app, { title: "T", version: "9" });
-    expect(document.openapi).toBe("3.0.3");
+    expect(document.openapi).toBe("3.1.0");
+    expect(document.jsonSchemaDialect).toBe("https://json-schema.org/draft/2019-09/schema");
     expect((document.info as { title: string; version: string }).title).toBe("T");
     const paths = document.paths as Record<string, Record<string, { tags: string[] }>>;
     expect(paths["/agents/{id}/composition"]?.get?.tags).toEqual(["Agents"]);
@@ -63,6 +64,15 @@ describe("buildOpenApiDocument", () => {
     >;
     expect(paths["/eval/runs"]?.post?.responses["503"]).toBeDefined();
     expect(paths["/capabilities/{id}/tools/{toolName}/invoke"]?.post?.requestBody).toBeDefined();
+  });
+
+  it("emits JSON-Schema 2020-12 nullable form (type union), not 3.0's `nullable`", () => {
+    // The 3.1 guarantee: a nullable field is `type: [T, "null"]`, so the schema
+    // is real JSON Schema an agent/validator can consume without dialect translation.
+    const withNullable = stub([{ method: "POST", path: "/eval/sets/:id/cases/:caseId" }]);
+    const { document } = buildOpenApiDocument(withNullable);
+    const json = JSON.stringify(document);
+    expect(json).not.toContain('"nullable":true');
   });
 
   it("reports overlay keys with no live route as drift", () => {
@@ -143,7 +153,7 @@ describe("docs routes (served)", () => {
     const res = await app.request("/openapi.json");
     expect(res.status).toBe(200);
     const doc = (await res.json()) as { openapi: string; paths: Record<string, unknown> };
-    expect(doc.openapi).toBe("3.0.3");
+    expect(doc.openapi).toBe("3.1.0");
     expect(Object.keys(doc.paths).length).toBeGreaterThan(20);
     // self-documenting: the docs routes appear too
     expect(doc.paths["/openapi.json"]).toBeDefined();

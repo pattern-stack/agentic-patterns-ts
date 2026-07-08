@@ -1,7 +1,7 @@
 /**
  * Docs routes — one Zod-fed source, four surfaces:
  *
- *   GET /openapi.json    OpenAPI 3.0.3 document (humans + tooling + codegen)
+ *   GET /openapi.json    OpenAPI 3.1.0 document (humans + tooling + codegen)
  *   GET /docs            Scalar API reference UI (self-contained page)
  *   GET /llms.txt        token-efficient markdown map for LLM agents
  *   GET /mcp/tools.json  MCP-shaped tool manifest (REST ops + capability tools)

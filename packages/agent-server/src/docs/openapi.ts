@@ -1,9 +1,19 @@
 /**
- * OpenAPI 3.0.3 document builder. Introspects Hono's live `app.routes` for
+ * OpenAPI 3.1.0 document builder. Introspects Hono's live `app.routes` for
  * COMPLETENESS (every mounted route is documented), overlays hand-authored
  * richness from the catalog, and converts Zod schemas via the server's existing
  * `zod-to-json-schema`. Overlay entries that match no live route are reported as
  * `drift` (and stamped as `x-drift` on the document) rather than silently lost.
+ *
+ * WHY 3.1 (not 3.0): OpenAPI 3.1 is fully aligned with JSON Schema 2020-12 — a
+ * schema object here IS a JSON Schema document, so an agent / MCP bridge / codegen
+ * / validator consumes it with zero dialect translation (the whole "already
+ * Zod/JSON-Schema'd" thesis, made literal). That requires the converter to emit
+ * the JSON-Schema dialect (`type: ["string","null"]`) rather than 3.0's fork
+ * (`nullable: true`), so we target `jsonSchema2019-09` — the closest 2020-12
+ * dialect this lib ships — and declare it via `jsonSchemaDialect`. 2019-09 vs
+ * 2020-12 differ only in `$dynamicRef`/tuple-`prefixItems`, neither of which our
+ * emitted shapes (objects/strings/enums/arrays/nullable) use.
  */
 
 import type { ZodTypeAny } from "zod";
@@ -67,9 +77,18 @@ function operationId(method: string, path: string): string {
   return `${method.toLowerCase()}_${body || "root"}`;
 }
 
-/** Zod → plain JSON Schema (OpenAPI-3 flavor, no `$ref`s). Shared with the MCP builder. */
+/** The JSON Schema dialect our converter emits — declared on the 3.1 document
+ *  and the honest answer to "what dialect are these schema objects?". */
+export const JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2019-09/schema";
+
+/**
+ * Zod → JSON Schema (2019-09 dialect, no `$ref`s) — directly embeddable in an
+ * OpenAPI 3.1 document AND handed straight to an agent/validator. Nullable
+ * renders as `type: [T, "null"]` (the JSON Schema form), not 3.0's `nullable`.
+ * Shared with the MCP builder.
+ */
 export function zodJsonSchema(schema: ZodTypeAny): Record<string, unknown> {
-  return zodToJsonSchema(schema, { target: "openApi3", $refStrategy: "none" }) as Record<
+  return zodToJsonSchema(schema, { target: "jsonSchema2019-09", $refStrategy: "none" }) as Record<
     string,
     unknown
   >;
@@ -167,7 +186,8 @@ export function buildOpenApiDocument(app: HonoLike, info: OpenApiInfo = {}): Ope
   const drift = Object.keys(OVERLAY).filter((k) => !liveKeys.has(k));
 
   const document: Record<string, unknown> = {
-    openapi: "3.0.3",
+    openapi: "3.1.0",
+    jsonSchemaDialect: JSON_SCHEMA_DIALECT,
     info: {
       title: info.title ?? "@agentic-patterns/server",
       version: info.version ?? "0",
