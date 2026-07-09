@@ -47,8 +47,9 @@ export interface DropRecord<TTag> {
   readonly tag: TTag;
   /** Identities this drop covered — post-expand, post-skip, deduped, first-touch order. */
   readonly ids: readonly string[];
-  /** Non-skipped identities this drop covered (= `ids.length`). */
-  readonly accepted: number;
+  /** Non-skipped identities this drop covered (= `ids.length`, new + merged alike —
+   *  deliberately NOT DropReceipt.accepted, which counts NEW identities only). */
+  readonly covered: number;
   /** Raws for which `expand()` returned null/undefined. */
   readonly skipped: number;
 }
@@ -255,6 +256,17 @@ class BackpackImpl<TIn, TEntry, TFinal, TTag> implements Backpack<TIn, TEntry, T
   /** Bumped by every drop/absorb; invalidates the finalize memo. */
   private writeGen = 0;
   private finalizeMemo?: { gen: number; value: TFinal };
+  /** True while drop()/absorb() runs. A hook that synchronously re-enters would
+   *  mint colliding indexes off a stale staging cursor — fail loud instead. */
+  private mutating = false;
+
+  private guardReentry(op: "drop" | "absorb"): void {
+    if (this.mutating) {
+      throw new Error(
+        `Backpack '${this.spec.key}' ${op}() re-entered from inside a hook — hooks are pure value transforms and must not touch the pack.`,
+      );
+    }
+  }
 
   constructor(readonly spec: BackpackSpec<TIn, TEntry, TFinal, TTag>) {}
 
@@ -263,88 +275,99 @@ class BackpackImpl<TIn, TEntry, TFinal, TTag> implements Backpack<TIn, TEntry, T
   }
 
   drop(raw: TIn | readonly TIn[], tag?: TTag): DropReceipt {
+    this.guardReentry("drop");
     const raws = Array.isArray(raw) ? (raw as readonly TIn[]) : [raw as TIn];
-    let accepted = 0;
-    let merged = 0;
-    let skipped = 0;
-    const indexes: number[] = [];
-    const coveredIds: string[] = [];
-    const coveredSet = new Set<string>();
-
-    // ── PHASE 1: compute into a staging buffer. Every developer hook (expand,
-    // identify, merge) runs HERE, touching NO instance field. So a throw from any
-    // hook leaves the store byte-identical — the drop is atomic. Committing per-raw
-    // (the naive form) would leave partial entries with no manifest record and no
-    // writeGen bump, so finalized() would keep serving a stale memo that contradicts
-    // entries()/view()/size (§3 "any drop invalidates the memo"). ──
-    const stagedValues = new Map<string, TEntry>(); // final value per touched id
-    const stagedNewOrder: string[] = []; // new ids, in first-seen order
-    const stagedNewIndex = new Map<string, number>(); // provisional index for new ids
-    let nextIdx = this.order.length; // pre-increment ⇒ first new id = order.length + 1
-
-    for (let i = 0; i < raws.length; i++) {
-      const one = raws[i] as TIn;
-      let entry: TEntry | null | undefined;
-      try {
-        entry = this.spec.expand(one); // throw ⇒ fails loud here, at the write site
-      } catch (err) {
-        // §3: fail LOUD with the offending raw in the error (not just the hook's
-        // own message). Preserve the original message so a hook that already names
-        // the raw still surfaces cleanly, and attach the cause.
-        throw new Error(
-          `Backpack '${this.spec.key}' expand() threw on raw ${i} (${safeRawPreview(one)}): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-          { cause: err },
-        );
-      }
-      if (entry === null || entry === undefined) {
-        skipped += 1;
-        continue;
-      }
-      const id = this.spec.identify(entry);
-      const committed = this.entriesById.has(id);
-      const staged = stagedValues.has(id);
-      if (committed || staged) {
-        const prev = (staged ? stagedValues.get(id) : this.entriesById.get(id)) as TEntry;
-        stagedValues.set(id, this.spec.merge ? this.spec.merge(prev, entry) : entry);
-        merged += 1;
-        indexes.push((committed ? this.indexById.get(id) : stagedNewIndex.get(id)) as number);
-      } else {
-        nextIdx += 1; // 1-based, first-seen, append-only
-        stagedNewOrder.push(id);
-        stagedNewIndex.set(id, nextIdx);
-        stagedValues.set(id, entry);
-        accepted += 1;
-        indexes.push(nextIdx);
-      }
-      if (!coveredSet.has(id)) {
-        coveredSet.add(id);
-        coveredIds.push(id);
-      }
+    // Empty batch = a true no-op: no record, no writeGen bump (a busted finalize
+    // memo for zero entries would be pure waste).
+    if (raws.length === 0) {
+      return Object.freeze({ accepted: 0, merged: 0, skipped: 0, indexes: Object.freeze([]) });
     }
+    this.mutating = true;
+    try {
+      let accepted = 0;
+      let merged = 0;
+      let skipped = 0;
+      const indexes: number[] = [];
+      const coveredIds: string[] = [];
+      const coveredSet = new Set<string>();
 
-    // ── PHASE 2: commit. No developer hook runs from here — only pure Map/array
-    // writes, so this can never throw and the mutation is all-or-nothing. ──
-    for (const id of stagedNewOrder) {
-      this.order.push(id);
-      this.indexById.set(id, stagedNewIndex.get(id) as number);
-    }
-    for (const [id, value] of stagedValues) {
-      this.entriesById.set(id, value);
-    }
-    this.records.push(
-      Object.freeze({
-        seq: this.records.length,
-        tag: tag as TTag,
-        ids: Object.freeze(coveredIds),
-        accepted: coveredIds.length,
-        skipped,
-      }),
-    );
-    this.writeGen += 1;
+      // ── PHASE 1: compute into a staging buffer. Every developer hook (expand,
+      // identify, merge) runs HERE, touching NO instance field. So a throw from any
+      // hook leaves the store byte-identical — the drop is atomic. Committing per-raw
+      // (the naive form) would leave partial entries with no manifest record and no
+      // writeGen bump, so finalized() would keep serving a stale memo that contradicts
+      // entries()/view()/size (§3 "any drop invalidates the memo"). ──
+      const stagedValues = new Map<string, TEntry>(); // final value per touched id
+      const stagedNewOrder: string[] = []; // new ids, in first-seen order
+      const stagedNewIndex = new Map<string, number>(); // provisional index for new ids
+      let nextIdx = this.order.length; // pre-increment ⇒ first new id = order.length + 1
 
-    return Object.freeze({ accepted, merged, skipped, indexes: Object.freeze(indexes) });
+      for (let i = 0; i < raws.length; i++) {
+        const one = raws[i] as TIn;
+        let entry: TEntry | null | undefined;
+        try {
+          entry = this.spec.expand(one); // throw ⇒ fails loud here, at the write site
+        } catch (err) {
+          // §3: fail LOUD with the offending raw in the error (not just the hook's
+          // own message). Preserve the original message so a hook that already names
+          // the raw still surfaces cleanly, and attach the cause.
+          throw new Error(
+            `Backpack '${this.spec.key}' expand() threw on raw ${i} (${safeRawPreview(one)}): ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+            { cause: err },
+          );
+        }
+        if (entry === null || entry === undefined) {
+          skipped += 1;
+          continue;
+        }
+        const id = this.spec.identify(entry);
+        const committed = this.entriesById.has(id);
+        const staged = stagedValues.has(id);
+        if (committed || staged) {
+          const prev = (staged ? stagedValues.get(id) : this.entriesById.get(id)) as TEntry;
+          stagedValues.set(id, this.spec.merge ? this.spec.merge(prev, entry) : entry);
+          merged += 1;
+          indexes.push((committed ? this.indexById.get(id) : stagedNewIndex.get(id)) as number);
+        } else {
+          nextIdx += 1; // 1-based, first-seen, append-only
+          stagedNewOrder.push(id);
+          stagedNewIndex.set(id, nextIdx);
+          stagedValues.set(id, entry);
+          accepted += 1;
+          indexes.push(nextIdx);
+        }
+        if (!coveredSet.has(id)) {
+          coveredSet.add(id);
+          coveredIds.push(id);
+        }
+      }
+
+      // ── PHASE 2: commit. No developer hook runs from here — only pure Map/array
+      // writes, so this can never throw and the mutation is all-or-nothing. ──
+      for (const id of stagedNewOrder) {
+        this.order.push(id);
+        this.indexById.set(id, stagedNewIndex.get(id) as number);
+      }
+      for (const [id, value] of stagedValues) {
+        this.entriesById.set(id, value);
+      }
+      this.records.push(
+        Object.freeze({
+          seq: this.records.length,
+          tag: tag as TTag,
+          ids: Object.freeze(coveredIds),
+          covered: coveredIds.length,
+          skipped,
+        }),
+      );
+      this.writeGen += 1;
+
+      return Object.freeze({ accepted, merged, skipped, indexes: Object.freeze(indexes) });
+    } finally {
+      this.mutating = false;
+    }
   }
 
   has(id: string): boolean {
@@ -382,6 +405,8 @@ class BackpackImpl<TIn, TEntry, TFinal, TTag> implements Backpack<TIn, TEntry, T
   }
 
   finalized(): TFinal {
+    // The returned value IS the memo (shared across reads until the next drop):
+    // treat it as immutable — mutating it in place poisons every subsequent read.
     if (this.finalizeMemo?.gen === this.writeGen) return this.finalizeMemo.value;
     const value = this.spec.finalize(this.entries(), this.manifest());
     this.finalizeMemo = { gen: this.writeGen, value };
@@ -393,41 +418,50 @@ class BackpackImpl<TIn, TEntry, TFinal, TTag> implements Backpack<TIn, TEntry, T
   }
 
   absorb(other: Backpack<TIn, TEntry, TFinal, TTag>): void {
-    // Entry-level replay: identify + merge apply, but never re-expand. New ids
-    // append after the parent's, so parent indexes stay stable. Two-phase for the
-    // same atomicity reason as drop(): identify/merge run in PHASE 1 against a
-    // staging buffer, so a mid-replay throw leaves the parent untouched (no torn
-    // state, no stale finalize memo).
-    const otherEntries = other.entries();
-    const otherRecords = other.manifest().records; // read before mutating
-    const stagedValues = new Map<string, TEntry>();
-    const stagedNewOrder: string[] = [];
-    for (const entry of otherEntries) {
-      const id = this.spec.identify(entry);
-      const committed = this.entriesById.has(id);
-      const staged = stagedValues.has(id);
-      if (committed || staged) {
-        const prev = (staged ? stagedValues.get(id) : this.entriesById.get(id)) as TEntry;
-        stagedValues.set(id, this.spec.merge ? this.spec.merge(prev, entry) : entry);
-      } else {
-        stagedNewOrder.push(id);
-        stagedValues.set(id, entry);
+    this.guardReentry("absorb");
+    // absorb(self) is a no-op: replaying a pack into itself would double every
+    // merged value and duplicate the manifest for zero information.
+    if ((other as unknown) === this) return;
+    this.mutating = true;
+    try {
+      // Entry-level replay: identify + merge apply, but never re-expand. New ids
+      // append after the parent's, so parent indexes stay stable. Two-phase for the
+      // same atomicity reason as drop(): identify/merge run in PHASE 1 against a
+      // staging buffer, so a mid-replay throw leaves the parent untouched (no torn
+      // state, no stale finalize memo).
+      const otherEntries = other.entries();
+      const otherRecords = other.manifest().records; // read before mutating
+      const stagedValues = new Map<string, TEntry>();
+      const stagedNewOrder: string[] = [];
+      for (const entry of otherEntries) {
+        const id = this.spec.identify(entry);
+        const committed = this.entriesById.has(id);
+        const staged = stagedValues.has(id);
+        if (committed || staged) {
+          const prev = (staged ? stagedValues.get(id) : this.entriesById.get(id)) as TEntry;
+          stagedValues.set(id, this.spec.merge ? this.spec.merge(prev, entry) : entry);
+        } else {
+          stagedNewOrder.push(id);
+          stagedValues.set(id, entry);
+        }
       }
-    }
 
-    // COMMIT — pure Map/array writes only; cannot throw.
-    for (const id of stagedNewOrder) {
-      this.order.push(id);
-      this.indexById.set(id, this.order.length);
+      // COMMIT — pure Map/array writes only; cannot throw.
+      for (const id of stagedNewOrder) {
+        this.order.push(id);
+        this.indexById.set(id, this.order.length);
+      }
+      for (const [id, value] of stagedValues) {
+        this.entriesById.set(id, value);
+      }
+      // Concatenate manifests, reseqing to stay monotonic per backpack.
+      for (const rec of otherRecords) {
+        this.records.push(Object.freeze({ ...rec, seq: this.records.length }));
+      }
+      this.writeGen += 1;
+    } finally {
+      this.mutating = false;
     }
-    for (const [id, value] of stagedValues) {
-      this.entriesById.set(id, value);
-    }
-    // Concatenate manifests, reseqing to stay monotonic per backpack.
-    for (const rec of otherRecords) {
-      this.records.push(Object.freeze({ ...rec, seq: this.records.length }));
-    }
-    this.writeGen += 1;
   }
 }
 
@@ -454,6 +488,9 @@ const slotCache = new WeakMap<object, Slot<unknown>>();
 // only the first spec's hooks. This registry maps slot-key → owning spec and throws
 // on a divergent re-registration. Held via WeakRef so a GC'd spec frees its key
 // (matching slotCache's non-retaining intent) and can be legitimately rebound.
+// NOTE: the string key itself is retained until rebound (only the spec is weakly
+// held) — spec keys are meant to be STATIC module-scope constants, not
+// runtime-generated; a dead ref is evicted on the next lookup either way.
 const keyOwners = new Map<string, WeakRef<object>>();
 
 export function backpackSlot<TIn, TEntry, TFinal, TTag = undefined>(
@@ -475,7 +512,9 @@ export function backpackSlot<TIn, TEntry, TFinal, TTag = undefined>(
   }
 
   const slotKey = `backpack.${spec.key}`;
-  const owner = keyOwners.get(slotKey)?.deref();
+  const ownerRef = keyOwners.get(slotKey);
+  const owner = ownerRef?.deref();
+  if (ownerRef !== undefined && owner === undefined) keyOwners.delete(slotKey); // GC'd spec — free the key
   if (owner !== undefined && owner !== spec) {
     throw new Error(
       `Backpack key '${spec.key}' is already bound to a different spec object. Each backpack key must map to exactly one spec (they share the string-keyed Scratchpad slot and would silently alias). Reuse the same spec instance, or pick a distinct key.`,

@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
 import {
+  type Backpack,
   type BackpackSpec,
   BackpackUnavailableError,
   type WriteManifest,
@@ -69,7 +71,7 @@ describe("Backpack — drop", () => {
     expect(records).toHaveLength(1);
     const record = records[0];
     expect(record?.skipped).toBe(1);
-    expect(record?.accepted).toBe(1);
+    expect(record?.covered).toBe(1);
     expect(record?.ids).toEqual(["a"]);
   });
 
@@ -339,22 +341,15 @@ describe("Backpack — purity", () => {
     expect(typeof finalize).toBe("function");
   });
 
-  it("no events emitted anywhere (bus spy stays empty)", () => {
-    // The primitive has no event channel at all — it never receives an emit sink.
-    // Drive every mutation + read surface and assert the spy the harness would
-    // wire to a bus is never called.
-    const events: unknown[] = [];
-    const emit = (e: unknown) => events.push(e);
-
-    const pack = createBackpack(makeSpec());
-    pack.drop([r("a", "a"), r("b", "b")], { facet: "x" });
-    pack.finalized();
-    pack.view().lines();
-    pack.manifest().tagsFor("a");
-
-    // No hook, no accessor, nothing ever touched `emit`.
-    expect(emit).toBeTypeOf("function");
-    expect(events).toHaveLength(0);
+  it("no events emitted anywhere (the module has no event channel)", () => {
+    // Structural proof, complementing the untouched SSE exact-count suites: the
+    // module's source contains no event creation, no bus publish, and no emit
+    // call — the primitive is invisible to the transport by construction.
+    const src = readFileSync(new URL("../backpack.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/createEvent\s*\(/);
+    expect(src).not.toMatch(/\.publish\s*\(/);
+    expect(src).not.toMatch(/\bemit\s*\(/);
+    expect(src).not.toMatch(/AgentEventBus/);
   });
 });
 
@@ -489,5 +484,47 @@ describe("Backpack — accessors", () => {
       expect(err).toBeInstanceOf(BackpackUnavailableError);
       expect((err as Error).message).toContain("eval-probe");
     }
+  });
+
+  describe("review hardening", () => {
+    it("drop() re-entered from inside a hook fails loud and leaves the store unchanged", () => {
+      const spec = makeSpec();
+      const holder: { pack?: Backpack<Raw, Entry, Final, Tag> } = {};
+      const reentrant = createBackpack<Raw, Entry, Final, Tag>({
+        ...spec,
+        expand: (raw) => {
+          // A hook touching the pack violates the pure-value contract — the
+          // guard must throw rather than mint colliding indexes.
+          holder.pack?.drop(r("smuggled", "smuggled"));
+          return spec.expand(raw);
+        },
+      });
+      holder.pack = reentrant;
+      expect(() => reentrant.drop(r("a", "a"))).toThrow(/re-entered from inside a hook/);
+      expect(reentrant.size).toBe(0);
+      expect(reentrant.manifest().records).toHaveLength(0);
+    });
+
+    it("drop([]) is a true no-op: empty receipt, no record, finalize memo identity preserved", () => {
+      const pack = createBackpack(makeSpec());
+      pack.drop(r("a", "a"));
+      const memo = pack.finalized();
+      const receipt = pack.drop([]);
+      expect(receipt).toEqual({ accepted: 0, merged: 0, skipped: 0, indexes: [] });
+      expect(pack.manifest().records).toHaveLength(1);
+      expect(pack.finalized()).toBe(memo); // no writeGen bump
+    });
+
+    it("absorb(self) is a no-op: size, values, and manifest unchanged", () => {
+      const pack = createBackpack(makeSpec());
+      pack.drop([r("a", "a"), r("b", "b")], { facet: "x" });
+      const sizeBefore = pack.size;
+      const recordsBefore = pack.manifest().records.length;
+      const memo = pack.finalized();
+      pack.absorb(pack);
+      expect(pack.size).toBe(sizeBefore);
+      expect(pack.manifest().records).toHaveLength(recordsBefore);
+      expect(pack.finalized()).toBe(memo);
+    });
   });
 });
