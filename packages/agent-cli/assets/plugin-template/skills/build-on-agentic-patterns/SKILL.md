@@ -68,6 +68,9 @@ When you have a piece of knowledge, find its row before you write a line of code
 | Domain reference / how-the-data-works / DSL guide | **Manual** (sectioned `ManualSection`s) | the mission |
 | A stable decision rule ("prefer not-enough-evidence over guessing") | **Judgment** | `persona.principles`; the mission |
 | Who the agent is (identity, tone, priorities) | **Persona** | the mission |
+| HOW the agent communicates — a reusable voice with examples + anti-patterns | **Tone** (`role.withTone(...)`) | the persona `tone` string (fine for one-liners; Tone when it deserves examples) |
+| HOW the agent works — a work protocol with a checklist | **Methodology** (`role.withMethodology(...)`) | the mission; a judgment's heuristics (those are *decision* rules) |
+| What to do when a step fails (retry policy, escalation) | **Recovery** (`role.withRecovery(...)`) | the mission; scattered "if that fails…" prose |
 | What the agent is accountable for | **Responsibility** | the mission |
 | Per-run grounding (this deal, this user, as-of) | **Mission**, rendered from a context `AgenticModel` | hardcoded strings; a fat protocol |
 | The mutable backend (API client, secret, store) | **injected into the Toolbox via a factory** (closure capture) | a module global; the prompt |
@@ -104,7 +107,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 
 1. **Toolbox** — subclass `Toolbox`; `tools` is a `Record<name, ToolDefinition>`. Each `execute` closes over the injected client. Expose via `buildXToolbox(deps)`.
 2. **Manual** *(optional)* — `ManualSection`s of domain reference. `manual.scoped([...])` gives progressive disclosure (full sections + a TOC of the rest).
-3. **Playbook** *(optional)* — subclass `Playbook`; `plays` are named recipes; `Playbook.execute` returns an `{ error }` envelope instead of throwing (so a malformed play can't abort the loop). Expose via `buildXPlaybook(deps)`.
+3. **Playbook** *(optional)* — subclass `Playbook`; `plays` are named recipes; `Playbook.execute` returns an `{ error }` envelope instead of throwing (so a malformed play can't abort the loop). A play may declare `returns: z.object({...})` alongside `parameters` — the output shape is erased at runtime otherwise, and `returns` makes it visible to consumers like the Tool Workbench. Expose via `buildXPlaybook(deps)`.
 4. **Capability** — `new Capability(name, description, toolbox, manual?, playbook?)`. **Toolbox is required.** Wrap in `buildXCapability(deps)`:
    ```ts
    export function buildQuerySurfaceCapability(deps: QueryDeps): Capability {
@@ -117,7 +120,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
    }
    ```
 5. **Judgment + Persona** (`roles/`) — decision rules and identity as named exports. **Don't start from zero:** `@agentic-patterns/runtime` ships preset judgments (`RETRIEVAL_STRATEGY`, `EVIDENCE_QUALITY`, `ROUTING`, `QUALITY_REVIEW`, …), responsibilities, and whole roles (`retrievalRole`, `analystRole`, `coordinatorRole`) — clone or compose those before authoring new ones.
-6. **Role** — `new RoleBuilder(name).withPersona(p).withJudgment(j).withCapability(c).withDefaultModel(id).build()`. Requires a persona.
+6. **Role** — `new RoleBuilder(name).withPersona(p).withJudgment(j).withCapability(c).withDefaultModel(id).build()`. Requires a persona. Optional knowledge slots: `.withTone(t)` (voice with examples/anti-patterns, renders under `### Tone` and wins over the persona tone string), `.withMethodology(m)` (work protocol + checklist, leads `## Methodology`), `.withRecovery(r)` (failure policy, renders as `### Recovery` under Boundaries).
 7. **Mission** — thin: `new Mission({ objective, successCriteria, /* grounding rendered from a context AgenticModel */ })`. No protocol text.
 8. **Agent** — `new AgentBuilder(role).withMission(m).withModel(id).build()`. Requires a mission. **This built Agent is what your `agents/<name>/agent.ts` exports** (§0).
 9. **Run** — `ap playground` / `ap run` wire the bus + exporter + executor for you. When driving `AgentRunner` directly, wire **the executor** yourself:
@@ -129,7 +132,9 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
    await runner.run(agent, message, { toolExecutor, eventBus: bus, maxIterations: 12 });
    ```
    **Gate destructive tools.** The runtime ships a gate chain (safety / approval / rate-limit / audit). The moment an agent gets a tool that writes or deletes, attach `HumanApprovalGate` (or the relevant gate) to the bus alongside the exporter — that's the "gate behavior" the `ConsoleExporter` surfaces.
-10. **Declarative route** *(optional)* — export `createXResolver(deps): CapabilityResolver` (name → live `Capability`), then `buildAgentFromConfig(config, { resolver })` where `config.capabilities` is `string[]`. The library never touches credentials; the app supplies `deps`.
+10. **Declarative route** *(optional)* — export `createXResolver(deps): CapabilityResolver` (name → live `Capability`), then `buildAgentFromConfig(config, { resolver })` where `config.capabilities` is `string[]`. The `roleTemplate` accepts the same knowledge slots (`tone`/`methodology`/`recovery` as plain data). The library never touches credentials; the app supplies `deps`.
+
+**Where the prompt text goes (one path).** `agent.renderInitialPrompt()` is the single section-composed prompt every runner ships: Identity → Boundaries → Capabilities → Context → Mission → Methodology. `agent.renderSections()` returns the same content as `{name, source, text}[]` with role-vs-instance provenance; `role.toPrompt()` previews just the role half. There is no separate `getSystemPrompt()` path anymore (removed in core 0.9.0) — if a slot edit "does nothing", check the slot is actually wired into the Role, not whether you hit the right render path.
 
 ## 4. Anti-patterns (the reasons builds fail)
 
