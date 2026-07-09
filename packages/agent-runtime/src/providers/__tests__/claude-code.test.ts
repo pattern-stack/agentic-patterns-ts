@@ -365,7 +365,7 @@ async function buildMathHarness() {
     .withMission(
       new Mission({
         objective: "Help with math using the provided tools",
-        success_criteria: ["Correct answers"],
+        successCriteria: ["Correct answers"],
       }),
     )
     .build();

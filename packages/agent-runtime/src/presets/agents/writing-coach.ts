@@ -50,7 +50,7 @@ export function buildWritingCoachAgent() {
   const mission = new Mission({
     objective:
       "Help users write more clearly and effectively by providing specific, actionable feedback on their text",
-    success_criteria: ["Improved clarity", "Preserved author voice", "Actionable suggestions"],
+    successCriteria: ["Improved clarity", "Preserved author voice", "Actionable suggestions"],
   });
 
   return new AgentBuilder(role).withMission(mission).build();

@@ -29,7 +29,7 @@ describe("Judgments", () => {
     expect(ROUTING.data.domain).toBe("work_routing");
     expect(ROUTING.data.heuristics.length).toBeGreaterThan(0);
     expect(ROUTING.data.constraints.length).toBeGreaterThan(0);
-    expect(ROUTING.data.escalation_triggers.length).toBeGreaterThan(0);
+    expect(ROUTING.data.escalationTriggers.length).toBeGreaterThan(0);
     expect(ROUTING.data.examples.length).toBeGreaterThan(0);
   });
 

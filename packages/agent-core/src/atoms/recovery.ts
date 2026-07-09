@@ -9,7 +9,7 @@ import { AgenticModel } from "./base.js";
 export const RecoverySchema = z.object({
   name: z.string().min(1),
   prompt: z.string().min(1),
-  max_attempts: z.number().int().min(1).default(3),
+  maxAttempts: z.number().int().min(1).default(3),
 });
 
 export type RecoveryData = z.infer<typeof RecoverySchema>;
@@ -23,6 +23,6 @@ export class Recovery extends AgenticModel<typeof RecoverySchema.shape> {
   }
 
   toPrompt(): string {
-    return `${this.data.prompt}\nMax attempts before escalating: ${this.data.max_attempts}`;
+    return `${this.data.prompt}\nMax attempts before escalating: ${this.data.maxAttempts}`;
   }
 }

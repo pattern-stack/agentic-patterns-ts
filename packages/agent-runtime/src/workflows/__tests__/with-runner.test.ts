@@ -206,7 +206,7 @@ describe("CoordinatorStep.spec.runner — per-node override (#116)", () => {
       role,
       mission: new Mission({
         objective: "author a canvas template",
-        success_criteria: ["valid template"],
+        successCriteria: ["valid template"],
         constraints: [],
       }),
     });

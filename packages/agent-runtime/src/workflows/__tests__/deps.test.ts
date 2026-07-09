@@ -52,7 +52,7 @@ function coordinatorAgent(): Agent {
     role,
     mission: new Mission({
       objective: "coordinate",
-      success_criteria: ["done"],
+      successCriteria: ["done"],
       constraints: [],
     }),
   });

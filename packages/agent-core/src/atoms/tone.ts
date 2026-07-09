@@ -10,7 +10,7 @@ export const ToneSchema = z.object({
   name: z.string().min(1),
   prompt: z.string().min(1),
   examples: z.array(z.tuple([z.string(), z.string()])).default([]),
-  anti_patterns: z.array(z.string()).default([]),
+  antiPatterns: z.array(z.string()).default([]),
 });
 
 export type ToneData = z.infer<typeof ToneSchema>;
@@ -33,9 +33,9 @@ export class Tone extends AgenticModel<typeof ToneSchema.shape> {
       }
     }
 
-    if (this.data.anti_patterns.length > 0) {
+    if (this.data.antiPatterns.length > 0) {
       parts.push("\nAvoid phrases like:");
-      for (const pattern of this.data.anti_patterns) {
+      for (const pattern of this.data.antiPatterns) {
         parts.push(`  - "${pattern}"`);
       }
     }

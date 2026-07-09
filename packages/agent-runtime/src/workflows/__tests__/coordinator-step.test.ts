@@ -44,7 +44,7 @@ function coordinatorAgent(): Agent {
     role,
     mission: new Mission({
       objective: "author a canvas template",
-      success_criteria: ["valid template"],
+      successCriteria: ["valid template"],
       constraints: [],
     }),
   });

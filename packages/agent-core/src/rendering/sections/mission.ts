@@ -27,11 +27,11 @@ export class MissionSection implements PromptSection {
     parts.push(this.mission.data.objective);
 
     // Render success criteria if present
-    if (this.mission.data.success_criteria.length > 0) {
+    if (this.mission.data.successCriteria.length > 0) {
       parts.push("");
       parts.push("### Success Criteria");
       parts.push("");
-      for (const c of this.mission.data.success_criteria) {
+      for (const c of this.mission.data.successCriteria) {
         parts.push(`- ${c}`);
       }
     }

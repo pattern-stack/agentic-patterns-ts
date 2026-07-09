@@ -22,7 +22,7 @@ export { Playbook } from "./playbook.js";
 export type { PlayDefinition } from "./playbook.js";
 
 export {
-  WorkflowStepSchema,
+  WorkflowStepDefinitionSchema,
   RuleDefinitionSchema,
   TemplateDefinitionSchema,
   EscalationTriggerSchema,
@@ -32,7 +32,7 @@ export {
   HealthSignalSchema,
 } from "./definitions.js";
 export type {
-  WorkflowStep,
+  WorkflowStepDefinition,
   RuleDefinition,
   TemplateDefinition,
   EscalationTrigger,

@@ -96,7 +96,7 @@ describe("Judgment", () => {
       .withEscalation(["security vulnerability found"]);
     expect(j.data.heuristics).toEqual(["check security"]);
     expect(j.data.constraints).toEqual(["never approve without tests"]);
-    expect(j.data.escalation_triggers).toEqual(["security vulnerability found"]);
+    expect(j.data.escalationTriggers).toEqual(["security vulnerability found"]);
   });
 
   it("toPrompt() matches Python output", () => {
@@ -104,7 +104,7 @@ describe("Judgment", () => {
       domain: "code review",
       heuristics: ["check security", "check readability"],
       constraints: ["never approve without tests"],
-      escalation_triggers: ["security vulnerability"],
+      escalationTriggers: ["security vulnerability"],
       examples: [
         {
           scenario: "PR has SQL injection",
@@ -145,7 +145,7 @@ describe("Mission", () => {
   it("renders full mission with criteria, constraints, rationale", () => {
     const m = new Mission({
       objective: "Ship the feature",
-      success_criteria: ["all tests pass", "no regressions"],
+      successCriteria: ["all tests pass", "no regressions"],
       constraints: ["do not modify public API"],
       rationale: "Customer deadline",
     });
@@ -158,28 +158,28 @@ describe("Mission", () => {
 
   it("withCriteria() and withConstraints() fluent methods", () => {
     const m = new Mission({ objective: "test" }).withCriteria(["c1"]).withConstraints(["x1"]);
-    expect(m.data.success_criteria).toEqual(["c1"]);
+    expect(m.data.successCriteria).toEqual(["c1"]);
     expect(m.data.constraints).toEqual(["x1"]);
   });
 
-  it("renders output schema when strict_output is false", () => {
+  it("renders output schema when strictOutput is false", () => {
     const schema = { title: "TestOutput", properties: { name: { type: "string" } } };
     const m = new Mission({
       objective: "produce output",
-      output_schema: schema,
-      strict_output: false,
+      outputSchema: schema,
+      strictOutput: false,
     });
     const prompt = m.toPrompt();
     expect(prompt).toContain("**Required Output Format:**");
     expect(prompt).toContain("TestOutput");
   });
 
-  it("does not render schema when strict_output is true", () => {
+  it("does not render schema when strictOutput is true", () => {
     const schema = { title: "TestOutput", properties: { name: { type: "string" } } };
     const m = new Mission({
       objective: "produce output",
-      output_schema: schema,
-      strict_output: true,
+      outputSchema: schema,
+      strictOutput: true,
     });
     expect(m.toPrompt()).not.toContain("Required Output Format");
   });
@@ -220,10 +220,10 @@ describe("Background", () => {
 
   it("renders sections", () => {
     const b = new Background({
-      team_context: { lead: "Alice" },
-      project_context: { name: "MyProject" },
+      teamContext: { lead: "Alice" },
+      projectContext: { name: "MyProject" },
       conventions: { style: "functional" },
-      current_state: { sprint: "14" },
+      currentState: { sprint: "14" },
     });
     const prompt = b.toPrompt();
     expect(prompt).toContain("## Team Context");
@@ -235,7 +235,7 @@ describe("Background", () => {
 
   it("handles nested dicts", () => {
     const b = new Background({
-      team_context: { members: { alice: "lead", bob: "dev" } },
+      teamContext: { members: { alice: "lead", bob: "dev" } },
     });
     const prompt = b.toPrompt();
     expect(prompt).toContain("- **members**:");
@@ -244,7 +244,7 @@ describe("Background", () => {
 
   it("handles arrays in dicts", () => {
     const b = new Background({
-      team_context: { skills: ["ts", "python"] },
+      teamContext: { skills: ["ts", "python"] },
     });
     expect(b.toPrompt()).toContain("- **skills**: ts, python");
   });
@@ -262,10 +262,10 @@ describe("Awareness", () => {
         {
           name: "codebase",
           description: "Source code",
-          access_method: "search",
+          accessMethod: "search",
         },
       ],
-      exploration_capabilities: ["grep", "find"],
+      explorationCapabilities: ["grep", "find"],
     });
     const prompt = a.toPrompt();
     expect(prompt).toContain("## Available Information Sources");
@@ -276,8 +276,8 @@ describe("Awareness", () => {
   it("domainNames returns names", () => {
     const a = new Awareness({
       domains: [
-        { name: "code", description: "d", access_method: "m" },
-        { name: "docs", description: "d", access_method: "m" },
+        { name: "code", description: "d", accessMethod: "m" },
+        { name: "docs", description: "d", accessMethod: "m" },
       ],
     });
     expect(a.domainNames).toEqual(["code", "docs"]);
@@ -285,7 +285,7 @@ describe("Awareness", () => {
 
   it("canAccess() and getDomain()", () => {
     const a = new Awareness({
-      domains: [{ name: "code", description: "source", access_method: "search" }],
+      domains: [{ name: "code", description: "source", accessMethod: "search" }],
     });
     expect(a.canAccess("code")).toBe(true);
     expect(a.canAccess("unknown")).toBe(false);
@@ -298,12 +298,12 @@ describe("Awareness", () => {
       .withDomain({
         name: "code",
         description: "d",
-        access_method: "m",
+        accessMethod: "m",
       })
-      .withDomains([{ name: "docs", description: "d2", access_method: "m2" }])
+      .withDomains([{ name: "docs", description: "d2", accessMethod: "m2" }])
       .withCapabilities(["search"]);
     expect(a.data.domains).toHaveLength(2);
-    expect(a.data.exploration_capabilities).toEqual(["search"]);
+    expect(a.data.explorationCapabilities).toEqual(["search"]);
   });
 });
 
@@ -312,7 +312,7 @@ describe("AwarenessDomain", () => {
     const d = new AwarenessDomain({
       name: "codebase",
       description: "Source code",
-      access_method: "search",
+      accessMethod: "search",
     });
     expect(d.toPrompt()).toBe("- **codebase**: Source code (via search)");
   });
@@ -349,15 +349,15 @@ describe("State", () => {
     const s = new State({});
     expect(s.data.iteration).toBe(0);
     expect(s.data.phase).toBe(Phase.PLANNING);
-    expect(s.data.accumulated_context).toEqual({});
-    expect(s.data.last_action).toBeNull();
+    expect(s.data.accumulatedContext).toEqual({});
+    expect(s.data.lastAction).toBeNull();
   });
 
   it("toPrompt() matches Python", () => {
     const s = new State({
       iteration: 3,
       phase: Phase.EXECUTING,
-      last_action: "ran tests",
+      lastAction: "ran tests",
     });
     expect(s.toPrompt()).toMatchInlineSnapshot(`
       "## Current State
@@ -367,7 +367,7 @@ describe("State", () => {
     `);
   });
 
-  it("toPrompt() without last_action", () => {
+  it("toPrompt() without lastAction", () => {
     const s = new State({ iteration: 0, phase: Phase.PLANNING });
     expect(s.toPrompt()).toBe("## Current State\nIteration: 0\nPhase: planning");
   });
@@ -388,7 +388,7 @@ describe("State", () => {
   it("withAction() returns new instance", () => {
     const s = new State({});
     const s2 = s.withAction("deployed");
-    expect(s2.data.last_action).toBe("deployed");
+    expect(s2.data.lastAction).toBe("deployed");
   });
 });
 
@@ -401,7 +401,7 @@ describe("Tone", () => {
         ["Good", "Fix the bug."],
         ["Bad", "Maybe consider fixing..."],
       ],
-      anti_patterns: ["I think maybe", "Perhaps we could"],
+      antiPatterns: ["I think maybe", "Perhaps we could"],
     });
     const prompt = t.toPrompt();
     expect(prompt).toContain("Be concise and clear.");
@@ -440,21 +440,21 @@ describe("Methodology", () => {
 });
 
 describe("Recovery", () => {
-  it("renders with default max_attempts", () => {
+  it("renders with default maxAttempts", () => {
     const r = new Recovery({ name: "retry", prompt: "Try again." });
     expect(r.toPrompt()).toBe("Try again.\nMax attempts before escalating: 3");
   });
 
-  it("renders with custom max_attempts", () => {
+  it("renders with custom maxAttempts", () => {
     const r = new Recovery({
       name: "retry",
       prompt: "Try again.",
-      max_attempts: 5,
+      maxAttempts: 5,
     });
     expect(r.toPrompt()).toBe("Try again.\nMax attempts before escalating: 5");
   });
 
-  it("rejects max_attempts < 1", () => {
-    expect(() => new Recovery({ name: "retry", prompt: "Try.", max_attempts: 0 })).toThrow();
+  it("rejects maxAttempts < 1", () => {
+    expect(() => new Recovery({ name: "retry", prompt: "Try.", maxAttempts: 0 })).toThrow();
   });
 });

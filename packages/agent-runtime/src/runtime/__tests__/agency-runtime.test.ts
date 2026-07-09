@@ -52,8 +52,8 @@ describe("AgencyRuntime", () => {
       name: "test-agency",
       description: "Test agency for unit tests",
       agents: [
-        { role: "coordinator", is_coordinator: true, model: "test-model" },
-        { role: "worker", is_coordinator: false, model: "test-model" },
+        { role: "coordinator", isCoordinator: true, model: "test-model" },
+        { role: "worker", isCoordinator: false, model: "test-model" },
       ],
     });
   }

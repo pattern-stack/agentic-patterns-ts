@@ -77,7 +77,7 @@ function tutorAgent(): Agent {
     role,
     mission: new Mission({
       objective: "answer the arithmetic question by delegating",
-      success_criteria: ["the answer comes from the calculator specialist"],
+      successCriteria: ["the answer comes from the calculator specialist"],
       constraints: ["never compute it yourself"],
     }),
   });

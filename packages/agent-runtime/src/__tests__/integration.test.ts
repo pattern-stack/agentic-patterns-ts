@@ -90,7 +90,7 @@ describe("integration: single-agent end-to-end", () => {
     });
 
     const background = new Background({
-      team_context: { company: "Acme Research Corp" },
+      teamContext: { company: "Acme Research Corp" },
     });
 
     const awareness = new Awareness({
@@ -98,7 +98,7 @@ describe("integration: single-agent end-to-end", () => {
         {
           name: "statistics",
           description: "Statistical analysis domain",
-          access_method: "direct",
+          accessMethod: "direct",
         },
       ],
     });
@@ -229,8 +229,8 @@ describe("integration: multi-agent end-to-end", () => {
       name: "sales-team",
       description: "Sales coordination team",
       agents: [
-        { role: "coordinator", is_coordinator: true, model: "test-model" },
-        { role: "researcher", is_coordinator: false, model: "test-model" },
+        { role: "coordinator", isCoordinator: true, model: "test-model" },
+        { role: "researcher", isCoordinator: false, model: "test-model" },
       ],
     });
 

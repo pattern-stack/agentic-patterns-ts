@@ -40,7 +40,7 @@ describe("AgentConfig", () => {
     expect(cfg.data.model).toBeNull();
     // Neither an agent model nor a role default → effective model is undefined.
     expect(cfg.model).toBeUndefined();
-    expect(cfg.data.background.team_context).toEqual({});
+    expect(cfg.data.background.teamContext).toEqual({});
     expect(cfg.data.awareness.domains).toEqual([]);
   });
 
