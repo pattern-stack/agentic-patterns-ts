@@ -73,6 +73,29 @@ describe("Toolbox", () => {
       expect(schemas[0]!.returns).toBeUndefined();
       expect(schemas[1]!.returns).toHaveProperty("type", "object");
     });
+
+    it("carries a tool's terminal flag through, and omits it otherwise", () => {
+      class FinishToolbox extends Toolbox {
+        readonly name = "Finish";
+        readonly description = "Has a terminal tool";
+        readonly tools: Record<string, ToolDefinition> = {
+          search: {
+            description: "Ordinary tool",
+            parameters: z.object({ q: z.string() }),
+            execute: async (args) => args,
+          },
+          finish: {
+            description: "Ends the loop",
+            parameters: z.object({ summary: z.string() }),
+            terminal: true,
+            execute: async (args) => (args as { summary: string }).summary,
+          },
+        };
+      }
+      const schemas = new FinishToolbox().getToolSchemas();
+      expect(schemas.find((s) => s.name === "search")!.terminal).toBeUndefined();
+      expect(schemas.find((s) => s.name === "finish")!.terminal).toBe(true);
+    });
   });
 
   describe("getToolNames", () => {

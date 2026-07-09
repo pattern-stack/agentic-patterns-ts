@@ -832,4 +832,146 @@ describe("AgentRunner", () => {
       expect((complete as { finishReason?: string }).finishReason).toBe("stop");
     });
   });
+
+  // Terminal tools (ToolDefinition.terminal): a successful call ends the raw
+  // tool loop — the tool's result IS the run's final response. The explicit
+  // exit for a bare tool-loop agent, vs the implicit "reply with no tool call".
+  describe("terminal-tool exit", () => {
+    const finishSchema = z.object({ summary: z.string() });
+    const finishTool = ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true);
+
+    it("ends the loop on a successful terminal call — the tool result is the response", async () => {
+      // The model tool-calls on EVERY iteration: without the terminal exit this
+      // run would burn maxIterations and finish as "max_iterations".
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "finish", input: { summary: "covered 3 facets" } },
+            20,
+            10,
+          ),
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async (_name, args) => args.summary);
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "Gather", {
+        toolExecutor: executor,
+        maxIterations: 5,
+      });
+
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.response).toBe("covered 3 facets");
+      expect(result.iterations).toBe(1);
+      expect(result.toolCallsCount).toBe(1);
+    });
+
+    it("serializes a non-string terminal result as JSON", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          ),
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => ({ facets: 3, gaps: 0 }));
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "Gather", { toolExecutor: executor });
+
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.response).toBe(JSON.stringify({ facets: 3, gaps: 0 }));
+    });
+
+    it("does NOT terminate on an errored terminal call — the model sees the error and corrects", async () => {
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          if (llmCalls === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-1", toolName: "finish", input: { summary: "too early" } },
+              20,
+              10,
+            );
+          }
+          return textResult("recovered with a plain reply", 30, 15);
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => {
+        throw new Error("not done yet — facet 2 uncovered");
+      });
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "Gather", {
+        toolExecutor: executor,
+        maxIterations: 5,
+      });
+
+      expect(result.finishReason).toBe("stop");
+      expect(result.response).toBe("recovered with a plain reply");
+      expect(result.iterations).toBe(2);
+    });
+
+    it("executes the whole batch before exiting when ordinary + terminal calls mix", async () => {
+      const executed: string[] = [];
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallsResult(
+            [
+              { toolCallId: "tc-1", toolName: "search", input: { q: "risks" } },
+              {
+                toolCallId: "tc-2",
+                toolName: "finish",
+                input: { summary: "one search, then done" },
+              },
+            ],
+            20,
+            10,
+          ),
+      });
+      const searchTool = ToolSchema.fromZod("search", "Search", z.object({ q: z.string() }));
+      const agent = makeAgent({ getTools: () => [searchTool, finishTool] });
+      const executor = makeToolExecutor(async (name, args) => {
+        executed.push(name);
+        return name === "finish" ? (args.summary as string) : { rows: 2 };
+      });
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "Gather", { toolExecutor: executor });
+
+      expect(executed.sort()).toEqual(["finish", "search"]);
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.response).toBe("one search, then done");
+      expect(result.toolCallsCount).toBe(2);
+    });
+
+    it("emits iteration.end (hasMore=false) and message.complete (terminal_tool)", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          ),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async (_name, args) => args.summary);
+
+      const runner = new AgentRunner(model, bus);
+      await runner.run(agent, "Gather", { toolExecutor: executor });
+
+      const iterEnd = events.find((e) => e.type === "agent.iteration.end");
+      expect((iterEnd as { hasMore?: boolean }).hasMore).toBe(false);
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool");
+      expect((complete as { content?: string }).content).toBe("done");
+    });
+  });
 });

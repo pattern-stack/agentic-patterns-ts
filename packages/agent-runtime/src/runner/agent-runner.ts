@@ -299,6 +299,10 @@ export class AgentRunner implements RunnerProtocol {
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
+    // Terminal tools (ToolDefinition.terminal): a successful call ends the loop —
+    // the explicit exit for a raw tool-loop agent (vs the implicit "reply with
+    // no tool call"). Resolved once; checked after each iteration's dispatch.
+    const terminalTools = new Set(agentTools.filter((t) => t.terminal === true).map((t) => t.name));
 
     // #117: hoisted above the start event (was after it) so message.start can
     // stamp systemPrompt — renderInitialPrompt() is a pure render, hoisting is safe.
@@ -584,9 +588,61 @@ export class AgentRunner implements RunnerProtocol {
             toolCallId: tc.toolCallId,
             toolName: tc.toolName,
             result: toolResult,
+            error: errorMsg,
           };
         }),
       );
+
+      // TERMINAL-TOOL EXIT: a successful terminal call ends the loop — the
+      // tool's result IS the run's final response (the explicit "I'm done"
+      // verb; no structured emission needed). Every call in this iteration's
+      // batch has already executed (side effects landed). An ERRORED terminal
+      // call does not terminate: the model must see the error and correct.
+      // First successful terminal call wins if a batch carries several.
+      const terminalHit = toolResults.find(
+        (tr) => terminalTools.has(tr.toolName) && tr.error === undefined,
+      );
+      if (terminalHit) {
+        const content =
+          typeof terminalHit.result === "string"
+            ? terminalHit.result
+            : JSON.stringify(terminalHit.result ?? "");
+
+        await this.emit(
+          createEvent("agent.iteration.end", {
+            traceId: effectiveTraceId,
+            runId,
+            spanId: iterSpanId,
+            parentSpanId: rootSpanId,
+            iteration,
+            toolCallsCount: resultToolCalls.length,
+            hasMore: false,
+          }),
+        );
+
+        await this.emit(
+          createEvent("agent.message.complete", {
+            traceId: effectiveTraceId,
+            runId,
+            spanId: rootSpanId,
+            parentSpanId: rootSpanId,
+            content,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            model: modelName,
+            finishReason: "terminal_tool",
+          }),
+        );
+
+        return {
+          response: content,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          toolCallsCount: totalToolCalls,
+          iterations: iteration + 1,
+          finishReason: "terminal_tool",
+        };
+      }
 
       // Append messages for next iteration.
       //
@@ -976,6 +1032,8 @@ export class AgentRunner implements RunnerProtocol {
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
+    // Terminal tools — parity with run(): a successful call ends the loop.
+    const terminalTools = new Set(agentTools.filter((t) => t.terminal === true).map((t) => t.name));
 
     const system = agent.renderInitialPrompt();
     const messages: ModelMessage[] = [];
@@ -1285,6 +1343,8 @@ export class AgentRunner implements RunnerProtocol {
       }
 
       // Process tool calls
+      let terminalFired = false;
+      let terminalResult: unknown;
       for (const tc of pendingToolCalls) {
         const intent = createEvent("agent.tool.intent", {
           traceId: effectiveTraceId,
@@ -1369,6 +1429,13 @@ export class AgentRunner implements RunnerProtocol {
         totalToolCalls++;
         tc.result = toolResult;
 
+        // Terminal-tool exit (parity with run()): first successful terminal
+        // call wins; an errored one does not terminate.
+        if (!terminalFired && errorMsg === undefined && terminalTools.has(tc.toolName)) {
+          terminalFired = true;
+          terminalResult = toolResult;
+        }
+
         const tcEnd = createEvent("agent.tool.end", {
           traceId: effectiveTraceId,
           runId,
@@ -1384,6 +1451,51 @@ export class AgentRunner implements RunnerProtocol {
         });
         await this.emit(tcEnd);
         yield tcEnd;
+      }
+
+      // TERMINAL-TOOL EXIT (parity with run()): the tool's result IS the final
+      // response; every call in this iteration's batch has already executed.
+      if (terminalFired) {
+        const content =
+          typeof terminalResult === "string"
+            ? terminalResult
+            : JSON.stringify(terminalResult ?? "");
+
+        const iterEnd = createEvent("agent.iteration.end", {
+          traceId: effectiveTraceId,
+          runId,
+          spanId: iterSpanId,
+          parentSpanId: rootSpanId,
+          iteration,
+          toolCallsCount: pendingToolCalls.length,
+          hasMore: false,
+        });
+        await this.emit(iterEnd);
+        yield iterEnd;
+
+        const msgComplete = createEvent("agent.message.complete", {
+          traceId: effectiveTraceId,
+          runId,
+          spanId: rootSpanId,
+          parentSpanId: rootSpanId,
+          content,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          model: modelName,
+          finishReason: "terminal_tool",
+        });
+        await this.emit(msgComplete);
+        yield msgComplete;
+
+        const convEnd = createEvent("agent.conversation.end", {
+          traceId: effectiveTraceId,
+          runId,
+          conversationId,
+          reason: "completed" as const,
+        });
+        await this.emit(convEnd);
+        yield convEnd;
+        return;
       }
 
       // Build messages for next iteration.
