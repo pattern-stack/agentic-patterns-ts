@@ -63,6 +63,17 @@ export interface ToolDefinition {
    */
   returns?: ZodTypeAny;
   /**
+   * Marks a TERMINAL tool — the harness-addressed "I'm done" verb. A successful
+   * call ends the enclosing raw tool loop on hosts that honor the flag (the
+   * runtime's AgentRunner), and the tool's result becomes the run's final
+   * response. This gives a bare (unstructured) tool-loop agent an EXPLICIT exit
+   * it can decide to take, instead of the implicit "reply with no tool call"
+   * convention. An ERRORED call does not terminate — the model sees the error
+   * and corrects. Omit (default) for ordinary tools; core carries the flag,
+   * the host enforces the semantics.
+   */
+  terminal?: boolean;
+  /**
    * Executes the tool. `ctx` is an optional execution context (event sink +
    * correlation ids) supplied by the host; existing implementations that
    * ignore it remain valid (assignment-compatible trailing optional param).
@@ -84,7 +95,7 @@ export abstract class Toolbox {
   /** Get tool definitions as ToolSchema objects. */
   getToolSchemas(): ToolSchema[] {
     return Object.entries(this.tools).map(([name, def]) =>
-      ToolSchema.fromZod(name, def.description, def.parameters, def.returns),
+      ToolSchema.fromZod(name, def.description, def.parameters, def.returns, def.terminal),
     );
   }
 

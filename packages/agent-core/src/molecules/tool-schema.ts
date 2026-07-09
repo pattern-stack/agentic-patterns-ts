@@ -44,6 +44,11 @@ export class ToolSchema {
   readonly parameters: Record<string, unknown>;
   /** Optional output schema (JSON schema) — the shape `execute` resolves to. */
   readonly returns?: Record<string, unknown>;
+  /**
+   * Marks a terminal tool (see ToolDefinition.terminal): a successful call ends
+   * the enclosing raw tool loop on hosts that honor the flag.
+   */
+  readonly terminal?: boolean;
 
   /** Optional: original Zod schema, kept for toVercelAI(). */
   private readonly _zodSchema?: ZodTypeAny;
@@ -54,24 +59,28 @@ export class ToolSchema {
     parameters: Record<string, unknown>,
     zodSchema?: ZodTypeAny,
     returns?: Record<string, unknown>,
+    terminal?: boolean,
   ) {
     this.name = name;
     this.description = description;
     this.parameters = parameters;
     this._zodSchema = zodSchema;
     this.returns = returns;
+    this.terminal = terminal;
     Object.freeze(this);
   }
 
   /**
    * Create ToolSchema from a Zod parameters schema, and optionally a Zod
-   * returns schema (the tool's declared output shape — see ToolDefinition.returns).
+   * returns schema (the tool's declared output shape — see ToolDefinition.returns)
+   * and the terminal flag (see ToolDefinition.terminal).
    */
   static fromZod(
     name: string,
     description: string,
     schema: ZodTypeAny,
     returnsSchema?: ZodTypeAny,
+    terminal?: boolean,
   ): ToolSchema {
     const jsonSchema = zodToJsonSchema(schema, { target: "openApi3" }) as Record<string, unknown>;
     // Remove $schema and additionalProperties top-level noise
@@ -81,7 +90,7 @@ export class ToolSchema {
       returns = zodToJsonSchema(returnsSchema, { target: "openApi3" }) as Record<string, unknown>;
       returns.$schema = undefined;
     }
-    return new ToolSchema(name, description, jsonSchema, schema, returns);
+    return new ToolSchema(name, description, jsonSchema, schema, returns, terminal);
   }
 
   /** Create ToolSchema from OpenAI function calling format. */
@@ -101,6 +110,7 @@ export class ToolSchema {
     description: string;
     parameters: Record<string, unknown>;
     returns?: Record<string, unknown>;
+    terminal?: boolean;
   } {
     return {
       name: this.name,
@@ -108,6 +118,7 @@ export class ToolSchema {
       parameters: this.parameters,
       // only present when declared — keeps the dict byte-identical for params-only tools
       ...(this.returns !== undefined ? { returns: this.returns } : {}),
+      ...(this.terminal !== undefined ? { terminal: this.terminal } : {}),
     };
   }
 

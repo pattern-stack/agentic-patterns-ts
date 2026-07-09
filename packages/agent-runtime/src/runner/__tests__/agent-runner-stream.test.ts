@@ -448,4 +448,44 @@ describe("AgentRunner.stream()", () => {
     expect(capturedCtx).toHaveLength(1);
     expect(capturedCtx[0]?.host).toBe(sentinelHost);
   });
+
+  // Terminal-tool exit — parity with run(): a successful terminal call ends
+  // the stream; the tool's result is the final message content.
+  it("ends the stream after a successful terminal call with finishReason terminal_tool", async () => {
+    // The model tool-calls on EVERY iteration: without the terminal exit this
+    // stream would burn maxIterations.
+    const model = new MockLanguageModelV2({
+      doStream: async () =>
+        streamFrom([
+          toolCallPart("tc-1", "finish", { summary: "all facets covered" }),
+          finishPart("tool-calls", 10, 5),
+        ])(),
+    });
+
+    const finishSchema = z.object({ summary: z.string() });
+    const tools = [ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true)];
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent({ getTools: () => tools });
+
+    const events = await collectStream(
+      runner.stream(agent, "Gather", {
+        toolExecutor: { execute: async (_name, args) => args.summary },
+        maxIterations: 3,
+      }),
+    );
+
+    const iterStarts = events.filter((e) => e.type === "agent.iteration.start");
+    expect(iterStarts.length).toBe(1);
+
+    const iterEnd = events.find((e) => e.type === "agent.iteration.end");
+    expect((iterEnd as { hasMore?: boolean }).hasMore).toBe(false);
+
+    const complete = events.find((e) => e.type === "agent.message.complete");
+    expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool");
+    expect((complete as { content?: string }).content).toBe("all facets covered");
+
+    const convEnd = events.find((e) => e.type === "agent.conversation.end");
+    expect((convEnd as { reason?: string }).reason).toBe("completed");
+  });
 });

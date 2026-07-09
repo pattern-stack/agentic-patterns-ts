@@ -28,6 +28,15 @@ describe("ToolSchema", () => {
       const schema = ToolSchema.fromZod("search", "Search", z.object({ q: z.string() }));
       expect(schema.returns).toBeUndefined();
     });
+
+    it("carries the terminal flag when set, undefined otherwise", () => {
+      const params = z.object({ summary: z.string() });
+      const terminal = ToolSchema.fromZod("finish", "Done", params, undefined, true);
+      expect(terminal.terminal).toBe(true);
+
+      const ordinary = ToolSchema.fromZod("search", "Search", params);
+      expect(ordinary.terminal).toBeUndefined();
+    });
   });
 
   describe("fromOpenAI", () => {
@@ -79,6 +88,14 @@ describe("ToolSchema", () => {
 
       const noReturns = new ToolSchema("t", "T", { type: "object" });
       expect(noReturns.toDict()).not.toHaveProperty("returns");
+    });
+
+    it("includes terminal only when declared", () => {
+      const terminal = new ToolSchema("t", "T", { type: "object" }, undefined, undefined, true);
+      expect(terminal.toDict()).toHaveProperty("terminal", true);
+
+      const ordinary = new ToolSchema("t", "T", { type: "object" });
+      expect(ordinary.toDict()).not.toHaveProperty("terminal");
     });
   });
 
