@@ -104,16 +104,6 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
     );
   }
 
-  /**
-   * Legacy alias for the section-composed initial prompt.
-   *
-   * @deprecated Use {@link renderInitialPrompt}. Retained through one release
-   * so the runner contract migrates in its own slice; scheduled for removal.
-   */
-  getSystemPrompt(): string {
-    return this.renderInitialPrompt();
-  }
-
   toPrompt(): string {
     return this.renderInitialPrompt();
   }

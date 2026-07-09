@@ -37,7 +37,6 @@ function calculator(): AgentLike {
     role: { name: "calculator" },
     getModel: () => process.env.SMOKE_MODEL ?? "gemini/gemini-2.5-flash",
     getTools: () => [],
-    getSystemPrompt: () => system,
     renderInitialPrompt: () => system,
   };
 }
@@ -49,7 +48,6 @@ function speller(): AgentLike {
     role: { name: "speller" },
     getModel: () => process.env.SMOKE_MODEL ?? "gemini/gemini-2.5-flash",
     getTools: () => [],
-    getSystemPrompt: () => system,
     renderInitialPrompt: () => system,
   };
 }

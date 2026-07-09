@@ -13,7 +13,6 @@ function makeAgent(name = "TestAgent") {
   return {
     getModel: () => "test-model",
     getTools: () => [],
-    getSystemPrompt: () => "system prompt",
     renderInitialPrompt: () => "initial prompt",
     role: { name },
   };

@@ -108,7 +108,6 @@ export interface AgentLikeForBridge {
   };
   getModel(): string | undefined;
   getTools(): ToolSchema[];
-  getSystemPrompt(): string;
   renderInitialPrompt(): string;
 }
 

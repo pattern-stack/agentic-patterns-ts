@@ -211,15 +211,6 @@ describe("Role", () => {
       expect(prompt).not.toContain("Recovery");
     });
 
-    it("renderSystemPrompt is a deprecated alias for toPrompt", () => {
-      const role = new Role({
-        name: "Test",
-        persona: makePersona(),
-        judgments: [makeJudgment()],
-      });
-      expect(role.renderSystemPrompt()).toBe(role.toPrompt());
-    });
-
     it("snapshot: full role prompt", () => {
       const role = new Role({
         name: "Project Manager",

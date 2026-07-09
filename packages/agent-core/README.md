@@ -190,13 +190,13 @@ const agent = new AgentBuilder(role)
   .build();
 
 // Prompt rendering
-const systemPrompt = agent.getSystemPrompt();
 const initialPrompt = agent.renderInitialPrompt();
 ```
 
 The `Agent` class provides:
-- `getSystemPrompt()` -- full system prompt via PromptRenderer
-- `renderInitialPrompt()` -- system + context + mission for first message
+- `renderInitialPrompt()` -- full system prompt (identity + boundaries +
+  capabilities + context + mission + methodology) via PromptRenderer
+- `renderSections()` -- the same prompt as attributed sections (`{name, source, text}`)
 - `renderContinuationPrompt(state)` -- state + mission + methodology for follow-ups
 - `getTools()` -- all ToolSchema instances from capabilities
 - `getModel()` -- model string from agent or role default

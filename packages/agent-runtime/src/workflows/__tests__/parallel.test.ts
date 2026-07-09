@@ -15,7 +15,6 @@ function makeAgent(name = "test-agent"): AgentLike {
     role: { name },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "You are a test agent.",
     renderInitialPrompt: () => "Initial prompt",
   };
 }

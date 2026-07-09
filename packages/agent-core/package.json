@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/core",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Composable primitives for building LLM agents \u2014 atoms, protocols, molecules, rendering, organisms",
   "license": "MIT",
   "type": "module",

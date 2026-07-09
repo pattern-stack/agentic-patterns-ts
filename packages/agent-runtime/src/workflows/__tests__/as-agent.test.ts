@@ -29,7 +29,6 @@ function makeAgent(name = "test-agent"): AgentLike {
     role: { name },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "You are a test agent.",
     renderInitialPrompt: () => "Initial prompt",
   };
 }
@@ -313,7 +312,7 @@ describe("asAgent", () => {
     const step = new FunctionStep<string, string>({ name: "noop", fn: (s) => s });
     const promoted = asAgent(step, { role });
 
-    const prompt = promoted.getSystemPrompt();
+    const prompt = promoted.renderInitialPrompt();
     expect(prompt).toContain("# Pipeline Reviewer");
     expect(prompt).toContain("## Identity");
     expect(prompt).toContain("Be blunt and specific.");
@@ -329,7 +328,7 @@ describe("asAgent", () => {
   it("falls back to a one-line descriptor when given a minimal role (no full Role)", () => {
     const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });
     const promoted = asAgent(pipeline, { role: { name: "Minimal" } });
-    expect(promoted.getSystemPrompt()).toContain("Promoted pipeline");
+    expect(promoted.renderInitialPrompt()).toContain("Promoted pipeline");
   });
 
   it("threads a minimal role's description into the descriptor", () => {
@@ -337,8 +336,8 @@ describe("asAgent", () => {
     const promoted = asAgent(pipeline, {
       role: { name: "Minimal", description: "does the thing" },
     });
-    expect(promoted.getSystemPrompt()).toContain("does the thing");
-    expect(promoted.renderInitialPrompt()).toBe(promoted.getSystemPrompt());
+    expect(promoted.renderInitialPrompt()).toContain("does the thing");
+    expect(promoted.renderInitialPrompt()).toBe(promoted.renderInitialPrompt());
   });
 
   it("defaults getModel() to a sensible tier string, overridable via opts.model", () => {
@@ -382,7 +381,6 @@ describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
       role: { name: "inner-agent" },
       getModel: () => "mock-model",
       getTools: () => [],
-      getSystemPrompt: () => "you are the inner agent",
       renderInitialPrompt: () => "you are the inner agent",
     };
 
@@ -428,7 +426,6 @@ describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
       role: { name: "inner-agent" },
       getModel: () => "mock-model",
       getTools: () => [],
-      getSystemPrompt: () => "you are the inner agent",
       renderInitialPrompt: () => "you are the inner agent",
     };
 

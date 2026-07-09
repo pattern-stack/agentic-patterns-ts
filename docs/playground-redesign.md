@@ -214,10 +214,11 @@ today (`/agents/:id/capabilities` already proves the pattern):
   delta (background, awareness, mission, model), provenance per slot, rendered prompt
   as a **section list** (`{name, source, text}[]`), and coherence-check results.
   Two caveats the payload must carry:
-  - **Render path.** Two prompt paths exist (`Agent.getSystemPrompt()` — role prompt +
-    background + awareness + mission — vs the `PromptRenderer` sections path); which one
-    the executing runner uses determines what "the delivered prompt" IS. The endpoint
-    reports which path applies so the lens shows what actually ships.
+  - **Render path.** (Historical: two prompt paths once existed — an inline
+    `Agent.getSystemPrompt()` vs the `PromptRenderer` sections path. As of the
+    primitive-knowledge rework there is a single section-composed path,
+    `renderInitialPrompt()`, so the delivered prompt and the section list always
+    agree.)
   - **Per-section rendering needs a small core helper.** `Agent` today exposes only
     joined strings (its renderer is private). Rather than fork the section wiring in the
     server, slice 1 adds e.g. `Agent.renderSections(): {name, source, text}[]` to core.

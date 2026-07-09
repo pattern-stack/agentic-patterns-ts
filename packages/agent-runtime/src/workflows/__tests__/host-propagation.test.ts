@@ -28,7 +28,6 @@ function makeAgent(name: string, model = "mock"): AgentLike {
     role: { name },
     getModel: () => model,
     getTools: () => [],
-    getSystemPrompt: () => `sys:${name}`,
     renderInitialPrompt: () => `init:${name}`,
   };
 }

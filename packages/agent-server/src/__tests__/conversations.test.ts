@@ -19,7 +19,6 @@ import { type ConversationEntry, conversationRoutes } from "../routes/conversati
 const mockAgent = {
   getModel: () => "test-model",
   getTools: () => [],
-  getSystemPrompt: () => "You are a test agent.",
   renderInitialPrompt: () => "Test prompt",
   role: { name: "TestAgent" },
 };

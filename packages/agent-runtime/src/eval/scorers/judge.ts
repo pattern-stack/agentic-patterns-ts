@@ -309,12 +309,8 @@ export function judgeScorer(opts: JudgeScorerOptions): Scorer<unknown, unknown, 
     role: { name: "eval-judge" },
     getModel: () => opts.model ?? "sonnet",
     getTools: () => [],
-    // AgentRunner (the main runner) reads renderInitialPrompt() for the system
-    // message; ClaudeCodeRunner reads getSystemPrompt(). Return the judge system
-    // prompt from BOTH so the rubric+schema reaches the model regardless of runner.
-    // Previously renderInitialPrompt was "" → the schema was silently dropped on
-    // the AgentRunner path and the model invented its own verdict shape.
-    getSystemPrompt: () => judgeSystem,
+    // Every runner reads renderInitialPrompt() for the system message, so the
+    // rubric+schema reaches the model regardless of runner.
     renderInitialPrompt: () => judgeSystem,
   };
   const agent = opts.agent ?? defaultAgent;

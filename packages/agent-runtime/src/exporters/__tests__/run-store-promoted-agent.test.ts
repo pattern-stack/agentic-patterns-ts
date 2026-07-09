@@ -53,7 +53,6 @@ function makePlainAgent(name: string): AgentLike {
     role: { name },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "system",
     renderInitialPrompt: () => "system",
   };
 }

@@ -127,7 +127,7 @@ describe.skipIf(shouldSkip)("ClaudeCodeRunner integration", () => {
       expect(agent.role.name).toBe("math-assistant");
       expect(agent.getModel()).toBe("sonnet");
       expect(agent.getTools().map((t) => t.name)).toEqual(["add", "multiply"]);
-      expect(agent.getSystemPrompt().length).toBeGreaterThan(100);
+      expect(agent.renderInitialPrompt().length).toBeGreaterThan(100);
 
       // Set up event bus to capture events
       const events: AgentEvent[] = [];
@@ -210,7 +210,7 @@ describe("ClaudeCodeRunner unit (no SDK)", () => {
 
     // System prompt includes all primitives (judgment domain renders
     // Title-Cased under ## Methodology in the section-composed prompt)
-    const prompt = agent.getSystemPrompt();
+    const prompt = agent.renderInitialPrompt();
     expect(prompt).toContain("math assistant");
     expect(prompt).toContain("### Mathematics");
     expect(prompt).toContain("Use the provided tools for all calculations");

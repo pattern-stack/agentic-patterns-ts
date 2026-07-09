@@ -67,7 +67,6 @@ describe("delegateTo (just pass subagents)", () => {
       role: { name },
       getModel: () => "mock",
       getTools: () => [],
-      getSystemPrompt: () => `you are ${name}`,
       renderInitialPrompt: () => `you are ${name}`,
     };
   }
@@ -105,7 +104,6 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
       role: { name },
       getModel: () => model,
       getTools: () => tools,
-      getSystemPrompt: () => `you are ${name}`,
       renderInitialPrompt: () => `you are ${name}`,
     };
   }

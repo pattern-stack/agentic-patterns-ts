@@ -13,7 +13,6 @@ function makeAgent(name: string): AgentLike {
     role: { name },
     getModel: () => "test-model",
     getTools: () => [],
-    getSystemPrompt: () => "system",
     renderInitialPrompt: () => "system",
   };
 }

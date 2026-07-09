@@ -87,7 +87,6 @@ function makeAgent(name: string, model: string, tools: ToolSchema[] = []): Agent
     role: { name },
     getModel: () => model,
     getTools: () => tools,
-    getSystemPrompt: () => `sys:${name}`,
     renderInitialPrompt: () => `init:${name}`,
   };
 }

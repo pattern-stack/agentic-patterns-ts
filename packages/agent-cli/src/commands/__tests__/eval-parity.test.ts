@@ -42,7 +42,6 @@ function makeParityTarget(id: string): AgentLike {
     role: { name: id },
     getModel: () => PARITY_MODEL,
     getTools: () => [],
-    getSystemPrompt: () => "parity target",
     renderInitialPrompt: () => "parity target",
   };
 }

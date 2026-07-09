@@ -35,7 +35,9 @@ import { createScratchpad } from "./slot.js";
 export type RoleInput = Role | { readonly name: string; readonly description?: string };
 
 function isFullRole(role: RoleInput): role is Role {
-  return typeof (role as Role).renderSystemPrompt === "function";
+  // A full core Role has a toPrompt() render; a minimal {name, description}
+  // role input does not. instanceof is unreliable across the dist boundary.
+  return typeof (role as Role).toPrompt === "function";
 }
 
 /** One-line descriptor for a minimal (non-`Role`) `RoleInput`, folding in `description` when given. */
@@ -114,18 +116,12 @@ export function asAgent<TIn, TOut>(
   const coerceIn = (opts.coerceIn as ((message: string) => TIn) | undefined) ?? defaultCoerceIn;
   const renderOut = opts.renderOut ?? defaultRenderOut;
 
-  const systemPrompt = isFullRole(role)
-    ? role.renderSystemPrompt()
-    : minimalRoleDescriptor(node, role);
+  const systemPrompt = isFullRole(role) ? role.toPrompt() : minimalRoleDescriptor(node, role);
 
   const promoted: PromotedAgent<TIn, TOut> = {
     role: { name: roleName },
     getModel: () => model,
     getTools: () => [],
-    getSystemPrompt: () => systemPrompt,
-    // A promoted pipeline has no separate "initial prompt" render (unlike a
-    // core Agent, whose renderInitialPrompt() can differ from its system
-    // prompt) — deliberately alias getSystemPrompt() here.
     renderInitialPrompt: () => systemPrompt,
     __promotedNode: node,
     coerceIn,
@@ -152,7 +148,6 @@ export function isPromotedAgent(x: unknown): x is PromotedAgent<unknown, unknown
     typeof a.coerceIn === "function" &&
     typeof a.renderOut === "function" &&
     typeof a.getModel === "function" &&
-    typeof a.getSystemPrompt === "function" &&
     typeof a.renderInitialPrompt === "function"
   );
 }
