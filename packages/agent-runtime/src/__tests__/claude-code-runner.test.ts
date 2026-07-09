@@ -208,10 +208,12 @@ describe("ClaudeCodeRunner unit (no SDK)", () => {
     expect(agent.getTools()[0]!.name).toBe("add");
     expect(agent.getTools()[1]!.name).toBe("multiply");
 
-    // System prompt includes all primitives
+    // System prompt includes all primitives (judgment domain renders
+    // Title-Cased under ## Methodology in the section-composed prompt)
     const prompt = agent.getSystemPrompt();
     expect(prompt).toContain("math assistant");
-    expect(prompt).toContain("mathematics");
+    expect(prompt).toContain("### Mathematics");
+    expect(prompt).toContain("Use the provided tools for all calculations");
     expect(prompt).toContain("Perform Calculations");
   });
 

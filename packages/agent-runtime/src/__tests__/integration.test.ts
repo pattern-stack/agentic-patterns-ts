@@ -122,10 +122,12 @@ describe("integration: single-agent end-to-end", () => {
     expect(agent.role.data.name).toBe("research-assistant");
     expect(agent.getModel()).toBe("test-model");
 
-    // Verify prompt rendering
+    // Verify prompt rendering (judgment domain renders Title-Cased under
+    // ## Methodology in the section-composed prompt)
     const systemPrompt = agent.getSystemPrompt();
     expect(systemPrompt).toContain("research assistant");
-    expect(systemPrompt).toContain("source-quality");
+    expect(systemPrompt).toContain("Source-Quality");
+    expect(systemPrompt).toContain("Prefer peer-reviewed sources");
 
     const initialPrompt = agent.renderInitialPrompt();
     expect(initialPrompt).toContain("Analyze the provided dataset");

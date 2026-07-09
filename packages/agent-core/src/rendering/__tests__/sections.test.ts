@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import { Awareness } from "../../atoms/awareness.js";
 import { Background } from "../../atoms/background.js";
 import { Judgment } from "../../atoms/judgment.js";
+import { Methodology } from "../../atoms/methodology.js";
 import { Mission } from "../../atoms/mission.js";
 import { Persona } from "../../atoms/persona.js";
+import { Recovery } from "../../atoms/recovery.js";
 import { Responsibility } from "../../atoms/responsibility.js";
 import { Phase, State } from "../../atoms/state.js";
 import { Tone } from "../../atoms/tone.js";
@@ -130,15 +132,36 @@ describe("BoundariesSection", () => {
     expect(result).toContain("- Legal review needed");
   });
 
-  it("renders just heading with empty judgments", () => {
+  it("renders empty with empty judgments", () => {
     const section = new BoundariesSection([]);
-    expect(section.render()).toBe("## Boundaries");
+    expect(section.render()).toBe("");
   });
 
-  it("renders just heading with judgments that have no constraints or triggers", () => {
+  it("renders empty with judgments that have no constraints or triggers", () => {
     const j = new Judgment({ domain: "testing", heuristics: ["Test first"] });
     const section = new BoundariesSection([j]);
-    expect(section.render()).toBe("## Boundaries");
+    expect(section.render()).toBe("");
+  });
+
+  it("renders a Recovery subsection after the escalation block", () => {
+    const judgment = new Judgment({
+      domain: "security",
+      escalationTriggers: ["Data breach"],
+    });
+    const recovery = new Recovery({ name: "retry", prompt: "Try again.", maxAttempts: 2 });
+    const section = new BoundariesSection([judgment], recovery);
+    const result = section.render();
+    expect(result.indexOf("### Escalate When")).toBeLessThan(result.indexOf("### Recovery"));
+    expect(result).toContain("Try again.\nMax attempts before escalating: 2");
+  });
+
+  it("renders recovery even when judgments contribute nothing", () => {
+    const recovery = new Recovery({ name: "retry", prompt: "Try again." });
+    const section = new BoundariesSection([], recovery);
+    const result = section.render();
+    expect(result).toContain("## Boundaries");
+    expect(result).toContain("### Recovery");
+    expect(result).toContain("Try again.");
   });
 
   it("snapshot: boundaries section", () => {
@@ -227,6 +250,17 @@ describe("MissionSection", () => {
     expect(section.render()).toBe("");
   });
 
+  it("renders the outputSchema when strictOutput is false (single prompt path)", () => {
+    const mission = new Mission({
+      objective: "Extract data",
+      outputSchema: { title: "Extraction", properties: { name: { type: "string" } } },
+      strictOutput: false,
+    });
+    const section = new MissionSection(mission);
+    expect(section.render()).toContain("**Required Output Format:**");
+    expect(section.render()).toContain("`Extraction`");
+  });
+
   it("snapshot: full mission section", () => {
     const mission = new Mission({
       objective: "Implement the rendering layer for TypeScript port",
@@ -294,6 +328,28 @@ describe("MethodologySection", () => {
     });
     const section = new MethodologySection([j]);
     expect(section.render()).toBe("");
+  });
+
+  it("renders a Methodology as the first block under the heading", () => {
+    const methodology = new Methodology({
+      name: "thorough",
+      prompt: "Be systematic.",
+      checklist: ["step 1"],
+    });
+    const judgment = new Judgment({
+      domain: "code_review",
+      heuristics: ["Check edge cases"],
+    });
+    const section = new MethodologySection([judgment], methodology);
+    const result = section.render();
+    expect(result.indexOf("Be systematic.")).toBeLessThan(result.indexOf("### Code Review"));
+    expect(result.startsWith("## Methodology\n\nBe systematic.")).toBe(true);
+  });
+
+  it("renders heading + methodology with empty judgments", () => {
+    const methodology = new Methodology({ name: "quick", prompt: "Move fast." });
+    const section = new MethodologySection([], methodology);
+    expect(section.render()).toBe("## Methodology\n\nMove fast.");
   });
 
   it("snapshot: methodology section", () => {

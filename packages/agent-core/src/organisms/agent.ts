@@ -105,37 +105,17 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
   }
 
   /**
-   * Generate full system prompt with runtime context (inline rendering).
+   * Legacy alias for the section-composed initial prompt.
    *
-   * Sections:
-   * 1. Role system prompt (identity, responsibilities, judgments, guidance, tools)
-   * 2. Background (team context, project context, conventions, current state)
-   * 3. Awareness (available information sources)
-   * 4. Mission (current objective)
+   * @deprecated Use {@link renderInitialPrompt}. Retained through one release
+   * so the runner contract migrates in its own slice; scheduled for removal.
    */
   getSystemPrompt(): string {
-    const sections: string[] = [this.role.renderSystemPrompt()];
-
-    // Background
-    const backgroundPrompt = this.background.toPrompt();
-    if (backgroundPrompt) {
-      sections.push(backgroundPrompt);
-    }
-
-    // Awareness
-    const awarenessPrompt = this.awareness.toPrompt();
-    if (awarenessPrompt) {
-      sections.push(awarenessPrompt);
-    }
-
-    // Mission
-    sections.push(this.mission.toPrompt());
-
-    return sections.join("\n\n");
+    return this.renderInitialPrompt();
   }
 
   toPrompt(): string {
-    return this.getSystemPrompt();
+    return this.renderInitialPrompt();
   }
 
   /**
@@ -188,12 +168,12 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
    */
   private _buildRenderer(): PromptRenderer {
     return new PromptRenderer(
-      new IdentitySection(this.role.persona, [...this.role.responsibilities]),
-      new BoundariesSection([...this.role.judgments]),
+      new IdentitySection(this.role.persona, [...this.role.responsibilities], this.role.tone),
+      new BoundariesSection([...this.role.judgments], this.role.recovery),
       new CapabilitiesSection([...this.role.capabilities]),
       new ContextSection(this.background, this.awareness),
       new MissionSection(this.mission),
-      new MethodologySection([...this.role.judgments]),
+      new MethodologySection([...this.role.judgments], this.role.methodology),
     );
   }
 }

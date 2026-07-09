@@ -58,8 +58,31 @@ describe("buildAgentFromConfig", () => {
     expect(fromInstance.role.name).toBe("Project Manager");
   });
 
+  it("hydrates roleTemplate tone/methodology/recovery into the Role", () => {
+    const agent = buildAgentFromConfig({
+      ...baseConfig,
+      roleTemplate: {
+        ...baseConfig.roleTemplate,
+        tone: { name: "direct", prompt: "Be direct." },
+        methodology: { name: "tdd", prompt: "Test first.", checklist: ["Write a failing test"] },
+        recovery: { name: "retry", prompt: "Retry once.", maxAttempts: 2 },
+      },
+    });
+
+    expect(agent.role.tone?.data.name).toBe("direct");
+    expect(agent.role.methodology?.data.name).toBe("tdd");
+    expect(agent.role.recovery?.data.maxAttempts).toBe(2);
+  });
+
+  it("leaves tone/methodology/recovery undefined when the config omits them", () => {
+    const agent = buildAgentFromConfig(baseConfig);
+    expect(agent.role.tone).toBeUndefined();
+    expect(agent.role.methodology).toBeUndefined();
+    expect(agent.role.recovery).toBeUndefined();
+  });
+
   it("renders persona, judgment, responsibility, and mission into the system prompt", () => {
-    const prompt = buildAgentFromConfig(baseConfig).getSystemPrompt();
+    const prompt = buildAgentFromConfig(baseConfig).toPrompt();
     expect(prompt).toContain("a project manager");
     expect(prompt).toContain("Triage");
     expect(prompt).toContain("urgent before important");
@@ -113,10 +136,10 @@ describe("buildAgentFromConfig", () => {
     // The whole point of Phase 0 — a config-hydrated agent is identical to the
     // code-built one. Here we assert the rendered system prompt is byte-identical
     // for the same inputs (no capabilities, to keep the comparison pure).
-    const fromConfig = buildAgentFromConfig(baseConfig).getSystemPrompt();
+    const fromConfig = buildAgentFromConfig(baseConfig).toPrompt();
 
     // Hand-built equivalent via the same atoms/builders buildAgentFromConfig uses.
     const handBuilt = new AgentConfig(baseConfig); // reuse schema defaults
-    expect(fromConfig).toBe(buildAgentFromConfig(handBuilt.toJSON()).getSystemPrompt());
+    expect(fromConfig).toBe(buildAgentFromConfig(handBuilt.toJSON()).toPrompt());
   });
 });

@@ -9,6 +9,10 @@ import type { PromptSection } from "./base.js";
 
 /**
  * Renders Persona + Responsibilities into the Identity prompt section.
+ *
+ * The persona block itself is formatted by `Persona.toPrompt()` — the single
+ * formatting source for the persona; this section adds the heading and the
+ * responsibilities subsection.
  */
 export class IdentitySection implements PromptSection {
   readonly name = "Identity";
@@ -23,43 +27,8 @@ export class IdentitySection implements PromptSection {
     const parts: string[] = ["## Identity"];
 
     if (this.persona) {
-      // Render identity statement
       parts.push("");
-      parts.push(`You are ${this.persona.data.identity}.`);
-
-      // Render tone as its own subsection
-      // Use Tone object if provided, otherwise fall back to persona.tone string
-      if (this.tone) {
-        parts.push("");
-        parts.push("### Tone");
-        parts.push("");
-        parts.push(this.tone.toPrompt());
-      } else if (this.persona.data.tone) {
-        parts.push("");
-        parts.push("### Tone");
-        parts.push("");
-        parts.push(this.persona.data.tone);
-      }
-
-      // Render priorities if present
-      if (this.persona.data.priorities.length > 0) {
-        parts.push("");
-        parts.push("### Priorities");
-        parts.push("");
-        for (const p of this.persona.data.priorities) {
-          parts.push(`- ${p}`);
-        }
-      }
-
-      // Render principles if present
-      if (this.persona.data.principles.length > 0) {
-        parts.push("");
-        parts.push("### Principles");
-        parts.push("");
-        for (const p of this.persona.data.principles) {
-          parts.push(`- ${p}`);
-        }
-      }
+      parts.push(this.persona.toPrompt({ tone: this.tone }));
     }
 
     if (this.responsibilities.length > 0) {

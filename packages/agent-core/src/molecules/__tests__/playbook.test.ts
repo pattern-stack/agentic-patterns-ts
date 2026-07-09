@@ -18,6 +18,7 @@ class TestPlaybook extends Playbook {
     greet: {
       description: "Greet someone",
       parameters: z.object({ name: z.string() }),
+      returns: z.object({ greeting: z.string() }),
       execute: async (args) => `Hello, ${args.name}!`,
     },
     fail: {
@@ -78,6 +79,17 @@ describe("Playbook", () => {
     expect(schemas[0]!.description).toBe("Greet someone");
     expect(schemas[1]!.name).toBe("fail");
     expect(schemas[1]!.description).toBe("Always fails");
+  });
+
+  it("should thread returns through getPlaySchemas", () => {
+    const playbook = new TestPlaybook();
+    const schemas = playbook.getPlaySchemas();
+
+    expect(schemas[0]!.returns).toMatchObject({
+      type: "object",
+      properties: { greeting: { type: "string" } },
+    });
+    expect(schemas[1]!.returns).toBeUndefined();
   });
 
   describe("execute", () => {

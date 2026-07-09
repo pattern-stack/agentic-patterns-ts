@@ -1,3 +1,11 @@
+import {
+  Judgment,
+  Methodology,
+  Persona,
+  Recovery,
+  RoleBuilder,
+  Tone,
+} from "@agentic-patterns/core";
 import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -286,6 +294,37 @@ describe("asAgent", () => {
   // -------------------------------------------------------------------------
   // Role identity
   // -------------------------------------------------------------------------
+
+  it("renders a full core Role via the section-composed prompt", () => {
+    const role = new RoleBuilder("Pipeline Reviewer")
+      .withPersona(new Persona({ identity: "a pipeline reviewer", tone: "terse" }))
+      .withJudgment(
+        new Judgment({
+          domain: "review",
+          constraints: ["Never approve failing pipelines"],
+          escalationTriggers: ["Unclear ownership"],
+        }),
+      )
+      .withTone(new Tone({ name: "direct", prompt: "Be blunt and specific." }))
+      .withMethodology(new Methodology({ name: "checklist", prompt: "Work the checklist." }))
+      .withRecovery(new Recovery({ name: "retry", prompt: "Retry once.", maxAttempts: 2 }))
+      .build();
+
+    const step = new FunctionStep<string, string>({ name: "noop", fn: (s) => s });
+    const promoted = asAgent(step, { role });
+
+    const prompt = promoted.getSystemPrompt();
+    expect(prompt).toContain("# Pipeline Reviewer");
+    expect(prompt).toContain("## Identity");
+    expect(prompt).toContain("Be blunt and specific.");
+    expect(prompt).toContain("## Boundaries");
+    expect(prompt).toContain("- Never approve failing pipelines");
+    expect(prompt).toContain("### Recovery");
+    expect(prompt).toContain("## Methodology");
+    expect(prompt).toContain("Work the checklist.");
+    // Promoted pipelines deliberately alias both prompt renders.
+    expect(promoted.renderInitialPrompt()).toBe(prompt);
+  });
 
   it("falls back to a one-line descriptor when given a minimal role (no full Role)", () => {
     const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });

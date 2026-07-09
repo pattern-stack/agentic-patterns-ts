@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { Judgment } from "../../atoms/judgment.js";
+import { Methodology } from "../../atoms/methodology.js";
 import { Persona } from "../../atoms/persona.js";
+import { Recovery } from "../../atoms/recovery.js";
 import { Responsibility } from "../../atoms/responsibility.js";
+import { Tone } from "../../atoms/tone.js";
 import { Capability } from "../../molecules/capability.js";
 import { TextManual } from "../../molecules/manual.js";
 import { type ToolDefinition, Toolbox } from "../../molecules/toolbox.js";
@@ -141,7 +144,7 @@ describe("Role", () => {
     expect(guidance).toContain("Always create tasks with clear titles.");
   });
 
-  describe("renderSystemPrompt", () => {
+  describe("toPrompt", () => {
     it("includes all sections", () => {
       const role = new Role({
         name: "Project Manager",
@@ -151,13 +154,12 @@ describe("Role", () => {
         responsibilities: [makeResponsibility()],
       });
 
-      const prompt = role.renderSystemPrompt();
+      const prompt = role.toPrompt();
       expect(prompt).toContain("# Project Manager");
       expect(prompt).toContain("## Identity");
-      expect(prompt).toContain("## Responsibilities");
-      expect(prompt).toContain("## Decision Guidelines");
-      expect(prompt).toContain("## Guidance");
-      expect(prompt).toContain("## Available Tools");
+      expect(prompt).toContain("### Responsibilities");
+      expect(prompt).toContain("## Capabilities");
+      expect(prompt).toContain("### Available Tools");
     });
 
     it("omits empty sections", () => {
@@ -166,21 +168,56 @@ describe("Role", () => {
         persona: makePersona(),
       });
 
-      const prompt = role.renderSystemPrompt();
+      const prompt = role.toPrompt();
       expect(prompt).toContain("# Simple Role");
       expect(prompt).toContain("## Identity");
-      expect(prompt).not.toContain("## Responsibilities");
-      expect(prompt).not.toContain("## Decision Guidelines");
-      expect(prompt).not.toContain("## Guidance");
-      expect(prompt).not.toContain("## Available Tools");
+      expect(prompt).not.toContain("### Responsibilities");
+      expect(prompt).not.toContain("## Boundaries");
+      expect(prompt).not.toContain("## Capabilities");
+      expect(prompt).not.toContain("### Available Tools");
     });
 
-    it("toPrompt is alias for renderSystemPrompt", () => {
+    it("renders tone/methodology/recovery when present", () => {
+      const role = new Role({
+        name: "Leveled Role",
+        persona: makePersona(),
+        tone: new Tone({ name: "direct", prompt: "Be direct and concise." }),
+        methodology: new Methodology({
+          name: "tdd",
+          prompt: "Test first.",
+          checklist: ["Write a failing test"],
+        }),
+        recovery: new Recovery({ name: "retry", prompt: "Retry once.", maxAttempts: 2 }),
+      });
+
+      const prompt = role.toPrompt();
+      expect(prompt).toContain("### Tone");
+      expect(prompt).toContain("Be direct and concise.");
+      expect(prompt).toContain("## Methodology");
+      expect(prompt).toContain("Test first.");
+      expect(prompt).toContain("- Write a failing test");
+      expect(prompt).toContain("Retry once.");
+      expect(prompt).toContain("Max attempts before escalating: 2");
+    });
+
+    it("omits methodology/recovery sections when absent", () => {
+      const role = new Role({
+        name: "Simple Role",
+        persona: makePersona(),
+      });
+
+      const prompt = role.toPrompt();
+      expect(prompt).not.toContain("## Methodology");
+      expect(prompt).not.toContain("Recovery");
+    });
+
+    it("renderSystemPrompt is a deprecated alias for toPrompt", () => {
       const role = new Role({
         name: "Test",
         persona: makePersona(),
+        judgments: [makeJudgment()],
       });
-      expect(role.toPrompt()).toBe(role.renderSystemPrompt());
+      expect(role.renderSystemPrompt()).toBe(role.toPrompt());
     });
 
     it("snapshot: full role prompt", () => {
@@ -191,7 +228,7 @@ describe("Role", () => {
         capabilities: [makeCapability()],
         responsibilities: [makeResponsibility()],
       });
-      expect(role.renderSystemPrompt()).toMatchSnapshot();
+      expect(role.toPrompt()).toMatchSnapshot();
     });
   });
 });
@@ -221,6 +258,34 @@ describe("RoleBuilder", () => {
 
   it("throws without persona", () => {
     expect(() => new RoleBuilder("Test").build()).toThrow("Persona is required");
+  });
+
+  it("withTone/withMethodology/withRecovery attach the leveled atoms", () => {
+    const tone = new Tone({ name: "direct", prompt: "Be direct." });
+    const methodology = new Methodology({
+      name: "tdd",
+      prompt: "Test first.",
+      checklist: ["Write a failing test"],
+    });
+    const recovery = new Recovery({ name: "retry", prompt: "Retry once.", maxAttempts: 2 });
+
+    const role = new RoleBuilder("Test")
+      .withPersona(makePersona())
+      .withTone(tone)
+      .withMethodology(methodology)
+      .withRecovery(recovery)
+      .build();
+
+    expect(role.tone).toBe(tone);
+    expect(role.methodology).toBe(methodology);
+    expect(role.recovery).toBe(recovery);
+  });
+
+  it("tone/methodology/recovery default to undefined", () => {
+    const role = new RoleBuilder("Test").withPersona(makePersona()).build();
+    expect(role.tone).toBeUndefined();
+    expect(role.methodology).toBeUndefined();
+    expect(role.recovery).toBeUndefined();
   });
 
   it("withJudgments adds multiple", () => {
