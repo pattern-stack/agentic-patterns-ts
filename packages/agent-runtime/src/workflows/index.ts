@@ -146,3 +146,21 @@ export {
 } from "./build-workflow-from-config.js";
 
 export { withRunner } from "./with-runner.js";
+
+export {
+  type BackpackSpec,
+  type Backpack,
+  type DropReceipt,
+  type DropRecord,
+  type WriteManifest,
+  type IndexedView,
+  createBackpack,
+  backpackSlot,
+  indexedView,
+  openBackpack,
+  requireBackpack,
+  readBackpack,
+  createRunHost,
+  hydrateThenDrop,
+  BackpackUnavailableError,
+} from "./backpack.js";
