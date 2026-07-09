@@ -56,7 +56,13 @@ export function createServer(config: ServerConfig): Hono {
   // Docs LAST — it introspects `app.routes`, so every route mounted above (and
   // the docs routes themselves) appears in /openapi.json, /docs, /llms.txt,
   // and /mcp/tools.json.
-  app.route("/", docsRoutes(app, config.agents, { info: config.docs }));
+  app.route(
+    "/",
+    docsRoutes(app, config.agents, {
+      info: config.docs,
+      ...(config.docs?.scalarJsUrl ? { scalarJsUrl: config.docs.scalarJsUrl } : {}),
+    }),
+  );
 
   return app;
 }

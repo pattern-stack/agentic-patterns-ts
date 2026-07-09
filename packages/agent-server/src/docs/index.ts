@@ -21,13 +21,28 @@ import {
   buildOpenApiDocument,
 } from "./openapi.js";
 
+/** Where the Scalar standalone bundle loads from when the embedder doesn't
+ *  override it. jsDelivr serves `@scalar/api-reference`'s browser build; the
+ *  server carries no `@scalar` dependency itself (it's 11MB) — an embedder that
+ *  needs offline `/docs` (e.g. the CLI playground) vendors the ~3.7MB standalone
+ *  and passes its local URL via `scalarJsUrl`. */
+export const DEFAULT_SCALAR_JS_URL = "https://cdn.jsdelivr.net/npm/@scalar/api-reference";
+
 export interface DocsOptions {
   readonly info?: OpenApiInfo;
+  /**
+   * URL the Scalar `/docs` page loads its bundle from. Default:
+   * {@link DEFAULT_SCALAR_JS_URL} (CDN). Set to a locally-served path (e.g.
+   * `/docs/scalar.js`) for an offline, self-contained `/docs` — the embedder is
+   * then responsible for serving that path.
+   */
+  readonly scalarJsUrl?: string;
 }
 
 /** Self-contained Scalar reference page — points at `/openapi.json`. */
-function scalarPage(title: string): string {
+function scalarPage(title: string, scalarJsUrl: string): string {
   const safe = title.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  const safeSrc = scalarJsUrl.replace(/"/g, "&quot;");
   return `<!doctype html>
 <html>
   <head>
@@ -38,7 +53,7 @@ function scalarPage(title: string): string {
   </head>
   <body>
     <script id="api-reference" data-url="/openapi.json"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+    <script src="${safeSrc}"></script>
   </body>
 </html>`;
 }
@@ -54,6 +69,7 @@ export function docsRoutes(
 ): Hono {
   const sub = new Hono();
   const info = options.info ?? {};
+  const scalarJsUrl = options.scalarJsUrl ?? DEFAULT_SCALAR_JS_URL;
 
   // Memoize: `app.routes` is stable once the server has finished mounting.
   let cached: OpenApiResult | undefined;
@@ -71,7 +87,9 @@ export function docsRoutes(
 
   sub.get("/openapi.json", (c) => c.json(openapi().document));
 
-  sub.get("/docs", (c) => c.html(scalarPage(info.title ?? "@agentic-patterns/server")));
+  sub.get("/docs", (c) =>
+    c.html(scalarPage(info.title ?? "@agentic-patterns/server", scalarJsUrl)),
+  );
 
   sub.get("/llms.txt", (c) =>
     c.body(buildLlmsTxt(app, info), 200, { "content-type": "text/markdown; charset=utf-8" }),

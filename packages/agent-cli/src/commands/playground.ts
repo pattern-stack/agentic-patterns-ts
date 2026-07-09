@@ -37,6 +37,7 @@ import { serve } from "@hono/node-server";
 import { DEFAULT_DASHBOARD_PORT } from "../constants.js";
 import { ensureParentDir, resolveDbPath } from "../helpers/db.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
+import { readSelfVersion } from "../helpers/versions.js";
 import { ExecutionService } from "../services/execution-service.js";
 
 // ---------------------------------------------------------------------------
@@ -140,6 +141,12 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   // 4. Build the Hono app with API routes FIRST
   // -------------------------------------------------------------------------
 
+  // Docs surface: stamp the CLI's own version, and serve Scalar offline from the
+  // vendored bundle when it's present (`build:scalar`), so `/docs` needs no CDN.
+  const scalarAsset = resolveScalarAsset();
+  const scalarOffline = scalarAsset != null && existsSync(scalarAsset);
+  const cliVersion = readSelfVersion(path.dirname(fileURLToPath(import.meta.url)));
+
   const app = createServer({
     agents: registrations,
     adminService,
@@ -154,7 +161,19 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
       model: process.env.AGENT_MODEL ?? tier,
       gitSha: readGitSha(),
     },
+    docs: {
+      title: "@agentic-patterns playground",
+      ...(cliVersion ? { version: cliVersion } : {}),
+      ...(scalarOffline ? { scalarJsUrl: "/docs/scalar.js" } : {}),
+    },
   });
+
+  // Serve the vendored Scalar bundle locally (registered BEFORE the dashboard
+  // catch-all below). Absent → `docs` above never set `scalarJsUrl`, so the
+  // server's HTML falls back to the CDN and `/docs` still works online.
+  if (scalarOffline && scalarAsset) {
+    app.get("/docs/scalar.js", () => streamFile(scalarAsset));
+  }
 
   // -------------------------------------------------------------------------
   // 5. Mount the dashboard SPA (after API routes so API wins)
@@ -234,6 +253,23 @@ function resolveDashboardDir(): string | null {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
     return path.resolve(here, "../assets/dashboard");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Absolute path to the vendored Scalar standalone bundle, or null if it can't
+ * be located. Layout mirrors the dashboard asset:
+ *   dist/cli.js            ← import.meta.url lands here
+ *   assets/scalar/standalone.js   ← copied by `build:scalar`
+ * Absent (dev without `build:scalar`) → the playground leaves `/docs` on the
+ * CDN default.
+ */
+function resolveScalarAsset(): string | null {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    return path.resolve(here, "../assets/scalar/standalone.js");
   } catch {
     return null;
   }
