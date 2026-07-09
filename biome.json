@@ -42,6 +42,7 @@
       "demo/",
       "packages/agent-cli/assets/dashboard/",
       "packages/agent-cli/assets/plugin-template/",
+      "packages/agent-cli/assets/scalar/",
       "**/__fixtures__/**",
       ".claude/worktrees/"
     ]
