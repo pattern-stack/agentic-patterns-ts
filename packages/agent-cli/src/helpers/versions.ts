@@ -66,6 +66,31 @@ export function readInstalledVersion(root: string, pkg: string): string | null {
   }
 }
 
+/**
+ * The CLI's OWN version — read from the nearest `package.json` walking up from
+ * `fromDir` (pass `path.dirname(fileURLToPath(import.meta.url))`). Works both
+ * bundled (`dist/cli.js` → `../package.json`) and from source under tsx
+ * (`src/**` → the package root). Returns `null` if none is found; callers
+ * default (e.g. the docs surface falls back to an unlabeled version).
+ */
+export function readSelfVersion(fromDir: string): string | null {
+  let dir = fromDir;
+  for (let i = 0; i < 6; i += 1) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf-8")) as {
+        version?: string;
+      };
+      if (manifest.version) return manifest.version;
+    } catch {
+      // no package.json here — keep walking up
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // npm registry
 // ---------------------------------------------------------------------------

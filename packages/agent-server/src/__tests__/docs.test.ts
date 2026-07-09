@@ -159,13 +159,25 @@ describe("docs routes (served)", () => {
     expect(doc.paths["/openapi.json"]).toBeDefined();
   });
 
-  it("GET /docs serves the Scalar page pointing at /openapi.json", async () => {
+  it("GET /docs serves the Scalar page pointing at /openapi.json (CDN by default)", async () => {
     const app = createServer(testConfig);
     const res = await app.request("/docs");
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("@scalar/api-reference");
     expect(html).toContain('data-url="/openapi.json"');
+    // default: loads the bundle from the CDN
+    expect(html).toContain('src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"');
+  });
+
+  it("docs.scalarJsUrl overrides the Scalar bundle URL (offline / self-hosted)", async () => {
+    const app = createServer({
+      ...testConfig,
+      docs: { title: "@agentic-patterns/server", scalarJsUrl: "/docs/scalar.js" },
+    } as unknown as ServerConfig);
+    const html = await (await app.request("/docs")).text();
+    expect(html).toContain('src="/docs/scalar.js"');
+    expect(html).not.toContain("cdn.jsdelivr.net");
   });
 
   it("GET /llms.txt serves markdown", async () => {

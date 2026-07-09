@@ -16,6 +16,7 @@ import {
   installLatestArgv,
   isBehind,
   readInstalledVersion,
+  readSelfVersion,
 } from "../versions.js";
 
 describe("compareSemver", () => {
@@ -91,6 +92,23 @@ describe("fs-backed helpers", () => {
     fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ version: "0.9.0" }));
     expect(readInstalledVersion(dir, "@agentic-patterns/runtime")).toBe("0.9.0");
     expect(readInstalledVersion(dir, "@agentic-patterns/absent")).toBeNull();
+  });
+
+  it("readSelfVersion walks UP from a nested dir to the nearest package.json", () => {
+    // dist/cli.js → ../package.json, and src/**/x → the package root: both resolve.
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ version: "1.2.3" }));
+    const nested = path.join(dir, "dist", "chunks");
+    fs.mkdirSync(nested, { recursive: true });
+    expect(readSelfVersion(nested)).toBe("1.2.3");
+    expect(readSelfVersion(dir)).toBe("1.2.3");
+  });
+
+  it("readSelfVersion returns null when no package.json is found upward", () => {
+    // A fresh temp dir with no package.json anywhere up to the walk cap.
+    const orphan = path.join(dir, "a", "b", "c");
+    fs.mkdirSync(orphan, { recursive: true });
+    // No package.json written → null (the walk cap stops it; tmp has none nearby).
+    expect(readSelfVersion(orphan)).toBeNull();
   });
 
   it("detectPackageManager infers from the lockfile", () => {

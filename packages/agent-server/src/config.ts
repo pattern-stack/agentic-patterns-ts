@@ -175,5 +175,11 @@ export interface ServerConfig {
     readonly title?: string;
     readonly version?: string;
     readonly description?: string;
+    /**
+     * URL the Scalar `/docs` page loads its bundle from. Default: the jsDelivr
+     * CDN. Set to a locally-served path (e.g. `/docs/scalar.js`) for offline,
+     * self-contained docs — the embedder must then serve that path itself.
+     */
+    readonly scalarJsUrl?: string;
   };
 }
