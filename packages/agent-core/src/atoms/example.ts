@@ -17,6 +17,9 @@ export type ExampleData = z.infer<typeof ExampleSchema>;
 
 /**
  * A reusable example for few-shot learning.
+ *
+ * `toPrompt()` is the single Example formatter — both Judgment and
+ * MethodologySection delegate to it.
  */
 export class Example extends AgenticModel<typeof ExampleSchema.shape> {
   constructor(data: z.input<typeof ExampleSchema>) {
@@ -24,13 +27,13 @@ export class Example extends AgenticModel<typeof ExampleSchema.shape> {
   }
 
   toPrompt(): string {
-    const lines: string[] = [`**Scenario:** ${this.data.scenario}`];
-    lines.push(`  \u2713 Good: ${this.data.good}`);
+    const lines: string[] = [`- **Scenario:** ${this.data.scenario}`];
+    lines.push(`  - ✓ ${this.data.good}`);
     if (this.data.bad) {
-      lines.push(`  \u2717 Bad: ${this.data.bad}`);
+      lines.push(`  - ✗ ${this.data.bad}`);
     }
     if (this.data.reasoning) {
-      lines.push(`  Why: ${this.data.reasoning}`);
+      lines.push(`  - *Why:* ${this.data.reasoning}`);
     }
     return lines.join("\n");
   }

@@ -11,10 +11,19 @@ import { z } from "zod";
 
 import { AgenticModel } from "../atoms/base.js";
 import { type Judgment, JudgmentSchema } from "../atoms/judgment.js";
+import { type Methodology, MethodologySchema } from "../atoms/methodology.js";
 import { type Persona, PersonaSchema } from "../atoms/persona.js";
+import { type Recovery, RecoverySchema } from "../atoms/recovery.js";
 import { type Responsibility, ResponsibilitySchema } from "../atoms/responsibility.js";
+import { type Tone, ToneSchema } from "../atoms/tone.js";
 import type { Capability } from "../molecules/capability.js";
 import type { ToolSchema } from "../molecules/tool-schema.js";
+import {
+  BoundariesSection,
+  CapabilitiesSection,
+  IdentitySection,
+  MethodologySection,
+} from "../rendering/index.js";
 
 /**
  * Zod schema for Role data.
@@ -28,6 +37,9 @@ export const RoleSchema = z.object({
   judgments: z.array(JudgmentSchema).default([]),
   capabilities: z.array(z.unknown()).default([]),
   responsibilities: z.array(ResponsibilitySchema).default([]),
+  tone: ToneSchema.nullable().default(null),
+  methodology: MethodologySchema.nullable().default(null),
+  recovery: RecoverySchema.nullable().default(null),
   // No framework default: an unset model is `undefined`. The model is chosen by
   // the agent (`.withModel()`), the role (`.withDefaultModel()`), or — when both
   // are unset — the RUNNER (createRunner tier/env/gateway). The framework does
@@ -51,6 +63,12 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
   readonly capabilities: readonly Capability[];
   /** The Responsibility instances. */
   readonly responsibilities: readonly Responsibility[];
+  /** Optional Tone instance — controls HOW the agent communicates. */
+  readonly tone?: Tone;
+  /** Optional Methodology instance — controls HOW the agent works. */
+  readonly methodology?: Methodology;
+  /** Optional Recovery instance — controls how the agent handles failure. */
+  readonly recovery?: Recovery;
 
   constructor(data: {
     name: string;
@@ -58,6 +76,9 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
     judgments?: Judgment[];
     capabilities?: Capability[];
     responsibilities?: Responsibility[];
+    tone?: Tone;
+    methodology?: Methodology;
+    recovery?: Recovery;
     defaultModel?: string;
   }) {
     // Pass raw data through Zod for name/defaultModel validation.
@@ -68,6 +89,9 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
       judgments: (data.judgments ?? []).map((j) => j.data),
       capabilities: data.capabilities ?? [],
       responsibilities: (data.responsibilities ?? []).map((r) => r.data),
+      tone: data.tone?.data ?? null,
+      methodology: data.methodology?.data ?? null,
+      recovery: data.recovery?.data ?? null,
       defaultModel: data.defaultModel,
     });
 
@@ -76,6 +100,9 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
     this.judgments = Object.freeze([...(data.judgments ?? [])]);
     this.capabilities = Object.freeze([...(data.capabilities ?? [])]);
     this.responsibilities = Object.freeze([...(data.responsibilities ?? [])]);
+    this.tone = data.tone;
+    this.methodology = data.methodology;
+    this.recovery = data.recovery;
   }
 
   /** Get the role name. */
@@ -107,65 +134,32 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
   }
 
   /**
-   * Generate base system prompt (without runtime context).
+   * Render the role as a standalone preview (no runtime context).
    *
-   * Sections:
-   * 1. Identity (Persona)
-   * 2. Responsibilities
-   * 3. Decision Guidelines (Judgments)
-   * 4. Capability Guidance
-   * 5. Available Tools (names + descriptions)
+   * Composes the same rendering sections the PromptRenderer uses —
+   * Identity, Boundaries, Capabilities, Methodology — so role previews and
+   * runner prompts share a single formatting system. Mission, background,
+   * awareness, and state belong to the Agent and are absent here.
    */
-  renderSystemPrompt(): string {
-    const sections: string[] = [`# ${this.name}`, ""];
-
-    // Identity
-    sections.push("## Identity");
-    sections.push("");
-    sections.push(this.persona.toPrompt());
-    sections.push("");
-
-    // Responsibilities
-    if (this.responsibilities.length > 0) {
-      sections.push("## Responsibilities");
-      sections.push("");
-      for (const r of this.responsibilities) {
-        sections.push(r.toPrompt());
-      }
-      sections.push("");
-    }
-
-    // Decision Guidelines
-    if (this.judgments.length > 0) {
-      sections.push("## Decision Guidelines");
-      sections.push("");
-      for (const j of this.judgments) {
-        sections.push(j.toPrompt());
-      }
-      sections.push("");
-    }
-
-    // Capability Guidance
-    if (this.capabilities.length > 0) {
-      sections.push("## Guidance");
-      sections.push("");
-      sections.push(this.getGuidance());
-      sections.push("");
-
-      // Available Tools (names + descriptions only)
-      sections.push("## Available Tools");
-      sections.push("");
-      for (const tool of this.getTools()) {
-        sections.push(`- **${tool.name}**: ${tool.description}`);
-      }
-      sections.push("");
-    }
-
-    return sections.join("\n");
+  toPrompt(): string {
+    const sections = [
+      new IdentitySection(this.persona, [...this.responsibilities], this.tone),
+      new BoundariesSection([...this.judgments], this.recovery),
+      new CapabilitiesSection([...this.capabilities]),
+      new MethodologySection([...this.judgments], this.methodology),
+    ];
+    const rendered = sections.map((s) => s.render()).filter((s) => s.length > 0);
+    return [`# ${this.name}`, ...rendered].join("\n\n");
   }
 
-  toPrompt(): string {
-    return this.renderSystemPrompt();
+  /**
+   * Legacy alias for the section-composed prompt.
+   *
+   * @deprecated Use {@link toPrompt}. Retained through one release so the
+   * runner contract migrates in its own slice; scheduled for removal.
+   */
+  renderSystemPrompt(): string {
+    return this.toPrompt();
   }
 }
 
@@ -186,6 +180,9 @@ export class RoleBuilder {
   private _judgments: Judgment[] = [];
   private _capabilities: Capability[] = [];
   private _responsibilities: Responsibility[] = [];
+  private _tone: Tone | undefined;
+  private _methodology: Methodology | undefined;
+  private _recovery: Recovery | undefined;
   private _defaultModel: string | undefined;
 
   constructor(name: string) {
@@ -227,6 +224,21 @@ export class RoleBuilder {
     return this;
   }
 
+  withTone(tone: Tone): this {
+    this._tone = tone;
+    return this;
+  }
+
+  withMethodology(methodology: Methodology): this {
+    this._methodology = methodology;
+    return this;
+  }
+
+  withRecovery(recovery: Recovery): this {
+    this._recovery = recovery;
+    return this;
+  }
+
   withDefaultModel(model: string): this {
     this._defaultModel = model;
     return this;
@@ -243,6 +255,9 @@ export class RoleBuilder {
       judgments: [...this._judgments],
       capabilities: [...this._capabilities],
       responsibilities: [...this._responsibilities],
+      tone: this._tone,
+      methodology: this._methodology,
+      recovery: this._recovery,
       defaultModel: this._defaultModel,
     });
   }

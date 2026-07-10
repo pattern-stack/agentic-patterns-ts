@@ -22,9 +22,12 @@ import { AwarenessSchema } from "./awareness.js";
 import { BackgroundSchema } from "./background.js";
 import { AgenticModel } from "./base.js";
 import { Judgment, JudgmentSchema } from "./judgment.js";
+import { Methodology, MethodologySchema } from "./methodology.js";
 import { Mission, MissionSchema } from "./mission.js";
 import { Persona, PersonaSchema } from "./persona.js";
+import { Recovery, RecoverySchema } from "./recovery.js";
 import { Responsibility, ResponsibilitySchema } from "./responsibility.js";
+import { Tone, ToneSchema } from "./tone.js";
 
 /**
  * The reusable, capability-free part of a role.
@@ -37,6 +40,9 @@ export const RoleTemplateConfigSchema = z.object({
   persona: PersonaSchema,
   judgments: z.array(JudgmentSchema).default([]),
   responsibilities: z.array(ResponsibilitySchema).default([]),
+  tone: ToneSchema.nullable().default(null),
+  methodology: MethodologySchema.nullable().default(null),
+  recovery: RecoverySchema.nullable().default(null),
   // No framework default — unset means "the runner decides" (see role.ts).
   defaultModel: z.string().optional(),
   source: z.enum(["library", "custom"]).default("custom"),
@@ -91,6 +97,15 @@ export class AgentConfig extends AgenticModel<typeof AgentConfigSchema.shape> {
       lines.push(`Capabilities: ${this.data.capabilities.join(", ")}`);
     }
     lines.push("", new Persona(rt.persona).toPrompt());
+    if (rt.tone) {
+      lines.push("", new Tone(rt.tone).toPrompt());
+    }
+    if (rt.methodology) {
+      lines.push("", new Methodology(rt.methodology).toPrompt());
+    }
+    if (rt.recovery) {
+      lines.push("", new Recovery(rt.recovery).toPrompt());
+    }
     for (const j of rt.judgments) {
       lines.push("", new Judgment(j).toPrompt());
     }

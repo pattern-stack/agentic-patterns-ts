@@ -117,31 +117,45 @@ export class Mission extends AgenticModel<typeof MissionSchema.shape> {
     super(MissionSchema, data);
   }
 
+  /**
+   * Render the Mission block.
+   *
+   * This is the single formatting source for the mission — MissionSection
+   * delegates here.
+   *
+   * When `outputSchema` is set and `strictOutput` is false, the rendered
+   * schema (via `renderSchemaForPrompt`) is appended so the model is guided
+   * toward the expected JSON output. Prompt injection is the only mechanism
+   * `outputSchema` has — no runner consumes it natively.
+   */
   toPrompt(): string {
-    const lines: string[] = ["## Current Mission", "", this.data.objective];
+    const lines: string[] = ["## Mission", "", "### Objective", "", this.data.objective];
+
     if (this.data.successCriteria.length > 0) {
-      lines.push("\n**Success criteria:**");
+      lines.push("", "### Success Criteria", "");
       for (const c of this.data.successCriteria) {
         lines.push(`- ${c}`);
       }
     }
+
     if (this.data.constraints.length > 0) {
-      lines.push("\n**Constraints:**");
+      lines.push("", "### Constraints", "");
       for (const c of this.data.constraints) {
         lines.push(`- ${c}`);
       }
     }
+
     if (this.data.rationale) {
-      lines.push(`\n**Rationale:** ${this.data.rationale}`);
+      lines.push("", "### Rationale", "", this.data.rationale);
     }
 
-    // Inject schema into prompt when strictOutput is false
+    // Inject the schema into the prompt when strictOutput is false.
     if (this.data.outputSchema != null && !this.data.strictOutput) {
       const schemaPrompt = renderSchemaForPrompt(
         this.data.outputSchema as ZodTypeAny | Record<string, unknown>,
       );
       if (schemaPrompt) {
-        lines.push(`\n${schemaPrompt}`);
+        lines.push("", schemaPrompt);
       }
     }
 

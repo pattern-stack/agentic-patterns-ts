@@ -26,7 +26,7 @@ describe("Persona", () => {
     expect(() => new Persona({ identity: "", tone: "direct" })).toThrow();
   });
 
-  it("toPrompt() matches Python output", () => {
+  it("toPrompt() renders the persona block", () => {
     const p = new Persona({
       identity: "a senior code reviewer",
       tone: "direct and constructive",
@@ -35,13 +35,18 @@ describe("Persona", () => {
     });
     expect(p.toPrompt()).toMatchInlineSnapshot(`
       "You are a senior code reviewer.
-      Communication style: direct and constructive
 
-      Priorities:
+      ### Tone
+
+      direct and constructive
+
+      ### Priorities
+
       - code quality
       - maintainability
 
-      Principles:
+      ### Principles
+
       - be specific
       - suggest alternatives"
     `);
@@ -52,7 +57,24 @@ describe("Persona", () => {
       identity: "an assistant",
       tone: "friendly",
     });
-    expect(p.toPrompt()).toBe("You are an assistant.\nCommunication style: friendly");
+    expect(p.toPrompt()).toBe("You are an assistant.\n\n### Tone\n\nfriendly");
+  });
+
+  it("toPrompt() renders a Tone object over the persona tone string", () => {
+    const p = new Persona({ identity: "an assistant", tone: "basic tone" });
+    const t = new Tone({ name: "formal", prompt: "Be formal and precise." });
+    const result = p.toPrompt({ tone: t });
+    expect(result).toContain("### Tone");
+    expect(result).toContain("Be formal and precise.");
+    expect(result).not.toContain("basic tone");
+  });
+
+  it("withPriorities() and withPrinciples() append", () => {
+    const p = new Persona({ identity: "reviewer", tone: "direct", priorities: ["p1"] })
+      .withPriorities(["p2"])
+      .withPrinciples(["always verify"]);
+    expect(p.data.priorities).toEqual(["p1", "p2"]);
+    expect(p.data.principles).toEqual(["always verify"]);
   });
 
   it("replace() returns new instance", () => {
@@ -72,10 +94,10 @@ describe("Example", () => {
       reasoning: "Security first",
     });
     expect(e.toPrompt()).toMatchInlineSnapshot(`
-      "**Scenario:** PR has SQL injection
-        \u2713 Good: Block for SQL injection
-        \u2717 Bad: Comment on both
-        Why: Security first"
+      "- **Scenario:** PR has SQL injection
+        - \u2713 Block for SQL injection
+        - \u2717 Comment on both
+        - *Why:* Security first"
     `);
   });
 
@@ -84,7 +106,7 @@ describe("Example", () => {
       scenario: "Simple case",
       good: "Do the right thing",
     });
-    expect(e.toPrompt()).toBe("**Scenario:** Simple case\n  \u2713 Good: Do the right thing");
+    expect(e.toPrompt()).toBe("- **Scenario:** Simple case\n  - \u2713 Do the right thing");
   });
 });
 
@@ -136,7 +158,9 @@ describe("Mission", () => {
   it("constructs and renders basic mission", () => {
     const m = new Mission({ objective: "Ship the feature" });
     expect(m.toPrompt()).toMatchInlineSnapshot(`
-      "## Current Mission
+      "## Mission
+
+      ### Objective
 
       Ship the feature"
     `);
@@ -150,10 +174,11 @@ describe("Mission", () => {
       rationale: "Customer deadline",
     });
     const prompt = m.toPrompt();
-    expect(prompt).toContain("**Success criteria:**");
+    expect(prompt).toContain("### Success Criteria");
     expect(prompt).toContain("- all tests pass");
-    expect(prompt).toContain("**Constraints:**");
-    expect(prompt).toContain("**Rationale:** Customer deadline");
+    expect(prompt).toContain("### Constraints");
+    expect(prompt).toContain("### Rationale");
+    expect(prompt).toContain("Customer deadline");
   });
 
   it("withCriteria() and withConstraints() fluent methods", () => {

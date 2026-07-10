@@ -4,10 +4,13 @@ import { z } from "zod";
 import { Awareness } from "../../atoms/awareness.js";
 import { Background } from "../../atoms/background.js";
 import { Judgment } from "../../atoms/judgment.js";
+import { Methodology } from "../../atoms/methodology.js";
 import { Mission } from "../../atoms/mission.js";
 import { Persona } from "../../atoms/persona.js";
+import { Recovery } from "../../atoms/recovery.js";
 import { Responsibility } from "../../atoms/responsibility.js";
 import { Phase, State } from "../../atoms/state.js";
+import { Tone } from "../../atoms/tone.js";
 import { Capability } from "../../molecules/capability.js";
 import { TextManual } from "../../molecules/manual.js";
 import { type ToolDefinition, Toolbox } from "../../molecules/toolbox.js";
@@ -180,7 +183,7 @@ describe("Agent", () => {
     });
   });
 
-  describe("getSystemPrompt (inline rendering)", () => {
+  describe("toPrompt (delegates to renderInitialPrompt)", () => {
     it("includes role, background, awareness, and mission", () => {
       const agent = new Agent({
         role: makeRole(),
@@ -189,19 +192,27 @@ describe("Agent", () => {
         mission: makeMission(),
       });
 
-      const prompt = agent.getSystemPrompt();
-      expect(prompt).toContain("# Code Reviewer");
+      const prompt = agent.toPrompt();
+      expect(prompt).toContain("## Identity");
       expect(prompt).toContain("## Team Context");
       expect(prompt).toContain("## Available Information Sources");
-      expect(prompt).toContain("## Current Mission");
+      expect(prompt).toContain("## Mission");
     });
 
-    it("toPrompt is alias for getSystemPrompt", () => {
+    it("toPrompt is alias for renderInitialPrompt", () => {
       const agent = new Agent({
         role: makeRole(),
         mission: makeMission(),
       });
-      expect(agent.toPrompt()).toBe(agent.getSystemPrompt());
+      expect(agent.toPrompt()).toBe(agent.renderInitialPrompt());
+    });
+
+    it("getSystemPrompt is a deprecated alias for renderInitialPrompt", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        mission: makeMission(),
+      });
+      expect(agent.getSystemPrompt()).toBe(agent.renderInitialPrompt());
     });
 
     it("omits empty background", () => {
@@ -209,9 +220,50 @@ describe("Agent", () => {
         role: makeRole(),
         mission: makeMission(),
       });
-      const prompt = agent.getSystemPrompt();
+      const prompt = agent.toPrompt();
       // Background with no data produces empty string, should not add extra sections
       expect(prompt).not.toContain("## Team Context");
+    });
+
+    it("includes role tone/methodology/recovery", () => {
+      const role = new RoleBuilder("Code Reviewer")
+        .withPersona(
+          new Persona({
+            identity: "a code review specialist",
+            tone: "professional",
+          }),
+        )
+        .withTone(new Tone({ name: "direct", prompt: "Be blunt and specific." }))
+        .withMethodology(
+          new Methodology({
+            name: "checklist-review",
+            prompt: "Work through the review checklist in order.",
+            checklist: ["Read the diff twice"],
+          }),
+        )
+        .withRecovery(
+          new Recovery({ name: "retry", prompt: "Retry the failing step once.", maxAttempts: 2 }),
+        )
+        .build();
+
+      const prompt = new Agent({ role, mission: makeMission() }).toPrompt();
+      expect(prompt).toContain("Be blunt and specific.");
+      expect(prompt).toContain("Work through the review checklist in order.");
+      expect(prompt).toContain("Retry the failing step once.");
+    });
+
+    it("injects the mission outputSchema when strictOutput is false", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        mission: new Mission({
+          objective: "Extract data",
+          outputSchema: { title: "Extraction", properties: { name: { type: "string" } } },
+          strictOutput: false,
+        }),
+      });
+      const prompt = agent.toPrompt();
+      expect(prompt).toContain("**Required Output Format:**");
+      expect(prompt).toContain("`Extraction`");
     });
   });
 
@@ -241,6 +293,33 @@ describe("Agent", () => {
         mission: makeMission(),
       });
       expect(agent.renderInitialPrompt()).toMatchSnapshot();
+    });
+
+    it("passes role tone/methodology/recovery through to the sections", () => {
+      const role = new RoleBuilder("Code Reviewer")
+        .withPersona(
+          new Persona({
+            identity: "a code review specialist",
+            tone: "professional",
+          }),
+        )
+        .withTone(new Tone({ name: "direct", prompt: "Be blunt and specific." }))
+        .withMethodology(
+          new Methodology({
+            name: "checklist-review",
+            prompt: "Work through the review checklist in order.",
+            checklist: ["Read the diff twice"],
+          }),
+        )
+        .withRecovery(
+          new Recovery({ name: "retry", prompt: "Retry the failing step once.", maxAttempts: 2 }),
+        )
+        .build();
+
+      const prompt = new Agent({ role, mission: makeMission() }).renderInitialPrompt();
+      expect(prompt).toContain("Be blunt and specific.");
+      expect(prompt).toContain("Work through the review checklist in order.");
+      expect(prompt).toContain("Retry the failing step once.");
     });
   });
 
@@ -451,11 +530,10 @@ describe("Integration: atoms -> molecules -> organisms", () => {
       .withMission(mission)
       .build();
 
-    // Verify inline rendering
-    const systemPrompt = agent.getSystemPrompt();
-    expect(systemPrompt).toContain("# DevOps Engineer");
+    // Verify the unified prompt path
+    const systemPrompt = agent.toPrompt();
     expect(systemPrompt).toContain("a DevOps engineer");
-    expect(systemPrompt).toContain("## Current Mission");
+    expect(systemPrompt).toContain("## Mission");
     expect(systemPrompt).toContain("Set up staging environment");
 
     // Verify structured rendering
