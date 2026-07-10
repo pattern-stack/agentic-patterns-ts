@@ -83,7 +83,7 @@ export function convertHistory(history: CanonicalMessage[]): ModelMessage[] {
         if (part.type === "user_prompt" && part.content) {
           messages.push({ role: "user" as const, content: part.content });
         }
-        // system_prompt parts are handled separately by agent.getSystemPrompt()
+        // system_prompt parts are handled separately by agent.renderInitialPrompt()
       }
     } else if (msg.kind === "response") {
       // Response messages contain assistant text and tool calls

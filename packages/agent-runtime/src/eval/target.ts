@@ -47,7 +47,6 @@ export function isAgentLikeShape(x: unknown): x is AgentLike {
     role !== null &&
     typeof role.name === "string" &&
     typeof a.getModel === "function" &&
-    typeof a.getSystemPrompt === "function" &&
     typeof a.renderInitialPrompt === "function"
   );
 }

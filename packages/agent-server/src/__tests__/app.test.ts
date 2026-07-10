@@ -6,7 +6,6 @@ import type { AgentRegistration, ServerConfig } from "../config.js";
 const mockAgent = {
   getModel: () => "test-model",
   getTools: () => [],
-  getSystemPrompt: () => "You are a test agent.",
   renderInitialPrompt: () => "Test prompt",
   role: { name: "TestAgent" },
 };

@@ -124,7 +124,7 @@ describe("integration: single-agent end-to-end", () => {
 
     // Verify prompt rendering (judgment domain renders Title-Cased under
     // ## Methodology in the section-composed prompt)
-    const systemPrompt = agent.getSystemPrompt();
+    const systemPrompt = agent.renderInitialPrompt();
     expect(systemPrompt).toContain("research assistant");
     expect(systemPrompt).toContain("Source-Quality");
     expect(systemPrompt).toContain("Prefer peer-reviewed sources");
@@ -192,7 +192,6 @@ describe("integration: single-agent end-to-end", () => {
       role: agent.role,
       getModel: () => agent.getModel(),
       getTools: () => [searchTool],
-      getSystemPrompt: () => agent.getSystemPrompt(),
       renderInitialPrompt: () => agent.renderInitialPrompt(),
     };
     const result = await runner.run(agentWithTools, "Analyze Q4 revenue trends.", { toolExecutor });

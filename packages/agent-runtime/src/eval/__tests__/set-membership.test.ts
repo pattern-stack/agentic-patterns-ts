@@ -174,7 +174,6 @@ describe("setMembership — T-SM4 (expected-gating)", () => {
       role: { name: "t" },
       getModel: () => "mock",
       getTools: () => [],
-      getSystemPrompt: () => "",
       renderInitialPrompt: () => "",
     };
     const report = await runEval(

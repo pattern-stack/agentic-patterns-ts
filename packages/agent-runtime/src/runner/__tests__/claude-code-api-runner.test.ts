@@ -39,7 +39,6 @@ function makeAgent(overrides: Partial<AgentLikeForBridge> = {}): AgentLikeForBri
     role: { name: "test-agent", capabilities: [] },
     getModel: () => "claude-sonnet-4-6",
     getTools: () => [],
-    getSystemPrompt: () => "You are a helpful assistant. Custom framework prompt.",
     renderInitialPrompt: () => "You are a helpful assistant. Custom framework prompt.",
     ...overrides,
   };

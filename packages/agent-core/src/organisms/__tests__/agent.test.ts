@@ -207,14 +207,6 @@ describe("Agent", () => {
       expect(agent.toPrompt()).toBe(agent.renderInitialPrompt());
     });
 
-    it("getSystemPrompt is a deprecated alias for renderInitialPrompt", () => {
-      const agent = new Agent({
-        role: makeRole(),
-        mission: makeMission(),
-      });
-      expect(agent.getSystemPrompt()).toBe(agent.renderInitialPrompt());
-    });
-
     it("omits empty background", () => {
       const agent = new Agent({
         role: makeRole(),

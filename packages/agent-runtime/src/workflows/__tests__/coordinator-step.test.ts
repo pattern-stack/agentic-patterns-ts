@@ -22,7 +22,6 @@ function subagent(name: string): AgentLike {
     role: { name },
     getModel: () => "mock",
     getTools: () => [],
-    getSystemPrompt: () => `you are ${name}`,
     renderInitialPrompt: () => `you are ${name}`,
   };
 }

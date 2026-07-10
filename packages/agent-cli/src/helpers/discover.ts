@@ -114,7 +114,7 @@ function isAgentShape(x: unknown): boolean {
  * `@agentic-patterns/runtime` `workflows/as-agent.ts`) alongside a full core
  * Agent. Same duck-type rationale as {@link isAgentShape}: `instanceof` is
  * unreliable across the built-`dist/` module boundary. `role:{name}` plus
- * `getModel`/`getSystemPrompt`/`renderInitialPrompt` all being functions is a
+ * `getModel`/`renderInitialPrompt` both being functions is a
  * fingerprint distinctive enough not to collide with a full core Agent (which
  * ALSO satisfies this — the two checks are non-exclusive, deliberately) or a
  * random object.
@@ -127,7 +127,6 @@ export function isAgentLikeShape(x: unknown): boolean {
     a.role !== null &&
     typeof (a.role as Record<string, unknown>).name === "string" &&
     typeof a.getModel === "function" &&
-    typeof a.getSystemPrompt === "function" &&
     typeof a.renderInitialPrompt === "function"
   );
 }

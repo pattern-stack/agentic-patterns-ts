@@ -67,7 +67,6 @@ function makeAgentLikeTarget(): AgentLike {
     role: { name: "target" },
     getModel: () => "target-model",
     getTools: () => [],
-    getSystemPrompt: () => "system",
     renderInitialPrompt: () => "",
   };
 }
@@ -306,7 +305,6 @@ describe("judgeScorer — T-J7 (injection seam)", () => {
       role: { name: "custom-judge" },
       getModel: () => "custom-model",
       getTools: () => [],
-      getSystemPrompt: () => "custom system",
       renderInitialPrompt: () => "",
     };
     const scorer = judgeScorer({ runner, model: "opus", agent: customAgent });

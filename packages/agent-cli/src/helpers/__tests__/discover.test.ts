@@ -66,12 +66,11 @@ describe("loadAgentsFromFile — accepted export shapes", () => {
 // ---------------------------------------------------------------------------
 
 describe("isAgentLikeShape", () => {
-  it("accepts an AgentLike-shaped object (role.name + getModel/getSystemPrompt/renderInitialPrompt)", () => {
+  it("accepts an AgentLike-shaped object (role.name + getModel/renderInitialPrompt)", () => {
     expect(
       isAgentLikeShape({
         role: { name: "Pipe" },
         getModel: () => "sonnet",
-        getSystemPrompt: () => "",
         renderInitialPrompt: () => "",
       }),
     ).toBe(true);

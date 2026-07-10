@@ -150,7 +150,7 @@ describe("buildWorkflowFromConfig", () => {
     const prompts: string[] = [];
     const runner: RunnerProtocol = {
       run: async (agent) => {
-        prompts.push(`${agent.getSystemPrompt()}\n${agent.renderInitialPrompt()}`);
+        prompts.push(`${agent.renderInitialPrompt()}\n${agent.renderInitialPrompt()}`);
         return {
           response: "ok",
           inputTokens: 0,

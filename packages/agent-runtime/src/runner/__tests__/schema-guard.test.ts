@@ -28,7 +28,6 @@ function makeAgent(overrides: Partial<AgentLike> = {}): AgentLike {
     role: { name: "test-agent" },
     getModel: () => "test-model",
     getTools: () => [],
-    getSystemPrompt: () => "You are a helpful assistant.",
     renderInitialPrompt: () => "You are a helpful assistant.",
     ...overrides,
   };

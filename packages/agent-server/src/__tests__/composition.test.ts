@@ -348,7 +348,6 @@ describe("GET /agents/:id/composition", () => {
     const legacyAgent = {
       getModel: () => "legacy-model",
       getTools: () => [],
-      getSystemPrompt: () => "Legacy prompt",
       renderInitialPrompt: () => "Legacy prompt",
       role: { name: "Legacy" },
     };

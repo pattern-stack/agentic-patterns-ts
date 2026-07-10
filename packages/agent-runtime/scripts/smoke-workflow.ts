@@ -49,7 +49,6 @@ function makeAgent(name: string, system: string): AgentLike {
     role: { name },
     getModel: () => "smoke-model",
     getTools: () => [],
-    getSystemPrompt: () => system,
     renderInitialPrompt: () => system,
   };
 }

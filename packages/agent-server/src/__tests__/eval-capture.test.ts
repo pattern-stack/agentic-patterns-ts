@@ -89,7 +89,6 @@ function makeConversationEntry(opts: { agentId: string; history: Exchange[] }): 
     role: { name: opts.agentId },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "stub",
     renderInitialPrompt: () => "stub",
   };
   const conversation = new Conversation(agent, new MockRunner(), { history: opts.history });

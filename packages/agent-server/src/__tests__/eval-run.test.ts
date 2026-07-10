@@ -84,7 +84,6 @@ function makeAgentLikeRegistration(id = "agent-fixture"): AgentRegistration {
     role: { name: id },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "You are a test agent.",
     renderInitialPrompt: () => "Initial prompt",
   };
   return { id, name: id, agent, runner: new MockRunner() };
@@ -103,7 +102,6 @@ function makeNestedAgentStepRegistration(id = "nested-pipeline"): AgentRegistrat
     role: { name: `${id}-inner` },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "inner",
     renderInitialPrompt: () => "inner prompt",
   };
   const agentStep = new AgentStep<string, string>({
@@ -784,7 +782,6 @@ describe("POST /eval/runs — model stamp", () => {
       role: { name: "undeclared-agent" },
       getModel: () => undefined,
       getTools: () => [],
-      getSystemPrompt: () => "no declared model",
       renderInitialPrompt: () => "prompt",
     };
     const target: AgentRegistration = {

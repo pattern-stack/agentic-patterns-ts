@@ -81,7 +81,6 @@ function makeAgentLikeTarget(id = "agent-fixture"): DiscoveredAgent {
     role: { name: id },
     getModel: () => "mock-model",
     getTools: () => [],
-    getSystemPrompt: () => "You are a test agent.",
     renderInitialPrompt: () => "Initial prompt",
   };
   return { id, name: id, agent, file: "/virtual/agent-fixture.ts" };

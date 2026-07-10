@@ -151,16 +151,6 @@ export class Role extends AgenticModel<typeof RoleSchema.shape> {
     const rendered = sections.map((s) => s.render()).filter((s) => s.length > 0);
     return [`# ${this.name}`, ...rendered].join("\n\n");
   }
-
-  /**
-   * Legacy alias for the section-composed prompt.
-   *
-   * @deprecated Use {@link toPrompt}. Retained through one release so the
-   * runner contract migrates in its own slice; scheduled for removal.
-   */
-  renderSystemPrompt(): string {
-    return this.toPrompt();
-  }
 }
 
 /**

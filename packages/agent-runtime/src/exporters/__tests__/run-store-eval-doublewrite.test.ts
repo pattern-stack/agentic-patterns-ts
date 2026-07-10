@@ -103,7 +103,6 @@ const fixtureAgent: AgentLike = {
   role: { name: "eval-fixture-agent" },
   getModel: () => "test-model",
   getTools: () => [],
-  getSystemPrompt: () => "You are a test agent.",
   renderInitialPrompt: () => "You are a test agent.",
 };
 
