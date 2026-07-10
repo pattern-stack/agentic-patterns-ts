@@ -91,7 +91,21 @@ stack**, using the old branch only as reference material:
   `getSystemPrompt()`/`renderSystemPrompt()` callers. Migration is one command:
   `bun scripts/migrate-to-camelcase.ts --keys --methods --write <dir>`.
   Known downstream repos (swe-brain, query-agent-poc, retrieval-agent) pin old
-  versions, so breakage is opt-in at upgrade time.
+  versions, so breakage is opt-in at upgrade time. The full rename map:
+
+  | old | new | old | new |
+  |---|---|---|---|
+  | `nats_url` | `natsUrl` | `access_method` | `accessMethod` |
+  | `agent_definition_id` | `agentDefinitionId` | `exploration_capabilities` | `explorationCapabilities` |
+  | `max_turns` | `maxTurns` | `team_context` | `teamContext` |
+  | `is_coordinator` | `isCoordinator` | `project_context` | `projectContext` |
+  | `env_vars` | `envVars` | `current_state` | `currentState` |
+  | `success_criteria` | `successCriteria` | `resource_profile` | `resourceProfile` |
+  | `output_schema` | `outputSchema` | `workspace_id` | `workspaceId` |
+  | `strict_output` | `strictOutput` | `inter_agency_transport` | `interAgencyTransport` |
+  | `escalation_triggers` | `escalationTriggers` | `accumulated_context` | `accumulatedContext` |
+  | `anti_patterns` | `antiPatterns` | `last_action` | `lastAction` |
+  | `max_attempts` | `maxAttempts` | *(methods)* `getSystemPrompt`→`renderInitialPrompt` | `renderSystemPrompt`→`toPrompt` |
 - **Every agent's rendered prompt changed shape** (intentional): `### Tone /
   ### Priorities / ### Principles` under Identity; `## Mission / ### Objective`
   subsections; `### Recovery` under Boundaries; Methodology block first;
@@ -99,9 +113,11 @@ stack**, using the old branch only as reference material:
   includes the mission `outputSchema` injection; runner prompts drop the
   `# <RoleName>` heading (matching what server previews always showed).
   Prompt-sensitive evals/baselines should expect drift.
-- Role previews (`role.toPrompt()`), runner prompts
-  (`renderInitialPrompt()`), and the composition endpoint's section list are
-  now the same text by construction — verified live against
+- Runner prompts (`renderInitialPrompt()`) and the composition endpoint's
+  section list are the same text by construction (the endpoint joins
+  `renderSections()`); role previews (`role.toPrompt()`) share the same
+  section formatters but render only the role half, under a `# <RoleName>`
+  heading, without Context/Mission. Verified live against
   `GET /agents/:id/composition` on the key-free playground.
 - The `build-on-agentic-patterns` skill (repo + plugin-template copies) now
   teaches the three knowledge slots and the single prompt path.
