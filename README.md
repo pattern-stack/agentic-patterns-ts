@@ -87,7 +87,7 @@ import { Mission } from "@agentic-patterns/core";
 
 const mission = new Mission({
   objective: "Analyze the provided dataset and produce a summary.",
-  success_criteria: [
+  successCriteria: [
     "Identify top 3 trends",
     "Include statistical backing",
   ],
@@ -106,7 +106,7 @@ const sourceQuality = new Judgment({
     "Prefer peer-reviewed sources",
     "Cross-reference statistics across multiple sources",
   ],
-  escalation_triggers: [
+  escalationTriggers: [
     "Contradictory data from equally credible sources",
   ],
 });
@@ -308,8 +308,8 @@ const agency = new Agency({
   name: "sales-team",
   description: "Coordinates lead research and outreach",
   agents: [
-    { role: "coordinator", is_coordinator: true, model: "claude-sonnet-4-20250514" },
-    { role: "researcher", is_coordinator: false, model: "claude-sonnet-4-20250514" },
+    { role: "coordinator", isCoordinator: true, model: "claude-sonnet-4-20250514" },
+    { role: "researcher", isCoordinator: false, model: "claude-sonnet-4-20250514" },
   ],
 });
 

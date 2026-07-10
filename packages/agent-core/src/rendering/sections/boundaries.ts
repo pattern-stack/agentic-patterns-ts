@@ -27,8 +27,8 @@ export class BoundariesSection implements PromptSection {
       if (j.data.constraints.length > 0) {
         constraints.push(...j.data.constraints);
       }
-      if (j.data.escalation_triggers.length > 0) {
-        escalations.push(...j.data.escalation_triggers);
+      if (j.data.escalationTriggers.length > 0) {
+        escalations.push(...j.data.escalationTriggers);
       }
     }
 

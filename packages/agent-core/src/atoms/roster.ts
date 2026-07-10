@@ -15,7 +15,7 @@ import { AgenticModel } from "./base.js";
 export const AgencyDeploymentSchema = z.object({
   agency: AgencyBaseSchema,
   isolated: z.boolean().default(false),
-  resource_profile: z.enum(["light", "standard", "heavy"]).default("standard"),
+  resourceProfile: z.enum(["light", "standard", "heavy"]).default("standard"),
 });
 
 export type AgencyDeploymentData = z.infer<typeof AgencyDeploymentSchema>;
@@ -29,7 +29,7 @@ export class AgencyDeployment extends AgenticModel<typeof AgencyDeploymentSchema
   }
 
   toPrompt(): string {
-    let line = `- ${this.data.agency.name} (profile: ${this.data.resource_profile})`;
+    let line = `- ${this.data.agency.name} (profile: ${this.data.resourceProfile})`;
     if (this.data.isolated) {
       line += " [isolated]";
     }
@@ -40,8 +40,8 @@ export class AgencyDeployment extends AgenticModel<typeof AgencyDeploymentSchema
 export const RosterBaseSchema = z.object({
   name: z.string().min(1),
   agencies: z.array(AgencyDeploymentSchema).default([]),
-  workspace_id: z.string().nullable().default(null),
-  inter_agency_transport: TransportConfigSchema.default({ type: "nats" }),
+  workspaceId: z.string().nullable().default(null),
+  interAgencyTransport: TransportConfigSchema.default({ type: "nats" }),
 });
 
 export type RosterData = z.infer<typeof RosterBaseSchema>;
@@ -81,14 +81,14 @@ export class Roster extends AgenticModel<typeof RosterBaseSchema.shape> {
   /** All coordinators across all agencies. */
   get coordinators(): z.infer<typeof AgentSpecSchema>[] {
     return this.data.agencies
-      .map((d) => d.agency.agents.find((a) => a.is_coordinator))
+      .map((d) => d.agency.agents.find((a) => a.isCoordinator))
       .filter((c): c is z.infer<typeof AgentSpecSchema> => c !== undefined);
   }
 
   toPrompt(): string {
     const lines: string[] = [`# Roster: ${this.data.name}`];
-    if (this.data.workspace_id) {
-      lines.push(`Workspace: ${this.data.workspace_id}`);
+    if (this.data.workspaceId) {
+      lines.push(`Workspace: ${this.data.workspaceId}`);
     }
     lines.push("");
 
@@ -100,7 +100,7 @@ export class Roster extends AgenticModel<typeof RosterBaseSchema.shape> {
       lines.push("");
     }
 
-    lines.push(new TransportConfig(this.data.inter_agency_transport).toPrompt());
+    lines.push(new TransportConfig(this.data.interAgencyTransport).toPrompt());
     return lines.join("\n");
   }
 }

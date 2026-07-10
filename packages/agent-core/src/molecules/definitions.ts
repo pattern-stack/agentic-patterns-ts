@@ -11,14 +11,14 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 /** A step in a procedure or process. */
-export const WorkflowStepSchema = z.object({
+export const WorkflowStepDefinitionSchema = z.object({
   key: z.string(),
   name: z.string(),
   description: z.string(),
   nextSteps: z.array(z.string()).default([]),
   requires: z.array(z.string()).default([]),
 });
-export type WorkflowStep = Readonly<z.infer<typeof WorkflowStepSchema>>;
+export type WorkflowStepDefinition = Readonly<z.infer<typeof WorkflowStepDefinitionSchema>>;
 
 /** A constraint or guardrail for tool usage. */
 export const RuleDefinitionSchema = z.object({

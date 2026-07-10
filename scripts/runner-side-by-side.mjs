@@ -149,7 +149,7 @@ function buildResearchAnalyst() {
     .withMission(
       new Mission({
         objective: "Answer the user's question correctly using whatever tools are available",
-        success_criteria: [
+        successCriteria: [
           "Correct answer",
           "Tools used to verify computations and lookups",
           "Clear explanation of any limits encountered",

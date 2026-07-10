@@ -169,7 +169,7 @@ export function buildTodoAgent() {
 
   const mission = new Mission({
     objective: "Help users manage their task lists efficiently using the provided tools",
-    success_criteria: [
+    successCriteria: [
       "Tasks created and tracked accurately",
       "Tools used appropriately for all operations",
     ],

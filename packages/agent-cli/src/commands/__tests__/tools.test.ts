@@ -77,7 +77,7 @@ function buildEchoAgent(): DiscoveredAgent {
     .withMission(
       new Mission({
         objective: "Echo input verbatim",
-        success_criteria: ["round-trip"],
+        successCriteria: ["round-trip"],
       }),
     )
     .build();

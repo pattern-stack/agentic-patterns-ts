@@ -11,7 +11,7 @@ export const JudgmentSchema = z.object({
   domain: z.string(),
   heuristics: z.array(z.string()).default([]),
   constraints: z.array(z.string()).default([]),
-  escalation_triggers: z.array(z.string()).default([]),
+  escalationTriggers: z.array(z.string()).default([]),
   examples: z.array(ExampleSchema).default([]),
 });
 
@@ -39,9 +39,9 @@ export class Judgment extends AgenticModel<typeof JudgmentSchema.shape> {
         lines.push(`- ${c}`);
       }
     }
-    if (this.data.escalation_triggers.length > 0) {
+    if (this.data.escalationTriggers.length > 0) {
       lines.push("\n**Escalate to human when:**");
-      for (const t of this.data.escalation_triggers) {
+      for (const t of this.data.escalationTriggers) {
         lines.push(`- ${t}`);
       }
     }
@@ -72,7 +72,7 @@ export class Judgment extends AgenticModel<typeof JudgmentSchema.shape> {
   /** Add escalation triggers to this judgment. */
   withEscalation(triggers: string[]): Judgment {
     return this.replace({
-      escalation_triggers: [...this.data.escalation_triggers, ...triggers],
+      escalationTriggers: [...this.data.escalationTriggers, ...triggers],
     });
   }
 

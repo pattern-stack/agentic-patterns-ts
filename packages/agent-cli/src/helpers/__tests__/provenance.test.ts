@@ -27,7 +27,7 @@ const LIB_MODULE = `export const CONTEXT_JUDGMENT = Object.freeze({
     domain: "library_context",
     heuristics: ["prefer the library's framing"],
     constraints: [],
-    escalation_triggers: [],
+    escalationTriggers: [],
     examples: [],
   }),
   toPrompt() {
@@ -66,7 +66,7 @@ function judgmentLike(domain: string, heuristics: string[]): unknown {
       domain,
       heuristics,
       constraints: [],
-      escalation_triggers: [],
+      escalationTriggers: [],
       examples: [],
     }),
     toPrompt: () => "",

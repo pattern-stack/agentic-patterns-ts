@@ -165,7 +165,7 @@ const coveredAwareness = new Awareness({
     {
       name: "Filesystem",
       description: "Local files reachable via file-tools",
-      access_method: "read_file",
+      accessMethod: "read_file",
     },
   ],
 });
@@ -175,7 +175,7 @@ const unreachableAwareness = new Awareness({
     {
       name: "CRM records",
       description: "Customer data in Salesforce",
-      access_method: "salesforce_api",
+      accessMethod: "salesforce_api",
     },
   ],
 });
@@ -183,7 +183,7 @@ const unreachableAwareness = new Awareness({
 const agentAlpha = new Agent({
   role: researcherRole,
   awareness: coveredAwareness,
-  background: new Background({ team_context: { team: "research" } }),
+  background: new Background({ teamContext: { team: "research" } }),
   mission: new Mission({ objective: "Summarize the corpus" }),
   model: "claude-opus-4-20250514",
 });
@@ -316,7 +316,7 @@ describe("GET /agents/:id/composition", () => {
     expect(curationCap.playbook).toEqual({ plays: ["archive_stale"] });
 
     // Instantiation delta
-    expect(body.instance.background.team_context).toEqual({ team: "research" });
+    expect(body.instance.background.teamContext).toEqual({ team: "research" });
     expect(body.instance.mission.objective).toBe("Summarize the corpus");
     expect(body.instance.modelOverride).toBe("claude-opus-4-20250514");
   });
@@ -525,7 +525,7 @@ describe("GET /roles/:id", () => {
     expect(alpha.mission.objective).toBe("Summarize the corpus");
     expect(alpha.awareness.domains).toHaveLength(1);
     expect(beta.model).toBe("claude-sonnet-4-20250514");
-    expect(beta.background.team_context).toEqual({});
+    expect(beta.background.teamContext).toEqual({});
   });
 });
 
@@ -654,7 +654,7 @@ describe("POST /agents/:id/composition/delivered", () => {
       role: researcherRole,
       awareness: coveredAwareness,
       background: new Background({
-        current_state: {
+        currentState: {
           FIELD_CATALOG: "outcome ∈ {won | lost}",
           TENANT: context?.organizationId ?? "unscoped",
         },
@@ -729,8 +729,8 @@ describe("POST /agents/:id/composition/delivered", () => {
     expect(body.delivered).toBe(true);
     expect(body.context).toEqual({ organizationId: "org-42" });
     // The delivered instance's LIVE background — not the declared agent's.
-    expect(body.instance.background.current_state.TENANT).toBe("org-42");
-    expect(body.instance.background.current_state.FIELD_CATALOG).toBe("outcome ∈ {won | lost}");
+    expect(body.instance.background.currentState.TENANT).toBe("org-42");
+    expect(body.instance.background.currentState.FIELD_CATALOG).toBe("outcome ∈ {won | lost}");
     // Full composition payload shape rides along.
     expect(body.prompt.sections.length).toBeGreaterThan(0);
     expect(body.role.name).toBe("Researcher");
@@ -747,7 +747,7 @@ describe("POST /agents/:id/composition/delivered", () => {
     const body = (await res.json()) as any;
     expect(received).toEqual([{ context: { organizationId: "org-default" } }]);
     expect(body.context).toEqual({ organizationId: "org-default" });
-    expect(body.instance.background.current_state.TENANT).toBe("org-default");
+    expect(body.instance.background.currentState.TENANT).toBe("org-default");
   });
 
   it("rejects a non-object context with 400", async () => {

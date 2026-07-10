@@ -162,7 +162,7 @@ export function buildCalculatorAgent() {
 
   const mission = new Mission({
     objective: "Help users with math calculations, compound operations, and numerical reasoning",
-    success_criteria: [
+    successCriteria: [
       "Correct answers verified by tool use",
       "Work shown step by step",
       "Tools used for every calculation",

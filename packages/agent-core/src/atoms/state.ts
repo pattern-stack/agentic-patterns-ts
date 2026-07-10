@@ -21,8 +21,8 @@ export const PhaseEnum = z.enum([Phase.PLANNING, Phase.EXECUTING, Phase.BLOCKED,
 export const StateSchema = z.object({
   iteration: z.number().int().min(0).default(0),
   phase: PhaseEnum.default(Phase.PLANNING),
-  accumulated_context: z.record(z.unknown()).default({}),
-  last_action: z.string().nullable().default(null),
+  accumulatedContext: z.record(z.unknown()).default({}),
+  lastAction: z.string().nullable().default(null),
 });
 
 export type StateData = z.infer<typeof StateSchema>;
@@ -44,39 +44,24 @@ export class State extends AgenticModel<typeof StateSchema.shape> {
       `Iteration: ${this.data.iteration}`,
       `Phase: ${this.data.phase}`,
     ];
-    if (this.data.last_action) {
-      lines.push(`Last action: ${this.data.last_action}`);
+    if (this.data.lastAction) {
+      lines.push(`Last action: ${this.data.lastAction}`);
     }
     return lines.join("\n");
   }
 
   /** Return new State with updated phase. */
   withPhase(phase: Phase): State {
-    return new State({
-      iteration: this.data.iteration,
-      phase,
-      accumulated_context: { ...this.data.accumulated_context },
-      last_action: this.data.last_action,
-    });
+    return this.replace({ phase });
   }
 
   /** Return new State with updated iteration. */
   withIteration(iteration: number): State {
-    return new State({
-      iteration,
-      phase: this.data.phase,
-      accumulated_context: { ...this.data.accumulated_context },
-      last_action: this.data.last_action,
-    });
+    return this.replace({ iteration });
   }
 
   /** Return new State with updated last action. */
   withAction(action: string): State {
-    return new State({
-      iteration: this.data.iteration,
-      phase: this.data.phase,
-      accumulated_context: { ...this.data.accumulated_context },
-      last_action: action,
-    });
+    return this.replace({ lastAction: action });
   }
 }

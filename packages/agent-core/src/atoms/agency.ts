@@ -9,8 +9,8 @@ import { Judgment, JudgmentSchema } from "./judgment.js";
 import { Persona, PersonaSchema } from "./persona.js";
 
 export const TransportConfigSchema = z.object({
-  type: z.string().default("in_process"),
-  nats_url: z.string().default("nats://localhost:4222"),
+  type: z.enum(["in_process", "nats"]).default("in_process"),
+  natsUrl: z.string().default("nats://localhost:4222"),
 });
 
 export type TransportConfigData = z.infer<typeof TransportConfigSchema>;
@@ -25,7 +25,7 @@ export class TransportConfig extends AgenticModel<typeof TransportConfigSchema.s
 
   toPrompt(): string {
     if (this.data.type === "nats") {
-      return `Transport: NATS (${this.data.nats_url})`;
+      return `Transport: NATS (${this.data.natsUrl})`;
     }
     return `Transport: ${this.data.type}`;
   }
@@ -33,13 +33,13 @@ export class TransportConfig extends AgenticModel<typeof TransportConfigSchema.s
 
 export const AgentSpecSchema = z.object({
   role: z.string().min(1),
-  agent_definition_id: z.string().nullable().default(null),
+  agentDefinitionId: z.string().nullable().default(null),
   persona: PersonaSchema.nullable().default(null),
   judgment: JudgmentSchema.nullable().default(null),
   model: z.string().optional(),
-  max_turns: z.number().int().positive().default(10),
+  maxTurns: z.number().int().positive().default(10),
   capabilities: z.array(z.string()).default([]),
-  is_coordinator: z.boolean().default(false),
+  isCoordinator: z.boolean().default(false),
 });
 
 export type AgentSpecData = z.infer<typeof AgentSpecSchema>;
@@ -57,8 +57,8 @@ export class AgentSpec extends AgenticModel<typeof AgentSpecSchema.shape> {
     if (this.data.model !== undefined) {
       lines.push(`Model: ${this.data.model}`);
     }
-    lines.push(`Max turns: ${this.data.max_turns}`);
-    if (this.data.is_coordinator) {
+    lines.push(`Max turns: ${this.data.maxTurns}`);
+    if (this.data.isCoordinator) {
       lines.push("Role: **Coordinator**");
     }
     if (this.data.capabilities.length > 0) {
@@ -82,7 +82,7 @@ export const AgencyBaseSchema = z.object({
   description: z.string().default(""),
   agents: z.array(AgentSpecSchema).min(1),
   transport: TransportConfigSchema.default({}),
-  env_vars: z.record(z.string()).default({}),
+  envVars: z.record(z.string()).default({}),
 });
 
 export type AgencyData = z.infer<typeof AgencyBaseSchema>;
@@ -91,7 +91,7 @@ export type AgencyData = z.infer<typeof AgencyBaseSchema>;
  * Self-contained group of agents with a coordinator.
  *
  * Validates:
- * - Exactly one agent must have is_coordinator=true
+ * - Exactly one agent must have isCoordinator=true
  * - Agent roles must be unique within the agency
  */
 export class Agency extends AgenticModel<typeof AgencyBaseSchema.shape> {
@@ -102,7 +102,7 @@ export class Agency extends AgenticModel<typeof AgencyBaseSchema.shape> {
   }
 
   private _validate(): void {
-    const coordinators = this.data.agents.filter((a) => a.is_coordinator);
+    const coordinators = this.data.agents.filter((a) => a.isCoordinator);
     if (coordinators.length !== 1) {
       throw new Error(`Agency must have exactly one coordinator, found ${coordinators.length}`);
     }
@@ -117,14 +117,14 @@ export class Agency extends AgenticModel<typeof AgencyBaseSchema.shape> {
     }
   }
 
-  /** Find the agent with is_coordinator=true. */
+  /** Find the agent with isCoordinator=true. */
   get coordinator(): AgentSpecData | undefined {
-    return this.data.agents.find((a) => a.is_coordinator);
+    return this.data.agents.find((a) => a.isCoordinator);
   }
 
-  /** Agents where is_coordinator=false. */
+  /** Agents where isCoordinator=false. */
   get internalAgents(): AgentSpecData[] {
-    return this.data.agents.filter((a) => !a.is_coordinator);
+    return this.data.agents.filter((a) => !a.isCoordinator);
   }
 
   toPrompt(): string {

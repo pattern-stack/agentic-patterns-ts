@@ -25,7 +25,7 @@ function makeJudgment(): Judgment {
     domain: "prioritization",
     heuristics: ["High impact first", "Unblock others"],
     constraints: ["Never skip testing"],
-    escalation_triggers: ["Budget exceeded"],
+    escalationTriggers: ["Budget exceeded"],
     examples: [
       {
         scenario: "Two tasks compete for resources",

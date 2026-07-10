@@ -7,13 +7,13 @@ import {
   RuleDefinitionSchema,
   StateDefinitionSchema,
   TemplateDefinitionSchema,
-  WorkflowStepSchema,
+  WorkflowStepDefinitionSchema,
 } from "../definitions.js";
 
 describe("Definition Schemas", () => {
-  describe("WorkflowStepSchema", () => {
+  describe("WorkflowStepDefinitionSchema", () => {
     it("parses valid input", () => {
-      const step = WorkflowStepSchema.parse({
+      const step = WorkflowStepDefinitionSchema.parse({
         key: "verify",
         name: "Verify Identity",
         description: "Check user identity",
@@ -24,7 +24,7 @@ describe("Definition Schemas", () => {
     });
 
     it("rejects missing required fields", () => {
-      expect(() => WorkflowStepSchema.parse({ key: "x" })).toThrow();
+      expect(() => WorkflowStepDefinitionSchema.parse({ key: "x" })).toThrow();
     });
   });
 

@@ -38,7 +38,7 @@ function makeRole(): Role {
   const judgment = new Judgment({
     domain: "code_quality",
     constraints: ["No direct DB access"],
-    escalation_triggers: ["Security vulnerability found"],
+    escalationTriggers: ["Security vulnerability found"],
     heuristics: ["Check edge cases"],
     examples: [
       {
@@ -69,21 +69,21 @@ function makeRole(): Role {
 function makeMission(): Mission {
   return new Mission({
     objective: "Review PR #42",
-    success_criteria: ["All issues flagged", "No false positives"],
+    successCriteria: ["All issues flagged", "No false positives"],
     constraints: ["Complete within 30 minutes"],
   });
 }
 
 function makeBackground(): Background {
   return new Background({
-    team_context: { team: "Platform", sprint: "Q1-S3" },
-    project_context: { name: "agentic-patterns" },
+    teamContext: { team: "Platform", sprint: "Q1-S3" },
+    projectContext: { name: "agentic-patterns" },
   });
 }
 
 function makeAwareness(): Awareness {
   return new Awareness({
-    domains: [{ name: "GitHub", description: "Repos and PRs", access_method: "API" }],
+    domains: [{ name: "GitHub", description: "Repos and PRs", accessMethod: "API" }],
   });
 }
 
@@ -327,7 +327,7 @@ describe("Agent", () => {
       const state = new State({
         iteration: 3,
         phase: Phase.EXECUTING,
-        last_action: "Reviewed utils.ts",
+        lastAction: "Reviewed utils.ts",
       });
 
       const prompt = agent.renderContinuationPrompt(state);
@@ -351,7 +351,7 @@ describe("Agent", () => {
       const state = new State({
         iteration: 5,
         phase: Phase.FINISHING,
-        last_action: "Final review complete",
+        lastAction: "Final review complete",
       });
       expect(agent.renderContinuationPrompt(state)).toMatchSnapshot();
     });
@@ -414,7 +414,7 @@ describe("Integration: atoms -> molecules -> organisms", () => {
       domain: "infrastructure",
       heuristics: ["Prefer managed services", "Automate everything"],
       constraints: ["Never store secrets in code"],
-      escalation_triggers: ["Production outage"],
+      escalationTriggers: ["Production outage"],
     });
     const responsibility = new Responsibility({
       key: "deploy",
@@ -423,13 +423,13 @@ describe("Integration: atoms -> molecules -> organisms", () => {
     });
     const mission = new Mission({
       objective: "Set up staging environment",
-      success_criteria: ["All services running", "Monitoring enabled"],
+      successCriteria: ["All services running", "Monitoring enabled"],
     });
     const background = new Background({
-      project_context: { cloud: "AWS", region: "us-east-1" },
+      projectContext: { cloud: "AWS", region: "us-east-1" },
     });
     const awareness = new Awareness({
-      domains: [{ name: "AWS Console", description: "Cloud resources", access_method: "SDK" }],
+      domains: [{ name: "AWS Console", description: "Cloud resources", accessMethod: "SDK" }],
     });
 
     // Molecules

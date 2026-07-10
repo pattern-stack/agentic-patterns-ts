@@ -107,7 +107,7 @@ function buildMathAgent() {
 
   const mission = new Mission({
     objective: "Help users with math calculations using the provided tools",
-    success_criteria: ["Correct answers", "Tools used appropriately"],
+    successCriteria: ["Correct answers", "Tools used appropriately"],
   });
 
   return new AgentBuilder(role).withMission(mission).build();

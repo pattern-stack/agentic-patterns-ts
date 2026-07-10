@@ -40,7 +40,7 @@ describe("IdentitySection", () => {
       name: "Professional",
       prompt: "Be formal and precise.",
       examples: [["Good", "I recommend..."]],
-      anti_patterns: ["Hey there!"],
+      antiPatterns: ["Hey there!"],
     });
     const section = new IdentitySection(persona, [], tone);
     const result = section.render();
@@ -104,7 +104,7 @@ describe("BoundariesSection", () => {
     const judgment = new Judgment({
       domain: "security",
       constraints: ["Never expose secrets", "No SQL injection"],
-      escalation_triggers: ["Unknown vulnerability type"],
+      escalationTriggers: ["Unknown vulnerability type"],
     });
     const section = new BoundariesSection([judgment]);
     const result = section.render();
@@ -122,7 +122,7 @@ describe("BoundariesSection", () => {
     });
     const j2 = new Judgment({
       domain: "compliance",
-      escalation_triggers: ["Legal review needed"],
+      escalationTriggers: ["Legal review needed"],
     });
     const section = new BoundariesSection([j1, j2]);
     const result = section.render();
@@ -145,7 +145,7 @@ describe("BoundariesSection", () => {
     const judgment = new Judgment({
       domain: "security",
       constraints: ["Never expose API keys", "No direct DB access"],
-      escalation_triggers: ["Potential data breach", "Compliance violation"],
+      escalationTriggers: ["Potential data breach", "Compliance violation"],
     });
     const section = new BoundariesSection([judgment]);
     expect(section.render()).toMatchSnapshot();
@@ -155,7 +155,7 @@ describe("BoundariesSection", () => {
 describe("ContextSection", () => {
   it("renders background", () => {
     const bg = new Background({
-      team_context: { team: "Platform" },
+      teamContext: { team: "Platform" },
     });
     const section = new ContextSection(bg);
     const result = section.render();
@@ -165,7 +165,7 @@ describe("ContextSection", () => {
 
   it("renders awareness", () => {
     const awareness = new Awareness({
-      domains: [{ name: "GitHub", description: "Code repos", access_method: "API" }],
+      domains: [{ name: "GitHub", description: "Code repos", accessMethod: "API" }],
     });
     const section = new ContextSection(undefined, awareness);
     const result = section.render();
@@ -200,7 +200,7 @@ describe("MissionSection", () => {
   it("renders success criteria and constraints", () => {
     const mission = new Mission({
       objective: "Build feature X",
-      success_criteria: ["All tests pass", "No regressions"],
+      successCriteria: ["All tests pass", "No regressions"],
       constraints: ["Use existing APIs only"],
     });
     const section = new MissionSection(mission);
@@ -230,7 +230,7 @@ describe("MissionSection", () => {
   it("snapshot: full mission section", () => {
     const mission = new Mission({
       objective: "Implement the rendering layer for TypeScript port",
-      success_criteria: ["All sections render correctly", "Snapshot tests pass"],
+      successCriteria: ["All sections render correctly", "Snapshot tests pass"],
       constraints: ["Match Python output exactly"],
       rationale: "Required for agent prompt composition",
     });
@@ -319,7 +319,7 @@ describe("StateSection", () => {
     const state = new State({
       iteration: 3,
       phase: Phase.EXECUTING,
-      last_action: "Reviewed file.ts",
+      lastAction: "Reviewed file.ts",
     });
     const section = new StateSection(state);
     const result = section.render();
