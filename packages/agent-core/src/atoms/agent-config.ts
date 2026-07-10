@@ -96,10 +96,13 @@ export class AgentConfig extends AgenticModel<typeof AgentConfigSchema.shape> {
     if (this.data.capabilities.length > 0) {
       lines.push(`Capabilities: ${this.data.capabilities.join(", ")}`);
     }
-    lines.push("", new Persona(rt.persona).toPrompt());
-    if (rt.tone) {
-      lines.push("", new Tone(rt.tone).toPrompt());
-    }
+    // Persona owns tone rendering — the same seam `IdentitySection` delegates
+    // to. Passing the Tone object renders it once under `### Tone`; absent it,
+    // the persona falls back to its plain-string tone. Previously the persona
+    // rendered its plain-string tone AND a second flat Tone block was appended,
+    // double-rendering tone whenever both were set (#221).
+    const tone = rt.tone ? new Tone(rt.tone) : undefined;
+    lines.push("", new Persona(rt.persona).toPrompt({ tone }));
     if (rt.methodology) {
       lines.push("", new Methodology(rt.methodology).toPrompt());
     }
