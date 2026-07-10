@@ -478,3 +478,93 @@
 .chat-root .md-table tbody tr:hover td {
   background: var(--fill-2);
 }
+
+/* ── human-input request (approval / select / text) ────────────────────────── */
+.chat-approval {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line));
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+.chat-approval.resolved {
+  border-left-color: var(--mute);
+  background: var(--paper);
+  opacity: 0.85;
+}
+.chat-approval .approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fz-small);
+  color: var(--ink);
+}
+.chat-approval .approval-prompt {
+  font-weight: 600;
+}
+.chat-approval .approval-tool {
+  font-family: var(--font-mono);
+  font-size: var(--fz-tiny);
+  color: var(--accent-ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+}
+.chat-approval .approval-args {
+  margin-top: 8px;
+}
+.chat-approval .approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.chat-approval .approval-btn {
+  font: inherit;
+  font-size: var(--fz-small);
+  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--line));
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+}
+.chat-approval .approval-btn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.chat-approval .approval-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.chat-approval .approval-btn.approve {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  border-color: var(--accent);
+}
+.chat-approval .approval-btn.deny {
+  border-color: color-mix(in oklch, var(--err) 40%, var(--line));
+  color: var(--err);
+}
+.chat-approval .approval-input {
+  font: inherit;
+  flex: 1;
+  min-width: 160px;
+  padding: 5px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+}
+.chat-approval .approval-resolved {
+  margin-top: 8px;
+  font-size: var(--fz-small);
+  color: var(--ink-2);
+}
+.chat-approval .approval-readonly {
+  margin-top: 8px;
+  font-size: var(--fz-tiny);
+  color: var(--mute);
+}

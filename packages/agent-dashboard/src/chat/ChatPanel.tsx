@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import "./chat.css";
 import { ChatComposer } from "./ChatComposer";
 import { MessageRow } from "./MessageRow";
+import { InputResponderContext, type RespondInput } from "./input-responder";
 import type { ChatMessage } from "./model";
 
 export interface ChatPanelProps {
@@ -29,6 +30,11 @@ export interface ChatPanelProps {
   /** Provide to render the composer + drive sends. Omit for a read-only thread. */
   onSend?: (text: string) => void;
   onAbort?: () => void;
+  /**
+   * Provide to answer inline `input_request` cards (approval gates / tool
+   * asks). Omit on read-only surfaces (session replay) — cards render inert.
+   */
+  onRespondInput?: RespondInput;
   streaming?: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -44,6 +50,7 @@ export function ChatPanel({
   emptyLabel = "No messages yet.",
   onSend,
   onAbort,
+  onRespondInput,
   streaming,
   disabled,
   placeholder,
@@ -74,13 +81,15 @@ export function ChatPanel({
 
   return (
     <div className={`chat-root ${size}${fill ? " fill" : ""}`} style={{ position: "relative" }}>
-      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
-        {messages.length === 0 ? (
-          <div className="chat-empty">{emptyLabel}</div>
-        ) : (
-          messages.map((m) => <MessageRow key={m.id} message={m} assistantName={assistantName} />)
-        )}
-      </div>
+      <InputResponderContext.Provider value={onRespondInput ?? null}>
+        <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
+          {messages.length === 0 ? (
+            <div className="chat-empty">{emptyLabel}</div>
+          ) : (
+            messages.map((m) => <MessageRow key={m.id} message={m} assistantName={assistantName} />)
+          )}
+        </div>
+      </InputResponderContext.Provider>
       {!stuck && messages.length > 0 && (
         <button type="button" className="chat-jump" onClick={jump}>
           ↓ latest

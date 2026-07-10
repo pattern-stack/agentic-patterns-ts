@@ -2,7 +2,7 @@
  * SSE (Server-Sent Events) formatter for agent events.
  *
  * Converts internal AgentEvent types to SSE-formatted strings for streaming
- * to clients over HTTP. Maps all 20 canonical events via a single typed
+ * to clients over HTTP. Maps all 21 canonical events via a single typed
  * discriminated-union switch (`toSSEMapping`) so event name, payload, and
  * exhaustiveness live in one place.
  */
@@ -14,7 +14,7 @@ import type { AgentEvent, AgentEventType } from "../events/types.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Client-facing SSE event name. Matches the 20 canonical events defined in
+ * Client-facing SSE event name. Matches the 21 canonical events defined in
  * the admin-observability spec. Used anywhere an SSE frame is produced so
  * the compiler catches typos like `"thinking.complete"` vs `"thinking"`.
  */
@@ -25,6 +25,7 @@ export type SSEEventName =
   | "message.delta"
   | "message.complete"
   | "message.cancel"
+  | "input.request"
   | "thinking.start"
   | "thinking"
   | "thinking.complete"
@@ -94,6 +95,18 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
       };
     case "agent.message.cancel":
       return { name: "message.cancel", payload: { reason: event.reason } };
+    case "agent.input.request": {
+      const payload: Record<string, unknown> = {
+        correlation_id: event.correlationId,
+        kind: event.kind,
+        prompt: event.prompt,
+      };
+      if (event.options !== undefined) payload.options = event.options;
+      if (event.toolName !== undefined) payload.tool_name = event.toolName;
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      if (event.arguments !== undefined) payload.arguments = event.arguments;
+      return { name: "input.request", payload };
+    }
     case "agent.thinking.start":
       return { name: "thinking.start", payload: {} };
     case "agent.reasoning":
@@ -259,6 +272,7 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.message.chunk": "message.delta",
   "agent.message.complete": "message.complete",
   "agent.message.cancel": "message.cancel",
+  "agent.input.request": "input.request",
   "agent.thinking.start": "thinking.start",
   "agent.reasoning": "thinking",
   "agent.tool.intent": "tool.intent",

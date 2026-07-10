@@ -359,6 +359,7 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.message.chunk":
       case "agent.reasoning":
       case "agent.thinking.start":
+      case "agent.input.request":
       case "agent.tool.intent":
       case "agent.tool.rejected":
       case "agent.tool.progress":

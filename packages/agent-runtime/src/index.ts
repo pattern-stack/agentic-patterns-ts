@@ -9,6 +9,7 @@ export type { EvalSplit } from "./eval/types.js";
 
 export * from "./events/index.js";
 export * from "./gates/index.js";
+export * from "./interaction/index.js";
 export * from "./runner/index.js";
 export * from "./transport/index.js";
 export * from "./runtime/index.js";

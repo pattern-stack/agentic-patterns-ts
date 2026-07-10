@@ -10,6 +10,8 @@ export type {
   MessageChunkEvent,
   MessageCompleteEvent,
   MessageCancelEvent,
+  InputRequestEvent,
+  HumanInputKind,
   ReasoningEvent,
   ThinkingStartEvent,
   ToolCallIntent,

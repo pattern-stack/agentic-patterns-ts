@@ -229,6 +229,7 @@ export function ChatPage() {
               assistantName={selected?.name ?? "agent"}
               onSend={viewing ? undefined : chat.send}
               onAbort={viewing ? undefined : chat.abort}
+              onRespondInput={viewing ? undefined : chat.respondInput}
               disabled={!selected}
               emptyLabel={
                 viewing

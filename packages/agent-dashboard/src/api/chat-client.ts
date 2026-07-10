@@ -72,6 +72,33 @@ export async function fetchAgentComposition(agentId: string): Promise<AgentCompo
   return res.json() as Promise<AgentCompositionDetail>;
 }
 
+/**
+ * Answer a human-in-the-loop `input.request` — the return leg that unblocks a
+ * run stalled on an approval gate (or a tool asking the user to pick / type).
+ * `correlationId` echoes the request; a bare-deny or approve/value is posted to
+ * `POST /conversations/:id/input`.
+ */
+export async function sendInputResponse(
+  conversationId: string,
+  correlationId: string,
+  answer: { decision: "approve" | "deny"; value?: string },
+): Promise<void> {
+  const res = await fetch(`/conversations/${encodeURIComponent(conversationId)}/input`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      correlation_id: correlationId,
+      decision: answer.decision,
+      ...(answer.value !== undefined ? { value: answer.value } : {}),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(
+      `POST /conversations/${conversationId}/input failed: ${res.status} ${res.statusText}`,
+    );
+  }
+}
+
 /** Create a new conversation with a given agent. */
 export async function createConversation(agentId: string): Promise<ConversationCreated> {
   const res = await fetch("/conversations", {

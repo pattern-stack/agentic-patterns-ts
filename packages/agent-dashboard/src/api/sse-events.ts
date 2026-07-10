@@ -23,6 +23,18 @@ export type ClientEvent =
       };
     }
   | { name: "message.cancel"; data: { reason: string } }
+  | {
+      name: "input.request";
+      data: {
+        correlation_id: string;
+        kind: "approval" | "select" | "text";
+        prompt: string;
+        options?: string[];
+        tool_name?: string;
+        tool_call_id?: string;
+        arguments?: unknown;
+      };
+    }
   | { name: "thinking.start"; data: Record<string, never> }
   | { name: "thinking"; data: { content: string } }
   | { name: "thinking.complete"; data: { content: string } }

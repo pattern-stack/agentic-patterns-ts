@@ -206,6 +206,42 @@ export interface MessageCancelEvent extends BaseEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Human-input request event
+// ---------------------------------------------------------------------------
+// Emitted when a run BLOCKS awaiting a human decision — an approval gate on a
+// destructive tool, or a tool asking the user to pick / type. It is published
+// on the bus (not yielded by the runner) so a per-conversation transport
+// subscription can deliver it into the live chat stream WHILE the run is
+// blocked, then resolve the block out-of-band via a correlation id. The client
+// echoes `correlationId` back to unblock the run (see `PendingInputRegistry`).
+
+/** What kind of input a run is blocked on. */
+export type HumanInputKind = "approval" | "select" | "text";
+
+export interface InputRequestEvent extends BaseEvent {
+  readonly type: "agent.input.request";
+  /**
+   * Unique id the client echoes back to resolve THIS request. For gate-driven
+   * approvals it is the guarded tool call's `toolCallId` (so the runner's
+   * double gate-check dedupes to one prompt); a tool-driven ask supplies its
+   * own.
+   */
+  readonly correlationId: string;
+  /** Which affordance to render: approve/deny, pick-one, or free text. */
+  readonly kind: HumanInputKind;
+  /** Human-facing prompt to render. */
+  readonly prompt: string;
+  /** For `kind: "select"` — the options to choose among. */
+  readonly options?: readonly string[];
+  /** The guarded tool (approval), when this request gates a tool call. */
+  readonly toolName?: string;
+  /** The guarded tool call's id, when applicable (equals `correlationId` for gate approvals). */
+  readonly toolCallId?: string;
+  /** The guarded tool call's arguments, for prompt context. */
+  readonly arguments?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Thinking lifecycle events
 // ---------------------------------------------------------------------------
 
@@ -248,6 +284,7 @@ export type AgentEvent =
   | MessageChunkEvent
   | MessageCompleteEvent
   | MessageCancelEvent
+  | InputRequestEvent
   | ReasoningEvent
   | ThinkingStartEvent
   | ToolCallIntent
