@@ -95,6 +95,19 @@ Owner feedback on v2, verbatim: *"I don't really understand what 'state' is — 
 - **Footer in receipt language**: healthy `✓ matches all write receipts`; mismatch `⚠ receipts disagree — receipts say 6, scratchpad shows 5`; derived `rebuilt from 2 drop receipts`.
 - **Teaching lifecycle, no state machine**: the empty state is the lesson (orientation line "What this run carries between stages.", the rail↔timeline contract line, three caption skeletons with one-line explainers that dissolve at first write); hover carries depth only; at steady state the captions themselves are the teaching. Permanent cost vs v2: ~40px (two caption lines + header suffix + "saved" suffix). Rejected: per-user graduation state machines, "got it" buttons, "?" pills, legend panels.
 
+### Language rule: "drop" always takes a destination (owner feedback, 2026-07-12)
+
+Bare "dropped by tools" reads as *discarded* — the opposite of the pack's append-only doctrine. Rule, extending the two-register split: **mono/API register keeps `drop`** (`drop #0`, `2 drops`, `DropReceipt` — the join key with the manifest); **meaning-register prose says "added" or gives drop an explicit destination** ("drops results *into the pack*"); bare "dropped" is banned. Caption is now `EVIDENCE ↳ added by tools`; the tool-output receipt field renders as `"receipt"` (it is the `DropReceipt`), not `"dropped"`.
+
+### Evidence provenance interactions (owner request, 2026-07-12)
+
+The Chain of Custody pass's provenance card, deferred by the rail-v2 judges, is pulled forward:
+
+- **Hover** an evidence row → transient popover: renderEntry line, kind, `identify()` identity, minted-by (drop # + tool + tags via `tagsFor`), merge history, backing artifact (`source_refs` join), cut status ("excluded from the brief, still carried"). Pure projection of `DropReceipt`/`WriteManifest` — no new data.
+- **Click** → the popover pins as an in-flow detail card under the row, with actions **↗ jump to write** and **✳ light lineage** (flash every frame that touched the identity) and a close affordance. Click again / close to unpin.
+- **Citation chips** in assistant prose are now clickable: they open (and scroll to) that entry's pinned detail in the rail — the canonical index as a shared language, both directions.
+- **Hidden-trace handling** (open design question the owner flagged: what if the backpack frames aren't in the chat?): when the density filter hides state frames (`scratchpad: Off`), *jump to write* honestly flips density back to Writes before seeking — it never scrolls to nothing. For runs where the write genuinely isn't in the transcript (uninstrumented/legacy), the detail card should show "write not in this transcript" rather than a dead action; materializing a transient inline frame in chat was considered and parked as a v2 alternative.
+
 **Open product flags for owner sign-off**: ~~"Memory" collision~~ (RESOLVED — owner reserved "memory" for cross-session user memory; rail renamed to Scratchpad); "EVIDENCE" editorializes the Backpack's dominant use (spec a per-BackpackSpec caption override; generic fallback "GATHERED ↳ dropped by tools"); "KEPT VALUES" vs the keep-by-default "kept:" tool output (the attribution line disambiguates; fallback "AGENT-KEPT"); the single-pack no-caption rule is deliberately reversed (+20px as structure, not teaching).
 
 ## Known risks

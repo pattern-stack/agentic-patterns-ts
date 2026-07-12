@@ -395,7 +395,7 @@ details.card > summary:focus-visible { outline: 2px solid var(--accent); outline
 .hero-n { margin-left: auto; font: 700 var(--fz-lg) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
 
 /* expanded ledger — the idx-row grammar survives intact */
-.idx-list { margin: 2px 0 0 18px; border-left: 1px solid var(--line); padding-left: 8px; display: flex; flex-direction: column; gap: 1px; }
+.idx-list { position: relative; margin: 2px 0 0 18px; border-left: 1px solid var(--line); padding-left: 8px; display: flex; flex-direction: column; gap: 1px; }
 .idx-list[hidden] { display: none; }
 .idx-row {
   display: flex; gap: 6px; align-items: baseline; font-size: var(--fz-micro);
@@ -460,6 +460,28 @@ details.card > summary:focus-visible { outline: 2px solid var(--accent); outline
 }
 .rail-foot.mismatch { color: var(--err-ink); background: var(--err-soft); cursor: pointer; }
 
+/* provenance card — hover popover + click-pinned inline detail on evidence rows.
+   One component, two placements: .pop floats under the row (hover, transient);
+   .pinned sits in-flow after the row (click, pushes the ledger, dismissable). */
+.prov {
+  font: 500 var(--fz-micro) var(--font-mono); color: var(--ink-2);
+  background: var(--paper); border: 1px solid color-mix(in oklch, var(--violet) 35%, var(--line));
+  border-radius: var(--radius-md); padding: 8px 10px; box-shadow: var(--shadow-2);
+}
+.prov.pop { position: absolute; left: 8px; right: 8px; top: 100%; margin-top: 3px; z-index: 4; pointer-events: none; }
+.prov.pinned { margin: 3px 0 5px 6px; }
+.prov .p-head { display: flex; gap: 6px; align-items: baseline; margin-bottom: 6px; color: var(--ink); }
+.prov .p-head .hnd { flex: none; }
+.prov .p-row { display: grid; grid-template-columns: 62px 1fr; gap: 2px 8px; padding: 1.5px 0; }
+.prov .p-row .pl { color: var(--mute); text-transform: uppercase; letter-spacing: 0.06em; font-size: 9px; }
+.prov .p-row .pv { overflow-wrap: anywhere; }
+.prov .p-row .pv.cut-v { color: var(--warn-ink); }
+.prov .p-acts { display: flex; gap: 12px; margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+.prov .p-acts .txt-btn { font-family: var(--font-sans); }
+.prov .p-note { margin-top: 5px; color: var(--mute); font-style: italic; }
+.idx-row { position: relative; }
+.idx-row.pinned-row { background: var(--violet-soft); }
+
 /* rail-states demo helpers (gallery only) */
 .rail-demo { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper); overflow: hidden; }
 .ghost-row { height: 10px; border-radius: 3px; background: var(--fill); margin: 6px 14px; }
@@ -518,7 +540,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
     <span class="chip v">8 grafts folded in from runner-ups</span>
   </div>
   <div class="legend">
-    <span><span class="g">Δ</span><b>write frame</b> — drop / set / update</span>
+    <span><span class="g">Δ</span><b>write frame</b> — drop into a pack / set / update</span>
     <span><span class="g">◇</span><b>read frame</b> — finalize / prompt injection</span>
     <span><span class="g">⇄</span><b>travel · absorb</b> — pack crosses an agent boundary</span>
     <span><span class="g" style="border-bottom:1px dashed var(--violet)">dashed</span><b>auto</b> — the framework saved this, not the agent (API: innate)</span>
@@ -579,7 +601,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
                 <div class="tool-io">
                   <div><div class="io-label">input</div><pre class="chat-code">{"deal_ids": ["deal_84h2"], "query": "blockers, budget, legal, timeline"}</pre></div>
                   <div><div class="io-label">output — what the model gets back (the dataset went into the pack)</div><pre class="chat-code">{
-  "dropped": { "accepted": 4, "skipped": 1, "indexes": [1, 2, 3, 4] },
+  "receipt": { "accepted": 4, "skipped": 1, "indexes": [1, 2, 3, 4] },
   "view": [
     "[#1] obs · security review gating — SOC 2 bridge letter · gong 06-28",
     "[#2] obs · CFO approved budget at $210k ceiling · email 06-24",
@@ -649,7 +671,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
                 <div class="tool-io">
                   <div><div class="io-label">input</div><pre class="chat-code">{"deal_id": "deal_84h2", "artifact_types": ["meeting", "email"]}</pre></div>
                   <div><div class="io-label">output — receipt, not payload</div><pre class="chat-code">{
-  "dropped": { "accepted": 2, "merged": 1, "indexes": [5, 6] },
+  "receipt": { "accepted": 2, "merged": 1, "indexes": [5, 6] },
   "view": [
     "[#5] artifact · meeting · “Security review sync” transcript · backs [#1]",
     "[#6] artifact · email · “Re: FY27 budget approval” thread · backs [#2]"
@@ -837,9 +859,9 @@ into the brief via [#1].</pre>
       </div>
 
       <div class="rail-body">
-        <!-- EVIDENCE — backpacks: what tools dropped in -->
+        <!-- EVIDENCE — backpacks: what tools added -->
         <div>
-          <div class="rail-cap" title="Backpacks — deduped evidence pools tools drop results into during execution. The model gets back [#N] handles; the data lives here.">Evidence <span class="attr">↳ dropped by tools</span></div>
+          <div class="rail-cap" title="Backpacks — deduped evidence pools tools add results to (the API verb is drop, as in: drop into the bag — nothing here is ever discarded). The model gets back [#N] handles; the data lives here.">Evidence <span class="attr">↳ added by tools</span></div>
           <div class="hero recent" id="heroSources">
             <button class="chev" id="chevSources" aria-expanded="true" aria-controls="railIdx" aria-label="toggle backpack.observations ledger">▶</button>
             <button class="hero-main" data-target="f-drop1" title="drop #0 · retrieve · facet:observations · 4 covered / drop #1 · retrieve · facet:artifacts · 2 covered">
@@ -897,7 +919,7 @@ into the brief via [#1].</pre>
   </div>
 </div>
 
-<p class="note">Rail v3 — the self-captioning <b>Scratchpad</b> rail. “Scratchpad · what this run carries between stages” names what the rail <em>is</em> in the runtime’s own vocabulary (run-scoped working state — deliberately not “memory”, which is reserved for true cross-session user memory); each group caption names <em>who wrote it</em>: Evidence ↳ dropped by tools, Stage outputs ↳ saved by the framework, Kept values ↳ written by agent code — three hands writing into one shared scratchpad, so the grouping is the taxonomy, not an arbitrary list. Sans words say what things mean; mono tokens stay letter-for-letter what the runtime calls them (<code style="font-family:var(--font-mono)">backpack.observations</code>, <code style="font-family:var(--font-mono)">agents.retrieve</code>) — the mono string is the join key with the timeline. Try the bridge both ways: click a rail row to jump to the Δ frame that wrote it, or click a mono key inside any Δ frame to find its row in the rail. The ledger ships collapsed by default (open here to demo the strike-through cut story); collapse it and hover a citation chip for the peek line.</p>
+<p class="note">Rail v3 — the self-captioning <b>Scratchpad</b> rail. “Scratchpad · what this run carries between stages” names what the rail <em>is</em> in the runtime’s own vocabulary (run-scoped working state — deliberately not “memory”, which is reserved for true cross-session user memory); each group caption names <em>who wrote it</em>: Evidence ↳ added by tools, Stage outputs ↳ saved by the framework, Kept values ↳ written by agent code — three hands writing into one shared scratchpad, so the grouping is the taxonomy, not an arbitrary list. Sans words say what things mean; mono tokens stay letter-for-letter what the runtime calls them (<code style="font-family:var(--font-mono)">backpack.observations</code>, <code style="font-family:var(--font-mono)">agents.retrieve</code>) — the mono string is the join key with the timeline. Try the bridge both ways: click a rail row to jump to the Δ frame that wrote it, or click a mono key inside any Δ frame to find its row in the rail. The ledger ships collapsed by default (open here to demo the strike-through cut story); collapse it and hover a citation chip for the peek line. <b>Evidence interactions:</b> hover any [#N] row for a provenance popover (identity, minted-by, merge history, backing artifact, cut status); click to pin it as an inline detail card with <em>jump to write</em> and <em>light lineage</em> actions; click a citation chip in the answer to open that entry’s detail in the rail. If the density filter is hiding the backpack frames (scratchpad: Off), <em>jump to write</em> honestly re-reveals them at Writes before seeking — it never scrolls to nothing.</p>
 
 <h2>Edge states the design must carry</h2>
 <p class="sub">Each of these was flagged as load-bearing by the judges — the frames must degrade honestly, coalesce under load, and fail loud where the runtime fails loud.</p>
@@ -969,7 +991,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
       <div class="rail-head" style="position:static"><span class="t">Scratchpad</span><span class="sub">· what this run carries between stages</span></div>
       <div style="padding:12px 14px 4px;font:500 var(--fz-micro) var(--font-mono);color:var(--mute)">What this run carries between stages.<br>Every row is written by a Δ frame in the timeline — click a row to jump to its write.</div>
       <div style="padding:6px 14px 12px;display:flex;flex-direction:column;gap:10px">
-        <div class="rail-cap" style="margin:0">Evidence <span class="attr">packs fill as tools drop results</span></div>
+        <div class="rail-cap" style="margin:0">Evidence <span class="attr">packs fill as tools add results</span></div>
         <div class="rail-cap" style="margin:0">Stage outputs <span class="attr">saved when each stage finishes</span></div>
         <div class="rail-cap" style="margin:0">Kept values <span class="attr">appears when agent code keeps one</span></div>
       </div>
@@ -1190,17 +1212,102 @@ notes.progress · update(fn) · deal 5/12</pre></div>
     });
   });
 
-  // idx-row click -> lineage lighting: flash every frame that touched the id,
-  // scroll to the minting drop
+  // ── evidence provenance: hover popover + click-pinned detail card ──
+  // Everything below is a projection of DropReceipt/WriteManifest/tagsFor —
+  // in the real build this comes from the fold, keyed by identity.
+  var ENTRIES = {
+    1: { kind: 'observation', id: 'obs_9f31', label: 'security review gating — SOC 2 bridge letter requested', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: '×1 — re-surfaced by list_artifacts (drop #1) · merge(): last-write-wins · index kept', backing: 'art_5521 → [#5]', cut: null, frame: 'f-drop0' },
+    2: { kind: 'observation', id: 'obs_4t20', label: 'CFO approved budget at $210k ceiling', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: 'art_88x2 → [#6]', cut: null, frame: 'f-drop0' },
+    3: { kind: 'observation', id: 'obs_7m54', label: 'champion (VP Ops) moving teams in Q3', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: null, cut: 'cut by curate — superseded (new champion identified) · excluded from the brief, still carried', frame: 'f-drop0' },
+    4: { kind: 'observation', id: 'obs_1k88', label: 'legal redlining MSA §7 liability cap', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: null, cut: null, frame: 'f-drop0' },
+    5: { kind: 'artifact · meeting', id: 'art_5521', label: '“Security review sync” transcript · gong', minted: 'drop #1 · ↳ list_artifacts · hydrated 840ms', tags: 'facet:artifacts · via source_refs', merged: null, backing: 'backs [#1]', cut: 'cut by curate — redundant with [#1] · still carried', frame: 'f-drop1' },
+    6: { kind: 'artifact · email', id: 'art_88x2', label: '“Re: FY27 budget approval” thread · gmail', minted: 'drop #1 · ↳ list_artifacts · hydrated 840ms', tags: 'facet:artifacts · via source_refs', merged: null, backing: 'backs [#2]', cut: null, frame: 'f-drop1' },
+  };
+  function provHtml(idx, e, pinned) {
+    var rows = '';
+    function pr(l, v, cls) { if (v) rows += '<div class="p-row"><span class="pl">' + l + '</span><span class="pv' + (cls || '') + '">' + v + '</span></div>'; }
+    pr('kind', e.kind); pr('identity', 'identify() → "' + e.id + '"'); pr('minted', e.minted);
+    pr('tags', e.tags); pr('merged', e.merged); pr(e.backing && e.backing.indexOf('backs') === 0 ? 'backs' : 'backed by', e.backing);
+    pr('status', e.cut ? e.cut : 'live — in the brief shortlist', e.cut ? ' cut-v' : '');
+    var acts = pinned
+      ? '<div class="p-acts"><button class="txt-btn" data-act="jump" data-idx="' + idx + '" type="button">↗ jump to write</button><button class="txt-btn" data-act="lineage" data-idx="' + idx + '" type="button">✳ light lineage</button><button class="txt-btn" data-act="close" type="button" style="margin-left:auto;color:var(--mute)">close</button></div>'
+      : '<div class="p-note">click to pin · jump to write · light lineage</div>';
+    return '<div class="p-head"><span class="hnd">[#' + idx + ']</span><span>' + e.label + '</span></div>' + rows + acts;
+  }
+  var pop = null, popTimer = null, pinnedCard = null, pinnedRow = null;
+  function hidePop() { clearTimeout(popTimer); if (pop) { pop.remove(); pop = null; } }
+  function unpin() {
+    if (pinnedCard) { pinnedCard.remove(); pinnedCard = null; }
+    if (pinnedRow) { pinnedRow.classList.remove('pinned-row'); pinnedRow = null; }
+  }
+  function frameVisible(el) { return !!(el && el.offsetParent !== null); }
+  function jumpToWrite(idx) {
+    var e = ENTRIES[idx]; var frame = document.getElementById(e.frame);
+    if (!frameVisible(frame)) {
+      // the backpack trace is hidden by the density filter — reveal honestly
+      // (frames re-render at 'Writes') rather than seeking to nothing
+      layout.setAttribute('data-density', 'writes');
+      seg.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-d') === 'writes'); });
+    }
+    document.querySelectorAll('.d-row[data-idx="' + idx + '"]').forEach(function (d) {
+      var f = d.closest('details'); if (f) f.open = true;
+    });
+    seek(frame);
+  }
   ledger.querySelectorAll('.idx-row').forEach(function (r) {
+    var idx = r.getAttribute('data-idx');
+    r.addEventListener('mouseenter', function () {
+      if (pinnedRow === r) return;
+      clearTimeout(popTimer);
+      popTimer = setTimeout(function () {
+        hidePop();
+        pop = document.createElement('div');
+        pop.className = 'prov pop';
+        pop.innerHTML = provHtml(idx, ENTRIES[idx], false);
+        pop.style.top = (r.offsetTop + r.offsetHeight) + 'px';
+        ledger.appendChild(pop);
+      }, 180);
+    });
+    r.addEventListener('mouseleave', hidePop);
     r.addEventListener('click', function () {
-      var idx = r.getAttribute('data-idx');
-      var mint = document.getElementById(Number(idx) >= 5 ? 'f-drop1' : 'f-drop0');
-      document.querySelectorAll('.d-row[data-idx="' + idx + '"]').forEach(function (d) {
-        var frame = d.closest('details');
-        if (frame) { frame.open = true; frame.classList.remove('flash'); void frame.offsetWidth; frame.classList.add('flash'); }
+      hidePop();
+      if (pinnedRow === r) { unpin(); return; }
+      unpin();
+      pinnedRow = r; r.classList.add('pinned-row');
+      pinnedCard = document.createElement('div');
+      pinnedCard.className = 'prov pinned';
+      pinnedCard.innerHTML = provHtml(idx, ENTRIES[idx], true);
+      r.insertAdjacentElement('afterend', pinnedCard);
+      pinnedCard.addEventListener('click', function (ev) {
+        var b = ev.target.closest('[data-act]'); if (!b) return;
+        var act = b.getAttribute('data-act');
+        if (act === 'close') { unpin(); return; }
+        if (act === 'jump') { jumpToWrite(b.getAttribute('data-idx')); return; }
+        if (act === 'lineage') {
+          var i = b.getAttribute('data-idx');
+          document.querySelectorAll('.d-row[data-idx="' + i + '"]').forEach(function (d) {
+            var f = d.closest('details');
+            if (f) { f.open = true; f.classList.remove('flash'); void f.offsetWidth; f.classList.add('flash'); }
+          });
+          seek(document.getElementById(ENTRIES[i].frame));
+        }
       });
-      seek(mint);
+    });
+  });
+  // citation chips in the answer -> open the rail detail for that entry
+  document.querySelectorAll('.cite').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var idx = chip.getAttribute('data-idx');
+      if (ledger.hidden) {
+        document.getElementById('chevSources').setAttribute('aria-expanded', 'true');
+        ledger.hidden = false;
+      }
+      var row = railRow(idx);
+      if (row && rail) {
+        var rr = rail.getBoundingClientRect(), tr = row.getBoundingClientRect();
+        if (rail.scrollHeight > rail.clientHeight) rail.scrollTo({ top: rail.scrollTop + (tr.top - rr.top) - rail.clientHeight / 2, behavior: 'smooth' });
+        row.click();
+      }
     });
   });
 })();
