@@ -509,7 +509,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 </header>
 
 <h2>The playground, mid-run</h2>
-<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Everything violet is new. The <b>state:</b> density toggle and the State rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
+<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Note the tool <b>outputs</b>: a backpack-aware tool drops the full dataset into the pack during execution and returns only a compact receipt to the model — the minted <span class="hnd">[#N]</span> handles plus one rendered line per entry. The heavy payload never re-enters the context window; the Δ frame beneath the tool card is the lossless record of what actually landed. Everything violet is new. The <b>state:</b> density toggle and the State rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
 
 <div class="frame">
   <div class="frame-bar">
@@ -556,9 +556,20 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
             <div class="step-children-label">tools called</div>
             <div class="step-children">
 
-              <details class="card chat-tool ok">
+              <details class="card chat-tool ok" open>
                 <summary><span class="glyph-ok">✓</span><span class="tool-name">search_deal_context</span><span class="tool-dur">1,842ms</span></summary>
-                <div class="tool-io"><div><div class="io-label">input</div><pre class="chat-code">{"deal_ids": ["deal_84h2"], "query": "blockers, budget, legal, timeline"}</pre></div></div>
+                <div class="tool-io">
+                  <div><div class="io-label">input</div><pre class="chat-code">{"deal_ids": ["deal_84h2"], "query": "blockers, budget, legal, timeline"}</pre></div>
+                  <div><div class="io-label">output — what the model gets back (the dataset went into the pack)</div><pre class="chat-code">{
+  "dropped": { "accepted": 4, "skipped": 1, "indexes": [1, 2, 3, 4] },
+  "view": [
+    "[#1] obs · security review gating — SOC 2 bridge letter · gong 06-28",
+    "[#2] obs · CFO approved budget at $210k ceiling · email 06-24",
+    "[#3] obs · champion (VP Ops) moving teams in Q3 · slack 06-19",
+    "[#4] obs · legal redlining MSA §7 liability cap · meeting 07-01"
+  ]
+}</pre></div>
+                </div>
               </details>
 
               <!-- Δ DROP frame #0 — rendered OPEN with the expansion pane -->
@@ -617,7 +628,16 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 
               <details class="card chat-tool ok">
                 <summary><span class="glyph-ok">✓</span><span class="tool-name">list_artifacts</span><span class="tool-dur">2,210ms</span></summary>
-                <div class="tool-io"><div><div class="io-label">input</div><pre class="chat-code">{"deal_id": "deal_84h2", "artifact_types": ["meeting", "email"]}</pre></div></div>
+                <div class="tool-io">
+                  <div><div class="io-label">input</div><pre class="chat-code">{"deal_id": "deal_84h2", "artifact_types": ["meeting", "email"]}</pre></div>
+                  <div><div class="io-label">output — receipt, not payload</div><pre class="chat-code">{
+  "dropped": { "accepted": 2, "merged": 1, "indexes": [5, 6] },
+  "view": [
+    "[#5] artifact · meeting · “Security review sync” transcript · backs [#1]",
+    "[#6] artifact · email · “Re: FY27 budget approval” thread · backs [#2]"
+  ]
+}</pre></div>
+                </div>
               </details>
 
               <!-- Δ DROP frame #1 — observations expanded to their backing artifacts -->
@@ -707,6 +727,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
                 <summary><span class="glyph-ok">✓</span><span class="tool-name">cut_evidence</span><span class="tool-dur">104ms</span></summary>
                 <div class="tool-io">
                   <div><div class="io-label">input</div><pre class="chat-code">{"cut": [3, 5]}</pre></div>
+                  <div><div class="io-label">output</div><pre class="chat-code">{ "kept": ["#1", "#2", "#4", "#6"] }</pre></div>
                   <div class="d-row" style="border:1px solid var(--line);border-radius:var(--radius-sm)"><span class="micro" style="padding:4px 8px">complement([3,5]) → kept <span class="hnd">[#1]</span><span class="hnd">[#2]</span><span class="hnd">[#4]</span><span class="hnd">[#6]</span> (keep-by-default) · [#3] superseded — new champion identified · [#5] redundant with [#1]</span></div>
                 </div>
               </details>
