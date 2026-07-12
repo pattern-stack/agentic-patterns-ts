@@ -511,7 +511,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 <header class="intro">
   <div class="eyebrow">agentic-patterns · playground concept mockup · pre-code</div>
   <h1>Delta Frames — a state ledger for the playground chat</h1>
-  <p class="lede">Today the chat timeline shows what agents <em>said</em> and which tools they <em>called</em> — but the actual product of a multi-stage run (the Backpack accumulating deduped evidence, the Scratchpad slots the framework silently writes) is invisible by construction. Delta Frames makes every state mutation a first-class timeline citizen: a new <code style="font-family:var(--font-mono)">state_delta</code> part kind rendered as collapsed diff cards in the exact grammar of the existing tool cards — plus a Memory rail — the run’s scratchpad — that answers “what does the agent carry right now.”</p>
+  <p class="lede">Today the chat timeline shows what agents <em>said</em> and which tools they <em>called</em> — but the actual product of a multi-stage run (the Backpack accumulating deduped evidence, the Scratchpad slots the framework silently writes) is invisible by construction. Delta Frames makes every state mutation a first-class timeline citizen: a new <code style="font-family:var(--font-mono)">state_delta</code> part kind rendered as collapsed diff cards in the exact grammar of the existing tool cards — plus a Scratchpad rail that answers “what does the agent carry right now.”</p>
   <div class="verdict-chips">
     <span class="chip win">✓ unanimous winner across 3 judge lenses</span>
     <span class="chip">4 concepts explored · 12-agent ideation run</span>
@@ -527,7 +527,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 </header>
 
 <h2>The playground, mid-run</h2>
-<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Note the tool <b>outputs</b>: a backpack-aware tool drops the full dataset into the pack during execution and returns only a compact receipt to the model — the minted <span class="hnd">[#N]</span> handles plus one rendered line per entry. The heavy payload never re-enters the context window; the Δ frame beneath the tool card is the lossless record of what actually landed. Everything violet is new. The <b>memory:</b> density toggle and the Memory rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
+<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Note the tool <b>outputs</b>: a backpack-aware tool drops the full dataset into the pack during execution and returns only a compact receipt to the model — the minted <span class="hnd">[#N]</span> handles plus one rendered line per entry. The heavy payload never re-enters the context window; the Δ frame beneath the tool card is the lossless record of what actually landed. Everything violet is new. The <b>scratchpad:</b> density toggle and the Scratchpad rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
 
 <div class="frame">
   <div class="frame-bar">
@@ -539,12 +539,12 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
     <span class="badge">1 exchange</span>
     <span class="bar-right">
       <span class="new-flag">new</span>
-      <span class="seg-label">memory:</span>
-      <span class="seg" id="densitySeg" role="group" aria-label="memory frame density">
+      <span class="seg-label">scratchpad:</span>
+      <span class="seg" id="densitySeg" role="group" aria-label="scratchpad frame density">
         <button data-d="all">All</button><button data-d="writes" class="on">Writes</button><button data-d="off">Off</button>
       </span>
       <span class="seg" role="group" aria-label="right rail tab">
-        <button>Universe</button><button>Trace</button><button class="on">Memory <span class="new-flag">new</span></button>
+        <button>Universe</button><button>Trace</button><button class="on">Scratchpad <span class="new-flag">new</span></button>
       </span>
     </span>
   </div>
@@ -830,9 +830,9 @@ into the brief via [#1].</pre>
 
     <!-- ══════════ STATE RAIL — "Carry Gauge" ══════════ -->
     <aside class="state-rail">
-      <div class="rail-head" title="The run's scratchpad — shared memory every stage reads and writes. The chat shows the writes (Δ); this shows what they left behind.">
-        <span class="t">Memory</span>
-        <span class="sub">· the run’s scratchpad</span>
+      <div class="rail-head" title="The run's scratchpad — shared working state every stage reads and writes. The chat shows the writes (Δ); this shows what they left behind. Not user memory: it lives and dies with the run.">
+        <span class="t">Scratchpad</span>
+        <span class="sub">· what this run carries between stages</span>
         <span class="live-dot"><i></i>live</span>
       </div>
 
@@ -897,7 +897,7 @@ into the brief via [#1].</pre>
   </div>
 </div>
 
-<p class="note">Rail v3 — the self-captioning <b>Memory</b> rail. “Memory · the run’s scratchpad” names what the rail <em>is</em>; each group caption names <em>who wrote it</em>: Evidence ↳ dropped by tools, Stage outputs ↳ saved by the framework, Kept values ↳ written by agent code — three hands writing into one shared memory, so the grouping is the taxonomy, not an arbitrary list. Sans words say what things mean; mono tokens stay letter-for-letter what the runtime calls them (<code style="font-family:var(--font-mono)">backpack.observations</code>, <code style="font-family:var(--font-mono)">agents.retrieve</code>) — the mono string is the join key with the timeline. Try the bridge both ways: click a rail row to jump to the Δ frame that wrote it, or click a mono key inside any Δ frame to find its row in the rail. The ledger ships collapsed by default (open here to demo the strike-through cut story); collapse it and hover a citation chip for the peek line.</p>
+<p class="note">Rail v3 — the self-captioning <b>Scratchpad</b> rail. “Scratchpad · what this run carries between stages” names what the rail <em>is</em> in the runtime’s own vocabulary (run-scoped working state — deliberately not “memory”, which is reserved for true cross-session user memory); each group caption names <em>who wrote it</em>: Evidence ↳ dropped by tools, Stage outputs ↳ saved by the framework, Kept values ↳ written by agent code — three hands writing into one shared scratchpad, so the grouping is the taxonomy, not an arbitrary list. Sans words say what things mean; mono tokens stay letter-for-letter what the runtime calls them (<code style="font-family:var(--font-mono)">backpack.observations</code>, <code style="font-family:var(--font-mono)">agents.retrieve</code>) — the mono string is the join key with the timeline. Try the bridge both ways: click a rail row to jump to the Δ frame that wrote it, or click a mono key inside any Δ frame to find its row in the rail. The ledger ships collapsed by default (open here to demo the strike-through cut story); collapse it and hover a citation chip for the peek line.</p>
 
 <h2>Edge states the design must carry</h2>
 <p class="sub">Each of these was flagged as load-bearing by the judges — the frames must degrade honestly, coalesce under load, and fail loud where the runtime fails loud.</p>
@@ -966,7 +966,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
   <div class="g-card">
     <div class="g-cap">Rail states — empty, scrubbed, mismatch <small>the empty state teaches the mental model before any state exists; scrubbed numerals tint violet so you always know the gauge shows the past; a manifest mismatch is the only loud element the rail is ever allowed</small></div>
     <div class="rail-demo">
-      <div class="rail-head" style="position:static"><span class="t">Memory</span><span class="sub">· the run’s scratchpad</span></div>
+      <div class="rail-head" style="position:static"><span class="t">Scratchpad</span><span class="sub">· what this run carries between stages</span></div>
       <div style="padding:12px 14px 4px;font:500 var(--fz-micro) var(--font-mono);color:var(--mute)">What this run carries between stages.<br>Every row is written by a Δ frame in the timeline — click a row to jump to its write.</div>
       <div style="padding:6px 14px 12px;display:flex;flex-direction:column;gap:10px">
         <div class="rail-cap" style="margin:0">Evidence <span class="attr">packs fill as tools drop results</span></div>
@@ -975,7 +975,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
       </div>
     </div>
     <div class="rail-demo">
-      <div class="rail-head" style="position:static"><span class="t">Memory</span><span class="asof">as of step 9/17</span></div>
+      <div class="rail-head" style="position:static"><span class="t">Scratchpad</span><span class="asof">as of step 9/17</span></div>
       <div style="padding:10px 14px">
         <div class="hero"><span class="chev" style="cursor:default">▶</span>
           <span class="hero-main" style="cursor:default">
@@ -987,7 +987,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
     </div>
     <div class="rail-demo">
       <div class="rail-foot mismatch" style="position:static" title="click seeks the earliest frame after the divergence">
-        <span>⚠ receipts disagree — receipts say 6, memory shows 5</span>
+        <span>⚠ receipts disagree — receipts say 6, scratchpad shows 5</span>
       </div>
     </div>
   </div>
@@ -1165,7 +1165,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
   });
 
   // REVERSE SEEK — clicking a mono slot key inside a Δ frame scrolls the
-  // Memory rail to the row holding its current value and flashes it
+  // Scratchpad rail to the row holding its current value and flashes it
   var rail = document.querySelector('.chat-layout > .state-rail');
   function railTarget(key) {
     if (key.indexOf('backpack.') === 0) return hero;
@@ -1177,7 +1177,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
     return r;
   }
   document.querySelectorAll('.chat-layout .d-key').forEach(function (k) {
-    k.setAttribute('title', 'click to find "' + k.textContent.trim() + '" in the Memory rail');
+    k.setAttribute('title', 'click to find "' + k.textContent.trim() + '" in the Scratchpad rail');
     k.addEventListener('click', function (e) {
       e.stopPropagation(); e.preventDefault();
       var t = railTarget(k.textContent.trim());
