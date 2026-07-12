@@ -81,6 +81,22 @@ Owner feedback on v1: concept approved; timeline clutter acceptable when collaps
 
 **Disclosure implementation note:** don't use `<details>` for hero rows — chevron-toggles vs row-seeks requires two sibling buttons (disclosure + seek), open state keyed by pack key.
 
+## Rail v3 — the self-captioning Memory rail (clarity pass, 2026-07-12)
+
+Owner feedback on v2, verbatim: *"I don't really understand what 'state' is — what is that rail I click on and what's happening in each one? It feels arbitrary to me."* A third design run (naming / information-architecture / shared-grammar / progressive-teaching lenses, judged by owner-replay, new-developer, and craft lenses) diagnosed the failure precisely: the rail was grouped by **implementation channel** (backpack slots / innate emissions / explicit slots) with no resting ink saying who writes each group or why it exists; "State" names the substrate, predicting nothing; "SLOTS · 1" is dishonest by underinclusion (everything on the rail is a slot); "stages · 2/3" reads as pipeline progress, not memory.
+
+**The fix — the answer lives in resting structure, not hover text:**
+
+- **Vocabulary**: tab `State` → **`Memory`**; rail header **"Memory · the run's scratchpad"** (the suffix is the permanent API-honesty anchor); density toggle relabels to `memory:`. Rejected: "Scratchpad" as the tab (predicts jotted notes), "Carry" (names motion, not contents).
+- **Three-writer captions** (permanent, one line each, mute): **`EVIDENCE ↳ dropped by tools`** / **`STAGE OUTPUTS ↳ saved by the framework`** / **`KEPT VALUES · N ↳ written by agent code`** — the grouping *is* the taxonomy: three different hands writing into one shared memory. The `↳` is the timeline's own provenance glyph. Rejected as captions: BACKPACK, SLOTS (implementation words as headlines), HANDOFFS (purpose-metaphor lost to plain noun + attribution), "stages" (control-flow word on a memory rail).
+- **Two-register rule** (enforced globally): sans words say what things *mean*; mono tokens stay byte-exact what the runtime *calls* them (`backpack.observations`, `agents.retrieve`, `✓ set`, `drop #1`). Mono is the visible join key between rail and timeline; no API word is displaced, only glossed (`backpack.` namespace de-emphasized in mute, never removed).
+- **Stage group**: key becomes the actual chain `retrieve → correlate → brief` (done/current/pending toned), fraction gains the 5-character fix **"2/3 saved"** — kills the progress-meter misread. Chip `innate` → **`auto`** (tooltip preserves "innate"); same swap on timeline innate frames, whose annotation becomes "← stage output · saved for next stage".
+- **Bridge, both directions**: rail row click → seek producing frame (existing); **reverse seek** — clicking a mono `.d-key` in any Δ frame scrolls the rail to the row holding that slot's current value; byte-identical mono keys + shared ↳ glyph carry the correspondence at rest.
+- **Footer in receipt language**: healthy `✓ matches all write receipts`; mismatch `⚠ receipts disagree — receipts say 6, memory shows 5`; derived `rebuilt from 2 drop receipts`.
+- **Teaching lifecycle, no state machine**: the empty state is the lesson (orientation line "What this run carries between stages.", the rail↔timeline contract line, three caption skeletons with one-line explainers that dissolve at first write); hover carries depth only; at steady state the captions themselves are the teaching. Permanent cost vs v2: ~40px (two caption lines + header suffix + "saved" suffix). Rejected: per-user graduation state machines, "got it" buttons, "?" pills, legend panels.
+
+**Open product flags for owner sign-off**: "Memory" vs a future conversation-memory feature (mitigated by the scratchpad suffix); "EVIDENCE" editorializes the Backpack's dominant use (spec a per-BackpackSpec caption override; generic fallback "GATHERED ↳ dropped by tools"); "KEPT VALUES" vs the keep-by-default "kept:" tool output (the attribution line disambiguates; fallback "AGENT-KEPT"); the single-pack no-caption rule is deliberately reversed (+20px as structure, not teaching).
+
 ## Known risks
 
 - Timeline noise on chatty runs — the density default, coalescing, one-frame-per-`drop()`, and memo-hit strips are load-bearing, not optional.

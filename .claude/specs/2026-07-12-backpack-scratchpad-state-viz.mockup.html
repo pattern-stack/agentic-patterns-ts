@@ -361,7 +361,18 @@ details.card > summary:focus-visible { outline: 2px solid var(--accent); outline
   background: var(--violet-soft); border-radius: var(--radius-pill); padding: 2px 8px;
 }
 .rail-body { flex: 1; padding: 16px 14px 12px; display: flex; flex-direction: column; gap: 24px; }
-.rail-cap { font: 700 var(--fz-micro) var(--font-sans); text-transform: uppercase; letter-spacing: 0.09em; color: var(--mute); margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
+.rail-cap { font: 700 var(--fz-micro) var(--font-sans); text-transform: uppercase; letter-spacing: 0.09em; color: var(--mute); margin-bottom: 6px; display: flex; gap: 6px; align-items: baseline; }
+/* writer attribution — the ↳ provenance glyph is the timeline's own mark;
+   sans words say what things MEAN, mono tokens stay what the runtime CALLS them */
+.rail-cap .attr { margin-left: auto; font: 500 var(--fz-micro) var(--font-mono); text-transform: none; letter-spacing: 0; color: var(--mute); }
+.rail-head .sub { font: 500 var(--fz-micro) var(--font-mono); color: var(--mute); }
+.hero-key .ns { color: var(--mute); font-weight: 500; }
+.chain .done { color: var(--ink-2); }
+.chain .cur { color: var(--ink); font-weight: 600; }
+.chain .pend { color: var(--mute); }
+.saved-sfx { font: 500 var(--fz-micro) var(--font-sans); color: var(--mute); }
+.d-key { cursor: pointer; }
+.d-key:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 /* hero row — two sibling click targets (chevron toggles, row seeks) */
 .hero { display: flex; align-items: flex-start; gap: 0; border-left: 3px solid transparent; border-radius: var(--radius-sm); position: relative; }
@@ -500,7 +511,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 <header class="intro">
   <div class="eyebrow">agentic-patterns · playground concept mockup · pre-code</div>
   <h1>Delta Frames — a state ledger for the playground chat</h1>
-  <p class="lede">Today the chat timeline shows what agents <em>said</em> and which tools they <em>called</em> — but the actual product of a multi-stage run (the Backpack accumulating deduped evidence, the Scratchpad slots the framework silently writes) is invisible by construction. Delta Frames makes every state mutation a first-class timeline citizen: a new <code style="font-family:var(--font-mono)">state_delta</code> part kind rendered as collapsed diff cards in the exact grammar of the existing tool cards — plus a cumulative State rail that answers “what does the agent carry right now.”</p>
+  <p class="lede">Today the chat timeline shows what agents <em>said</em> and which tools they <em>called</em> — but the actual product of a multi-stage run (the Backpack accumulating deduped evidence, the Scratchpad slots the framework silently writes) is invisible by construction. Delta Frames makes every state mutation a first-class timeline citizen: a new <code style="font-family:var(--font-mono)">state_delta</code> part kind rendered as collapsed diff cards in the exact grammar of the existing tool cards — plus a Memory rail — the run’s scratchpad — that answers “what does the agent carry right now.”</p>
   <div class="verdict-chips">
     <span class="chip win">✓ unanimous winner across 3 judge lenses</span>
     <span class="chip">4 concepts explored · 12-agent ideation run</span>
@@ -510,13 +521,13 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
     <span><span class="g">Δ</span><b>write frame</b> — drop / set / update</span>
     <span><span class="g">◇</span><b>read frame</b> — finalize / prompt injection</span>
     <span><span class="g">⇄</span><b>travel · absorb</b> — pack crosses an agent boundary</span>
-    <span><span class="g" style="border-bottom:1px dashed var(--violet)">dashed</span><b>innate</b> — the framework did this, not the agent</span>
+    <span><span class="g" style="border-bottom:1px dashed var(--violet)">dashed</span><b>auto</b> — the framework saved this, not the agent (API: innate)</span>
     <span><span class="g">[#N]</span><b>canonical handle</b> — append-only, never renumbered</span>
   </div>
 </header>
 
 <h2>The playground, mid-run</h2>
-<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Note the tool <b>outputs</b>: a backpack-aware tool drops the full dataset into the pack during execution and returns only a compact receipt to the model — the minted <span class="hnd">[#N]</span> handles plus one rendered line per entry. The heavy payload never re-enters the context window; the Δ frame beneath the tool card is the lossless record of what actually landed. Everything violet is new. The <b>state:</b> density toggle and the State rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
+<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Note the tool <b>outputs</b>: a backpack-aware tool drops the full dataset into the pack during execution and returns only a compact receipt to the model — the minted <span class="hnd">[#N]</span> handles plus one rendered line per entry. The heavy payload never re-enters the context window; the Δ frame beneath the tool card is the lossless record of what actually landed. Everything violet is new. The <b>memory:</b> density toggle and the Memory rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
 
 <div class="frame">
   <div class="frame-bar">
@@ -528,12 +539,12 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
     <span class="badge">1 exchange</span>
     <span class="bar-right">
       <span class="new-flag">new</span>
-      <span class="seg-label">state:</span>
-      <span class="seg" id="densitySeg" role="group" aria-label="state frame density">
+      <span class="seg-label">memory:</span>
+      <span class="seg" id="densitySeg" role="group" aria-label="memory frame density">
         <button data-d="all">All</button><button data-d="writes" class="on">Writes</button><button data-d="off">Off</button>
       </span>
       <span class="seg" role="group" aria-label="right rail tab">
-        <button>Universe</button><button>Trace</button><button class="on">State <span class="new-flag">new</span></button>
+        <button>Universe</button><button>Trace</button><button class="on">Memory <span class="new-flag">new</span></button>
       </span>
     </span>
   </div>
@@ -674,8 +685,8 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
             <summary>
               <span class="d-badge">Δ</span>
               <span class="d-key">agents.retrieve</span>
-              <span style="font-size:var(--fz-tiny);color:var(--ink-2)">← stage emission</span>
-              <span class="innate-chip">innate</span>
+              <span style="font-size:var(--fz-tiny);color:var(--ink-2)">← stage output · saved for next stage</span>
+              <span class="innate-chip" title="innate — written by the framework, not by agent code">auto</span>
               <span class="d-prov">set · null → {…} · <a href="#f-drop1">= stage output ↑</a></span>
             </summary>
             <div class="d-body"><pre class="chat-code">Same value as the retrieve step result above — rendered once, referenced here.</pre></div>
@@ -760,8 +771,8 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
           <details class="card chat-delta innate sd">
             <summary>
               <span class="d-badge">Δ</span><span class="d-key">agents.correlate</span>
-              <span style="font-size:var(--fz-tiny);color:var(--ink-2)">← stage emission</span>
-              <span class="innate-chip">innate</span>
+              <span style="font-size:var(--fz-tiny);color:var(--ink-2)">← stage output · saved for next stage</span>
+              <span class="innate-chip" title="innate — written by the framework, not by agent code">auto</span>
               <span class="d-prov">set · null → {…}</span>
             </summary>
             <div class="d-body"><pre class="chat-code">= stage output above</pre></div>
@@ -782,7 +793,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
               <span class="d-badge read">◇</span>
               <span class="d-key">agents.correlate</span>
               <span style="font-size:var(--fz-tiny);color:var(--ink-2)">→ prompt · renderPriorEmission</span>
-              <span class="innate-chip">innate</span>
+              <span class="innate-chip" title="innate — written by the framework, not by agent code">auto</span>
               <span class="d-prov">exact injected text ▾</span>
             </summary>
             <div class="d-body">
@@ -819,19 +830,21 @@ into the brief via [#1].</pre>
 
     <!-- ══════════ STATE RAIL — "Carry Gauge" ══════════ -->
     <aside class="state-rail">
-      <div class="rail-head">
-        <span class="t">State</span>
+      <div class="rail-head" title="The run's scratchpad — shared memory every stage reads and writes. The chat shows the writes (Δ); this shows what they left behind.">
+        <span class="t">Memory</span>
+        <span class="sub">· the run’s scratchpad</span>
         <span class="live-dot"><i></i>live</span>
       </div>
 
       <div class="rail-body">
-        <!-- CARRY — single pack, so the key IS the caption (no group header) -->
+        <!-- EVIDENCE — backpacks: what tools dropped in -->
         <div>
+          <div class="rail-cap" title="Backpacks — deduped evidence pools tools drop results into during execution. The model gets back [#N] handles; the data lives here.">Evidence <span class="attr">↳ dropped by tools</span></div>
           <div class="hero recent" id="heroSources">
             <button class="chev" id="chevSources" aria-expanded="true" aria-controls="railIdx" aria-label="toggle backpack.observations ledger">▶</button>
             <button class="hero-main" data-target="f-drop1" title="drop #0 · retrieve · facet:observations · 4 covered / drop #1 · retrieve · facet:artifacts · 2 covered">
               <span class="hero-key">
-                <span class="k">backpack.observations</span>
+                <span class="k"><span class="ns">backpack.</span>observations</span>
                 <span class="s">2 drops · 2 excluded · 1 skipped</span>
               </span>
               <span class="hero-n">6</span>
@@ -847,43 +860,44 @@ into the brief via [#1].</pre>
           </div>
         </div>
 
-        <!-- STAGES — exactly one row; per-stage detail behind the chevron -->
+        <!-- STAGE OUTPUTS — what the framework saved for the next stage -->
         <div>
+          <div class="rail-cap" title="When a stage finishes, the framework saves its output under agents.<stage> so later stages can have it injected into their prompts.">Stage outputs <span class="attr">↳ saved by the framework</span></div>
           <div class="hero">
             <button class="chev" id="chevStages" aria-expanded="false" aria-controls="stageRows" aria-label="toggle stage rows">▶</button>
             <button class="hero-main" data-target="f-inn-gather">
-              <span class="hero-key"><span class="k" style="font-weight:600">stages</span></span>
+              <span class="hero-key"><span class="k chain"><span class="done">retrieve</span> <span style="color:var(--mute)">→</span> <span class="done">correlate</span> <span style="color:var(--mute)">→</span> <span class="pend">brief</span></span></span>
               <span class="ticks" style="margin-left:auto"><i class="set" title="retrieve · set"></i><i class="set" title="correlate · set"></i><i class="pend" title="brief · pending"></i></span>
-              <span class="frac">2/3</span>
+              <span class="frac">2/3</span> <span class="saved-sfx">saved</span>
             </button>
           </div>
           <div class="stage-rows" id="stageRows" hidden>
-            <div class="srow-head"><span class="innate-chip">innate</span></div>
-            <button class="srow" data-target="f-inn-gather">agents.retrieve <span class="st">✓ set</span></button>
-            <button class="srow" data-target="f-read-prompt">agents.correlate <span class="st">✓ set</span> <span class="sfx">→ prompt</span></button>
+            <div class="srow-head"><span class="innate-chip" title="innate — written by the framework, not by agent code">auto</span></div>
+            <button class="srow" data-target="f-inn-gather" data-key="agents.retrieve">agents.retrieve <span class="st">✓ set</span></button>
+            <button class="srow" data-target="f-read-prompt" data-key="agents.correlate">agents.correlate <span class="st">✓ set</span> <span class="sfx">→ prompt</span></button>
             <div class="srow pending">agents.brief <span style="margin-left:auto">pending</span></div>
           </div>
         </div>
 
-        <!-- SLOTS — rendered only once something has been written -->
+        <!-- KEPT VALUES — what agent code chose to pass forward -->
         <div>
-          <div class="rail-cap">Slots · 1</div>
-          <button class="slot-row" data-target="f-write-shortlist" title='["#1","#2","#4","#6"]'>
+          <div class="rail-cap" title="Named values agent code explicitly kept (onEmit / fn writes) to pass forward. Appears only once something is written.">Kept values · 1 <span class="attr">↳ written by agent code</span></div>
+          <button class="slot-row" data-target="f-write-shortlist" data-key="brief.highlights" title="slot brief.highlights · set by onEmit(correlate) — click to jump to the write">
             <span class="k">brief.highlights</span>
             <span class="v">["#1","#2","#4","#6"]</span>
           </button>
         </div>
       </div>
 
-      <div class="rail-foot" title="manifest: 2 records · 6 covered · 1 skipped — matches carried state">
-        <span>✓ ledger consistent</span>
-        <span>derived from 2 drop events</span>
+      <div class="rail-foot" title="manifest: 2 records · 6 covered · 1 skipped — every drop receipt reconciles with what's shown">
+        <span>✓ matches all write receipts</span>
+        <span>rebuilt from 2 drop receipts</span>
       </div>
     </aside>
   </div>
 </div>
 
-<p class="note">Rail v2 — the “Carry Gauge”: one focal number per group, lists behind disclosure, silence as the healthy signal. The ledger ships <em>collapsed</em> by default (shown open here to demo the strike-through cut story — [#3] and [#5] are excluded, never removed). Try it: collapse the ledger with the chevron, then hover a citation chip in the answer — a peek line overlays the pack row with zero layout shift. The violet left tick marks the most recent write; the footer only gets loud on a manifest mismatch.</p>
+<p class="note">Rail v3 — the self-captioning <b>Memory</b> rail. “Memory · the run’s scratchpad” names what the rail <em>is</em>; each group caption names <em>who wrote it</em>: Evidence ↳ dropped by tools, Stage outputs ↳ saved by the framework, Kept values ↳ written by agent code — three hands writing into one shared memory, so the grouping is the taxonomy, not an arbitrary list. Sans words say what things mean; mono tokens stay letter-for-letter what the runtime calls them (<code style="font-family:var(--font-mono)">backpack.observations</code>, <code style="font-family:var(--font-mono)">agents.retrieve</code>) — the mono string is the join key with the timeline. Try the bridge both ways: click a rail row to jump to the Δ frame that wrote it, or click a mono key inside any Δ frame to find its row in the rail. The ledger ships collapsed by default (open here to demo the strike-through cut story); collapse it and hover a citation chip for the peek line.</p>
 
 <h2>Edge states the design must carry</h2>
 <p class="sub">Each of these was flagged as load-bearing by the judges — the frames must degrade honestly, coalesce under load, and fail loud where the runtime fails loud.</p>
@@ -952,12 +966,16 @@ notes.progress · update(fn) · deal 5/12</pre></div>
   <div class="g-card">
     <div class="g-cap">Rail states — empty, scrubbed, mismatch <small>the empty state teaches the mental model before any state exists; scrubbed numerals tint violet so you always know the gauge shows the past; a manifest mismatch is the only loud element the rail is ever allowed</small></div>
     <div class="rail-demo">
-      <div class="rail-head" style="position:static"><span class="t">State</span></div>
-      <div style="padding:14px 14px 4px;font:500 var(--fz-micro) var(--font-mono);color:var(--mute)">nothing carried yet — writes appear as they land</div>
-      <div class="ghost-row w3"></div><div class="ghost-row w2"></div><div class="ghost-row w3" style="width:40%"></div>
+      <div class="rail-head" style="position:static"><span class="t">Memory</span><span class="sub">· the run’s scratchpad</span></div>
+      <div style="padding:12px 14px 4px;font:500 var(--fz-micro) var(--font-mono);color:var(--mute)">What this run carries between stages.<br>Every row is written by a Δ frame in the timeline — click a row to jump to its write.</div>
+      <div style="padding:6px 14px 12px;display:flex;flex-direction:column;gap:10px">
+        <div class="rail-cap" style="margin:0">Evidence <span class="attr">packs fill as tools drop results</span></div>
+        <div class="rail-cap" style="margin:0">Stage outputs <span class="attr">saved when each stage finishes</span></div>
+        <div class="rail-cap" style="margin:0">Kept values <span class="attr">appears when agent code keeps one</span></div>
+      </div>
     </div>
     <div class="rail-demo">
-      <div class="rail-head" style="position:static"><span class="t">State</span><span class="asof">as of step 9/17</span></div>
+      <div class="rail-head" style="position:static"><span class="t">Memory</span><span class="asof">as of step 9/17</span></div>
       <div style="padding:10px 14px">
         <div class="hero"><span class="chev" style="cursor:default">▶</span>
           <span class="hero-main" style="cursor:default">
@@ -969,7 +987,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
     </div>
     <div class="rail-demo">
       <div class="rail-foot mismatch" style="position:static" title="click seeks the earliest frame after the divergence">
-        <span>⚠ manifest mismatch — 6 covered ≠ 5 carried</span>
+        <span>⚠ receipts disagree — receipts say 6, memory shows 5</span>
       </div>
     </div>
   </div>
@@ -1144,6 +1162,32 @@ notes.progress · update(fn) · deal 5/12</pre></div>
     el.addEventListener('mouseleave', function () { hl(idx, false); });
     el.addEventListener('focus', function () { hl(idx, true); });
     el.addEventListener('blur', function () { hl(idx, false); });
+  });
+
+  // REVERSE SEEK — clicking a mono slot key inside a Δ frame scrolls the
+  // Memory rail to the row holding its current value and flashes it
+  var rail = document.querySelector('.chat-layout > .state-rail');
+  function railTarget(key) {
+    if (key.indexOf('backpack.') === 0) return hero;
+    var r = document.querySelector('.state-rail [data-key="' + key + '"]');
+    if (r && r.closest('.stage-rows') && r.closest('.stage-rows').hidden) {
+      document.getElementById('chevStages').setAttribute('aria-expanded', 'true');
+      r.closest('.stage-rows').hidden = false;
+    }
+    return r;
+  }
+  document.querySelectorAll('.chat-layout .d-key').forEach(function (k) {
+    k.setAttribute('title', 'click to find "' + k.textContent.trim() + '" in the Memory rail');
+    k.addEventListener('click', function (e) {
+      e.stopPropagation(); e.preventDefault();
+      var t = railTarget(k.textContent.trim());
+      if (!t || !rail) return;
+      var rr = rail.getBoundingClientRect(), tr = t.getBoundingClientRect();
+      if (rail.scrollHeight > rail.clientHeight) {
+        rail.scrollTo({ top: rail.scrollTop + (tr.top - rr.top) - rail.clientHeight / 2, behavior: 'smooth' });
+      }
+      t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash');
+    });
   });
 
   // idx-row click -> lineage lighting: flash every frame that touched the id,
