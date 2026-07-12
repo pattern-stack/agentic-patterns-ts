@@ -3,6 +3,7 @@
 **Status:** ideation complete, concept mockup approved-pending-review — no product code changed.
 **Mockup:** [`2026-07-12-backpack-scratchpad-state-viz.mockup.html`](./2026-07-12-backpack-scratchpad-state-viz.mockup.html) (open in a browser; interactive).
 **Process:** 12-agent ideation run — 5 codebase readers → 4 independent concept designers → 3 judge lenses (debugging, first-contact, implementation). Delta Frames won all three votes.
+**Demo scenario:** the CRM retrieval agent (`retrieve → correlate → brief`, built on the `retrievalRole` preset) answering "Where does the Meridian Health deal stand?" — `search_deal_context` drops **observations** about the deal into `backpack.observations`; `hydrateThenDrop` + `list_artifacts` expands them to their **associated artifacts** via `source_refs.artifact_id`; correlate cuts stale/redundant items and emits `brief.highlights`. Deal content is fictional; field shapes match the Deal Brain CRM tools (`observation_id`, `deal_id`, `artifact_id`, artifact types `meeting`/`email`, sources `gong`/`gmail`).
 
 ## Goal
 
@@ -35,10 +36,10 @@ Multi-agent sessions matter: backpacks travel across agents.
 
 A sixth `Part` kind, **`state_delta`**, rendered as collapsed diff cards in the existing tool-card grammar, violet family, placed immediately beneath the causal tool call (or standalone at boundaries). Frame family:
 
-- **DROP** `Δ backpack.sources +3 ~1 ø1 · 9 → 12` — expands to a per-raw diff table (`+` added / `~` merged / `ø` skipped rows keyed by `[#N]` handles); each `+` row expands to the **expansion pane**: `raw (TIn)` → `expand()` / `identify()` → `entry [#N] (TEntry)` before/after. `expand()` throw → auto-open error frame with the runtime's verbatim message.
+- **DROP** `Δ backpack.observations +3 ~1 ø1 · 9 → 12` — expands to a per-raw diff table (`+` added / `~` merged / `ø` skipped rows keyed by `[#N]` handles); each `+` row expands to the **expansion pane**: `raw (TIn)` → `expand()` / `identify()` → `entry [#N] (TEntry)` before/after. `expand()` throw → auto-open error frame with the runtime's verbatim message.
 - **READ** `◇ finalized() · memo miss (gen 2) · 6 entries → ranked list` — memo hits render as 24px one-line strips. Prompt-injection reads expand to the **exact injected prompt text**.
-- **WRITE** `Δ curation.shortlist · set · ↳ onEmit(curate)` — before/after CodeBlocks.
-- **TRAVEL** `⇄ backpack.sources travels → curate · 6 items [#1..#6]` — manifest strip segmented per DropRecord (width ∝ covered, colored by origin agent). Honest when nothing changed ("no new drops since gather").
+- **WRITE** `Δ brief.highlights · set · ↳ onEmit(correlate)` — before/after CodeBlocks.
+- **TRAVEL** `⇄ backpack.observations travels → correlate · 6 items [#1..#6]` — manifest strip segmented per DropRecord (width ∝ covered, colored by origin agent). Honest when nothing changed ("no new drops since retrieve").
 - **ABSORB** `⇄ absorb branch 2/3 · +2 ~1 · appended [#13..#14]` — FanOut determinism visible; join's silent-discard case explicitly called out.
 - **INNATE** variants (dashed border + `INNATE` chip) for stage emissions, fork/join, prompt reads — the framework's moves displayed as steps.
 

@@ -509,15 +509,15 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 </header>
 
 <h2>The playground, mid-run</h2>
-<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the pipeline demo (<b>gather → curate → answer</b>) against: <em>“Summarize the current state of EU solar tariff policy, with sources.”</em> Everything violet is new. The <b>state:</b> density toggle and the State rail’s seek buttons are functional in this mockup — click around.</p>
+<p class="sub">The <code style="font-family:var(--font-mono)">/chat</code> route running the CRM retrieval agent (<b>retrieve → correlate → brief</b>) against: <em>“Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.”</em> The retrieve stage drops <b>observations</b> about the deal into the backpack; <code style="font-family:var(--font-mono)">hydrateThenDrop</code> then expands them to their <b>associated artifacts</b> (the gong call, the email thread) via the observation → artifact citation refs. Everything violet is new. The <b>state:</b> density toggle and the State rail’s seek buttons are functional in this mockup — click around. <span style="color:var(--mute)">(Deal content is fictional; shapes match the CRM tools.)</span></p>
 
 <div class="frame">
   <div class="frame-bar">
     <span class="dots"><i></i><i></i><i></i></span>
-    <span class="sel">pipeline · gather→curate→answer ▾</span>
+    <span class="sel">retrieval · retrieve→correlate→brief ▾</span>
     <span class="sel">Sessions ▾</span>
     <span class="badge">max tool calls · 12</span>
-    <span class="badge">agent: pipeline</span>
+    <span class="badge">agent: retrieval</span>
     <span class="badge">1 exchange</span>
     <span class="bar-right">
       <span class="new-flag">new</span>
@@ -540,7 +540,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
         <div class="chat-avatar user">›</div>
         <div class="chat-body">
           <div class="chat-attr"><span class="name">you</span><span class="time">2m ago</span></div>
-          <div class="chat-bubble user">Summarize the current state of EU solar tariff policy, with sources.</div>
+          <div class="chat-bubble user">Where does the Meridian Health deal stand? Pull the latest observations and the artifacts backing them.</div>
         </div>
       </div>
 
@@ -548,91 +548,95 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
       <div class="chat-row assistant">
         <div class="chat-avatar assistant">◆</div>
         <div class="chat-body">
-          <div class="chat-attr"><span class="name">pipeline</span><span class="time">2m ago</span></div>
+          <div class="chat-attr"><span class="name">retrieval</span><span class="time">2m ago</span></div>
 
-          <!-- STAGE 1 · GATHER -->
+          <!-- STAGE 1 · RETRIEVE -->
           <details class="card chat-step" open>
-            <summary><span style="color:var(--accent)">◆</span><span class="step-kind">agent · gather</span><span class="tool-dur">12.4s</span></summary>
+            <summary><span style="color:var(--accent)">◆</span><span class="step-kind">agent · retrieve</span><span class="tool-dur">12.4s</span></summary>
             <div class="step-children-label">tools called</div>
             <div class="step-children">
 
               <details class="card chat-tool ok">
-                <summary><span class="glyph-ok">✓</span><span class="tool-name">web_search</span><span class="tool-dur">1,842ms</span></summary>
-                <div class="tool-io"><div><div class="io-label">input</div><pre class="chat-code">{"query": "EU solar tariff 2026"}</pre></div></div>
+                <summary><span class="glyph-ok">✓</span><span class="tool-name">search_deal_context</span><span class="tool-dur">1,842ms</span></summary>
+                <div class="tool-io"><div><div class="io-label">input</div><pre class="chat-code">{"deal_ids": ["deal_84h2"], "query": "blockers, budget, legal, timeline"}</pre></div></div>
               </details>
 
               <!-- Δ DROP frame #0 — rendered OPEN with the expansion pane -->
               <details class="card chat-delta sd" id="f-drop0" open>
                 <summary>
                   <span class="d-badge">Δ</span>
-                  <span class="d-key">backpack.sources</span>
+                  <span class="d-key">backpack.observations</span>
                   <span class="pill add">+4</span><span class="pill skp">ø1</span>
                   <span class="d-size">0 → 4</span>
-                  <span class="d-prov">drop #0 · ↳ <a href="#f-drop0">web_search</a></span>
+                  <span class="d-prov">drop #0 · ↳ <a href="#f-drop0">search_deal_context</a></span>
                 </summary>
                 <div class="d-body">
                   <div class="d-diff">
-                    <div class="d-row add" data-idx="1"><span class="gut">+</span><span class="hnd">[#1]</span><span class="lbl">EU Commission — provisional duties notice · ec.europa.eu</span></div>
+                    <div class="d-row add" data-idx="1"><span class="gut">+</span><span class="hnd">[#1]</span><span class="lbl">obs · security review gating — SOC 2 bridge letter requested · gong 06-28</span></div>
                     <!-- expansion pane: the expand() hero interaction, shown open for [#1] -->
                     <div class="x-pane">
                       <div class="x-col">
                         <div class="x-head">raw (TIn)</div>
                         <pre class="chat-code">{
-  "title": "Commission adopts provisional duties…",
-  "url": "https://ec.europa.eu/trade/solar-2026",
-  "snippet": "The European Commission today…",
-  "rank": 1, "engine": "brave"
+  "observation_id": "obs_9f31",
+  "deal_id": "deal_84h2",
+  "text": "InfoSec lead: SOC 2 bridge letter is the
+   last gating item before security sign-off",
+  "source_refs": { "artifact_id": "art_5521" },
+  "observed_at": "2026-06-28"
 }</pre>
                       </div>
                       <div class="x-fn">
                         <span class="fname">expand()</span>
                         <span class="farrow">→</span>
-                        <span class="fid">identify() →<br>"ec.europa.eu/trade/solar-2026"</span>
+                        <span class="fid">identify() →<br>"obs_9f31"</span>
                       </div>
                       <div class="x-col">
                         <div class="x-head">entry [#1] (TEntry)</div>
                         <pre class="chat-code">{
-  "source": "EU Commission",
-  "claim": "provisional duties notice",
-  "url": "https://ec.europa.eu/trade/solar-2026",
-  "publishedAt": "2026-05-30"
+  "kind": "observation",
+  "dealId": "deal_84h2",
+  "summary": "Security review gating — SOC 2
+   bridge letter requested",
+  "backing": ["art_5521"],
+  "observedAt": "2026-06-28"
 }</pre>
                       </div>
                     </div>
-                    <div class="d-row add" data-idx="2"><span class="gut">+</span><span class="hnd">[#2]</span><span class="lbl">Reuters — member states split on tariff extension · reuters.com</span></div>
-                    <div class="d-row add" data-idx="3"><span class="gut">+</span><span class="hnd">[#3]</span><span class="lbl">SolarPower Europe — industry impact brief · solarpowereurope.org</span></div>
-                    <div class="d-row add" data-idx="4"><span class="gut">+</span><span class="hnd">[#4]</span><span class="lbl">Politico — Council vote timeline · politico.eu</span></div>
-                    <div class="d-row skp"><span class="gut">ø</span><span class="lbl raw">{"title":"(untitled)","url":null}</span><span class="micro">expand() → null · skip recorded in manifest</span></div>
+                    <div class="d-row add" data-idx="2"><span class="gut">+</span><span class="hnd">[#2]</span><span class="lbl">obs · CFO approved budget at $210k ceiling · email 06-24</span></div>
+                    <div class="d-row add" data-idx="3"><span class="gut">+</span><span class="hnd">[#3]</span><span class="lbl">obs · champion (VP Ops) moving teams in Q3 · slack 06-19</span></div>
+                    <div class="d-row add" data-idx="4"><span class="gut">+</span><span class="hnd">[#4]</span><span class="lbl">obs · legal redlining MSA §7 liability cap · meeting 07-01</span></div>
+                    <div class="d-row skp"><span class="gut">ø</span><span class="lbl raw">{"observation_id":"obs_a112","deal_id":null}</span><span class="micro">expand() → null (no deal ref) · skip recorded in manifest</span></div>
                   </div>
                   <div class="d-foot">
-                    <span class="tag-chip">{"facet":"search","query":"EU solar tariff 2026"}</span>
+                    <span class="tag-chip">{"facet":"observations","deal":"deal_84h2"}</span>
                     <button class="txt-btn" type="button">receipt</button>
                   </div>
                 </div>
               </details>
 
               <details class="card chat-tool ok">
-                <summary><span class="glyph-ok">✓</span><span class="tool-name">fetch_page</span><span class="tool-dur">2,210ms</span></summary>
-                <div class="tool-io"><div><div class="io-label">input</div><pre class="chat-code">{"url": "https://reuters.com/…", "extract": "full"}</pre></div></div>
+                <summary><span class="glyph-ok">✓</span><span class="tool-name">list_artifacts</span><span class="tool-dur">2,210ms</span></summary>
+                <div class="tool-io"><div><div class="io-label">input</div><pre class="chat-code">{"deal_id": "deal_84h2", "artifact_types": ["meeting", "email"]}</pre></div></div>
               </details>
 
-              <!-- Δ DROP frame #1 — merged ~ row visible -->
+              <!-- Δ DROP frame #1 — observations expanded to their backing artifacts -->
               <details class="card chat-delta sd" id="f-drop1" open>
                 <summary>
                   <span class="d-badge">Δ</span>
-                  <span class="d-key">backpack.sources</span>
+                  <span class="d-key">backpack.observations</span>
                   <span class="pill add">+2</span><span class="pill mrg">~1</span>
                   <span class="d-size">4 → 6</span>
                   <span class="hydra-chip">hydrated 840ms</span>
-                  <span class="d-prov">drop #1 · ↳ <a href="#f-drop1">fetch_page</a></span>
+                  <span class="d-prov">drop #1 · ↳ <a href="#f-drop1">list_artifacts</a></span>
                 </summary>
                 <div class="d-body">
                   <div class="d-diff">
-                    <div class="d-row add" data-idx="5"><span class="gut">+</span><span class="hnd">[#5]</span><span class="lbl">Reuters full text — quota compromise draft · reuters.com/…/full</span></div>
-                    <div class="d-row add" data-idx="6"><span class="gut">+</span><span class="hnd">[#6]</span><span class="lbl">EC annex — duty schedule table · ec.europa.eu/…/annex</span></div>
-                    <div class="d-row mrg" data-idx="2"><span class="gut">~</span><span class="lbl">merged into <span class="hnd">[#2]</span> · identify() collision · merge(): last-write-wins · kept first-seen index</span><button class="txt-btn" type="button" style="margin-left:auto">prev ⇄ next</button></div>
+                    <div class="d-row add" data-idx="5"><span class="gut">+</span><span class="hnd">[#5]</span><span class="lbl">artifact · meeting · “Security review sync” transcript · gong · backs [#1]</span></div>
+                    <div class="d-row add" data-idx="6"><span class="gut">+</span><span class="hnd">[#6]</span><span class="lbl">artifact · email · “Re: FY27 budget approval” thread · gmail · backs [#2]</span></div>
+                    <div class="d-row mrg" data-idx="1"><span class="gut">~</span><span class="lbl">merged into <span class="hnd">[#1]</span> · same observation resurfaced by the artifact fetch · identify() collision · kept first-seen index</span><button class="txt-btn" type="button" style="margin-left:auto">prev ⇄ next</button></div>
                   </div>
-                  <div class="d-foot"><span class="tag-chip">{"facet":"fetch"}</span><button class="txt-btn" type="button">receipt</button></div>
+                  <div class="d-foot"><span class="tag-chip">{"facet":"artifacts","via":"source_refs"}</span><button class="txt-btn" type="button">receipt</button></div>
                 </div>
               </details>
             </div>
@@ -642,77 +646,77 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
           <details class="card chat-delta innate sd" id="f-inn-gather">
             <summary>
               <span class="d-badge">Δ</span>
-              <span class="d-key">agents.gather</span>
+              <span class="d-key">agents.retrieve</span>
               <span style="font-size:var(--fz-tiny);color:var(--ink-2)">← stage emission</span>
               <span class="innate-chip">innate</span>
               <span class="d-prov">set · null → {…} · <a href="#f-drop1">= stage output ↑</a></span>
             </summary>
-            <div class="d-body"><pre class="chat-code">Same value as the gather step result above — rendered once, referenced here.</pre></div>
+            <div class="d-body"><pre class="chat-code">Same value as the retrieve step result above — rendered once, referenced here.</pre></div>
           </details>
 
           <!-- TRAVEL frame -->
           <details class="travel sd" id="f-travel1">
             <summary>
               <span class="t-glyph">⇄</span>
-              <span class="t-title">backpack.sources travels → curate</span>
+              <span class="t-title">backpack.observations travels → correlate</span>
               <span class="t-sub">6 items · [#1..#6]</span>
-              <span class="m-strip" title="drop #0 · gather · facet:search · 4 covered / drop #1 · gather · facet:fetch · 2 covered">
-                <i style="width:66.6%;background:color-mix(in oklch, var(--accent) 60%, var(--paper))" title="drop #0 · gather · facet:search · 4 covered"></i>
-                <i style="width:33.4%;background:color-mix(in oklch, var(--accent) 85%, var(--paper))" title="drop #1 · gather · facet:fetch · 2 covered"></i>
+              <span class="m-strip" title="drop #0 · retrieve · facet:observations · 4 covered / drop #1 · retrieve · facet:artifacts · 2 covered">
+                <i style="width:66.6%;background:color-mix(in oklch, var(--accent) 60%, var(--paper))" title="drop #0 · retrieve · facet:observations · 4 covered"></i>
+                <i style="width:33.4%;background:color-mix(in oklch, var(--accent) 85%, var(--paper))" title="drop #1 · retrieve · facet:artifacts · 2 covered"></i>
               </span>
             </summary>
             <div class="t-body"><pre class="chat-code">view().lines()
-[#1] EU Commission — provisional duties notice · ec.europa.eu
-[#2] Reuters — member states split on tariff extension · reuters.com
-[#3] SolarPower Europe — industry impact brief · solarpowereurope.org
-[#4] Politico — Council vote timeline · politico.eu
-[#5] Reuters full text — quota compromise draft
-[#6] EC annex — duty schedule table</pre></div>
+[#1] obs · security review gating — SOC 2 bridge letter · gong 06-28
+[#2] obs · CFO approved budget at $210k ceiling · email 06-24
+[#3] obs · champion (VP Ops) moving teams in Q3 · slack 06-19
+[#4] obs · legal redlining MSA §7 liability cap · meeting 07-01
+[#5] artifact · meeting · “Security review sync” transcript · backs [#1]
+[#6] artifact · email · “Re: FY27 budget approval” thread · backs [#2]</pre></div>
           </details>
 
-          <!-- STAGE 2 · CURATE -->
+          <!-- STAGE 2 · CORRELATE -->
           <details class="card chat-step" open>
-            <summary><span style="color:var(--accent)">◆</span><span class="step-kind">agent · curate</span><span class="tool-dur">6.1s</span></summary>
+            <summary><span style="color:var(--accent)">◆</span><span class="step-kind">agent · correlate</span><span class="tool-dur">6.1s</span></summary>
             <div class="step-children-label">tools called</div>
             <div class="step-children">
 
               <details class="card chat-delta readframe sd" id="f-read-cur">
                 <summary>
                   <span class="d-badge read">◇</span>
-                  <span class="d-key">backpack.sources</span>
+                  <span class="d-key">backpack.observations</span>
                   <span style="font-size:var(--fz-tiny);color:var(--ink-2)">finalized() · memo miss (gen 2)</span>
-                  <span class="d-prov">6 entries → ranked list</span>
+                  <span class="d-prov">6 entries → deal timeline</span>
                 </summary>
                 <div class="d-body">
                   <div class="ba">
-                    <div><div class="io-label">entries (6)</div><pre class="chat-code">[#1] EU Commission — provisional duties…
-[#2] Reuters — member states split…
-[#3] SolarPower Europe — industry…
-[#4] Politico — Council vote timeline
-[#5] Reuters full text — quota draft
-[#6] EC annex — duty schedule table</pre></div>
+                    <div><div class="io-label">entries (6)</div><pre class="chat-code">[#1] obs · security review gating…
+[#2] obs · CFO approved budget…
+[#3] obs · champion moving teams…
+[#4] obs · legal redlining MSA §7…
+[#5] artifact · gong transcript
+[#6] artifact · budget email thread</pre></div>
                     <div class="arr">→</div>
-                    <div><div class="io-label">final (TFinal)</div><pre class="chat-code">{ "ranked": ["#1","#6","#2","#5","#4","#3"],
-  "cutoff": "2026-01-01",
-  "primary": "#1" }</pre></div>
+                    <div><div class="io-label">final (TFinal)</div><pre class="chat-code">{ "timeline": ["#3","#2","#1","#4"],
+  "blockers": ["#1","#4"],
+  "backing": { "#1":["#5"], "#2":["#6"] } }</pre></div>
                   </div>
                 </div>
               </details>
 
               <details class="card chat-tool ok">
-                <summary><span class="glyph-ok">✓</span><span class="tool-name">cut_sources</span><span class="tool-dur">104ms</span></summary>
+                <summary><span class="glyph-ok">✓</span><span class="tool-name">cut_evidence</span><span class="tool-dur">104ms</span></summary>
                 <div class="tool-io">
                   <div><div class="io-label">input</div><pre class="chat-code">{"cut": [3, 5]}</pre></div>
-                  <div class="d-row" style="border:1px solid var(--line);border-radius:var(--radius-sm)"><span class="micro" style="padding:4px 8px">complement([3,5]) → kept <span class="hnd">[#1]</span><span class="hnd">[#2]</span><span class="hnd">[#4]</span><span class="hnd">[#6]</span> (keep-by-default)</span></div>
+                  <div class="d-row" style="border:1px solid var(--line);border-radius:var(--radius-sm)"><span class="micro" style="padding:4px 8px">complement([3,5]) → kept <span class="hnd">[#1]</span><span class="hnd">[#2]</span><span class="hnd">[#4]</span><span class="hnd">[#6]</span> (keep-by-default) · [#3] superseded — new champion identified · [#5] redundant with [#1]</span></div>
                 </div>
               </details>
 
               <details class="card chat-delta sd" id="f-write-shortlist" open>
                 <summary>
                   <span class="d-badge">Δ</span>
-                  <span class="d-key">curation.shortlist</span>
+                  <span class="d-key">brief.highlights</span>
                   <span style="font-size:var(--fz-tiny);color:var(--ink-2)">set</span>
-                  <span class="d-prov">↳ onEmit(curate)</span>
+                  <span class="d-prov">↳ onEmit(correlate)</span>
                 </summary>
                 <div class="d-body">
                   <div class="ba">
@@ -727,7 +731,7 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
 
           <details class="card chat-delta innate sd">
             <summary>
-              <span class="d-badge">Δ</span><span class="d-key">agents.curate</span>
+              <span class="d-badge">Δ</span><span class="d-key">agents.correlate</span>
               <span style="font-size:var(--fz-tiny);color:var(--ink-2)">← stage emission</span>
               <span class="innate-chip">innate</span>
               <span class="d-prov">set · null → {…}</span>
@@ -739,8 +743,8 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
           <details class="travel quiet sd">
             <summary>
               <span class="t-glyph">⇄</span>
-              <span class="t-title">backpack.sources travels → answer</span>
-              <span class="t-sub">no new drops since gather · still 6 items</span>
+              <span class="t-title">backpack.observations travels → brief</span>
+              <span class="t-sub">no new drops since retrieve · still 6 items</span>
             </summary>
             <div class="t-body"><pre class="chat-code">Pack unchanged — manifest still 2 records, 6 covered, 1 skipped.</pre></div>
           </details>
@@ -748,35 +752,37 @@ footer { margin-top: 60px; color: var(--mute); font-size: var(--fz-tiny); border
           <details class="card chat-delta innate readframe sd" id="f-read-prompt">
             <summary>
               <span class="d-badge read">◇</span>
-              <span class="d-key">agents.curate</span>
+              <span class="d-key">agents.correlate</span>
               <span style="font-size:var(--fz-tiny);color:var(--ink-2)">→ prompt · renderPriorEmission</span>
               <span class="innate-chip">innate</span>
               <span class="d-prov">exact injected text ▾</span>
             </summary>
             <div class="d-body">
               <div class="io-label">injected prompt block — what the model actually saw</div>
-              <pre class="chat-code">TASK: Write the final answer with citations.
+              <pre class="chat-code">TASK: Write the deal brief with citations.
 
 WHAT PRIOR STAGES ESTABLISHED
-── curate ──
-Shortlist: [#1] [#2] [#4] [#6] (ranked, primary #1).
-Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
+── correlate ──
+Highlights: [#1] [#2] [#4] [#6] — blockers [#1] [#4],
+backed by artifacts [#5]→[#1], [#6]→[#2].
+[#3] superseded (new champion identified); [#5] folded
+into the brief via [#1].</pre>
             </div>
           </details>
 
-          <!-- STAGE 3 · ANSWER -->
+          <!-- STAGE 3 · BRIEF -->
           <details class="card chat-step" open>
-            <summary><span style="color:var(--accent)">◆</span><span class="step-kind">agent · answer</span><span class="tool-dur">8.9s</span></summary>
+            <summary><span style="color:var(--accent)">◆</span><span class="step-kind">agent · brief</span><span class="tool-dur">8.9s</span></summary>
             <div class="step-children-label">tools called</div>
             <div class="step-children">
-              <div class="strip sd readframe"><span class="d-badge read">◇</span>backpack.sources · finalized() · memo hit · unchanged since drop #1</div>
-              <div class="strip sd readframe"><span class="d-badge read">◇</span>curation.shortlist → prompt</div>
+              <div class="strip sd readframe"><span class="d-badge read">◇</span>backpack.observations · finalized() · memo hit · unchanged since drop #1</div>
+              <div class="strip sd readframe"><span class="d-badge read">◇</span>brief.highlights → prompt</div>
             </div>
           </details>
 
           <div class="chat-bubble assistant">
-            <p style="margin:0 0 8px">EU solar tariff policy is mid-pivot. The Commission's provisional duties notice <button class="cite" data-idx="1">[#1]</button> sets duties of 12–18% on imported modules from June 2026, while member states remain split on extending them past 2027 <button class="cite" data-idx="2">[#2]</button>.</p>
-            <p style="margin:0">A Council vote is expected in Q4 <button class="cite" data-idx="4">[#4]</button>; the duty schedule annex <button class="cite" data-idx="6">[#6]</button> details per-cell rates. Industry groups warn of deployment slowdowns if the compromise draft fails.</p>
+            <p style="margin:0 0 8px">Meridian Health is in Negotiation with two live blockers. Security review is the gating item — InfoSec is waiting on a SOC 2 bridge letter <button class="cite" data-idx="1">[#1]</button>, and legal is still redlining the MSA §7 liability cap <button class="cite" data-idx="4">[#4]</button>.</p>
+            <p style="margin:0">Budget is not a risk: the CFO approved a $210k ceiling <button class="cite" data-idx="2">[#2]</button>, confirmed on the approval thread <button class="cite" data-idx="6">[#6]</button>. Suggested next step: get the bridge letter to InfoSec before the champion transition completes in Q3.</p>
           </div>
           <div class="chat-footer"><span>claude-sonnet</span><span>·</span><span>9,412 in</span><span>·</span><span>1,286 out</span></div>
         </div>
@@ -794,22 +800,22 @@ Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
         <!-- CARRY — single pack, so the key IS the caption (no group header) -->
         <div>
           <div class="hero recent" id="heroSources">
-            <button class="chev" id="chevSources" aria-expanded="true" aria-controls="railIdx" aria-label="toggle backpack.sources ledger">▶</button>
-            <button class="hero-main" data-target="f-drop1" title="drop #0 · gather · facet:search · 4 covered / drop #1 · gather · facet:fetch · 2 covered">
+            <button class="chev" id="chevSources" aria-expanded="true" aria-controls="railIdx" aria-label="toggle backpack.observations ledger">▶</button>
+            <button class="hero-main" data-target="f-drop1" title="drop #0 · retrieve · facet:observations · 4 covered / drop #1 · retrieve · facet:artifacts · 2 covered">
               <span class="hero-key">
-                <span class="k">backpack.sources</span>
+                <span class="k">backpack.observations</span>
                 <span class="s">2 drops · 2 excluded · 1 skipped</span>
               </span>
               <span class="hero-n">6</span>
             </button>
           </div>
           <div class="idx-list" id="railIdx">
-            <div class="idx-row" data-idx="1" title="minted by gather · drop #0 · facet:search" tabindex="0"><span class="hnd">[#1]</span><span class="l">EU Commission — provisional duties notice</span></div>
-            <div class="idx-row" data-idx="2" title="minted by gather · drop #0 · facet:search · merged ×1" tabindex="0"><span class="hnd">[#2]</span><span class="l">Reuters — member states split on tariff…</span></div>
-            <div class="idx-row cut" data-idx="3" title="minted by gather · cut by curate (excluded, not removed)" tabindex="0"><span class="hnd">[#3]</span><span class="l">SolarPower Europe — industry impact brief</span></div>
-            <div class="idx-row" data-idx="4" title="minted by gather · drop #0 · facet:search" tabindex="0"><span class="hnd">[#4]</span><span class="l">Politico — Council vote timeline</span></div>
-            <div class="idx-row cut" data-idx="5" title="minted by gather · cut by curate (excluded, not removed)" tabindex="0"><span class="hnd">[#5]</span><span class="l">Reuters full text — quota compromise draft</span></div>
-            <div class="idx-row" data-idx="6" title="minted by gather · drop #1 · facet:fetch" tabindex="0"><span class="hnd">[#6]</span><span class="l">EC annex — duty schedule table</span></div>
+            <div class="idx-row" data-idx="1" title="minted by retrieve · drop #0 · facet:observations · merged ×1" tabindex="0"><span class="hnd">[#1]</span><span class="l">obs · security review gating — SOC 2 letter</span></div>
+            <div class="idx-row" data-idx="2" title="minted by retrieve · drop #0 · facet:observations" tabindex="0"><span class="hnd">[#2]</span><span class="l">obs · CFO approved $210k ceiling</span></div>
+            <div class="idx-row cut" data-idx="3" title="minted by retrieve · cut by correlate (excluded, not removed)" tabindex="0"><span class="hnd">[#3]</span><span class="l">obs · champion moving teams in Q3</span></div>
+            <div class="idx-row" data-idx="4" title="minted by retrieve · drop #0 · facet:observations" tabindex="0"><span class="hnd">[#4]</span><span class="l">obs · legal redlining MSA §7 cap</span></div>
+            <div class="idx-row cut" data-idx="5" title="minted by retrieve · cut by correlate (excluded, not removed)" tabindex="0"><span class="hnd">[#5]</span><span class="l">artifact · “Security review sync” transcript</span></div>
+            <div class="idx-row" data-idx="6" title="minted by retrieve · drop #1 · facet:artifacts" tabindex="0"><span class="hnd">[#6]</span><span class="l">artifact · “Re: FY27 budget approval” thread</span></div>
           </div>
         </div>
 
@@ -819,15 +825,15 @@ Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
             <button class="chev" id="chevStages" aria-expanded="false" aria-controls="stageRows" aria-label="toggle stage rows">▶</button>
             <button class="hero-main" data-target="f-inn-gather">
               <span class="hero-key"><span class="k" style="font-weight:600">stages</span></span>
-              <span class="ticks" style="margin-left:auto"><i class="set" title="gather · set"></i><i class="set" title="curate · set"></i><i class="pend" title="answer · pending"></i></span>
+              <span class="ticks" style="margin-left:auto"><i class="set" title="retrieve · set"></i><i class="set" title="correlate · set"></i><i class="pend" title="brief · pending"></i></span>
               <span class="frac">2/3</span>
             </button>
           </div>
           <div class="stage-rows" id="stageRows" hidden>
             <span class="innate-chip">innate</span>
-            <button class="srow" data-target="f-inn-gather">agents.gather <span class="st">✓ set</span></button>
-            <button class="srow" data-target="f-read-prompt">agents.curate <span class="st">✓ set</span> <span class="sfx">→ prompt</span></button>
-            <div class="srow pending">agents.answer <span style="margin-left:auto">pending</span></div>
+            <button class="srow" data-target="f-inn-gather">agents.retrieve <span class="st">✓ set</span></button>
+            <button class="srow" data-target="f-read-prompt">agents.correlate <span class="st">✓ set</span> <span class="sfx">→ prompt</span></button>
+            <div class="srow pending">agents.brief <span style="margin-left:auto">pending</span></div>
           </div>
         </div>
 
@@ -835,7 +841,7 @@ Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
         <div>
           <div class="rail-cap">Slots · 1</div>
           <button class="slot-row" data-target="f-write-shortlist" title='["#1","#2","#4","#6"]'>
-            <span class="k">curation.shortlist</span>
+            <span class="k">brief.highlights</span>
             <span class="v">["#1","#2","#4","#6"]</span>
           </button>
         </div>
@@ -860,15 +866,15 @@ Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
     <details class="card chat-delta errframe" open>
       <summary>
         <span class="d-badge err">Δ</span>
-        <span class="d-key">backpack.sources</span>
+        <span class="d-key">backpack.observations</span>
         <span class="pill" style="color:var(--err-ink);border-color:color-mix(in oklch, var(--err) 45%, var(--line));background:var(--err-soft)">expand() threw</span>
-        <span class="d-prov">drop #2 · ↳ web_search</span>
+        <span class="d-prov">drop #2 · ↳ search_deal_context</span>
       </summary>
       <div class="d-body">
-        <pre class="chat-code" style="border-color:color-mix(in oklch, var(--err) 45%, var(--line));color:var(--err-ink)">Backpack 'sources' expand() threw on raw 0
-({"title":"Solar update","url":"htp:/broken"}): Invalid URL</pre>
+        <pre class="chat-code" style="border-color:color-mix(in oklch, var(--err) 45%, var(--line));color:var(--err-ink)">Backpack 'observations' expand() threw on raw 0
+({"observation_id":"obs_c220",…}): invalid observed_at "yesterday-ish"</pre>
         <div class="io-label">offending raw</div>
-        <pre class="chat-code">{"title": "Solar update", "url": "htp:/broken", "rank": 7}</pre>
+        <pre class="chat-code">{"observation_id": "obs_c220", "deal_id": "deal_84h2", "observed_at": "yesterday-ish"}</pre>
       </div>
     </details>
   </div>
@@ -879,18 +885,18 @@ Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
       <summary>
         <span class="d-badge">Δ</span>
         <span class="d-key" style="color:var(--ink-2)">5 state ops</span>
-        <span class="pill add">backpack.sources +4</span>
+        <span class="pill add">backpack.observations +4</span>
         <span class="pill mrg">notes ✎2</span>
-        <span class="d-prov">loop iter 3–7 · expand ▾</span>
+        <span class="d-prov">deal loop 3–7 · expand ▾</span>
       </summary>
-      <div class="d-body"><pre class="chat-code">drop #4 · +1 · [#12]
-drop #5 · +1 · [#13]
-notes.progress · update(fn) · iter 4
-drop #6 · +2 · [#14] [#15]
-notes.progress · update(fn) · iter 5</pre></div>
+      <div class="d-body"><pre class="chat-code">drop #4 · +1 · [#12] · deal_2c88
+drop #5 · +1 · [#13] · deal_5n19
+notes.progress · update(fn) · deal 4/12
+drop #6 · +2 · [#14] [#15] · deal_7q03
+notes.progress · update(fn) · deal 5/12</pre></div>
     </details>
     <div class="g-cap" style="margin-top:6px">Memo-hit read — 24px strip, never expands tall</div>
-    <div class="strip"><span class="d-badge read">◇</span>backpack.sources · finalized() · memo hit · unchanged since drop #6</div>
+    <div class="strip"><span class="d-badge read">◇</span>backpack.observations · finalized() · memo hit · unchanged since drop #6</div>
   </div>
 
   <div class="g-card">
@@ -898,16 +904,16 @@ notes.progress · update(fn) · iter 5</pre></div>
     <details class="card chat-delta" open>
       <summary>
         <span class="d-badge">⇄</span>
-        <span class="d-key">backpack.sources</span>
+        <span class="d-key">backpack.observations</span>
         <span style="font-size:var(--fz-tiny);color:var(--ink-2)">absorb branch 2/3</span>
         <span class="pill add">+2</span><span class="pill mrg">~1</span>
         <span class="d-prov">appended [#13..#14]</span>
       </summary>
       <div class="d-body">
         <div class="d-diff">
-          <div class="d-row add"><span class="gut">+</span><span class="hnd">[#13]</span><span class="lbl">branch 2 · IEA outlook chapter</span></div>
-          <div class="d-row add"><span class="gut">+</span><span class="hnd">[#14]</span><span class="lbl">branch 2 · WTO filing summary</span></div>
-          <div class="d-row mrg"><span class="gut">~</span><span class="lbl">merged into <span class="hnd">[#2]</span> · duplicate across branches</span></div>
+          <div class="d-row add"><span class="gut">+</span><span class="hnd">[#13]</span><span class="lbl">branch 2 · deal_9k41 · obs · renewal risk flagged in QBR</span></div>
+          <div class="d-row add"><span class="gut">+</span><span class="hnd">[#14]</span><span class="lbl">branch 2 · deal_9k41 · artifact · QBR meeting notes · granola</span></div>
+          <div class="d-row mrg"><span class="gut">~</span><span class="lbl">merged into <span class="hnd">[#2]</span> · same email thread observed on two deals</span></div>
         </div>
       </div>
     </details>
@@ -927,7 +933,7 @@ notes.progress · update(fn) · iter 5</pre></div>
       <div style="padding:10px 14px">
         <div class="hero"><span class="chev" style="cursor:default">▶</span>
           <span class="hero-main" style="cursor:default">
-            <span class="hero-key"><span class="k">backpack.sources</span><span class="s">1 drop · 1 skipped</span></span>
+            <span class="hero-key"><span class="k">backpack.observations</span><span class="s">1 drop · 1 skipped</span></span>
             <span class="hero-n" style="color:var(--violet-ink)">4</span>
           </span>
         </div>
@@ -943,9 +949,9 @@ notes.progress · update(fn) · iter 5</pre></div>
   <div class="g-card">
     <div class="g-cap">Gate-blocked tool — the absence IS the display <small>a rejected tool never runs, so it has no child Δ frame; the rail confirms pack size didn’t move. One taught line makes the invariant explicit.</small></div>
     <details class="card chat-tool err" open>
-      <summary><span class="glyph-err">⊘</span><span class="tool-name">bulk_import</span><span class="tool-dur">rejected</span></summary>
+      <summary><span class="glyph-err">⊘</span><span class="tool-name">manage_deal_updates</span><span class="tool-dur">rejected</span></summary>
       <div class="tool-io">
-        <div><div class="io-label">gate</div><pre class="chat-code">approval-gate: "bulk writes require human sign-off"</pre></div>
+        <div><div class="io-label">gate</div><pre class="chat-code">approval-gate: "CRM field writes require human sign-off"</pre></div>
         <div class="strip" style="border-style:solid"><span class="d-badge read">◇</span>backpack: no writes (gate blocked before execution)</div>
       </div>
     </details>
