@@ -39,11 +39,15 @@
  * accepted (a Sequential stage, a Loop body, a FanOut branch, a sub-tool).
  */
 
+import { generateId } from "ai";
 import type { ZodType } from "zod";
+import type { AgentEvent } from "../events/types.js";
+import { createEvent } from "../events/types.js";
 import type { AgentLike } from "../runner/agent-runner.js";
 import { createToolboxExecutor } from "../runner/toolbox-executor.js";
 import { AgentStep } from "./agent-step.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
+import { ObservedScratchpad } from "./observed-scratchpad.js";
 import { retry } from "./retry.js";
 import {
   type ScratchpadAccess,
@@ -253,6 +257,27 @@ export function sequentialAgent(
       let tokensIn = 0;
       let tokensOut = 0;
 
+      // Step-event emission (#226): SKIPPED entirely when ctx.eventBus is
+      // absent — today's silent behavior, byte-identical. Event identity
+      // prefers the ctx's ids, then the observed pad's run-wide emitter ids
+      // (so step events correlate with the pad's state-delta events), then a
+      // one-per-run mint so the start/end pairs still cohere.
+      const bus = ctx.eventBus;
+      const observed = scratchpad instanceof ObservedScratchpad ? scratchpad : undefined;
+      const traceId = ctx.traceId ?? observed?.emitter.traceId ?? generateId();
+      const runId = ctx.runId ?? observed?.emitter.runId ?? generateId();
+      const publish = bus
+        ? (event: AgentEvent): void => {
+            try {
+              void bus.publish(event).catch(() => {
+                // Swallow — step events are best-effort observability.
+              });
+            } catch {
+              // Swallow a synchronous throw too (same non-throw contract).
+            }
+          }
+        : undefined;
+
       for (let i = 0; i < specs.length; i += 1) {
         const spec = specs[i]!;
         const name = names[i]!;
@@ -273,9 +298,30 @@ export function sequentialAgent(
         const hasCapabilities =
           ((spec.agent as { role?: { capabilities?: ReadonlyArray<unknown> } }).role?.capabilities
             ?.length ?? 0) > 0;
+
+        // One `agent.step.start`/`.end` pair per STAGE. The start's spanId is
+        // the stage's span: the stage ctx nests under it (parentSpanId), so the
+        // delegated agent's tool events attribute to their stage in every view.
+        const agentName = (spec.agent as { role?: { name?: string } }).role?.name;
+        let stepSpanId: string | undefined;
+        const stepStartedAt = Date.now();
+        if (publish) {
+          const startEvent = createEvent("agent.step.start", {
+            traceId,
+            runId,
+            ...(ctx.parentSpanId ? { parentSpanId: ctx.parentSpanId } : {}),
+            stepName: name,
+            ...(agentName ? { agentName } : {}),
+            arguments: { input },
+          });
+          stepSpanId = startEvent.spanId;
+          publish(startEvent);
+        }
+
         const stageCtx: NodeRunContext = {
           ...ctx,
           scratchpad,
+          ...(stepSpanId ? { parentSpanId: stepSpanId } : {}),
           ...(hasCapabilities ? { toolExecutor: createToolboxExecutor(spec.agent as never) } : {}),
         };
 
@@ -288,48 +334,87 @@ export function sequentialAgent(
         const node =
           attempts > 0 ? retry(step, { maxAttempts: attempts + 1, name: `${name}:retry` }) : step;
 
-        const res = await node.run(input, stageCtx);
-        tokensIn += res.totalInputTokens;
-        tokensOut += res.totalOutputTokens;
-        if (!res.succeeded) {
-          return {
-            output: undefined as never,
-            succeeded: false,
-            error:
-              res.error ?? new Error(`sequentialAgent: stage '${name}' failed without an error`),
-            totalInputTokens: tokensIn,
-            totalOutputTokens: tokensOut,
-          };
-        }
-
-        scratchpad.set(emissionSlot, res.output);
-        outputs[name] = res.output;
-        completed.push({ name, output: res.output });
-
-        const done = (
-          stopped: SequentialAgentResult["stopped"],
-        ): NodeResult<SequentialAgentResult> => ({
-          output: { outputs, stopped },
-          succeeded: true,
-          totalInputTokens: tokensIn,
-          totalOutputTokens: tokensOut,
-        });
-
-        const stopReason = spec.stop?.(res.output, scratchpad.reader()) ?? null;
-        if (stopReason != null) return done({ stage: name, reason: stopReason });
-
-        if (spec.onEmit != null) {
-          try {
-            const emitStop = await spec.onEmit(res.output, scratchpad, { ...ctx, scratchpad });
-            if (typeof emitStop === "string") return done({ stage: name, reason: emitStop });
-          } catch (error) {
+        // `stepResult`/`stepError` feed the `finally`-emitted `agent.step.end`,
+        // which therefore covers EVERY exit: success, failure return, stop
+        // short-circuit, onEmit throw, and an unexpected throw.
+        let stepResult: unknown;
+        let stepError: string | undefined;
+        try {
+          const res = await node.run(input, stageCtx);
+          tokensIn += res.totalInputTokens;
+          tokensOut += res.totalOutputTokens;
+          if (!res.succeeded) {
+            const error =
+              res.error ?? new Error(`sequentialAgent: stage '${name}' failed without an error`);
+            stepError = error.message;
             return {
               output: undefined as never,
               succeeded: false,
-              error: error as Error,
+              error,
               totalInputTokens: tokensIn,
               totalOutputTokens: tokensOut,
             };
+          }
+          stepResult = res.output;
+
+          // The per-stage emission is the FRAMEWORK's write, not the agent's —
+          // tag it innate on an observed pad (#226). Plain pads write as before.
+          if (observed) {
+            observed.withOrigin("innate", () => scratchpad.set(emissionSlot, res.output));
+          } else {
+            scratchpad.set(emissionSlot, res.output);
+          }
+          outputs[name] = res.output;
+          completed.push({ name, output: res.output });
+
+          const done = (
+            stopped: SequentialAgentResult["stopped"],
+          ): NodeResult<SequentialAgentResult> => ({
+            output: { outputs, stopped },
+            succeeded: true,
+            totalInputTokens: tokensIn,
+            totalOutputTokens: tokensOut,
+          });
+
+          const stopReason = spec.stop?.(res.output, scratchpad.reader()) ?? null;
+          if (stopReason != null) return done({ stage: name, reason: stopReason });
+
+          if (spec.onEmit != null) {
+            try {
+              const emitStop = await spec.onEmit(res.output, scratchpad, { ...ctx, scratchpad });
+              if (typeof emitStop === "string") return done({ stage: name, reason: emitStop });
+            } catch (error) {
+              stepError = error instanceof Error ? error.message : String(error);
+              return {
+                output: undefined as never,
+                succeeded: false,
+                error: error as Error,
+                totalInputTokens: tokensIn,
+                totalOutputTokens: tokensOut,
+              };
+            }
+          }
+        } catch (error) {
+          // A nested/third-party node that throws (well-behaved leaves don't)
+          // still gets its step.end stamped before the throw propagates.
+          stepError = error instanceof Error ? error.message : String(error);
+          throw error;
+        } finally {
+          if (publish) {
+            publish(
+              createEvent("agent.step.end", {
+                traceId,
+                runId,
+                ...(stepSpanId ? { spanId: stepSpanId } : {}),
+                ...(ctx.parentSpanId ? { parentSpanId: ctx.parentSpanId } : {}),
+                stepName: name,
+                ...(agentName ? { agentName } : {}),
+                arguments: { input },
+                result: stepResult,
+                ...(stepError !== undefined ? { error: stepError } : {}),
+                durationMs: Date.now() - stepStartedAt,
+              }),
+            );
           }
         }
       }

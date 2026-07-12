@@ -21,6 +21,12 @@ import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
+import type {
+  AgentEvent,
+  BackpackAbsorbEvent,
+  BackpackDropEvent,
+  BackpackReadEvent,
+} from "../../events/types.js";
 import { type Gate, GateBlock, GateCategory } from "../../gates/base.js";
 import type { ModelResolver } from "../../providers/model-resolver.js";
 import { AgentRunner } from "../../runner/agent-runner.js";
@@ -38,11 +44,14 @@ import {
 } from "../backpack.js";
 import { FanOut } from "../fan-out.js";
 import { FunctionStep } from "../function-step.js";
+import { requireBackpack as observedRequireBackpack } from "../index.js";
 import { Loop } from "../loop.js";
 import { nodeTool } from "../node-tool.js";
+import { ObservedScratchpad } from "../observed-scratchpad.js";
 import { retry } from "../retry.js";
 import { sequentialAgent } from "../sequential-agents.js";
 import { type ScratchpadReader, type Slot, createScratchpad } from "../slot.js";
+import { createStateEmitter } from "../state-events.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures — one evidence-pool shape, shared with the unit suite's intent.
@@ -518,6 +527,229 @@ describe("Backpack × gate", () => {
 // ---------------------------------------------------------------------------
 // hydrateThenDrop — async I/O outside the RMW window, sync drop inside
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// State events (#226) — the OBSERVED accessors across Retry / Loop / FanOut.
+// The raw accessors above stay event-free; the barrel serves the observed pair.
+// ---------------------------------------------------------------------------
+
+function observedHarness(): {
+  pad: ObservedScratchpad;
+  events: AgentEvent[];
+} {
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribeAll((e) => void events.push(e as AgentEvent));
+  const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t-1", runId: "r-1" }));
+  return { pad, events };
+}
+
+const dropsOf = (events: AgentEvent[]): BackpackDropEvent[] =>
+  events.filter((e) => e.type === "agent.backpack.drop") as BackpackDropEvent[];
+const absorbsOf = (events: AgentEvent[]): BackpackAbsorbEvent[] =>
+  events.filter((e) => e.type === "agent.backpack.absorb") as BackpackAbsorbEvent[];
+const readsOf = (events: AgentEvent[]): BackpackReadEvent[] =>
+  events.filter((e) => e.type === "agent.backpack.read") as BackpackReadEvent[];
+
+describe("Backpack × state events (#226)", () => {
+  it("Retry: each attempt's drop emits; the re-drop is visible as pure merges (idempotent pool, honest events)", async () => {
+    const spec = makeSpec();
+    const { pad, events } = observedHarness();
+    const runner = new MockRunner();
+
+    let attempt = 0;
+    const body = new FunctionStep<undefined, string>({
+      name: "gather-then-flake",
+      fn: (_input, scratchpad) => {
+        attempt += 1;
+        const pack = observedRequireBackpack({ host: { scratchpad } }, spec);
+        pack.drop([r("a", "a1"), r("b", "b1")], { facet: "gather" });
+        if (attempt === 1) throw new Error("flaky after drop");
+        return "ok";
+      },
+    });
+
+    const result = await retry(body, { maxAttempts: 3 }).run(undefined, {
+      runner,
+      scratchpad: pad,
+    });
+    expect(result.succeeded).toBe(true);
+
+    const drops = dropsOf(events);
+    expect(drops).toHaveLength(2); // one per attempt — the retry seam is visible
+    expect(drops[0]).toMatchObject({
+      key: `backpack.${spec.key}`,
+      origin: "explicit",
+      accepted: 2,
+      merged: 0,
+      skipped: 0,
+      indexes: [1, 2],
+      sizeBefore: 0,
+      sizeAfter: 2,
+      previewsOmitted: 0,
+      tag: '{"facet":"gather"}',
+      traceId: "t-1",
+      runId: "r-1",
+    });
+    expect(drops[0]!.previews.map((p) => [p.index, p.op])).toEqual([
+      [1, "added"],
+      [2, "added"],
+    ]);
+    // The re-drop: same identities, nothing new — dedup shown, not hidden.
+    expect(drops[1]).toMatchObject({ accepted: 0, merged: 2, sizeBefore: 2, sizeAfter: 2 });
+    expect(drops[1]!.previews.map((p) => [p.index, p.op])).toEqual([
+      [1, "merged"],
+      [2, "merged"],
+    ]);
+  });
+
+  it("Loop: one drop event per iteration, single monotonic ordinal stream", async () => {
+    const spec = makeSpec();
+    const { pad, events } = observedHarness();
+    const runner = new MockRunner();
+
+    const body = new FunctionStep<number, number>({
+      name: "gather-iteration",
+      fn: (n, scratchpad) => {
+        observedRequireBackpack({ host: { scratchpad } }, spec).drop([
+          r(`item-${n}`, `t${n}`),
+          r("shared", "s"),
+        ]);
+        return n + 1;
+      },
+    });
+
+    const loop = new Loop<number>({ body, until: (_state, i) => i >= 2, maxIterations: 5 });
+    await loop.run(0, { runner, scratchpad: pad });
+
+    const drops = dropsOf(events);
+    expect(drops).toHaveLength(3);
+    expect(drops.map((d) => d.sizeAfter)).toEqual([2, 3, 4]); // accumulation visible per frame
+    const ordinals = drops.map((d) => d.ordinal);
+    expect(ordinals[0]! < ordinals[1]! && ordinals[1]! < ordinals[2]!).toBe(true);
+  });
+
+  it("FanOut: branch fan-in emits one innate backpack.absorb per branch, in index order — and still merges", async () => {
+    const spec = makeSpec();
+    const branchSlot = backpackSlot(spec, { scope: "branch" });
+    const { pad, events } = observedHarness();
+
+    const batches: Record<number, Raw[]> = {
+      0: [r("a", "a"), r("b", "b0")],
+      1: [r("b", "b1"), r("c", "c1")],
+      2: [r("c", "c2"), r("d", "d")],
+    };
+
+    const step = new FunctionStep<number, number>({
+      name: "branch-gather",
+      fn: (i, scratchpad) => {
+        const pack = observedRequireBackpack({ host: { scratchpad } }, spec);
+        pack.drop(batches[i]!, { facet: `b${i}` });
+        return pack.size;
+      },
+    });
+
+    const fan = new FanOut<number[], number, number>({ over: (items) => items, step });
+    const result = await fan.run([0, 1, 2], { runner: new MockRunner(), scratchpad: pad });
+    expect(result.succeeded).toBe(true);
+    expect(result.output).toEqual([2, 2, 2]);
+
+    // The union still lands (ObservedScratchpad passes the join instanceof guard).
+    expect(
+      pad
+        .get(branchSlot)
+        .entries()
+        .map((e) => e.id),
+    ).toEqual(["a", "b", "c", "d"]);
+
+    // Per-branch drops (explicit) + per-branch absorbs (innate, index order).
+    expect(dropsOf(events)).toHaveLength(3);
+    const absorbs = absorbsOf(events);
+    expect(absorbs).toHaveLength(3);
+    for (const a of absorbs) {
+      expect(a.origin).toBe("innate");
+      expect(a.key).toBe(`backpack.${spec.key}`);
+    }
+    expect(absorbs.map((a) => [a.sizeBefore, a.sizeAfter, a.accepted, a.merged])).toEqual([
+      [0, 2, 2, 0], // branch 0: a,b — both new
+      [2, 3, 1, 1], // branch 1: b merges, c appends
+      [3, 4, 1, 1], // branch 2: c merges, d appends
+    ]);
+    expect(absorbs.map((a) => a.appendedIndexes)).toEqual([[1, 2], [3], [4]]);
+    // Each branch forked and joined the shared pad.
+    expect(events.filter((e) => e.type === "agent.scratchpad.fork")).toHaveLength(3);
+    expect(events.filter((e) => e.type === "agent.scratchpad.join")).toHaveLength(3);
+  });
+
+  it("finalized() via the observed accessor emits backpack.read with memo hit/miss across proxies", async () => {
+    const spec = makeSpec();
+    const { pad, events } = observedHarness();
+    const ctx = { host: { scratchpad: pad } };
+
+    const pack = observedRequireBackpack(ctx, spec);
+    pack.drop([r("a", "alpha"), r("b", "bravo")]);
+
+    pack.finalized(); // computes
+    pack.finalized(); // memo
+    observedRequireBackpack(ctx, spec).finalized(); // a DIFFERENT proxy — memo state is per-pack
+    pack.drop(r("c", "charlie")); // invalidates
+    pack.finalized(); // recomputes
+
+    const reads = readsOf(events);
+    expect(reads.map((rd) => rd.memoHit)).toEqual([false, true, true, false]);
+    expect(reads.map((rd) => rd.size)).toEqual([2, 2, 2, 3]);
+    expect(reads[0]!.preview).toContain('"count":2');
+  });
+
+  it("threads toolCallId + spec.display onto backpack events; nests under the causing tool call", async () => {
+    const spec = makeSpec({ display: { caption: "Evidence" } });
+    const { pad, events } = observedHarness();
+
+    const pack = observedRequireBackpack(
+      { host: { scratchpad: pad }, parentToolCallId: "tc-gather" },
+      spec,
+    );
+    pack.drop(r("a", "alpha"));
+
+    const [drop] = dropsOf(events);
+    expect(drop).toMatchObject({
+      toolCallId: "tc-gather",
+      parentSpanId: "tc-gather", // the tool call's span IS the parent span
+      display: { caption: "Evidence" },
+    });
+  });
+
+  it("row previews are byte-capped with the explicit marker; oversized batches report previewsOmitted", async () => {
+    const spec = makeSpec();
+    const { pad, events } = observedHarness();
+    const pack = observedRequireBackpack({ host: { scratchpad: pad } }, spec);
+
+    // 8 rows × ~600B raw text: each row preview clips at 512B and the 2KB frame
+    // budget cannot hold all of them.
+    pack.drop(Array.from({ length: 8 }, (_, i) => r(`id-${i}`, "x".repeat(600))));
+
+    const [drop] = dropsOf(events);
+    expect(drop!.accepted).toBe(8);
+    expect(drop!.previews.length).toBeLessThan(8);
+    expect(drop!.previewsOmitted).toBe(8 - drop!.previews.length);
+    for (const p of drop!.previews) {
+      expect(p.preview.endsWith("… (preview only)")).toBe(true);
+    }
+  });
+
+  it("a plain (unobserved) pad gets the RAW pack back — zero emission, today's behavior exactly", async () => {
+    const spec = makeSpec();
+    const pad = createScratchpad();
+
+    const pack = observedRequireBackpack({ host: { scratchpad: pad } }, spec);
+    // No ObservedScratchpad in the host → no proxy: the identical slot value.
+    expect(pack).toBe(pad.get(backpackSlot(spec)));
+
+    // And the raw accessor (backpack.ts) remains what the observed module wraps:
+    // the two agree on the same underlying pack.
+    expect(requireBackpack({ host: { scratchpad: pad } }, spec)).toBe(pack);
+  });
+});
 
 describe("Backpack × hydrateThenDrop", () => {
   it("hydrateThenDrop: I/O outside the RMW window; drop itself synchronous; receipt correct", async () => {

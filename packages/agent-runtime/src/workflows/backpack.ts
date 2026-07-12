@@ -102,6 +102,20 @@ export interface BackpackSpec<TIn, TEntry, TFinal, TTag = undefined> {
 
   /** Model-facing line for one entry in a view. Default: JSON one-liner. */
   readonly renderEntry?: (entry: TEntry, index: number) => string;
+
+  /**
+   * OPTIONAL display metadata for state-visualization surfaces (#226).
+   * TYPE-ONLY at this layer: nothing in this module reads it — the observed
+   * accessor layer (`observed-backpack.ts`) threads it onto its own payloads,
+   * and the dashboard rail falls back to a generic caption when unset.
+   * "EVIDENCE" was one demo's framing, not a framework word.
+   */
+  readonly display?: {
+    /** Rail group caption for this pack (e.g. "Evidence"). */
+    readonly caption?: string;
+    /** Attribution line rendered with the caption (e.g. "added by tools"). */
+    readonly attribution?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------

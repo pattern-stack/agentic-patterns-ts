@@ -48,10 +48,18 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.llm.end"]).toBe("llm.end");
     expect(SSE_EVENT_NAMES["agent.step.start"]).toBe("step.start");
     expect(SSE_EVENT_NAMES["agent.step.end"]).toBe("step.end");
+    // State-delta events (#226)
+    expect(SSE_EVENT_NAMES["agent.backpack.drop"]).toBe("backpack.drop");
+    expect(SSE_EVENT_NAMES["agent.backpack.read"]).toBe("backpack.read");
+    expect(SSE_EVENT_NAMES["agent.backpack.absorb"]).toBe("backpack.absorb");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.write"]).toBe("scratchpad.write");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.read"]).toBe("scratchpad.read");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.fork"]).toBe("scratchpad.fork");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.join"]).toBe("scratchpad.join");
   });
 
-  it("has exactly 21 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(21);
+  it("has exactly 28 mappings", () => {
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(28);
   });
 });
 

@@ -25,7 +25,9 @@ import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunOptions, RunResult, RunnerProtocol } from "../runner/types.js";
 import type { DepReader } from "./deps.js";
 import type { Node, NodeRunContext } from "./node.js";
-import { createScratchpad } from "./slot.js";
+import { ObservedScratchpad } from "./observed-scratchpad.js";
+import { type Scratchpad, createScratchpad } from "./slot.js";
+import { createStateEmitter } from "./state-events.js";
 
 // ---------------------------------------------------------------------------
 // Role identity
@@ -185,18 +187,46 @@ export class NodeBackedRunner implements RunnerProtocol {
       );
     }
 
+    // Run identity (#226): honor caller-supplied ids (stream() threads its
+    // minted pair down through RunOptions); mint only what emission needs —
+    // a traceId is minted ONLY when a bus is present (state-delta events must
+    // carry concrete ids), so bus-less callers see today's ctx byte-for-byte
+    // (modulo the new runId field).
+    const bus = options?.eventBus;
+    const runId = options?.runId ?? generateId();
+    let traceId = options?.traceId;
+
+    // The Scratchpad: OBSERVED when the run has a bus (every slot write/read/
+    // fork/join and — via the observed accessors — every backpack drop/absorb/
+    // read publishes a state-delta event), plain otherwise (today's zero-emit
+    // behavior, byte-identical).
+    let scratchpad: Scratchpad;
+    if (bus) {
+      traceId = traceId ?? generateId();
+      scratchpad = new ObservedScratchpad(
+        createStateEmitter(bus, {
+          traceId,
+          runId,
+          ...(options?.parentSpanId ? { parentSpanId: options.parentSpanId } : {}),
+        }),
+      );
+    } else {
+      scratchpad = createScratchpad();
+    }
+
     const ctx: NodeRunContext = {
       runner: this.inner,
       toolExecutor: options?.toolExecutor,
-      traceId: options?.traceId,
+      traceId,
+      runId,
       parentSpanId: options?.parentSpanId,
-      scratchpad: createScratchpad(),
+      scratchpad,
       deps: agent.deps,
       // Thread the run's event bus onto the ctx so a promoted node can publish
       // its lifecycle events (`stream()` supplies a per-run bus it relays; a
       // direct `run()` forwards the caller's bus, or none). OPTIONAL → absent
       // when no bus is provided, preserving today's no-emit behavior.
-      ...(options?.eventBus ? { eventBus: options.eventBus } : {}),
+      ...(bus ? { eventBus: bus } : {}),
     };
 
     const input = agent.coerceIn(message);
@@ -286,7 +316,10 @@ export class NodeBackedRunner implements RunnerProtocol {
     let runError: unknown;
     const runPromise = (async () => {
       try {
-        runResult = await this.run(agent, message, { ...options, eventBus: bus });
+        // Thread the stream's minted traceId/runId down (#226) so the node's
+        // intra-run events — steps, tools, state deltas — correlate with the
+        // message lifecycle events yielded above instead of minting their own.
+        runResult = await this.run(agent, message, { ...options, traceId, runId, eventBus: bus });
       } catch (err) {
         runError = err;
       } finally {
