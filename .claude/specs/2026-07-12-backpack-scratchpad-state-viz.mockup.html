@@ -335,41 +335,119 @@ details.card > summary:focus-visible { outline: 2px solid var(--accent); outline
 .ba .arr { display: grid; place-items: center; color: var(--violet); font-weight: 700; }
 @media (max-width: 700px) { .ba { grid-template-columns: 1fr; } .ba .arr { transform: rotate(90deg); } }
 
-/* ── State rail ──────────────────────────────────────────────────── */
-.state-rail { border-left: 1px solid var(--line); background: var(--paper); padding: 12px 14px 20px; font-size: var(--fz-small); min-width: 0; }
+/* ── State rail — "Carry Gauge" (rail pass 2) ────────────────────────
+   Glance-first: one focal number per group, every list behind disclosure,
+   healthy states near-silent, only a mismatch is allowed to be loud.
+   Everything is a pure fold over events[0..cursor]; only disclosure state
+   is rail-local. */
+.state-rail { border-left: 1px solid var(--line); background: var(--paper); font-size: var(--fz-small); min-width: 0; display: flex; flex-direction: column; padding: 0; }
 @media (max-width: 980px) { .state-rail { border-left: 0; border-top: 1px solid var(--line); } }
-.rail-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.rail-head {
+  display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--paper); z-index: 2;
+}
+.rail-head .t { font: 700 var(--fz-small) var(--font-sans); color: var(--ink); }
+.live-dot { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font: 500 var(--fz-micro) var(--font-mono); color: var(--ok-ink); }
+.live-dot i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
 .asof {
-  font: 500 var(--fz-micro) var(--font-mono); color: var(--violet-ink);
+  margin-left: auto; font: 500 var(--fz-micro) var(--font-mono); color: var(--violet-ink);
   background: var(--violet-soft); border-radius: var(--radius-pill); padding: 2px 8px;
 }
-.rail-group { margin-top: 14px; }
+.rail-body { flex: 1; padding: 16px 14px 12px; display: flex; flex-direction: column; gap: 24px; }
 .rail-cap { font: 700 var(--fz-micro) var(--font-sans); text-transform: uppercase; letter-spacing: 0.09em; color: var(--mute); margin-bottom: 6px; display: flex; gap: 6px; align-items: center; }
-.rail-row {
-  display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: var(--radius-sm);
-  font-family: var(--font-mono); font-size: var(--fz-tiny); cursor: pointer; border: 0; background: none;
-  width: 100%; text-align: left; color: var(--ink);
+
+/* hero row — two sibling click targets (chevron toggles, row seeks) */
+.hero { display: flex; align-items: flex-start; gap: 0; border-left: 3px solid transparent; border-radius: var(--radius-sm); position: relative; }
+.hero.recent { border-left-color: var(--violet); }
+.chev {
+  flex: none; width: 24px; height: 34px; border: 0; background: none; cursor: pointer;
+  color: var(--mute); font-size: 10px; display: grid; place-items: center;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
-.rail-row:hover, .rail-row:focus-visible { background: var(--fill-2); }
-.rail-row .sz { margin-left: auto; font-weight: 700; color: var(--violet-ink); background: var(--violet-soft); border-radius: var(--radius-pill); padding: 0 7px; font-size: var(--fz-micro); }
-.gen-dots { display: inline-flex; gap: 3px; align-items: center; }
-.gen-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block; }
-.gen-dots i.hollow { background: transparent; border: 1.5px solid var(--mute); }
-.idx-list { margin: 2px 0 0 10px; border-left: 1px solid var(--line); padding-left: 8px; display: flex; flex-direction: column; gap: 1px; }
+.chev[aria-expanded="true"] { transform: rotate(90deg); }
+.chev:focus-visible { outline: 2px solid var(--accent); border-radius: var(--radius-sm); }
+.hero-main {
+  flex: 1; min-width: 0; border: 0; background: none; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 0; border-radius: var(--radius-sm);
+}
+.hero-main:hover, .hero-main:focus-visible { background: var(--fill-2); }
+.hero-key { min-width: 0; }
+.hero-key .k { display: block; font: 600 var(--fz-tiny) var(--font-mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-key .s { display: block; margin-top: 1px; font: 500 var(--fz-micro) var(--font-mono); color: var(--mute); }
+.hero-n { margin-left: auto; font: 700 var(--fz-lg) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+
+/* expanded ledger — the idx-row grammar survives intact */
+.idx-list { margin: 2px 0 0 18px; border-left: 1px solid var(--line); padding-left: 8px; display: flex; flex-direction: column; gap: 1px; }
+.idx-list[hidden] { display: none; }
 .idx-row {
   display: flex; gap: 6px; align-items: baseline; font-size: var(--fz-micro);
-  font-family: var(--font-mono); color: var(--ink-2); padding: 2px 4px; border-radius: var(--radius-sm);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--font-mono); color: var(--ink-2); padding: 2px 4px 2px 6px; border-radius: var(--radius-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative;
+  border-left: 2px solid color-mix(in oklch, var(--accent) 55%, var(--paper)); /* minted-by tick, carrier hue */
+  cursor: pointer;
 }
+.idx-row:hover { background: var(--fill-2); }
 .idx-row .l { overflow: hidden; text-overflow: ellipsis; }
 .idx-row.cut { color: var(--mute); text-decoration: line-through; }
 .idx-row.hl { background: var(--accent-soft); color: var(--accent-ink); }
-.slot-val { font: 500 var(--fz-micro) var(--font-mono); color: var(--ink-2); background: var(--fill); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 1px 5px; }
-.pending { color: var(--mute); font-style: italic; }
-.recon {
-  margin-top: 18px; padding-top: 10px; border-top: 1px solid var(--line);
-  font: 500 var(--fz-micro) var(--font-mono); color: var(--ok-ink);
+
+/* peek line — cross-highlight over a COLLAPSED ledger; overlay, zero reflow */
+.peek {
+  position: absolute; left: 24px; right: 6px; top: 100%; margin-top: 2px; z-index: 3;
+  font: 500 var(--fz-micro) var(--font-mono); color: var(--accent-ink);
+  background: var(--accent-soft); border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--line));
+  border-radius: var(--radius-sm); padding: 2px 6px; box-shadow: var(--shadow-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
 }
+.peek.cutpeek { text-decoration: line-through; color: var(--mute); }
+.hero.peeking .hero-main { background: var(--accent-soft); }
+
+/* stages — one row: ticks + fraction */
+.ticks { display: inline-flex; gap: 3px; }
+.ticks i { width: 6px; height: 6px; border-radius: 2px; }
+.ticks i.set { background: var(--ok); }
+.ticks i.pend { background: transparent; border: 1.5px solid var(--mute); width: 5px; height: 5px; }
+.ticks i.fail { background: var(--err); }
+.frac { font: 700 var(--fz-md) var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+.stage-rows { margin: 2px 0 0 18px; border-left: 1px solid var(--line); padding-left: 8px; position: relative; }
+.stage-rows[hidden] { display: none; }
+.stage-rows .innate-chip { position: absolute; top: 2px; right: 4px; }
+.srow {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: 0; background: none; padding: 2px 4px; border-radius: var(--radius-sm);
+  font: 500 var(--fz-micro) var(--font-mono); color: var(--ink-2); cursor: pointer;
+}
+.srow:hover, .srow:focus-visible { background: var(--fill-2); }
+.srow .st { margin-left: auto; color: var(--ok-ink); }
+.srow .sfx { color: var(--mute); }
+.srow.pending { color: var(--mute); font-style: italic; cursor: default; }
+.srow.pending:hover { background: none; }
+
+/* slots — quiet rows, no chips */
+.slot-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+  border: 0; background: none; padding: 3px 6px; border-radius: var(--radius-sm);
+  font-family: var(--font-mono); cursor: pointer; min-height: 22px;
+}
+.slot-row:hover, .slot-row:focus-visible { background: var(--fill-2); }
+.slot-row .k { font: 500 var(--fz-tiny) var(--font-mono); color: var(--ink); }
+.slot-row .v { margin-left: auto; font: 500 var(--fz-micro) var(--font-mono); color: var(--mute); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* health footer — silence is the healthy signal */
+.rail-foot {
+  padding: 8px 14px 10px; border-top: 1px solid var(--line);
+  font: 500 var(--fz-micro) var(--font-mono); color: var(--mute);
+  position: sticky; bottom: 0; background: var(--paper);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.rail-foot.mismatch { color: var(--err-ink); background: var(--err-soft); cursor: pointer; }
+
+/* rail-states demo helpers (gallery only) */
+.rail-demo { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--paper); overflow: hidden; }
+.ghost-row { height: 10px; border-radius: 3px; background: var(--fill); margin: 6px 14px; }
+.ghost-row.w2 { width: 55%; }
+.ghost-row.w3 { width: 70%; }
+.pending { color: var(--mute); font-style: italic; }
 
 /* density behaviour (functional in the mockup) */
 [data-density="off"] .sd { display: none; }
@@ -705,48 +783,73 @@ Cutoff 2026-01-01 applied; [#3] and [#5] cut as redundant.</pre>
       </div>
     </div>
 
-    <!-- ══════════ STATE RAIL ══════════ -->
+    <!-- ══════════ STATE RAIL — "Carry Gauge" ══════════ -->
     <aside class="state-rail">
       <div class="rail-head">
-        <span class="rail-cap" style="margin:0">State</span>
-        <span class="asof">as of drop #1 · step 14/17</span>
+        <span class="t">State</span>
+        <span class="live-dot"><i></i>live</span>
       </div>
 
-      <div class="rail-group">
-        <div class="rail-cap">Backpacks</div>
-        <button class="rail-row" data-target="f-drop0">
-          backpack.sources
-          <span class="gen-dots" title="one dot per drop/absorb · hollow = ø-only"><i title="drop #0"></i><i title="drop #1"></i></span>
-          <span class="sz">6</span>
-        </button>
-        <div class="idx-list" id="railIdx">
-          <div class="idx-row" data-idx="1"><span class="hnd">[#1]</span><span class="l">EU Commission — provisional duties notice</span></div>
-          <div class="idx-row" data-idx="2"><span class="hnd">[#2]</span><span class="l">Reuters — member states split on tariff…</span></div>
-          <div class="idx-row cut" data-idx="3"><span class="hnd">[#3]</span><span class="l">SolarPower Europe — industry impact brief</span></div>
-          <div class="idx-row" data-idx="4"><span class="hnd">[#4]</span><span class="l">Politico — Council vote timeline</span></div>
-          <div class="idx-row cut" data-idx="5"><span class="hnd">[#5]</span><span class="l">Reuters full text — quota compromise draft</span></div>
-          <div class="idx-row" data-idx="6"><span class="hnd">[#6]</span><span class="l">EC annex — duty schedule table</span></div>
+      <div class="rail-body">
+        <!-- CARRY — single pack, so the key IS the caption (no group header) -->
+        <div>
+          <div class="hero recent" id="heroSources">
+            <button class="chev" id="chevSources" aria-expanded="true" aria-controls="railIdx" aria-label="toggle backpack.sources ledger">▶</button>
+            <button class="hero-main" data-target="f-drop1" title="drop #0 · gather · facet:search · 4 covered / drop #1 · gather · facet:fetch · 2 covered">
+              <span class="hero-key">
+                <span class="k">backpack.sources</span>
+                <span class="s">2 drops · 2 excluded · 1 skipped</span>
+              </span>
+              <span class="hero-n">6</span>
+            </button>
+          </div>
+          <div class="idx-list" id="railIdx">
+            <div class="idx-row" data-idx="1" title="minted by gather · drop #0 · facet:search" tabindex="0"><span class="hnd">[#1]</span><span class="l">EU Commission — provisional duties notice</span></div>
+            <div class="idx-row" data-idx="2" title="minted by gather · drop #0 · facet:search · merged ×1" tabindex="0"><span class="hnd">[#2]</span><span class="l">Reuters — member states split on tariff…</span></div>
+            <div class="idx-row cut" data-idx="3" title="minted by gather · cut by curate (excluded, not removed)" tabindex="0"><span class="hnd">[#3]</span><span class="l">SolarPower Europe — industry impact brief</span></div>
+            <div class="idx-row" data-idx="4" title="minted by gather · drop #0 · facet:search" tabindex="0"><span class="hnd">[#4]</span><span class="l">Politico — Council vote timeline</span></div>
+            <div class="idx-row cut" data-idx="5" title="minted by gather · cut by curate (excluded, not removed)" tabindex="0"><span class="hnd">[#5]</span><span class="l">Reuters full text — quota compromise draft</span></div>
+            <div class="idx-row" data-idx="6" title="minted by gather · drop #1 · facet:fetch" tabindex="0"><span class="hnd">[#6]</span><span class="l">EC annex — duty schedule table</span></div>
+          </div>
+        </div>
+
+        <!-- STAGES — exactly one row; per-stage detail behind the chevron -->
+        <div>
+          <div class="hero">
+            <button class="chev" id="chevStages" aria-expanded="false" aria-controls="stageRows" aria-label="toggle stage rows">▶</button>
+            <button class="hero-main" data-target="f-inn-gather">
+              <span class="hero-key"><span class="k" style="font-weight:600">stages</span></span>
+              <span class="ticks" style="margin-left:auto"><i class="set" title="gather · set"></i><i class="set" title="curate · set"></i><i class="pend" title="answer · pending"></i></span>
+              <span class="frac">2/3</span>
+            </button>
+          </div>
+          <div class="stage-rows" id="stageRows" hidden>
+            <span class="innate-chip">innate</span>
+            <button class="srow" data-target="f-inn-gather">agents.gather <span class="st">✓ set</span></button>
+            <button class="srow" data-target="f-read-prompt">agents.curate <span class="st">✓ set</span> <span class="sfx">→ prompt</span></button>
+            <div class="srow pending">agents.answer <span style="margin-left:auto">pending</span></div>
+          </div>
+        </div>
+
+        <!-- SLOTS — rendered only once something has been written -->
+        <div>
+          <div class="rail-cap">Slots · 1</div>
+          <button class="slot-row" data-target="f-write-shortlist" title='["#1","#2","#4","#6"]'>
+            <span class="k">curation.shortlist</span>
+            <span class="v">["#1","#2","#4","#6"]</span>
+          </button>
         </div>
       </div>
 
-      <div class="rail-group">
-        <div class="rail-cap">Stage emissions <span class="innate-chip">innate</span></div>
-        <button class="rail-row" data-target="f-inn-gather">agents.gather <span class="sz" style="background:var(--ok-soft);color:var(--ok-ink)">set ✓</span></button>
-        <button class="rail-row" data-target="f-read-prompt">agents.curate <span class="sz" style="background:var(--ok-soft);color:var(--ok-ink)">set ✓</span></button>
-        <button class="rail-row"><span class="pending">agents.answer — not yet written</span></button>
+      <div class="rail-foot" title="manifest: 2 records · 6 covered · 1 skipped — matches carried state">
+        <span>✓ ledger consistent</span>
+        <span>derived from 2 drop events</span>
       </div>
-
-      <div class="rail-group">
-        <div class="rail-cap">Slots</div>
-        <button class="rail-row" data-target="f-write-shortlist">curation.shortlist <span class="slot-val">["#1","#2","#4","#6"]</span></button>
-      </div>
-
-      <div class="recon">manifest: 2 records · 6 covered · 1 skipped ✓ matches</div>
     </aside>
   </div>
 </div>
 
-<p class="note">Struck-through rail rows ([#3], [#5]) show the curator’s cut — items are never removed from the pack (append-only handles), only excluded downstream: keep-by-default made visible. Hover a citation chip in the answer to light up its rail row; click any rail row to seek its frame.</p>
+<p class="note">Rail v2 — the “Carry Gauge”: one focal number per group, lists behind disclosure, silence as the healthy signal. The ledger ships <em>collapsed</em> by default (shown open here to demo the strike-through cut story — [#3] and [#5] are excluded, never removed). Try it: collapse the ledger with the chevron, then hover a citation chip in the answer — a peek line overlays the pack row with zero layout shift. The violet left tick marks the most recent write; the footer only gets loud on a manifest mismatch.</p>
 
 <h2>Edge states the design must carry</h2>
 <p class="sub">Each of these was flagged as load-bearing by the judges — the frames must degrade honestly, coalesce under load, and fail loud where the runtime fails loud.</p>
@@ -810,6 +913,31 @@ notes.progress · update(fn) · iter 5</pre></div>
     </details>
     <div class="g-cap" style="margin-top:6px">Silent-discard trap, called out</div>
     <div class="strip"><span class="d-badge">⨝</span>join(branch 1) · merged: notes.draft · <span style="color:var(--err-ink)">discarded: temp.scratch (no merge reducer)</span></div>
+  </div>
+
+  <div class="g-card">
+    <div class="g-cap">Rail states — empty, scrubbed, mismatch <small>the empty state teaches the mental model before any state exists; scrubbed numerals tint violet so you always know the gauge shows the past; a manifest mismatch is the only loud element the rail is ever allowed</small></div>
+    <div class="rail-demo">
+      <div class="rail-head" style="position:static"><span class="t">State</span></div>
+      <div style="padding:14px 14px 4px;font:500 var(--fz-micro) var(--font-mono);color:var(--mute)">nothing carried yet — writes appear as they land</div>
+      <div class="ghost-row w3"></div><div class="ghost-row w2"></div><div class="ghost-row w3" style="width:40%"></div>
+    </div>
+    <div class="rail-demo">
+      <div class="rail-head" style="position:static"><span class="t">State</span><span class="asof">as of step 9/17</span></div>
+      <div style="padding:10px 14px">
+        <div class="hero"><span class="chev" style="cursor:default">▶</span>
+          <span class="hero-main" style="cursor:default">
+            <span class="hero-key"><span class="k">backpack.sources</span><span class="s">1 drop · 1 skipped</span></span>
+            <span class="hero-n" style="color:var(--violet-ink)">4</span>
+          </span>
+        </div>
+      </div>
+    </div>
+    <div class="rail-demo">
+      <div class="rail-foot mismatch" style="position:static" title="click seeks the earliest frame after the divergence">
+        <span>⚠ manifest mismatch — 6 covered ≠ 5 carried</span>
+      </div>
+    </div>
   </div>
 
   <div class="g-card">
@@ -892,7 +1020,7 @@ notes.progress · update(fn) · iter 5</pre></div>
   </div>
 </div>
 
-<footer>Concept mockup — no product code changed. Produced from a 12-agent ideation run (5 codebase readers · 4 concept designers · 3 judge lenses) over pattern-stack/agentic-patterns-ts.</footer>
+<footer>Concept mockup — no product code changed. Produced from a 12-agent ideation run (5 codebase readers · 4 concept designers · 3 judge lenses) over pattern-stack/agentic-patterns-ts, plus a 7-agent enhancement pass on the State rail (4 redesign lenses · 3 judges → the “Carry Gauge”).</footer>
 </div>
 
 <script>
@@ -906,8 +1034,8 @@ notes.progress · update(fn) · iter 5</pre></div>
     layout.setAttribute('data-density', b.getAttribute('data-d'));
   });
 
-  // rail row -> seek + flash frame
-  document.querySelectorAll('.rail-row[data-target]').forEach(function (row) {
+  // seek buttons (hero rows, stage rows, slot rows) -> seek + flash frame
+  document.querySelectorAll('.state-rail [data-target]').forEach(function (row) {
     row.addEventListener('click', function () {
       var el = document.getElementById(row.getAttribute('data-target'));
       if (!el) return;
@@ -917,11 +1045,40 @@ notes.progress · update(fn) · iter 5</pre></div>
     });
   });
 
-  // citation chips + diff rows -> highlight rail index row
+  // chevrons — disclosure is a sibling button, never nested in the seek target
+  [['chevSources', 'railIdx'], ['chevStages', 'stageRows']].forEach(function (pair) {
+    var chev = document.getElementById(pair[0]);
+    var region = document.getElementById(pair[1]);
+    chev.addEventListener('click', function () {
+      var open = chev.getAttribute('aria-expanded') === 'true';
+      chev.setAttribute('aria-expanded', String(!open));
+      region.hidden = open;
+    });
+  });
+
+  // cross-highlight from [#N] chips: ledger open -> highlight the idx-row;
+  // ledger collapsed -> peek line overlay on the hero row (zero reflow)
+  var hero = document.getElementById('heroSources');
+  var ledger = document.getElementById('railIdx');
+  var peekEl = null;
+  function railRow(idx) {
+    return ledger.querySelector('.idx-row[data-idx="' + idx + '"]');
+  }
   function hl(idx, on) {
-    document.querySelectorAll('#railIdx .idx-row').forEach(function (r) {
+    ledger.querySelectorAll('.idx-row').forEach(function (r) {
       r.classList.toggle('hl', on && r.getAttribute('data-idx') === idx);
     });
+    if (ledger.hidden) {
+      if (peekEl) { peekEl.remove(); peekEl = null; hero.classList.remove('peeking'); }
+      var src = railRow(idx);
+      if (on && src) {
+        peekEl = document.createElement('div');
+        peekEl.className = 'peek' + (src.classList.contains('cut') ? ' cutpeek' : '');
+        peekEl.textContent = '[#' + idx + '] ' + src.querySelector('.l').textContent;
+        hero.appendChild(peekEl);
+        hero.classList.add('peeking');
+      }
+    }
   }
   document.querySelectorAll('.cite, .d-row[data-idx]').forEach(function (el) {
     var idx = el.getAttribute('data-idx');
@@ -929,6 +1086,20 @@ notes.progress · update(fn) · iter 5</pre></div>
     el.addEventListener('mouseleave', function () { hl(idx, false); });
     el.addEventListener('focus', function () { hl(idx, true); });
     el.addEventListener('blur', function () { hl(idx, false); });
+  });
+
+  // idx-row click -> lineage lighting: flash every frame that touched the id,
+  // scroll to the minting drop
+  ledger.querySelectorAll('.idx-row').forEach(function (r) {
+    r.addEventListener('click', function () {
+      var idx = r.getAttribute('data-idx');
+      var mint = document.getElementById(Number(idx) >= 5 ? 'f-drop1' : 'f-drop0');
+      document.querySelectorAll('.d-row[data-idx="' + idx + '"]').forEach(function (d) {
+        var frame = d.closest('details');
+        if (frame) { frame.open = true; frame.classList.remove('flash'); void frame.offsetWidth; frame.classList.add('flash'); }
+      });
+      if (mint) mint.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
   });
 })();
 </script>

@@ -61,6 +61,25 @@ New `AgentEvent` variants (compiler forces `toSSEMapping` branches): `backpack.d
 
 **UI path:** `state_delta` Part variant → `applyParts` case → `StateDeltaPart` in `PartView` → `storedPartsToParts` case (replay). State rail as a pure fold sharing an accessor module with `applyParts`, pinned against a captured event fixture (à la `trace-from-events.test.ts`).
 
+## State rail v2 — the "Carry Gauge" (enhancement pass, 2026-07-12)
+
+Owner feedback on v1: concept approved; timeline clutter acceptable when collapsed; the rail needs design passes. A second 7-agent run (4 redesign lenses — hierarchy, temporality, provenance, live behavior — judged by owner/operator/builder lenses) converged unanimously on the **hierarchy pass ("Carry Gauge")** as spine:
+
+- **Thesis:** the rail answers one question in 3 seconds — *how much does the agent carry, has it moved, is anything wrong* — so every group gets exactly one focal number, every list lives behind disclosure, and healthy states are nearly silent.
+- **Structure:** sticky header (`State` + mode slot: live dot / nothing / as-of pill — the pill only when scrub-displaced), scrollable body with whitespace-only group separation, sticky health footer.
+- **Per pack — hero row:** chevron (own 24px target, toggles ledger) + mono key + sub-line `2 drops · 2 excluded · 1 skipped` (nonzero segments only) + right-aligned focal count (`--fz-lg` 700 mono, tabular-nums — the loudest element on the rail). Ledger **collapsed by default**; expanded it keeps the `[#N]` row grammar with strike-through cuts, an `N excluded · show` collapse past 12 items, and its own 40vh scroll past 24.
+- **Stages as ONE row:** 6px status ticks (filled ok / hollow pending / err failed) + `2/3` fraction; per-stage rows (with the `innate` chip and `→ prompt` suffixes) behind the chevron.
+- **Slots:** quiet 22px rows, no chips, mute right-aligned value previews, rendered only after first write.
+- **Peek line:** hovering a `[#N]` cite chip while the ledger is collapsed overlays one absolutely-positioned line under the hero row (zero reflow) — preserves cross-highlight over a closed ledger.
+- **Recency tick:** a 3px violet left border on the most-recently-written row, fading over 2s — the sole "what just moved" signal; rows never reorder.
+- **Health footer:** healthy = `✓ ledger consistent` in `--mute` (manifest numbers on hover); a mismatch is the only loud element the rail is ever allowed (`--err-soft` band, click seeks the divergence). Derived mode adds `derived from N drop events`.
+
+**Grafts:** (Pulse Rail) the **RailDelta contract** — all choreography is a pure function of `diff(fold(0..cursor-1), fold(0..cursor))`; cursor+1 animates one-shot, any jump settles instantly — one machine for live/replay/scrub; verdict-withheld footer while streaming; teaching empty state ("nothing carried yet — writes appear as they land" + ghost rows); failed-drop strip; reduced-motion = static fold-derived tick. (Chain of Custody) 2px minted-by ticks in carrier hue on expanded ledger rows only, `title`-attr detail, "unattributed" never guessed. (Timewrite, invisible only) fold snapshot memoization every 16 write-ordinals; the rail never owns a private cursor.
+
+**Rejected as clutter:** the write-track second scrubber, gen dots (all forms), per-stage `set ✓` pill rows, always-expanded index lists, provenance hover-card popover (v2 once read/absorb events exist), auto-open-follows-writer, carrier color confetti at rest, always-green reconciliation prose.
+
+**Disclosure implementation note:** don't use `<details>` for hero rows — chevron-toggles vs row-seeks requires two sibling buttons (disclosure + seek), open state keyed by pack key.
+
 ## Known risks
 
 - Timeline noise on chatty runs — the density default, coalescing, one-frame-per-`drop()`, and memo-hit strips are load-bearing, not optional.
