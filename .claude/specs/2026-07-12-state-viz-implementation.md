@@ -95,7 +95,9 @@ Ships alone: events exist on the bus; nothing consumes them yet.
    `drop()`/`absorb()` to the real pack then publish `backpack.drop/absorb`
    (receipt → payload); `finalized()` reads publish `backpack.read` with
    memo hit/miss. Swap the barrel export at `workflows/index.ts:160-161`.
-   `backpack.ts` stays byte-untouched.
+   `backpack.ts` gets ONLY the type-only `display` field on `BackpackSpec`
+   (see Resolved questions) — no runtime code; the proxy threads
+   `spec.display` onto every `backpack.*` payload.
 5. **runId threading** — `workflows/node.ts`: add optional `runId`; set in
    `NodeBackedRunner` (`as-agent.ts:188-200`, minted at `:231`).
 
@@ -176,8 +178,10 @@ Ships alone against WI-1+2; with no events it shows the teaching empty state.
    `__tests__/trace-from-events.test.ts`.
 2. **Rail component** — new `chat/ScratchpadRail.tsx` implementing the mockup
    exactly: header "Scratchpad · what this run carries between stages";
-   three-writer captions (EVIDENCE ↳ added by tools / STAGE OUTPUTS ↳ saved
-   by the framework / KEPT VALUES ↳ written by agent code); hero rows with
+   three-writer captions — the backpack group caption/attribution come from
+   the event-carried `display` metadata, defaulting to
+   `GATHERED ↳ added by tools` (the demo sets "Evidence"); STAGE OUTPUTS ↳
+   saved by the framework / KEPT VALUES ↳ written by agent code; hero rows with
    focal numerals + collapsed ledgers; stage chain + "2/3 saved"; quiet slot
    rows; receipt-language health footer with the mismatch state as the only
    loud element; teaching empty state.
@@ -207,7 +211,8 @@ whichever lands first creates it.
 - [ ] Running the playground pipeline demo shows drop/read/write frames inline
       and a live Scratchpad rail whose counts reconcile with the manifest
       (`✓ matches all write receipts`).
-- [ ] `backpack.ts` is byte-identical; its structural no-emit test passes.
+- [ ] `backpack.ts` has no runtime changes (type-only `display` field
+      excepted); its structural no-emit test passes.
 - [ ] A run with no event bus behaves exactly as today (zero emission).
 - [ ] Session replay rebuilds state frames from persisted `state_delta` parts;
       old sessions degrade to labeled text, never crash.
@@ -217,12 +222,23 @@ whichever lands first creates it.
       always agree on the demo run.
 - [ ] `bun run check` passes.
 
-## Open questions
+## Resolved questions (owner, 2026-07-12)
 
-- **v1 cut-line** (the scope critic didn't complete): are `absorb`/`fork`/
-  `join` events and the write ordinal v1, or defer with the UI hiding those
-  frame types? Leanest defensible v1: drop/read/write + step events + rail;
-  absorb/fork/join behind a follow-on.
-- Per-BackpackSpec rail caption override ("EVIDENCE" vs generic "GATHERED") —
-  API addition, needs owner sign-off.
-- Byte-cap thresholds for previews (suggest 512B/row, 2KB/frame to start).
+- **v1 cut-line: full set.** `absorb`/`fork`/`join` events ship in v1 — they
+  are the parallel-execution seams (fork = per-branch scratchpad copies,
+  join = merge-or-silently-discard, absorb = backpack fan-in with appended
+  handles), they're cheap at the emission layer (the decorator already sees
+  fork/join; absorb rides the drop proxy), and without them FanOut runs have
+  invisible seams. The write ordinal also stays in v1 (trivial counter;
+  keys RailDelta animation and coalescing).
+- **Backpack display is 100% customizable.** "EVIDENCE" was only this demo's
+  framing. `BackpackSpec` gains optional display metadata —
+  `display?: { caption?: string; attribution?: string }` — as a TYPE-ONLY
+  addition to `backpack.ts` (no runtime code; the structural no-emit test is
+  unaffected). The instrumented accessor threads it onto `backpack.*` event
+  payloads; the rail fold takes the latest. Fallback when unset:
+  `GATHERED ↳ added by tools`. The playground demo spec sets
+  `{ caption: "Evidence" }`.
+- **Preview byte caps:** 512B per row preview, 2KB per frame total, applied
+  at event construction with the explicit "(preview only)" marker — tune
+  later if real payloads argue otherwise.
