@@ -44,7 +44,10 @@ import {
 } from "../backpack.js";
 import { FanOut } from "../fan-out.js";
 import { FunctionStep } from "../function-step.js";
-import { requireBackpack as observedRequireBackpack } from "../index.js";
+import {
+  readBackpack as observedReadBackpack,
+  requireBackpack as observedRequireBackpack,
+} from "../index.js";
 import { Loop } from "../loop.js";
 import { nodeTool } from "../node-tool.js";
 import { ObservedScratchpad } from "../observed-scratchpad.js";
@@ -748,6 +751,42 @@ describe("Backpack × state events (#226)", () => {
     // And the raw accessor (backpack.ts) remains what the observed module wraps:
     // the two agree on the same underlying pack.
     expect(requireBackpack({ host: { scratchpad: pad } }, spec)).toBe(pack);
+  });
+
+  it("pad-side readBackpack via the observed pad/reader emits backpack.read — the stage-prompt read seam", async () => {
+    const spec = makeSpec();
+    const key = backpackSlot(spec).key;
+    const { pad, events } = observedHarness();
+
+    // Seed rows through the RAW pack: the slot-handle fetch is plumbing and the
+    // raw pack's drop is event-free — the read events below stand alone.
+    pad.get(backpackSlot(spec)).drop([r("a", "alpha"), r("b", "bravo")]);
+    expect(events).toHaveLength(0);
+
+    // The documented read path: a reader minted by the observed pad (what a
+    // sequentialAgent stage prompt receives), and the pad itself (post-run
+    // readers / eval probes are handed the pad directly).
+    expect(observedReadBackpack(pad.reader(), spec, "reader-stage").finalized()).toEqual({
+      count: 2,
+      ids: ["a", "b"],
+    });
+    observedReadBackpack(pad, spec, "eval-probe").finalized();
+
+    const reads = readsOf(events);
+    expect(reads.map((rd) => [rd.key, rd.memoHit, rd.size])).toEqual([
+      [key, false, 2],
+      [key, true, 2], // memo state is per-PACK — shared across accessor proxies
+    ]);
+    expect(reads[0]!.origin).toBe("explicit");
+    expect(reads[0]!.toolCallId).toBeUndefined(); // pad-side: no tool dispatch
+    // The backpack slot fetches stayed suppressed — no scratchpad.read leaked.
+    expect(events.some((e) => e.type === "agent.scratchpad.read")).toBe(false);
+  });
+
+  it("readBackpack over a PLAIN pad/reader returns the raw pack — zero emission, today's behavior exactly", async () => {
+    const spec = makeSpec();
+    const pad = createScratchpad();
+    expect(observedReadBackpack(pad.reader(), spec, "probe")).toBe(pad.get(backpackSlot(spec)));
   });
 });
 

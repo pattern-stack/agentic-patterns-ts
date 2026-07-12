@@ -86,6 +86,32 @@ export function createStateEmitter(
 }
 
 // ---------------------------------------------------------------------------
+// Reader branding — pad-side emitter discovery
+// ---------------------------------------------------------------------------
+
+/**
+ * `ScratchpadReader` → the run's emitter, branded by
+ * `ObservedScratchpad.reader()`. Lets pad-side accessors (the observed
+ * `readBackpack`) discover the emission context through a read-only view
+ * WITHOUT widening the `ScratchpadReader` interface — a reader minted by a
+ * plain pad simply isn't in the map, so it stays emission-free.
+ *
+ * Lives here (not in `observed-scratchpad.ts`) so `observed-backpack.ts` can
+ * consume it without a circular import.
+ */
+const readerEmitters = new WeakMap<object, StateEmitter>();
+
+/** Brand a reader with its pad's emitter (called by `ObservedScratchpad.reader()`). */
+export function brandReaderEmitter(reader: object, emitter: StateEmitter): void {
+  readerEmitters.set(reader, emitter);
+}
+
+/** The emitter a reader was branded with, if any. */
+export function readerEmitter(reader: object): StateEmitter | undefined {
+  return readerEmitters.get(reader);
+}
+
+// ---------------------------------------------------------------------------
 // Byte-capped previews
 // ---------------------------------------------------------------------------
 

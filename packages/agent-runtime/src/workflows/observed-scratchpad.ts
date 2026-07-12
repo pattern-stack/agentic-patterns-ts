@@ -8,8 +8,11 @@
  *
  *  - `set`/`update`  → `agent.scratchpad.write` (before/after previews)
  *  - `get`/`reader()`→ `agent.scratchpad.read` (skipped for `backpack.*` slot
- *    keys — the observed backpack ACCESSORS own that domain's read reporting;
- *    a slot-handle fetch is plumbing, not a semantic read)
+ *    keys — the observed backpack ACCESSORS (`requireBackpack`/`openBackpack`/
+ *    `readBackpack`, all barrel-served from `observed-backpack.ts`) own that
+ *    domain's read reporting via `agent.backpack.read`; a slot-handle fetch is
+ *    plumbing, not a semantic read). `reader()` brands its view with the
+ *    emitter so the pad-side `readBackpack` can find the emission context.
  *  - `fork`          → `agent.scratchpad.fork` (origin always `"innate"`)
  *  - `join`          → `agent.scratchpad.join` + one `agent.backpack.absorb`
  *    per branch-scoped backpack merged in (the FanOut fan-in seam), with the
@@ -23,8 +26,19 @@
 
 import { createEvent } from "../events/types.js";
 import type { BackpackDisplay, StateOrigin } from "../events/types.js";
-import { DefaultScratchpad, type Scratchpad, type Slot, type SlotEntry } from "./slot.js";
-import { BACKPACK_SLOT_PREFIX, type StateEmitter, previewValue } from "./state-events.js";
+import {
+  DefaultScratchpad,
+  type Scratchpad,
+  type ScratchpadReader,
+  type Slot,
+  type SlotEntry,
+} from "./slot.js";
+import {
+  BACKPACK_SLOT_PREFIX,
+  type StateEmitter,
+  brandReaderEmitter,
+  previewValue,
+} from "./state-events.js";
 
 /** Duck-typed view of a Backpack living in a slot (no import — stays layered). */
 interface PackLike {
@@ -90,10 +104,24 @@ export class ObservedScratchpad extends DefaultScratchpad {
     return s.scope === "run" ? this.runEntries : this.branchEntries;
   }
 
+  /**
+   * Same read-only view as the base class, BRANDED with this pad's emitter —
+   * the seam that lets the pad-side `readBackpack` (observed-backpack.ts)
+   * publish `agent.backpack.read` for stage-prompt / post-run / eval-probe
+   * reads that never see a `ToolExecutionContext`.
+   */
+  override reader(): ScratchpadReader {
+    const view = super.reader();
+    brandReaderEmitter(view, this.emitter);
+    return view;
+  }
+
   override get<T>(s: Slot<T>): T {
     const value = super.get(s);
     // Backpack slot-handle fetches are plumbing (every accessor call makes one);
-    // the observed accessors publish the semantic `agent.backpack.read` instead.
+    // the observed accessors — requireBackpack/openBackpack (tool-side) and
+    // readBackpack (pad-side, via the branded reader above) — publish the
+    // semantic `agent.backpack.read` instead.
     if (!s.key.startsWith(BACKPACK_SLOT_PREFIX)) {
       this.emitter.publish(
         createEvent("agent.scratchpad.read", {

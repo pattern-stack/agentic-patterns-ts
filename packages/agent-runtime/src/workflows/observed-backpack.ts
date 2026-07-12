@@ -4,8 +4,10 @@
  *
  * `backpack.ts` emits zero events BY CONSTRUCTION (a structural test bans any
  * event channel in that module), so instrumentation lives here, in the
- * accessor layer: `requireBackpack`/`openBackpack` keep their exact contracts
- * but return a forwarding proxy that publishes after each real operation:
+ * accessor layer: `requireBackpack`/`openBackpack` (tool-side, emitter found
+ * via `ToolExecutionContext.host`) and `readBackpack` (pad-side, emitter found
+ * via the `ObservedScratchpad`-branded reader) keep their exact contracts but
+ * return a forwarding proxy that publishes after each real operation:
  *
  *  - `drop()`      → `agent.backpack.drop` (DropReceipt → payload, plus
  *                    sizeBefore/After and byte-capped per-row previews)
@@ -32,15 +34,18 @@ import {
   type BackpackSpec,
   type DropReceipt,
   openBackpack as rawOpenBackpack,
+  readBackpack as rawReadBackpack,
   requireBackpack as rawRequireBackpack,
 } from "./backpack.js";
 import { ObservedScratchpad } from "./observed-scratchpad.js";
+import type { ScratchpadReader } from "./slot.js";
 import {
   FRAME_PREVIEW_BYTES,
   ROW_PREVIEW_BYTES,
   type StateEmitter,
   byteLength,
   capPreview,
+  readerEmitter,
   renderPreviewSource,
 } from "./state-events.js";
 
@@ -52,6 +57,13 @@ function emitterFromCtx(ctx: ToolExecutionContext | undefined): StateEmitter | u
   const host = ctx?.host as { scratchpad?: unknown } | undefined;
   const pad = host?.scratchpad;
   return pad instanceof ObservedScratchpad ? pad.emitter : undefined;
+}
+
+/** Pad-side twin of {@link emitterFromCtx}: the pad itself, or a reader minted
+ *  by `ObservedScratchpad.reader()` (branded — see `state-events.ts`). */
+function emitterFromReader(pad: ScratchpadReader): StateEmitter | undefined {
+  if (pad instanceof ObservedScratchpad) return pad.emitter;
+  return readerEmitter(pad as object);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,4 +259,24 @@ export function requireBackpack<TIn, TEntry, TFinal, TTag = undefined>(
   const pack = rawRequireBackpack(ctx, spec);
   const emitter = emitterFromCtx(ctx);
   return emitter ? observePack(pack, emitter, ctx?.parentToolCallId) : pack;
+}
+
+/**
+ * Pad-side fail-loud read — stage prompts, post-run readers, eval probes (see
+ * the raw `readBackpack` for the full contract). When `pad` is an
+ * `ObservedScratchpad` — or a read-only view minted by one via `reader()` —
+ * the returned pack additionally publishes `agent.backpack.*` state events;
+ * notably `finalized()` → `agent.backpack.read` with memo hit/miss, the
+ * primary stage-read seam. A plain pad/reader gets the RAW pack back: zero
+ * emission, today's behavior exactly. No `toolCallId` is threaded — pad-side
+ * reads happen outside any tool dispatch.
+ */
+export function readBackpack<TIn, TEntry, TFinal, TTag = undefined>(
+  pad: ScratchpadReader,
+  spec: BackpackSpec<TIn, TEntry, TFinal, TTag>,
+  who: string,
+): Backpack<TIn, TEntry, TFinal, TTag> {
+  const pack = rawReadBackpack(pad, spec, who);
+  const emitter = emitterFromReader(pad);
+  return emitter ? observePack(pack, emitter, undefined) : pack;
 }

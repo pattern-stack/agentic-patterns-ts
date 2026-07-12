@@ -3,6 +3,7 @@ import { type ZodType, z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type {
   AgentEvent,
+  ScratchpadReadEvent,
   ScratchpadWriteEvent,
   StepEndEvent,
   StepStartEvent,
@@ -578,5 +579,87 @@ describe("sequentialAgent: step events (#226)", () => {
     const starts = stepStarts(events);
     expect(starts).toHaveLength(1);
     expect(seen).toEqual([starts[0]!.spanId]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Innate prompt-read frames (#226) — the implicit render's injection of prior
+// emissions is the FRAMEWORK's read, reported per injected slot (the design's
+// f-read-prompt frame: "→ prompt · renderPriorEmission [auto], exact injected
+// text").
+// ---------------------------------------------------------------------------
+
+const scratchpadReadsOf = (events: AgentEvent[]): ScratchpadReadEvent[] =>
+  events.filter((e) => e.type === "agent.scratchpad.read") as ScratchpadReadEvent[];
+
+describe("sequentialAgent: innate prompt-read frames (#226)", () => {
+  it("default render: a later stage's implicit injection publishes one innate scratchpad.read of the prior emission, nested under the stage span", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t-1", runId: "r-1" }));
+
+    const node = sequentialAgent([makeAgent("finder"), makeAgent("concluder")]);
+    const res = await node.run("q", {
+      runner,
+      scratchpad: pad,
+      eventBus: bus,
+      traceId: "t-1",
+      runId: "r-1",
+    });
+
+    expect(res.succeeded).toBe(true);
+    const reads = scratchpadReadsOf(events);
+    // Stage 1 has no prior emission → no read; stage 2 injects finder's.
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({
+      key: "agents.finder",
+      origin: "innate",
+      preview: "OUT", // the EXACT injected text (string emission → verbatim)
+      traceId: "t-1",
+      runId: "r-1",
+    });
+    // Nested under the injecting stage's step span, after its step.start.
+    const starts = stepStarts(events);
+    expect(reads[0]!.parentSpanId).toBe(starts[1]!.spanId);
+    expect(events.indexOf(reads[0]!)).toBeGreaterThan(events.indexOf(starts[1]!));
+  });
+
+  it("renderSharedState: the render reads EVERY prior emission, in stage order", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t", runId: "r" }));
+
+    const node = sequentialAgent([makeAgent("a"), makeAgent("b"), makeAgent("c")], {
+      render: renderSharedState,
+    });
+    const res = await node.run("q", { runner, scratchpad: pad });
+
+    expect(res.succeeded).toBe(true);
+    const reads = scratchpadReadsOf(events);
+    expect(reads.map((r) => [r.key, r.origin])).toEqual([
+      ["agents.a", "innate"], // stage b injects a
+      ["agents.a", "innate"], // stage c injects a…
+      ["agents.b", "innate"], // …and b
+    ]);
+  });
+
+  it("a custom opts.render mints NO innate reads (injections are opaque); a custom stage prompt's state reads stay explicit", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t", runId: "r" }));
+    const kept = slot<string>({ key: "kept.note", scope: "run", init: () => "seed" });
+
+    const node = sequentialAgent(
+      [
+        makeAgent("first"),
+        { agent: makeAgent("second"), prompt: (state) => `use:${state.get(kept)}` },
+      ],
+      { render: (input) => `CUSTOM:${String(input)}` },
+    );
+    const res = await node.run("q", { runner, scratchpad: pad });
+
+    expect(res.succeeded).toBe(true);
+    const reads = scratchpadReadsOf(events);
+    expect(reads.map((r) => [r.key, r.origin])).toEqual([["kept.note", "explicit"]]);
   });
 });
