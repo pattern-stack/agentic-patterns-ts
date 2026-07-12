@@ -873,12 +873,12 @@ into the brief via [#1].</pre>
             </button>
           </div>
           <div class="idx-list" id="railIdx">
-            <div class="idx-row" data-idx="1" title="minted by retrieve · drop #0 · facet:observations · merged ×1" tabindex="0"><span class="hnd">[#1]</span><span class="l">obs · security review gating — SOC 2 letter</span></div>
-            <div class="idx-row" data-idx="2" title="minted by retrieve · drop #0 · facet:observations" tabindex="0"><span class="hnd">[#2]</span><span class="l">obs · CFO approved $210k ceiling</span></div>
-            <div class="idx-row cut" data-idx="3" title="minted by retrieve · cut by correlate (excluded, not removed)" tabindex="0"><span class="hnd">[#3]</span><span class="l">obs · champion moving teams in Q3</span></div>
-            <div class="idx-row" data-idx="4" title="minted by retrieve · drop #0 · facet:observations" tabindex="0"><span class="hnd">[#4]</span><span class="l">obs · legal redlining MSA §7 cap</span></div>
-            <div class="idx-row cut" data-idx="5" title="minted by retrieve · cut by correlate (excluded, not removed)" tabindex="0"><span class="hnd">[#5]</span><span class="l">artifact · “Security review sync” transcript</span></div>
-            <div class="idx-row" data-idx="6" title="minted by retrieve · drop #1 · facet:artifacts" tabindex="0"><span class="hnd">[#6]</span><span class="l">artifact · “Re: FY27 budget approval” thread</span></div>
+            <div class="idx-row" data-idx="1" tabindex="0"><span class="hnd">[#1]</span><span class="l">obs · security review gating — SOC 2 letter</span></div>
+            <div class="idx-row" data-idx="2" tabindex="0"><span class="hnd">[#2]</span><span class="l">obs · CFO approved $210k ceiling</span></div>
+            <div class="idx-row cut" data-idx="3" tabindex="0"><span class="hnd">[#3]</span><span class="l">obs · champion moving teams in Q3</span></div>
+            <div class="idx-row" data-idx="4" tabindex="0"><span class="hnd">[#4]</span><span class="l">obs · legal redlining MSA §7 cap</span></div>
+            <div class="idx-row cut" data-idx="5" tabindex="0"><span class="hnd">[#5]</span><span class="l">artifact · “Security review sync” transcript</span></div>
+            <div class="idx-row" data-idx="6" tabindex="0"><span class="hnd">[#6]</span><span class="l">artifact · “Re: FY27 budget approval” thread</span></div>
           </div>
         </div>
 
@@ -1218,9 +1218,9 @@ notes.progress · update(fn) · deal 5/12</pre></div>
   var ENTRIES = {
     1: { kind: 'observation', id: 'obs_9f31', label: 'security review gating — SOC 2 bridge letter requested', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: '×1 — re-surfaced by list_artifacts (drop #1) · merge(): last-write-wins · index kept', backing: 'art_5521 → [#5]', cut: null, frame: 'f-drop0' },
     2: { kind: 'observation', id: 'obs_4t20', label: 'CFO approved budget at $210k ceiling', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: 'art_88x2 → [#6]', cut: null, frame: 'f-drop0' },
-    3: { kind: 'observation', id: 'obs_7m54', label: 'champion (VP Ops) moving teams in Q3', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: null, cut: 'cut by curate — superseded (new champion identified) · excluded from the brief, still carried', frame: 'f-drop0' },
+    3: { kind: 'observation', id: 'obs_7m54', label: 'champion (VP Ops) moving teams in Q3', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: null, cut: 'cut by correlate — superseded (new champion identified) · excluded from the brief, still carried', frame: 'f-drop0' },
     4: { kind: 'observation', id: 'obs_1k88', label: 'legal redlining MSA §7 liability cap', minted: 'drop #0 · ↳ search_deal_context', tags: 'facet:observations · deal_84h2', merged: null, backing: null, cut: null, frame: 'f-drop0' },
-    5: { kind: 'artifact · meeting', id: 'art_5521', label: '“Security review sync” transcript · gong', minted: 'drop #1 · ↳ list_artifacts · hydrated 840ms', tags: 'facet:artifacts · via source_refs', merged: null, backing: 'backs [#1]', cut: 'cut by curate — redundant with [#1] · still carried', frame: 'f-drop1' },
+    5: { kind: 'artifact · meeting', id: 'art_5521', label: '“Security review sync” transcript · gong', minted: 'drop #1 · ↳ list_artifacts · hydrated 840ms', tags: 'facet:artifacts · via source_refs', merged: null, backing: 'backs [#1]', cut: 'cut by correlate — redundant with [#1] · still carried', frame: 'f-drop1' },
     6: { kind: 'artifact · email', id: 'art_88x2', label: '“Re: FY27 budget approval” thread · gmail', minted: 'drop #1 · ↳ list_artifacts · hydrated 840ms', tags: 'facet:artifacts · via source_refs', merged: null, backing: 'backs [#2]', cut: null, frame: 'f-drop1' },
   };
   function provHtml(idx, e, pinned) {
@@ -1266,7 +1266,7 @@ notes.progress · update(fn) · deal 5/12</pre></div>
         pop.innerHTML = provHtml(idx, ENTRIES[idx], false);
         pop.style.top = (r.offsetTop + r.offsetHeight) + 'px';
         ledger.appendChild(pop);
-      }, 180);
+      }, 500);
     });
     r.addEventListener('mouseleave', hidePop);
     r.addEventListener('click', function () {
