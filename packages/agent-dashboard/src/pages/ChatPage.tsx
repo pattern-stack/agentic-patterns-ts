@@ -58,6 +58,20 @@ const RAIL_TAB_OPTIONS: { value: RailTab; label: string }[] = [
   { value: "trace", label: "Trace" },
 ];
 
+/** #226 — how many Backpack/Scratchpad state frames render in the timeline.
+ *  Applied as `data-density` on the chat column; chat.css does the rest
+ *  (Off hides `.sd` frames, Writes compacts closed reads/innate frames). */
+type ScratchpadDensity = "all" | "writes" | "off";
+const DENSITY_OPTIONS: { value: ScratchpadDensity; label: string; title: string }[] = [
+  { value: "all", label: "All", title: "Every state frame, full size" },
+  {
+    value: "writes",
+    label: "Writes",
+    title: "Write frames full size; reads and framework (auto) frames compact",
+  },
+  { value: "off", label: "Off", title: "Hide state frames (the escape hatch)" },
+];
+
 export function ChatPage() {
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -65,6 +79,19 @@ export function ChatPage() {
   const [maxIterations, setMaxIterations] = useState(10); // matches the runner default
   const [railOpen, setRailOpen] = useState(true);
   const [railTab, setRailTab] = useState<RailTab>("universe");
+  const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
+
+  // #226: a [#N] cite seek with density Off would scroll to a hidden frame —
+  // parts.tsx bubbles `chat:reveal-state-frames` instead, and we honestly flip
+  // the toggle back to Writes before the seek lands (never seek to nothing).
+  const chatColRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = chatColRef.current;
+    if (!el) return;
+    const reveal = () => setDensity((d) => (d === "off" ? "writes" : d));
+    el.addEventListener("chat:reveal-state-frames", reveal);
+    return () => el.removeEventListener("chat:reveal-state-frames", reveal);
+  }, []);
 
   // Sessions (S8 Console upgrade): GET /admin/conversations has no per-agent
   // query param — filter + sort client-side (lib/sessions.ts).
@@ -204,6 +231,8 @@ export function ChatPage() {
         description={selected?.description}
         maxIterations={maxIterations}
         onMaxIterations={setMaxIterations}
+        density={density}
+        onDensity={setDensity}
         sessions={sessions}
         sessionsError={sessionsError}
         viewingId={viewingId}
@@ -221,7 +250,12 @@ export function ChatPage() {
           <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>{viewingError}</div>
         )}
         <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>
-          <div className="chat-route" style={{ flex: 1, minWidth: 0 }}>
+          <div
+            ref={chatColRef}
+            className="chat-route"
+            style={{ flex: 1, minWidth: 0 }}
+            data-density={density}
+          >
             <ChatPanel
               messages={displayMessages}
               fill
@@ -305,6 +339,8 @@ interface HeaderProps {
   description?: string;
   maxIterations: number;
   onMaxIterations: (n: number) => void;
+  density: ScratchpadDensity;
+  onDensity: (d: ScratchpadDensity) => void;
   sessions: ConversationSummary[];
   sessionsError: string | null;
   viewingId: string | null;
@@ -326,6 +362,8 @@ function Header({
   description,
   maxIterations,
   onMaxIterations,
+  density,
+  onDensity,
   sessions,
   sessionsError,
   viewingId,
@@ -393,6 +431,25 @@ function Header({
             style={{ ...inputStyle, width: 56, padding: "6px 8px" }}
           />
         </label>
+        <div
+          title="How many Backpack/Scratchpad state frames render in the timeline. The run's scratchpad — what it carries between stages — not user memory."
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+          }}
+        >
+          scratchpad
+          <Segmented
+            options={DENSITY_OPTIONS}
+            value={density}
+            onChange={onDensity}
+            size="sm"
+            aria-label="Scratchpad frame density"
+          />
+        </div>
         <div style={{ flex: 1 }} />
         {selected && (
           <Badge tone="ok" variant="outline">

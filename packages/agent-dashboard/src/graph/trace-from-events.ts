@@ -324,6 +324,18 @@ export function eventsToSteps(
           });
         }
         break;
+      // State-delta events (#226) are TIMELINE citizens — rendered as Δ frames
+      // by chat/model.ts's `applyParts` — deliberately NOT trace steps, or one
+      // Backpack/Scratchpad mutation would double-render in the Trace tab.
+      // Explicit cases (not the default) so the curation is a pinned decision.
+      case "backpack.drop":
+      case "backpack.read":
+      case "backpack.absorb":
+      case "scratchpad.write":
+      case "scratchpad.read":
+      case "scratchpad.fork":
+      case "scratchpad.join":
+        break;
       // chunk / iteration.end / tool.intent / tool.progress /
       // reasoning / step.start → no own TraceStep (step.start drives handoff edges,
       // which the constellation derives structurally, not from the flat trace).
