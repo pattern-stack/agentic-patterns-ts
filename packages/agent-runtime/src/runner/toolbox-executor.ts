@@ -29,7 +29,7 @@
  */
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
-import type { ToolExecutor } from "./types.js";
+import type { AgentLike, ToolExecutor } from "./types.js";
 
 /** Minimal shape — matches what Agent.role.capabilities[].toolbox exposes. */
 interface ToolboxLike {
@@ -141,4 +141,40 @@ export function createToolboxExecutor(agent: AgentWithCapabilities): ToolExecuto
       throw new Error(`Tool "${name}" not found. Available: ${available}`);
     },
   };
+}
+
+/**
+ * Structural capabilities probe — `true` iff `agent.role.capabilities` is a
+ * non-empty array. Deliberately STRUCTURAL, never `instanceof Agent`: this repo
+ * runs a known dual-core where two copies of the `Agent` class can coexist
+ * across the package boundary, so an `instanceof` check would spuriously fail.
+ * Any `AgentLike` whose role carries capabilities qualifies.
+ */
+function agentHasCapabilities(agent: AgentLike): boolean {
+  const caps = (agent as AgentWithCapabilities).role?.capabilities;
+  return Array.isArray(caps) && caps.length > 0;
+}
+
+/**
+ * Derive a {@link ToolExecutor} for an agent's OWN capabilities, or `undefined`
+ * when it has none.
+ *
+ * This is the "an agent's tools are its own capabilities" rule (the same one
+ * `CoordinatorStep` applies by hand). A node running an agent needs an executor
+ * for THAT agent's tools — and that executor is a pure function of the agent,
+ * NOT ambient run state to forward. Unlike scratchpad / deps / trace (which the
+ * agent-as-tool seam must FORWARD parent→child because they can't be
+ * reconstructed — see `node-tool.ts`, #99/#102/#124), a subagent's executor
+ * must be DERIVED per-agent: forwarding the parent's would wrongly expose the
+ * parent's tools instead of the subagent's own. That is precisely why
+ * `nodeTool` does not forward `toolExecutor`; the leaf derives it instead.
+ *
+ * Returning `undefined` for a capability-less agent keeps the no-tools path
+ * byte-identical: the caller leaves `RunOptions.toolExecutor` unset, exactly as
+ * before (a tool-less agent can never emit a tool call anyway).
+ */
+export function deriveToolboxExecutor(agent: AgentLike): ToolExecutor | undefined {
+  return agentHasCapabilities(agent)
+    ? createToolboxExecutor(agent as AgentWithCapabilities)
+    : undefined;
 }
