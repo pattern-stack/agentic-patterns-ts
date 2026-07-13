@@ -393,6 +393,95 @@ describe("[#N] cite chips in assistant markdown", () => {
     fireEvent.click(chip);
   });
 
+  it("clicking a cite opens ancestor <details> too — a completed step otherwise hides nested frames", () => {
+    // Mirrors AgentStepPart's markup once `open={running || !!part.error}`
+    // has flipped to false: the drop frame sits inside a CLOSED <details>,
+    // so without the ancestor walk the seek would measure a hidden element.
+    const { container } = render(
+      <div className="chat-root">
+        <details className="chat-tool chat-step ok">
+          <summary>delegate</summary>
+          <div className="step-children">
+            <PartView part={drop} role={ROLE} />
+          </div>
+        </details>
+        <PartView part={{ kind: "text", content: "see [#1]" }} role={ROLE} />
+      </div>,
+    );
+    const step = container.querySelector("details.chat-step") as HTMLDetailsElement;
+    const frame = container.querySelector('details[data-minted~="1"]') as HTMLDetailsElement;
+    expect(step.open).toBe(false);
+    fireEvent.click(container.querySelector("button.cite") as HTMLElement);
+    expect(step.open).toBe(true);
+    expect(frame.open).toBe(true);
+    expect(frame.classList.contains("flash")).toBe(true);
+  });
+
+  it("resolves the minting frame within the citing message first — [#N] restarts every run/turn", () => {
+    const turn1: typeof drop = {
+      ...drop,
+      previews: [{ index: 1, op: "added", preview: "turn-one entry" }],
+    };
+    const turn2: typeof drop = {
+      ...drop,
+      previews: [{ index: 1, op: "added", preview: "turn-two entry" }],
+    };
+    const { container } = render(
+      <div className="chat-root">
+        <div className="chat-row assistant">
+          <PartView part={turn1} role={ROLE} />
+        </div>
+        <div className="chat-row assistant">
+          <PartView part={turn2} role={ROLE} />
+          <PartView part={{ kind: "text", content: "see [#1]" }} role={ROLE} />
+        </div>
+      </div>,
+    );
+    const frames = container.querySelectorAll<HTMLDetailsElement>('details[data-minted~="1"]');
+    expect(frames).toHaveLength(2);
+    const chip = container.querySelector("button.cite") as HTMLElement;
+    // hover title comes from the citing turn's frame, not turn 1's
+    fireEvent.mouseOver(chip);
+    expect(chip.title).toBe("[#1] turn-two entry — drop #0 · ↳ search_deal_context");
+    // click seeks the citing turn's frame, not turn 1's
+    fireEvent.click(chip);
+    expect(frames[1]?.open).toBe(true);
+    expect(frames[1]?.classList.contains("flash")).toBe(true);
+    expect(frames[0]?.open).toBe(false);
+    expect(frames[0]?.classList.contains("flash")).toBe(false);
+  });
+
+  it("falls back to a panel-wide lookup when the citing message has no minting frame", () => {
+    const { container } = render(
+      <div className="chat-root">
+        <div className="chat-row assistant">
+          <PartView part={drop} role={ROLE} />
+        </div>
+        <div className="chat-row assistant">
+          <PartView part={{ kind: "text", content: "see [#1]" }} role={ROLE} />
+        </div>
+      </div>,
+    );
+    fireEvent.click(container.querySelector("button.cite") as HTMLElement);
+    const frame = container.querySelector('details[data-minted~="1"]') as HTMLDetailsElement;
+    expect(frame.open).toBe(true);
+    expect(frame.classList.contains("flash")).toBe(true);
+  });
+
+  it("hovering a minted-but-not-previewed handle stays honest: provenance only, no other row's text", () => {
+    // drop mints [#1..#4] but previews only rows 1 and 2 — [#3]'s title must
+    // never borrow a different row's label.
+    const { container } = render(
+      <div className="chat-root">
+        <PartView part={drop} role={ROLE} />
+        <PartView part={{ kind: "text", content: "see [#3]" }} role={ROLE} />
+      </div>,
+    );
+    const chip = container.querySelector("button.cite") as HTMLElement;
+    fireEvent.mouseOver(chip);
+    expect(chip.title).toBe("[#3] — drop #0 · ↳ search_deal_context");
+  });
+
   it("cite seek with density Off bubbles the honest reveal event before seeking", () => {
     let revealed = 0;
     const { container } = render(

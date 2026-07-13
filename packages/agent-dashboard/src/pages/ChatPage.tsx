@@ -27,6 +27,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { type AgentSummary, listAgents } from "../api/chat-client";
 import { fetchJSON } from "../api/client";
 import type {
@@ -84,11 +85,18 @@ export function ChatPage() {
   // #226: a [#N] cite seek with density Off would scroll to a hidden frame —
   // parts.tsx bubbles `chat:reveal-state-frames` instead, and we honestly flip
   // the toggle back to Writes before the seek lands (never seek to nothing).
+  // flushSync is load-bearing: the dispatching seek (parts.tsx seekCite)
+  // measures the frame's rect synchronously after dispatchEvent returns, and
+  // under React's automatic batching a plain setDensity would commit a frame
+  // LATER — the seek would measure a still-display:none frame (zero rect) and
+  // scroll to the top of the column instead of the frame. dispatchEvent runs
+  // this listener synchronously, so flushSync makes the CSS flip visible
+  // before seekCite continues.
   const chatColRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = chatColRef.current;
     if (!el) return;
-    const reveal = () => setDensity((d) => (d === "off" ? "writes" : d));
+    const reveal = () => flushSync(() => setDensity((d) => (d === "off" ? "writes" : d)));
     el.addEventListener("chat:reveal-state-frames", reveal);
     return () => el.removeEventListener("chat:reveal-state-frames", reveal);
   }, []);

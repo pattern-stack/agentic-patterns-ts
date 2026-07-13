@@ -25,9 +25,25 @@ const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n ==
  * title — pure DOM projection, nothing fabricated); click seeks the minting
  * Δ frame inside the chat scroll column (never the page). With the density
  * toggle at Off the frames are hidden — the seek honestly reveals them first
- * (a bubbled `chat:reveal-state-frames` ChatPage listens for) rather than
- * scrolling to nothing.
+ * (a bubbled `chat:reveal-state-frames` ChatPage listens for, flipping the
+ * toggle back inside flushSync so the frames are visible again BEFORE the
+ * dispatch returns) rather than scrolling to nothing.
+ *
+ * Resolution scope: [#N] indexes are per-pack and restart at [#1] every run
+ * (= every send), so a panel-global first match could land on an EARLIER
+ * turn's frame. The minting frame lives in the same assistant message as the
+ * prose citing it — resolve within the citing message first, panel-wide only
+ * as a fallback. (Two packs minting the same index inside ONE message can
+ * still collide — disambiguating that needs pack-key stamps on both ends.)
  */
+
+/** Resolve idx's minting frame: the citing message (`.chat-row`) first, then
+ *  the whole panel — see the scope note above. */
+function resolveMintingFrame(chip: HTMLElement, idx: string): HTMLElement | null {
+  const sel = `[data-minted~="${idx}"]`;
+  const local = chip.closest(".chat-row")?.querySelector<HTMLElement>(sel);
+  return local ?? chip.closest(".chat-root")?.querySelector<HTMLElement>(sel) ?? null;
+}
 
 /** Wrap [#N] handles (outside code/pre) in cite buttons. Exported for tests. */
 export function linkifyCites(html: string): string {
@@ -48,13 +64,25 @@ function seekCite(chip: HTMLElement, idx: string): void {
   if (!idx) return;
   const root = chip.closest(".chat-root");
   if (!root) return;
-  const frame = root.querySelector<HTMLElement>(`[data-minted~="${idx}"]`);
+  const frame = resolveMintingFrame(chip, idx);
   if (!frame) return;
   const layout = chip.closest<HTMLElement>("[data-density]");
   if (layout && layout.getAttribute("data-density") === "off") {
+    // ChatPage's listener flips the toggle back to Writes inside flushSync —
+    // dispatchEvent runs listeners synchronously, so the `.sd` frames are
+    // display:none no longer when the rect math below runs. Without the
+    // synchronous commit the frame would measure as a zero rect and the
+    // scroll would land at the top of the column instead of on the frame.
     layout.dispatchEvent(new CustomEvent("chat:reveal-state-frames", { bubbles: true }));
   }
+  // Open the frame AND every ancestor <details> up to the panel root — a
+  // completed agent_step's <details> closes itself, leaving nested frames
+  // display:none (zero rect → garbage scroll target, off-screen flash).
+  // Opening is synchronous DOM, so the rect read below is correct.
   if (frame instanceof HTMLDetailsElement) frame.open = true;
+  for (let el = frame.parentElement; el && el !== root; el = el.parentElement) {
+    if (el instanceof HTMLDetailsElement) el.open = true;
+  }
   frame.classList.remove("flash");
   void frame.offsetWidth; // restart the animation
   frame.classList.add("flash");
@@ -78,13 +106,18 @@ function seekCite(chip: HTMLElement, idx: string): void {
 function ensureCiteTitle(chip: HTMLElement): void {
   if (chip.title) return;
   const idx = chip.getAttribute("data-idx") ?? "";
-  const root = chip.closest(".chat-root");
-  const row = root?.querySelector(`.d-row[data-idx="${idx}"] .lbl`);
-  const frame = root?.querySelector(`[data-minted~="${idx}"]`);
-  const prov = frame?.getAttribute("data-prov");
+  const frame = idx ? resolveMintingFrame(chip, idx) : null;
+  if (!frame) {
+    chip.title = `[#${idx}] — minting frame not in this transcript`;
+    return;
+  }
+  // The [#idx] row lives INSIDE the minting frame — never resolve it panel-
+  // globally (another turn's pack can render the same index).
+  const row = frame.querySelector(`.d-row[data-idx="${idx}"] .lbl`);
+  const prov = frame.getAttribute("data-prov");
   chip.title = row?.textContent
     ? `[#${idx}] ${row.textContent}${prov ? ` — ${prov}` : ""}`
-    : `[#${idx}] — minting frame not in this transcript`;
+    : `[#${idx}]${prov ? ` — ${prov}` : " — minted here (no preview on record)"}`;
 }
 
 /* ── text ───────────────────────────────────────────────────────────────────*/
