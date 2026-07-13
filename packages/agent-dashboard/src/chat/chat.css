@@ -424,6 +424,20 @@
   font-weight: 600;
   color: var(--ink);
 }
+/* #226 rail v3 — a slot key is the byte-exact join key with the Scratchpad
+   rail; clickable ones (SlotKey buttons) advertise the reverse seek. */
+button.d-key {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+button.d-key:hover,
+button.d-key:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .d-key.ops {
   color: var(--ink-2);
 }

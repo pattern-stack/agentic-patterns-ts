@@ -60,21 +60,13 @@ export function linkifyCites(html: string): string {
     .join("");
 }
 
-function seekCite(chip: HTMLElement, idx: string): void {
-  if (!idx) return;
-  const root = chip.closest(".chat-root");
-  if (!root) return;
-  const frame = resolveMintingFrame(chip, idx);
-  if (!frame) return;
-  const layout = chip.closest<HTMLElement>("[data-density]");
-  if (layout && layout.getAttribute("data-density") === "off") {
-    // ChatPage's listener flips the toggle back to Writes inside flushSync —
-    // dispatchEvent runs listeners synchronously, so the `.sd` frames are
-    // display:none no longer when the rect math below runs. Without the
-    // synchronous commit the frame would measure as a zero rect and the
-    // scroll would land at the top of the column instead of on the frame.
-    layout.dispatchEvent(new CustomEvent("chat:reveal-state-frames", { bubbles: true }));
-  }
+/**
+ * Open + flash + center `frame` inside the chat column's OWN scroll container
+ * (`.chat-scroll`) — never the page. Shared by the [#N] cite seeks below and
+ * the Scratchpad rail's row→frame seeks (ScratchpadRail.tsx). `root` is the
+ * `.chat-root` element the frame lives in.
+ */
+export function seekStateFrame(root: Element, frame: HTMLElement): void {
   // Open the frame AND every ancestor <details> up to the panel root — a
   // completed agent_step's <details> closes itself, leaving nested frames
   // display:none (zero rect → garbage scroll target, off-screen flash).
@@ -101,6 +93,24 @@ function seekCite(chip: HTMLElement, idx: string): void {
   } else if (typeof frame.scrollIntoView === "function") {
     frame.scrollIntoView({ behavior: "smooth", block: "center" });
   }
+}
+
+function seekCite(chip: HTMLElement, idx: string): void {
+  if (!idx) return;
+  const root = chip.closest(".chat-root");
+  if (!root) return;
+  const frame = resolveMintingFrame(chip, idx);
+  if (!frame) return;
+  const layout = chip.closest<HTMLElement>("[data-density]");
+  if (layout && layout.getAttribute("data-density") === "off") {
+    // ChatPage's listener flips the toggle back to Writes inside flushSync —
+    // dispatchEvent runs listeners synchronously, so the `.sd` frames are
+    // display:none no longer when the rect math below runs. Without the
+    // synchronous commit the frame would measure as a zero rect and the
+    // scroll would land at the top of the column instead of on the frame.
+    layout.dispatchEvent(new CustomEvent("chat:reveal-state-frames", { bubbles: true }));
+  }
+  seekStateFrame(root, frame);
 }
 
 function ensureCiteTitle(chip: HTMLElement): void {
@@ -323,6 +333,34 @@ function InnateChip() {
   );
 }
 
+/**
+ * A mono slot key inside a Δ frame — the byte-exact join key with the
+ * Scratchpad rail. Clicking finds the slot's row on the rail (the REVERSE of a
+ * rail row's frame seek): bubbles a `chat:seek-rail` event that ChatPage
+ * bridges, flipping the side panel to the Scratchpad tab first so the seek
+ * never lands on a hidden rail. Inside a <summary>, the click must not toggle
+ * the frame.
+ */
+function SlotKey({ k }: { k: string }) {
+  return (
+    <button
+      type="button"
+      className="d-key"
+      title={`click to find "${k}" in the Scratchpad rail`}
+      onClick={(e) => {
+        // Inside a <summary> — the click must not toggle the frame.
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.dispatchEvent(
+          new CustomEvent("chat:seek-rail", { detail: { key: k }, bubbles: true }),
+        );
+      }}
+    >
+      {k}
+    </button>
+  );
+}
+
 type DropDelta = Extract<StateDelta, { op: "drop" }>;
 type AbsorbDelta = Extract<StateDelta, { op: "absorb" }>;
 type ReadDelta = Extract<StateDelta, { op: "read" }>;
@@ -345,12 +383,14 @@ function DropFrame({ part }: { part: DropDelta }) {
       className={`chat-delta sd${innate ? " innate" : ""}`}
       data-minted={part.indexes.join(" ") || undefined}
       data-prov={prov}
+      data-skey={part.key}
+      data-drop-seq={part.dropSeq}
     >
       <summary>
         <span className="d-badge" aria-hidden>
           Δ
         </span>
-        <span className="d-key">{part.key}</span>
+        <SlotKey k={part.key} />
         {part.accepted > 0 && <span className="pill add">+{part.accepted}</span>}
         {part.merged > 0 && <span className="pill mrg">~{part.merged}</span>}
         {part.skipped > 0 && <span className="pill skp">ø{part.skipped}</span>}
@@ -427,12 +467,14 @@ function AbsorbFrame({ part }: { part: AbsorbDelta }) {
       className="chat-delta sd"
       data-minted={part.appendedIndexes.join(" ") || undefined}
       data-prov={dropProv(part)}
+      data-skey={part.key}
+      data-drop-seq={part.dropSeq}
     >
       <summary>
         <span className="d-badge" aria-hidden>
           ⇄
         </span>
-        <span className="d-key">{part.key}</span>
+        <SlotKey k={part.key} />
         <span className="d-note">absorb</span>
         {part.accepted > 0 && <span className="pill add">+{part.accepted}</span>}
         {part.merged > 0 && <span className="pill mrg">~{part.merged}</span>}
@@ -458,11 +500,11 @@ function ReadFrame({ part }: { part: ReadDelta }) {
   if (part.scope === "backpack") {
     if (part.memoHit) {
       return (
-        <div className="strip sd readframe">
+        <div className="strip sd readframe" data-skey={part.key}>
           <span className="d-badge read" aria-hidden>
             ◇
           </span>
-          <span className="d-key">{part.key}</span>
+          <SlotKey k={part.key} />
           <span>
             · finalized() · memo hit
             {part.size != null ? ` · ${count(part.size, "entry", "entries")}` : ""}
@@ -471,12 +513,12 @@ function ReadFrame({ part }: { part: ReadDelta }) {
       );
     }
     return (
-      <details className={`chat-delta readframe sd${innate ? " innate" : ""}`}>
+      <details className={`chat-delta readframe sd${innate ? " innate" : ""}`} data-skey={part.key}>
         <summary>
           <span className="d-badge read" aria-hidden>
             ◇
           </span>
-          <span className="d-key">{part.key}</span>
+          <SlotKey k={part.key} />
           <span className="d-note">finalized() · memo miss</span>
           {innate && <InnateChip />}
           <span className="d-prov">
@@ -496,12 +538,12 @@ function ReadFrame({ part }: { part: ReadDelta }) {
   }
   if (innate) {
     return (
-      <details className="chat-delta innate readframe sd">
+      <details className="chat-delta innate readframe sd" data-skey={part.key}>
         <summary>
           <span className="d-badge read" aria-hidden>
             ◇
           </span>
-          <span className="d-key">{part.key}</span>
+          <SlotKey k={part.key} />
           <span className="d-note">→ prompt</span>
           <InnateChip />
           <span className="d-prov">
@@ -525,11 +567,11 @@ function ReadFrame({ part }: { part: ReadDelta }) {
     );
   }
   return (
-    <div className="strip sd readframe">
+    <div className="strip sd readframe" data-skey={part.key}>
       <span className="d-badge read" aria-hidden>
         ◇
       </span>
-      <span className="d-key">{part.key}</span>
+      <SlotKey k={part.key} />
       <span>· read{part.preview ? ` · ${preview(part.preview, 48)}` : ""}</span>
     </div>
   );
@@ -538,12 +580,12 @@ function ReadFrame({ part }: { part: ReadDelta }) {
 function WriteFrame({ part }: { part: WriteDelta }) {
   const innate = part.origin === "innate";
   return (
-    <details className={`chat-delta sd${innate ? " innate" : ""}`}>
+    <details className={`chat-delta sd${innate ? " innate" : ""}`} data-skey={part.key}>
       <summary>
         <span className="d-badge" aria-hidden>
           Δ
         </span>
-        <span className="d-key">{part.key}</span>
+        <SlotKey k={part.key} />
         <span className="d-note">
           {innate ? "← stage output · saved for next stage" : part.writeOp}
         </span>
@@ -578,13 +620,13 @@ function TravelFrame({ part }: { part: TravelDelta }) {
   const total = part.records.reduce((acc, r) => acc + r.covered, 0);
   const items = count(part.items, "item");
   return (
-    <details className={`travel sd${part.quiet ? " quiet" : ""}`}>
+    <details className={`travel sd${part.quiet ? " quiet" : ""}`} data-skey={part.key}>
       <summary>
         <span className="t-glyph" aria-hidden>
           ⇄
         </span>
         <span className="t-title">
-          <span className="d-key">{part.key}</span> travels → {part.toStep}
+          <SlotKey k={part.key} /> travels → {part.toStep}
         </span>
         <span className="t-sub">
           {part.quiet

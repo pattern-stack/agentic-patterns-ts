@@ -1,0 +1,543 @@
+/* ── Scratchpad rail (#226) — the "Carry Gauge", rail v3 ────────────────────
+   Glance-first: one focal number per group, every list behind disclosure,
+   healthy states near-silent; a receipt mismatch is the ONLY loud element the
+   rail is ever allowed. Class grammar + copy ported from the approved mockup
+   (which uses these same global tokens). Everything rendered is a pure fold
+   over events[0..cursor]; only disclosure state is rail-local. */
+
+.scratchpad-rail {
+  width: 320px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  font-size: var(--fz-small);
+}
+
+.scratchpad-rail .rail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 9px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+  background: var(--paper);
+}
+.scratchpad-rail .rail-head .t {
+  font: 700 var(--fz-small) var(--font-sans);
+  color: var(--ink);
+}
+.scratchpad-rail .rail-head .sub {
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scratchpad-rail .live-dot {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--ok-ink);
+  flex: none;
+}
+.scratchpad-rail .live-dot i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.scratchpad-rail .asof {
+  margin-left: auto;
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--violet-ink);
+  background: var(--violet-soft);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  flex: none;
+}
+
+.scratchpad-rail .rail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* writer attribution — the ↳ provenance glyph is the timeline's own mark;
+   sans words say what things MEAN, mono tokens stay what the runtime CALLS them */
+.scratchpad-rail .rail-cap {
+  font: 700 var(--fz-micro) var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--mute);
+  margin-bottom: 6px;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.scratchpad-rail .rail-cap .attr {
+  margin-left: auto;
+  font: 500 var(--fz-micro) var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--mute);
+}
+
+/* teaching empty state — the lesson IS the structure */
+.scratchpad-rail .rail-teach {
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+  line-height: 1.6;
+}
+.scratchpad-rail .rail-teach-caps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.scratchpad-rail .rail-teach-caps .rail-cap {
+  margin: 0;
+}
+
+/* hero row — TWO sibling click targets (chevron toggles, row seeks) */
+.scratchpad-rail .hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+.scratchpad-rail .chev {
+  flex: none;
+  width: 24px;
+  height: 34px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--mute);
+  font-size: 10px;
+  display: grid;
+  place-items: center;
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.scratchpad-rail .chev[aria-expanded="true"] {
+  transform: rotate(90deg);
+}
+.scratchpad-rail .chev:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.scratchpad-rail .hero-main {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 0;
+  border-radius: var(--radius-sm);
+}
+.scratchpad-rail .hero-main:hover,
+.scratchpad-rail .hero-main:focus-visible {
+  background: var(--fill-2);
+}
+.scratchpad-rail .hero-key {
+  min-width: 0;
+}
+.scratchpad-rail .hero-key .k {
+  display: block;
+  font: 600 var(--fz-tiny) var(--font-mono);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scratchpad-rail .hero-key .k .ns {
+  color: var(--mute);
+  font-weight: 500;
+}
+.scratchpad-rail .hero-key .s {
+  display: block;
+  margin-top: 1px;
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+}
+.scratchpad-rail .hero-n {
+  margin-left: auto;
+  font: 700 var(--fz-lg) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.scratchpad-rail.scrubbed .hero-n {
+  color: var(--violet-ink);
+}
+
+/* recency tick — the sole "what just moved" signal; rows never reorder.
+   RailDelta contract: cursor+1 animates one-shot (the fade), any jump settles
+   instantly (.settled), reduced-motion renders the fold-derived static tick. */
+@keyframes rail-tick {
+  from {
+    border-left-color: var(--violet);
+  }
+  to {
+    border-left-color: transparent;
+  }
+}
+.scratchpad-rail .recent {
+  animation: rail-tick 2s var(--ease-out) 1 forwards;
+}
+.scratchpad-rail .recent.settled {
+  animation: none;
+  border-left-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scratchpad-rail .recent,
+  .scratchpad-rail .recent.settled {
+    animation: none;
+    border-left-color: var(--violet);
+  }
+}
+
+/* expanded ledger — the idx-row grammar survives intact */
+.scratchpad-rail .idx-list {
+  position: relative;
+  margin: 2px 0 0 18px;
+  border-left: 1px solid var(--line);
+  padding-left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.scratchpad-rail .idx-list[hidden] {
+  display: none;
+}
+.scratchpad-rail .idx-list.tall {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.scratchpad-rail .idx-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  font-size: var(--fz-micro);
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+  padding: 2px 4px 2px 6px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+  /* minted-by tick, carrier hue — expanded rows only */
+  border-left: 2px solid color-mix(in oklch, var(--accent) 55%, var(--paper));
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+}
+.scratchpad-rail .idx-row:hover {
+  background: var(--fill-2);
+}
+.scratchpad-rail .idx-row .l {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scratchpad-rail .idx-row.hl {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.scratchpad-rail .idx-row.pinned-row {
+  background: var(--violet-soft);
+}
+.scratchpad-rail .idx-more {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--accent-ink);
+  font: 600 var(--fz-micro) var(--font-sans);
+  text-align: left;
+  padding: 3px 6px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* peek line — cross-highlight over a COLLAPSED ledger; overlay, zero reflow */
+.scratchpad-rail .peek {
+  position: absolute;
+  left: 24px;
+  right: 6px;
+  top: 100%;
+  margin-top: 2px;
+  z-index: 3;
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--line));
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  box-shadow: var(--shadow-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.scratchpad-rail .hero.peeking .hero-main {
+  background: var(--accent-soft);
+}
+
+/* stages — ONE row: chain + ticks + fraction */
+.scratchpad-rail .chain .done {
+  color: var(--ink-2);
+}
+.scratchpad-rail .chain .cur {
+  color: var(--ink);
+  font-weight: 600;
+}
+.scratchpad-rail .chain .pend {
+  color: var(--mute);
+}
+.scratchpad-rail .chain .sep {
+  color: var(--mute);
+}
+.scratchpad-rail .chain .fail {
+  color: var(--err-ink);
+}
+.scratchpad-rail .ticks {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+.scratchpad-rail .ticks i {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+.scratchpad-rail .ticks i.set {
+  background: var(--ok);
+}
+.scratchpad-rail .ticks i.pend {
+  background: transparent;
+  border: 1.5px solid var(--mute);
+  width: 5px;
+  height: 5px;
+}
+.scratchpad-rail .ticks i.fail {
+  background: var(--err);
+}
+.scratchpad-rail .frac {
+  font: 700 var(--fz-md) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.scratchpad-rail .saved-sfx {
+  font: 500 var(--fz-micro) var(--font-sans);
+  color: var(--mute);
+}
+.scratchpad-rail .stage-rows {
+  margin: 2px 0 0 18px;
+  border-left: 1px solid var(--line);
+  padding-left: 8px;
+}
+.scratchpad-rail .stage-rows[hidden] {
+  display: none;
+}
+.scratchpad-rail .srow-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 4px 3px;
+}
+.scratchpad-rail .srow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.scratchpad-rail .srow:hover,
+.scratchpad-rail .srow:focus-visible {
+  background: var(--fill-2);
+}
+.scratchpad-rail .srow .st {
+  margin-left: auto;
+  color: var(--ok-ink);
+}
+.scratchpad-rail .srow .sfx {
+  color: var(--mute);
+}
+.scratchpad-rail .srow.pending {
+  color: var(--mute);
+  font-style: italic;
+  cursor: default;
+}
+.scratchpad-rail .srow.pending:hover {
+  background: none;
+}
+.scratchpad-rail .srow.pending .st {
+  color: var(--mute);
+}
+
+/* slots — quiet 22px rows, no chips */
+.scratchpad-rail .slot-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  min-height: 22px;
+  border-left: 3px solid transparent;
+}
+.scratchpad-rail .slot-row:hover,
+.scratchpad-rail .slot-row:focus-visible {
+  background: var(--fill-2);
+}
+.scratchpad-rail .slot-row .k {
+  font: 500 var(--fz-tiny) var(--font-mono);
+  color: var(--ink);
+}
+.scratchpad-rail .slot-row .v {
+  margin-left: auto;
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* health footer — silence is the healthy signal */
+.scratchpad-rail .rail-foot {
+  padding: 8px 12px 9px;
+  border-top: 1px solid var(--line);
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+  flex: none;
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.scratchpad-rail .rail-foot.mismatch {
+  color: var(--err-ink);
+  background: var(--err-soft);
+  cursor: pointer;
+  border: 0;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  width: 100%;
+}
+
+/* provenance card — hover popover + click-pinned inline detail on evidence
+   rows. One component, two placements: .pop floats under the row (hover,
+   transient); .pinned sits in-flow after the row (click, dismissable). */
+.scratchpad-rail .prov {
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid color-mix(in oklch, var(--violet) 35%, var(--line));
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  box-shadow: var(--shadow-2);
+}
+.scratchpad-rail .prov.pop {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: 4;
+  pointer-events: none;
+}
+.scratchpad-rail .prov.pinned {
+  margin: 3px 0 5px 6px;
+}
+.scratchpad-rail .prov .p-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 6px;
+  color: var(--ink);
+}
+.scratchpad-rail .prov .p-head .hnd {
+  flex: none;
+}
+.scratchpad-rail .prov .p-row {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  gap: 2px 8px;
+  padding: 1.5px 0;
+}
+.scratchpad-rail .prov .p-row .pl {
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+}
+.scratchpad-rail .prov .p-row .pv {
+  overflow-wrap: anywhere;
+}
+.scratchpad-rail .prov .p-acts {
+  display: flex;
+  gap: 12px;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.scratchpad-rail .prov .p-note {
+  margin-top: 5px;
+  color: var(--mute);
+  font-style: italic;
+}
+.scratchpad-rail .txt-btn {
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: 600 var(--fz-micro) var(--font-sans);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.scratchpad-rail .txt-btn.close {
+  margin-left: auto;
+  color: var(--mute);
+}
+
+/* replay / error hints reuse the trace rail's tone */
+.scratchpad-rail .rail-hint {
+  font-size: var(--fz-small);
+  color: var(--mute);
+  line-height: 1.5;
+}
+.scratchpad-rail .rail-error {
+  font-size: var(--fz-small);
+  color: var(--err);
+}

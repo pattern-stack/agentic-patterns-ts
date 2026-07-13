@@ -40,6 +40,7 @@ import { CaptureCasePanel } from "../chat/CaptureCasePanel";
 import type { ChatMessage } from "../chat/model";
 import { storedMessagesToChat } from "../chat/stored-parts";
 import "./chat-route.css";
+import { type RailSeekRequest, ScratchpadRail } from "../chat/ScratchpadRail";
 import { AgentUniverse } from "../components/AgentUniverse";
 import { TraceRail, type TraceRailSource } from "../components/TraceRail";
 import { Badge } from "../components/atoms/Badge";
@@ -53,10 +54,15 @@ import { relTime, shortId, statusTone } from "../lib/format";
 import { sessionsForAgent } from "../lib/sessions";
 import { T } from "../ui/tokens";
 
-type RailTab = "universe" | "trace";
-const RAIL_TAB_OPTIONS: { value: RailTab; label: string }[] = [
+type RailTab = "universe" | "trace" | "scratchpad";
+const RAIL_TAB_OPTIONS: { value: RailTab; label: string; title?: string }[] = [
   { value: "universe", label: "Universe" },
   { value: "trace", label: "Trace" },
+  {
+    value: "scratchpad",
+    label: "Scratchpad",
+    title: "What this run carries between stages — not user memory",
+  },
 ];
 
 /** #226 — how many Backpack/Scratchpad state frames render in the timeline.
@@ -99,6 +105,28 @@ export function ChatPage() {
     const reveal = () => flushSync(() => setDensity((d) => (d === "off" ? "writes" : d)));
     el.addEventListener("chat:reveal-state-frames", reveal);
     return () => el.removeEventListener("chat:reveal-state-frames", reveal);
+  }, []);
+
+  // #226: the REVERSE seek — clicking a mono `.d-key` inside any Δ frame
+  // bubbles `chat:seek-rail`; we open the side panel on the Scratchpad tab
+  // (inside flushSync, so the rail is mounted before the seek request lands)
+  // and hand the key to the rail, which scrolls to + flashes the slot's row.
+  const [railSeek, setRailSeek] = useState<RailSeekRequest | null>(null);
+  const railSeekNonce = useRef(0);
+  useEffect(() => {
+    const el = chatColRef.current;
+    if (!el) return;
+    const onSeekRail = (ev: Event) => {
+      const key = (ev as CustomEvent<{ key?: string }>).detail?.key;
+      if (!key) return;
+      flushSync(() => {
+        setRailOpen(true);
+        setRailTab("scratchpad");
+        setRailSeek({ key, nonce: ++railSeekNonce.current });
+      });
+    };
+    el.addEventListener("chat:seek-rail", onSeekRail);
+    return () => el.removeEventListener("chat:seek-rail", onSeekRail);
   }, []);
 
   // Sessions (S8 Console upgrade): GET /admin/conversations has no per-agent
@@ -321,8 +349,10 @@ export function ChatPage() {
                 />
                 {railTab === "universe" ? (
                   <AgentUniverse agentId={selectedId} />
-                ) : (
+                ) : railTab === "trace" ? (
                   <TraceRail source={traceSource} />
+                ) : (
+                  <ScratchpadRail source={traceSource} chatRoot={chatColRef} seekKey={railSeek} />
                 )}
               </div>
             )}
