@@ -87,8 +87,6 @@ export interface PromotedAgent<TIn, TOut> extends AgentLike {
   readonly deps?: DepReader;
 }
 
-const DEFAULT_MODEL = "sonnet";
-
 function defaultRenderOut<TOut>(out: TOut): string {
   if (typeof out === "string") return out;
   // JSON.stringify(undefined) returns the JS value `undefined`, not a string
@@ -112,7 +110,10 @@ export function asAgent<TIn, TOut>(
 ): PromotedAgent<TIn, TOut> {
   const role = opts.role;
   const roleName = role.name;
-  const model = opts.model ?? DEFAULT_MODEL;
+  // No framework model default (#179/#222): an unset model stays `undefined` and
+  // the runner resolves it (tier/env/gateway) or fails loud — the framework never
+  // silently pins a vendor's model onto a promoted pipeline.
+  const model = opts.model;
   const coerceIn = (opts.coerceIn as ((message: string) => TIn) | undefined) ?? defaultCoerceIn;
   const renderOut = opts.renderOut ?? defaultRenderOut;
 

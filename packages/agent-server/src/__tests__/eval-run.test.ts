@@ -262,10 +262,11 @@ describe("POST /eval/runs — happy path", () => {
     expect(run?.targetId).toBe("echo-agent");
     expect(run?.variant).toBe("v1");
     // Honest model stamp (PR: eval-run scorer seam): the row records the TARGET's
-    // declared model, not the ambient `evalExecution.model`. A promoted echo
-    // agent reports `asAgent`'s DEFAULT_MODEL ("sonnet"), which wins over the
-    // "sonnet-test" execution label. (Dedicated stamp coverage below.)
-    expect(run?.model).toBe("sonnet");
+    // declared model, else the ambient `evalExecution.model`. Post-#222 a promoted
+    // echo agent declares NO model (asAgent no longer pins "sonnet"), so the
+    // "sonnet-test" execution label is what gets stamped. (Dedicated stamp
+    // coverage below.)
+    expect(run?.model).toBe("sonnet-test");
 
     const rows = store.evalRunResults(body.runId);
     expect(rows).toHaveLength(2);

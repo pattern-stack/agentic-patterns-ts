@@ -340,10 +340,11 @@ describe("asAgent", () => {
     expect(promoted.renderInitialPrompt()).toBe(promoted.renderInitialPrompt());
   });
 
-  it("defaults getModel() to a sensible tier string, overridable via opts.model", () => {
+  it("leaves getModel() undefined by default — no framework model default (#179/#222) — overridable via opts.model", () => {
     const pipeline = new FunctionStep<string, string>({ fn: (s) => s });
     const promoted = asAgent(pipeline, { role: { name: "M" } });
-    expect(typeof promoted.getModel()).toBe("string");
+    // Unset → undefined; the runner resolves the model or fails loud (never a silent pin).
+    expect(promoted.getModel()).toBeUndefined();
 
     const overridden = asAgent(pipeline, { role: { name: "M" }, model: "opus" });
     expect(overridden.getModel()).toBe("opus");
