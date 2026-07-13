@@ -5,7 +5,7 @@
  * indicator instead of an empty bubble.
  */
 import { Avatar, Dots, RelativeTime } from "./atoms";
-import type { ChatMessage } from "./model";
+import { type ChatMessage, coalesceStateParts } from "./model";
 import { PartView } from "./parts";
 
 function MessageFooter({ message }: { message: ChatMessage }) {
@@ -35,7 +35,11 @@ export function MessageRow({
   assistantName?: string;
   showAttribution?: boolean;
 }) {
-  const { role, parts, streaming } = message;
+  const { role, streaming } = message;
+  // #226: render-time view — 3+ consecutive same-site state frames fold into
+  // one `state_group` summary card (load-bearing for Loop / parallel-drop
+  // runs). Pure function of the parts; the message itself is untouched.
+  const parts = coalesceStateParts(message.parts);
   // index of the last text part — the only one that carries the live cursor.
   const lastTextIdx = (() => {
     for (let i = parts.length - 1; i >= 0; i--) if (parts[i]?.kind === "text") return i;

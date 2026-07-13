@@ -156,6 +156,94 @@ describe("storedPartsToParts", () => {
     const parts = [mkPart({ id: "p1", type: "mystery", position: 0 })];
     expect(storedPartsToParts(parts)).toEqual([{ kind: "text", content: "[mystery]" }]);
   });
+
+  // WI-3 (#226): the reader now HAS a state_delta case — the WI-2 old-reader
+  // degradation pin is superseded for buildable rows (unknown types keep the
+  // labeled-text contract above; so do state_delta rows with no event name).
+  it("rebuilds a persisted state_delta part (#226) into the same Part the live fold builds", () => {
+    // Metadata shape mirrors what `Conversation._persistExchange` writes: the
+    // wire event name + the canonical snake_case SSE payload, verbatim.
+    const parts = [
+      mkPart({
+        id: "p1",
+        type: "state_delta",
+        position: 0,
+        metadata: {
+          event: "backpack.drop",
+          key: "backpack.observations",
+          origin: "explicit",
+          ordinal: 1,
+          accepted: 2,
+          merged: 0,
+          skipped: 0,
+          indexes: [1, 2],
+          size_before: 0,
+          size_after: 2,
+          previews: [{ index: 1, op: "added", preview: "obs · one (preview only)" }],
+          previews_omitted: 1,
+          tool_call_id: "t1",
+        },
+      }),
+    ];
+    expect(storedPartsToParts(parts)).toEqual([
+      {
+        kind: "state_delta",
+        op: "drop",
+        key: "backpack.observations",
+        origin: "explicit",
+        ordinal: 1,
+        toolCallId: "t1",
+        accepted: 2,
+        merged: 0,
+        skipped: 0,
+        indexes: [1, 2],
+        sizeBefore: 0,
+        sizeAfter: 2,
+        previews: [{ index: 1, op: "added", preview: "obs · one (preview only)" }],
+        previewsOmitted: 1,
+        dropSeq: 0,
+      },
+    ]);
+  });
+
+  it("rebuilds a redacted innate scratchpad.read (#226) — frame survives, text stays gone", () => {
+    // Runtime `toStateDeltaPart` strips the preview (the exact injected prompt
+    // text follows thinking's posture: streamed live, never stored) and marks
+    // `preview_redacted` explicitly.
+    const parts = [
+      mkPart({
+        id: "p1",
+        type: "state_delta",
+        position: 0,
+        metadata: {
+          event: "scratchpad.read",
+          key: "agents.correlate",
+          origin: "innate",
+          ordinal: 4,
+          preview_redacted: true,
+        },
+      }),
+    ];
+    const [frame] = storedPartsToParts(parts);
+    expect(frame).toEqual({
+      kind: "state_delta",
+      op: "read",
+      key: "agents.correlate",
+      scope: "scratchpad",
+      origin: "innate",
+      ordinal: 4,
+      previewRedacted: true,
+    });
+  });
+
+  it("a state_delta row with no buildable event name still degrades to labeled text", () => {
+    const parts = [
+      mkPart({ id: "p1", type: "state_delta", position: 0, metadata: { ordinal: 1 } }),
+    ];
+    expect(storedPartsToParts(parts)).toEqual([
+      { kind: "text", content: '[state_delta] {"ordinal":1}' },
+    ]);
+  });
 });
 
 describe("storedMessageToChatMessage", () => {

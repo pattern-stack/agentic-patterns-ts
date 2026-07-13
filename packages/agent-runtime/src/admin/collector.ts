@@ -366,6 +366,15 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.step.end":
       case "agent.llm.start":
       case "claude_code.hook":
+      // State-delta events (#226): observed, never aggregated — the dashboard
+      // folds these client-side (timeline frames + the Scratchpad rail).
+      case "agent.backpack.drop":
+      case "agent.backpack.read":
+      case "agent.backpack.absorb":
+      case "agent.scratchpad.write":
+      case "agent.scratchpad.read":
+      case "agent.scratchpad.fork":
+      case "agent.scratchpad.join":
         this._recordEvent(typed);
         return;
       default: {

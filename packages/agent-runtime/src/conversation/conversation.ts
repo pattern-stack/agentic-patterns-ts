@@ -6,7 +6,7 @@
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import { getAgentEventBus } from "../events/agent-event-bus.js";
-import type { AgentEvent } from "../events/types.js";
+import type { AgentEvent, AgentEventType } from "../events/types.js";
 import { createEvent } from "../events/types.js";
 import type {
   AgentLike,
@@ -16,6 +16,7 @@ import type {
   RunnerProtocol,
   ToolExecutor,
 } from "../runner/types.js";
+import { toSSEMapping } from "../transport/sse-formatter.js";
 import type { ConversationStore } from "./store.js";
 
 // ---------------------------------------------------------------------------
@@ -235,6 +236,10 @@ export class Conversation {
     // runId IN, so it's captured off the first event the runner yields.
     // Every AgentEvent carries `runId` (BaseEvent), so the first one wins.
     let capturedRunId: string | undefined;
+    // State-delta events (#226) captured during the run, persisted as
+    // `state_delta` parts on the response message so session replay can
+    // rebuild Delta Frames. Streamed order == persisted order (position).
+    const stateDeltas: StateDeltaPart[] = [];
 
     try {
       for await (const event of this.runner.stream(this.agent, message, {
@@ -251,6 +256,11 @@ export class Conversation {
       })) {
         yield event;
         capturedRunId ??= event.runId;
+
+        if (STATE_DELTA_EVENT_TYPES.has(event.type)) {
+          const part = toStateDeltaPart(event);
+          if (part) stateDeltas.push(part);
+        }
 
         // Accumulate response data from events
         if (event.type === "agent.message.chunk") {
@@ -281,7 +291,7 @@ export class Conversation {
     this._history.push(exchange);
 
     if (this._store) {
-      await this._persistExchange(exchange);
+      await this._persistExchange(exchange, stateDeltas);
     }
 
     // Emit conversation end
@@ -326,8 +336,18 @@ export class Conversation {
 
   /**
    * Persist an exchange to the store using the new protocol.
+   *
+   * `stateDeltas` (#226, `stream()` only — `send()` has no event stream to
+   * capture them from) are written as `state_delta` parts BEFORE the terminal
+   * `text` part, mirroring run order: the frames happened during the run, the
+   * answer text is terminal. Readers without a `state_delta` case degrade to
+   * labeled text via their unknown-type default (the dashboard's
+   * `stored-parts.ts` contract) — the parts never crash an old reader.
    */
-  private async _persistExchange(exchange: Exchange): Promise<void> {
+  private async _persistExchange(
+    exchange: Exchange,
+    stateDeltas?: readonly StateDeltaPart[],
+  ): Promise<void> {
     if (!this._store) return;
 
     if (!this._storeConversationId) {
@@ -348,7 +368,7 @@ export class Conversation {
     await this._store.addMessage(
       this._storeConversationId,
       "response",
-      [{ type: "text", content: exchange.assistant }],
+      [...(stateDeltas ?? []), { type: "text", content: exchange.assistant }],
       {
         runId: exchange.runId,
         inputTokens: exchange.inputTokens,
@@ -383,6 +403,52 @@ export class Conversation {
     }
     return messages;
   }
+}
+
+// ---------------------------------------------------------------------------
+// State-delta persistence (#226)
+// ---------------------------------------------------------------------------
+
+/** A `state_delta` stored part — `content` stays empty so message previews
+ * (`derivePreviewContent`, `routes/conversations.ts`) never pick frames up. */
+interface StateDeltaPart {
+  readonly type: "state_delta";
+  readonly metadata: Record<string, unknown>;
+}
+
+/** The state-delta event vocabulary persisted for replay (#226). */
+const STATE_DELTA_EVENT_TYPES: ReadonlySet<AgentEventType> = new Set<AgentEventType>([
+  "agent.backpack.drop",
+  "agent.backpack.read",
+  "agent.backpack.absorb",
+  "agent.scratchpad.write",
+  "agent.scratchpad.read",
+  "agent.scratchpad.fork",
+  "agent.scratchpad.join",
+]);
+
+/**
+ * Map a state-delta event to its stored part: the canonical SSE wire payload
+ * (snake_case, via `toSSEMapping` — persisted bytes == streamed bytes) plus
+ * the wire event name under `event`.
+ *
+ * Redaction: an INNATE `agent.scratchpad.read` preview is the EXACT injected
+ * prompt text (`sequential-agents.ts`'s prompt builder). Persisted replay
+ * follows thinking's posture — reasoning content streams live but is never
+ * stored — so the frame survives (key/ordinal/origin) while the text is
+ * dropped, with an explicit `preview_redacted` marker (never silently).
+ */
+function toStateDeltaPart(event: AgentEvent): StateDeltaPart | null {
+  const mapping = toSSEMapping(event);
+  if (!mapping) return null;
+  if (event.type === "agent.scratchpad.read" && event.origin === "innate") {
+    const { preview: _redacted, ...rest } = mapping.payload;
+    return {
+      type: "state_delta",
+      metadata: { event: mapping.name, ...rest, preview_redacted: true },
+    };
+  }
+  return { type: "state_delta", metadata: { event: mapping.name, ...mapping.payload } };
 }
 
 // ---------------------------------------------------------------------------

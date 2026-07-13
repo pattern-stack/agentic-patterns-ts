@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { type ZodType, z } from "zod";
+import { AgentEventBus } from "../../events/agent-event-bus.js";
+import type {
+  AgentEvent,
+  ScratchpadReadEvent,
+  ScratchpadWriteEvent,
+  StepEndEvent,
+  StepStartEvent,
+} from "../../events/types.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import type {
@@ -9,8 +17,10 @@ import type {
   StructuredRunResult,
 } from "../../runner/types.js";
 import type { PatternHooks } from "../base.js";
+import { ObservedScratchpad } from "../observed-scratchpad.js";
 import { renderSharedState, sequentialAgent } from "../sequential-agents.js";
 import { createScratchpad, slot } from "../slot.js";
+import { createStateEmitter } from "../state-events.js";
 
 function makeAgent(name: string): AgentLike {
   return {
@@ -384,5 +394,272 @@ describe("sequentialAgent: stage retry (#201)", () => {
     );
     expect(() => sequentialAgent([{ agent: makeAgent("a"), retry: 0 }])).not.toThrow();
     expect(() => sequentialAgent([{ agent: makeAgent("a"), retry: 3 }])).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step events + innate tagging (#226)
+// ---------------------------------------------------------------------------
+
+function captureBus(): { bus: AgentEventBus; events: AgentEvent[] } {
+  const bus = new AgentEventBus();
+  const events: AgentEvent[] = [];
+  bus.subscribeAll((e) => void events.push(e as AgentEvent));
+  return { bus, events };
+}
+
+const stepStarts = (events: AgentEvent[]): StepStartEvent[] =>
+  events.filter((e) => e.type === "agent.step.start") as StepStartEvent[];
+const stepEnds = (events: AgentEvent[]): StepEndEvent[] =>
+  events.filter((e) => e.type === "agent.step.end") as StepEndEvent[];
+
+describe("sequentialAgent: step events (#226)", () => {
+  it("publishes one paired agent.step.start/end per stage, in order, on ctx.eventBus", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+
+    const node = sequentialAgent([makeAgent("finder"), makeAgent("concluder")]);
+    const res = await node.run("the task", {
+      runner,
+      eventBus: bus,
+      traceId: "t-1",
+      runId: "r-1",
+    });
+
+    expect(res.succeeded).toBe(true);
+    expect(events.map((e) => e.type)).toEqual([
+      "agent.step.start",
+      "agent.step.end",
+      "agent.step.start",
+      "agent.step.end",
+    ]);
+
+    const starts = stepStarts(events);
+    const ends = stepEnds(events);
+    expect(starts.map((s) => s.stepName)).toEqual(["finder", "concluder"]);
+    expect(ends.map((e) => e.stepName)).toEqual(["finder", "concluder"]);
+    // Pairing: the end shares its start's spanId (the stage's span).
+    expect(ends[0]!.spanId).toBe(starts[0]!.spanId);
+    expect(ends[1]!.spanId).toBe(starts[1]!.spanId);
+    expect(starts[0]!.spanId).not.toBe(starts[1]!.spanId);
+    // Identity + payload contract.
+    for (const s of starts) {
+      expect(s).toMatchObject({ traceId: "t-1", runId: "r-1", arguments: { input: "the task" } });
+      expect(s.agentName).toBe(s.stepName); // default stage name = the agent's role name
+    }
+    expect(ends[0]!.result).toBe("OUT");
+    expect(ends[0]!.error).toBeUndefined();
+    expect(ends[0]!.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("emits NOTHING when ctx.eventBus is absent (today's silent behavior)", async () => {
+    // The pad is observed on its own bus, so pad writes still publish there —
+    // but sequentialAgent's OWN step events are gated on ctx.eventBus.
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t", runId: "r" }));
+
+    const res = await sequentialAgent([makeAgent("a")]).run("go", { runner, scratchpad: pad });
+
+    expect(res.succeeded).toBe(true);
+    expect(events.some((e) => e.type.startsWith("agent.step."))).toBe(false);
+    // (The innate emission write still landed on the pad's own bus.)
+    expect(events.some((e) => e.type === "agent.scratchpad.write")).toBe(true);
+  });
+
+  it("tags the per-stage emission write innate; consumer onEmit writes stay explicit", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t-1", runId: "r-1" }));
+    const derived = slot<string | null>({ key: "derived.note", scope: "run", init: () => null });
+
+    const node = sequentialAgent([
+      { agent: makeAgent("resolve"), onEmit: (_out, p) => void p.set(derived, "follow-through") },
+    ]);
+    const res = await node.run("q", {
+      runner,
+      scratchpad: pad,
+      eventBus: bus,
+      traceId: "t-1",
+      runId: "r-1",
+    });
+
+    expect(res.succeeded).toBe(true);
+    const writes = events.filter(
+      (e) => e.type === "agent.scratchpad.write",
+    ) as ScratchpadWriteEvent[];
+    expect(writes.map((w) => [w.key, w.origin])).toEqual([
+      ["agents.resolve", "innate"],
+      ["derived.note", "explicit"],
+    ]);
+    // Step and state events share the run's identity — one correlatable stream.
+    for (const e of events) {
+      expect(e.runId).toBe("r-1");
+      expect(e.traceId).toBe("t-1");
+    }
+  });
+
+  it("a failed stage still gets its step.end, carrying the error", async () => {
+    const runner = new MockRunner().addResponse("*", {
+      content: "",
+      error: new Error("provider down"),
+    });
+    const { bus, events } = captureBus();
+
+    const res = await sequentialAgent([makeAgent("a")]).run("go", { runner, eventBus: bus });
+
+    expect(res.succeeded).toBe(false);
+    const ends = stepEnds(events);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.error).toContain("provider down");
+    expect(ends[0]!.result).toBeUndefined();
+  });
+
+  it("a stop() short-circuit closes the stopping stage's step and emits nothing for later stages", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "AMBIGUOUS" });
+    const { bus, events } = captureBus();
+
+    const node = sequentialAgent([
+      { agent: makeAgent("interpret"), stop: () => "clarify: which one?" },
+      makeAgent("resolve"),
+    ]);
+    const res = await node.run("q", { runner, eventBus: bus });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output.stopped).toEqual({ stage: "interpret", reason: "clarify: which one?" });
+    expect(stepStarts(events).map((s) => s.stepName)).toEqual(["interpret"]);
+    const ends = stepEnds(events);
+    expect(ends.map((e) => e.stepName)).toEqual(["interpret"]);
+    expect(ends[0]!.result).toBe("AMBIGUOUS");
+    expect(ends[0]!.error).toBeUndefined();
+  });
+
+  it("an onEmit throw still gets a step.end, carrying the error", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+
+    const node = sequentialAgent([
+      {
+        agent: makeAgent("a"),
+        onEmit: () => {
+          throw new Error("tail exploded");
+        },
+      },
+    ]);
+    const res = await node.run("go", { runner, eventBus: bus });
+
+    expect(res.succeeded).toBe(false);
+    const ends = stepEnds(events);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.error).toContain("tail exploded");
+  });
+
+  it("nested tool/agent activity nests under the stage span (stageCtx.parentSpanId = step spanId)", async () => {
+    // The runner records the options it was called with; AgentStep threads
+    // ctx.parentSpanId → RunOptions.parentSpanId, so the delegated agent's
+    // events attribute to the stage span.
+    const seen: (string | undefined)[] = [];
+    const recorder: RunnerProtocol = {
+      run: async (_a, _m, options?: RunOptions): Promise<RunResult> => {
+        seen.push(options?.parentSpanId);
+        return {
+          response: "OK",
+          inputTokens: 0,
+          outputTokens: 0,
+          toolCallsCount: 0,
+          iterations: 1,
+          finishReason: "stop",
+        };
+      },
+    };
+    const { bus, events } = captureBus();
+
+    await sequentialAgent([makeAgent("a")]).run("go", { runner: recorder, eventBus: bus });
+
+    const starts = stepStarts(events);
+    expect(starts).toHaveLength(1);
+    expect(seen).toEqual([starts[0]!.spanId]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Innate prompt-read frames (#226) — the implicit render's injection of prior
+// emissions is the FRAMEWORK's read, reported per injected slot (the design's
+// f-read-prompt frame: "→ prompt · renderPriorEmission [auto], exact injected
+// text").
+// ---------------------------------------------------------------------------
+
+const scratchpadReadsOf = (events: AgentEvent[]): ScratchpadReadEvent[] =>
+  events.filter((e) => e.type === "agent.scratchpad.read") as ScratchpadReadEvent[];
+
+describe("sequentialAgent: innate prompt-read frames (#226)", () => {
+  it("default render: a later stage's implicit injection publishes one innate scratchpad.read of the prior emission, nested under the stage span", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t-1", runId: "r-1" }));
+
+    const node = sequentialAgent([makeAgent("finder"), makeAgent("concluder")]);
+    const res = await node.run("q", {
+      runner,
+      scratchpad: pad,
+      eventBus: bus,
+      traceId: "t-1",
+      runId: "r-1",
+    });
+
+    expect(res.succeeded).toBe(true);
+    const reads = scratchpadReadsOf(events);
+    // Stage 1 has no prior emission → no read; stage 2 injects finder's.
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({
+      key: "agents.finder",
+      origin: "innate",
+      preview: "OUT", // the EXACT injected text (string emission → verbatim)
+      traceId: "t-1",
+      runId: "r-1",
+    });
+    // Nested under the injecting stage's step span, after its step.start.
+    const starts = stepStarts(events);
+    expect(reads[0]!.parentSpanId).toBe(starts[1]!.spanId);
+    expect(events.indexOf(reads[0]!)).toBeGreaterThan(events.indexOf(starts[1]!));
+  });
+
+  it("renderSharedState: the render reads EVERY prior emission, in stage order", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t", runId: "r" }));
+
+    const node = sequentialAgent([makeAgent("a"), makeAgent("b"), makeAgent("c")], {
+      render: renderSharedState,
+    });
+    const res = await node.run("q", { runner, scratchpad: pad });
+
+    expect(res.succeeded).toBe(true);
+    const reads = scratchpadReadsOf(events);
+    expect(reads.map((r) => [r.key, r.origin])).toEqual([
+      ["agents.a", "innate"], // stage b injects a
+      ["agents.a", "innate"], // stage c injects a…
+      ["agents.b", "innate"], // …and b
+    ]);
+  });
+
+  it("a custom opts.render mints NO innate reads (injections are opaque); a custom stage prompt's state reads stay explicit", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t", runId: "r" }));
+    const kept = slot<string>({ key: "kept.note", scope: "run", init: () => "seed" });
+
+    const node = sequentialAgent(
+      [
+        makeAgent("first"),
+        { agent: makeAgent("second"), prompt: (state) => `use:${state.get(kept)}` },
+      ],
+      { render: (input) => `CUSTOM:${String(input)}` },
+    );
+    const res = await node.run("q", { runner, scratchpad: pad });
+
+    expect(res.succeeded).toBe(true);
+    const reads = scratchpadReadsOf(events);
+    expect(reads.map((r) => [r.key, r.origin])).toEqual([["kept.note", "explicit"]]);
   });
 });

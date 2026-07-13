@@ -157,10 +157,27 @@ export {
   createBackpack,
   backpackSlot,
   indexedView,
-  openBackpack,
-  requireBackpack,
-  readBackpack,
   createRunHost,
   hydrateThenDrop,
   BackpackUnavailableError,
 } from "./backpack.js";
+
+// The backpack accessors — tool-side (openBackpack/requireBackpack) AND
+// pad-side (readBackpack) — are served by the OBSERVED module (#226):
+// identical contracts to the raw trio in backpack.ts, plus `agent.backpack.*`
+// state-event emission when the run's pad is an ObservedScratchpad.
+// backpack.ts itself stays event-free by construction (structural no-emit test).
+export { openBackpack, readBackpack, requireBackpack } from "./observed-backpack.js";
+
+export { ObservedScratchpad } from "./observed-scratchpad.js";
+
+export {
+  type StateEmitter,
+  createStateEmitter,
+  previewValue,
+  capPreview,
+  ROW_PREVIEW_BYTES,
+  FRAME_PREVIEW_BYTES,
+  PREVIEW_MARKER,
+  BACKPACK_SLOT_PREFIX,
+} from "./state-events.js";

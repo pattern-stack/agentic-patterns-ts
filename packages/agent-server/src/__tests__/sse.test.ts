@@ -228,6 +228,74 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // State-delta events (#226) — pass through with ZERO server changes. The
+  // delegation to the runtime's `toSSEMapping` carries them automatically;
+  // only iteration.*/llm.* are filtered here. These pins make that verified
+  // claim executable.
+  // ---------------------------------------------------------------------------
+
+  it("maps backpack.drop with the snake_case receipt payload (no server-side allowlist)", () => {
+    const result = agentEventToSSE({
+      type: "agent.backpack.drop",
+      key: "backpack.observations",
+      origin: "explicit",
+      ordinal: 1,
+      accepted: 2,
+      merged: 1,
+      skipped: 1,
+      indexes: [10, 11, 3],
+      sizeBefore: 9,
+      sizeAfter: 12,
+      previews: [{ index: 10, op: "added", preview: "obs-10" }],
+      previewsOmitted: 0,
+      toolCallId: "tc-1",
+      ...base,
+    });
+    expect(result?.event).toBe("backpack.drop");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.key).toBe("backpack.observations");
+    expect(parsed.accepted).toBe(2);
+    expect(parsed.size_before).toBe(9);
+    expect(parsed.size_after).toBe(12);
+    expect(parsed.tool_call_id).toBe("tc-1");
+  });
+
+  it("maps scratchpad.write with origin + ordinal + before/after previews", () => {
+    const result = agentEventToSSE({
+      type: "agent.scratchpad.write",
+      key: "brief.highlights",
+      origin: "innate",
+      ordinal: 5,
+      op: "set",
+      hadValue: false,
+      after: "stage output",
+      ...base,
+    });
+    expect(result?.event).toBe("scratchpad.write");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.key).toBe("brief.highlights");
+    expect(parsed.origin).toBe("innate");
+    expect(parsed.ordinal).toBe(5);
+    expect(parsed.had_value).toBe(false);
+    expect(parsed.after).toBe("stage output");
+  });
+
+  it("maps scratchpad.join — the silent-discard trap reaches the client", () => {
+    const result = agentEventToSSE({
+      type: "agent.scratchpad.join",
+      origin: "innate",
+      ordinal: 9,
+      mergedKeys: ["branch.results"],
+      discardedKeys: ["branch.scratch"],
+      ...base,
+    });
+    expect(result?.event).toBe("scratchpad.join");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.merged_keys).toEqual(["branch.results"]);
+    expect(parsed.discarded_keys).toEqual(["branch.scratch"]);
+  });
+
+  // ---------------------------------------------------------------------------
   // Internal events are filtered from the client protocol
   // ---------------------------------------------------------------------------
 

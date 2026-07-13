@@ -13,9 +13,10 @@
  *
  * Honest note on today's actual data (verified against
  * `packages/agent-runtime/src/conversation/conversation.ts` `_persistExchange`):
- * the ONLY part types this runtime ever writes are `user_prompt` (request) and
- * `text` (response) — `Exchange.toolCalls` is always `[]`, so `tool_call` /
- * `tool_result` / `agent_step` parts are never actually produced yet. This
+ * the part types this runtime writes are `user_prompt` (request), `text`
+ * (response), and — since #226 — `state_delta` (response; the wire event name +
+ * snake_case SSE payload as metadata). `Exchange.toolCalls` is always `[]`, so
+ * `tool_call` / `tool_result` / `agent_step` parts are never actually produced yet. This
  * mapper still honors the fuller protocol-implied vocabulary (the
  * `ConversationStore.addMessage` parts type is an open `string`, and
  * `ConversationDetailPage` already renders tool_call/tool_result generically)
@@ -27,11 +28,19 @@
  * that names the type — it never silently disappears (port-map §6, mechanism 3).
  */
 import type { ConversationMessage, ConversationMessagePart } from "../api/types";
-import type { ChatMessage, Part, Role } from "./model";
+import { type ChatMessage, type Part, type Role, countDropFrames } from "./model";
+import { stateDeltaFromFields } from "./state-accessors";
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 const num = (v: unknown): number | undefined => (typeof v === "number" ? v : undefined);
 const meta = (p: ConversationMessagePart): Record<string, unknown> => p.metadata ?? {};
+
+/** The unknown-type contract (port-map §6, mechanism 3): degrade to a neutral
+ *  text rendering that names the type — never silently drop a part. */
+function degradeToText(part: ConversationMessagePart, m: Record<string, unknown>): Part {
+  const body = part.content ?? (Object.keys(m).length > 0 ? JSON.stringify(m) : "");
+  return { kind: "text", content: body ? `[${part.type}] ${body}` : `[${part.type}]` };
+}
 
 function roleOf(kind: ConversationMessage["kind"]): Role {
   return kind === "request" ? "user" : "assistant";
@@ -103,11 +112,32 @@ export function storedPartsToParts(parts: ConversationMessagePart[]): Part[] {
         });
         break;
       }
+      case "state_delta": {
+        // #226 replay: metadata carries the wire event name (`event`) plus the
+        // canonical snake_case SSE payload verbatim (runtime `conversation.ts`
+        // `toStateDeltaPart` — persisted bytes == streamed bytes), so the same
+        // shared accessor module that folds the live stream rebuilds the frame.
+        // Stored parts are flat (tool parts are never persisted), so frames
+        // render standalone in stored positions — no fabricated nesting; travel
+        // frames (UI-derived from step boundaries) don't exist in replay.
+        // Rows without a buildable event name degrade to labeled text.
+        const wireEvent = str(m.event);
+        const frame = wireEvent ? stateDeltaFromFields(wireEvent, m) : null;
+        if (frame) {
+          result.push(
+            frame.op === "drop" || frame.op === "absorb"
+              ? { ...frame, dropSeq: countDropFrames(result, frame.key) }
+              : frame,
+          );
+        } else {
+          result.push(degradeToText(part, m));
+        }
+        break;
+      }
       default: {
         // Unknown part type — degrade to a neutral text rendering that names
         // the type, never drop it (port-map §6, mechanism 3).
-        const body = part.content ?? (Object.keys(m).length > 0 ? JSON.stringify(m) : "");
-        result.push({ kind: "text", content: body ? `[${part.type}] ${body}` : `[${part.type}]` });
+        result.push(degradeToText(part, m));
       }
     }
   }

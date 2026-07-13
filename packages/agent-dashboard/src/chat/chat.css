@@ -359,6 +359,370 @@
   opacity: 1;
 }
 
+/* ── state-delta frames (Δ / ◇ / ⇄ — #226 state-viz) ───────────────────────
+   The violet family: one collapsed diff card per Backpack/Scratchpad mutation,
+   in the exact grammar of the tool cards. Class names, copy glyphs, and token
+   usage copied from the approved mockup (which uses these same tokens).
+   `.sd` is the density toggle's hook ([data-density] set by ChatPage). */
+.chat-delta {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--violet);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  font-size: var(--fz-small);
+}
+.chat-delta > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+  flex-wrap: wrap;
+}
+.chat-delta > summary::-webkit-details-marker {
+  display: none;
+}
+.chat-delta > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}
+/* dashed = the framework's own move (API: innate; chip reads "auto") */
+.chat-delta.innate {
+  border: 1px dashed color-mix(in oklch, var(--violet) 55%, var(--line));
+  border-left-width: 1px;
+  background: color-mix(in oklch, var(--fill) 55%, transparent);
+}
+.chat-delta.errframe {
+  border-left-color: var(--err);
+}
+.d-badge {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 10px var(--font-mono);
+  background: var(--violet-soft);
+  color: var(--violet-ink);
+}
+.d-badge.read {
+  background: transparent;
+  border: 1.5px solid var(--violet);
+  color: var(--violet-ink);
+}
+.d-badge.err {
+  background: var(--err-soft);
+  color: var(--err-ink);
+}
+.d-key {
+  font-family: var(--font-mono);
+  font-size: var(--fz-tiny);
+  font-weight: 600;
+  color: var(--ink);
+}
+/* #226 rail v3 — a slot key is the byte-exact join key with the Scratchpad
+   rail; clickable ones (SlotKey buttons) advertise the reverse seek. */
+button.d-key {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+button.d-key:hover,
+button.d-key:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.d-key.ops {
+  color: var(--ink-2);
+}
+.d-note {
+  font-size: var(--fz-tiny);
+  color: var(--ink-2);
+}
+.pill {
+  font: 600 var(--fz-micro) var(--font-mono);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  line-height: 15px;
+  border: 1px solid;
+}
+.pill.add {
+  color: var(--ok-ink);
+  border-color: color-mix(in oklch, var(--ok) 50%, var(--line));
+  background: var(--ok-soft);
+}
+.pill.mrg {
+  color: var(--warn-ink);
+  border-color: color-mix(in oklch, var(--warn) 55%, var(--line));
+  background: color-mix(in oklch, var(--warn) 10%, var(--paper));
+}
+.pill.skp {
+  color: var(--mute);
+  border-color: var(--line);
+  background: var(--fill);
+}
+.d-size {
+  font: 500 var(--fz-tiny) var(--font-mono);
+  color: var(--ink-2);
+}
+.d-prov {
+  margin-left: auto;
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+}
+.innate-chip {
+  font: 700 9px var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--mute);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+}
+
+/* diff table */
+.d-body {
+  padding: 0 11px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.d-diff {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.d-row {
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+  padding: 5px 9px 5px 0;
+  font-size: var(--fz-small);
+}
+.d-row + .d-row {
+  border-top: 1px solid var(--line);
+}
+.d-row .gut {
+  flex: none;
+  width: 24px;
+  text-align: center;
+  font: 700 var(--fz-small) var(--font-mono);
+}
+.d-row.add {
+  background: color-mix(in oklch, var(--ok) 8%, var(--paper));
+}
+.d-row.add .gut {
+  color: var(--ok-ink);
+}
+.d-row.mrg {
+  background: color-mix(in oklch, var(--warn) 9%, var(--paper));
+}
+.d-row.mrg .gut {
+  color: var(--warn-ink);
+}
+.d-row.skp {
+  background: var(--fill);
+  color: var(--mute);
+}
+.d-row.skp .gut {
+  color: var(--mute);
+}
+.hnd {
+  font: 600 var(--fz-micro) var(--font-mono);
+  color: var(--violet-ink);
+  background: var(--violet-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  cursor: default;
+  white-space: nowrap;
+}
+.d-row .lbl {
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.d-row .micro {
+  font-size: var(--fz-micro);
+  color: var(--mute);
+  font-family: var(--font-mono);
+}
+.d-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tag-chip {
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--ink-2);
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+.d-redacted {
+  font: 500 var(--fz-tiny) var(--font-sans);
+  color: var(--mute);
+  font-style: italic;
+}
+
+/* travel frame — the pack crossing a stage boundary (UI-derived in v1) */
+.travel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--fill);
+  font-size: var(--fz-small);
+  max-width: 100%;
+}
+.travel > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  flex-wrap: wrap;
+  user-select: none;
+}
+.travel > summary::-webkit-details-marker {
+  display: none;
+}
+.t-glyph {
+  color: var(--violet-ink);
+  font-weight: 700;
+  font-size: var(--fz-lg);
+}
+.t-title {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--fz-tiny);
+}
+.t-sub {
+  color: var(--mute);
+  font-family: var(--font-mono);
+  font-size: var(--fz-micro);
+}
+.m-strip {
+  display: flex;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  flex: 1 1 120px;
+  min-width: 90px;
+  border: 1px solid var(--line);
+}
+.m-strip i {
+  display: block;
+  height: 100%;
+}
+.t-body {
+  padding: 0 12px 10px;
+}
+.travel.quiet > summary {
+  color: var(--mute);
+}
+
+/* memo-hit / one-liner micro strips (reads, fork/join) */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  font: 500 var(--fz-micro) var(--font-mono);
+  color: var(--mute);
+  background: transparent;
+}
+.strip .d-badge {
+  width: 13px;
+  height: 13px;
+  font-size: 8.5px;
+}
+.strip .strip-discard {
+  color: var(--err-ink);
+}
+
+/* [#N] citation chips in assistant prose */
+.cite {
+  font: 600 var(--fz-micro) var(--font-mono);
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  cursor: pointer;
+  border: 0;
+}
+.cite:hover,
+.cite:focus-visible {
+  outline: 1px solid var(--accent);
+}
+
+/* before/after pair (scratchpad writes, memo-miss reads) */
+.ba {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+.ba .arr {
+  display: grid;
+  place-items: center;
+  color: var(--violet);
+  font-weight: 700;
+}
+@media (max-width: 700px) {
+  .ba {
+    grid-template-columns: 1fr;
+  }
+  .ba .arr {
+    transform: rotate(90deg);
+  }
+}
+
+/* density behaviour — data-density set by ChatPage's scratchpad toggle.
+   Off hides every state frame; Writes compacts closed reads + innate frames. */
+[data-density="off"] .sd {
+  display: none;
+}
+[data-density="writes"] .sd.readframe:not([open]) > summary {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  opacity: 0.85;
+}
+[data-density="writes"] .sd.innate:not([open]) > summary {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  opacity: 0.85;
+}
+
+/* flash target on cite / rail seek */
+@keyframes chat-flash {
+  0% {
+    box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+.flash {
+  animation: chat-flash 1.4s var(--ease-out) 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash {
+    animation: none;
+    outline: 2px solid var(--accent);
+  }
+}
+
 /* ── error part ────────────────────────────────────────────────────────────*/
 .chat-error {
   border: 1px solid color-mix(in oklch, var(--err) 45%, var(--line));
