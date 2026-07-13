@@ -11,6 +11,7 @@
  */
 import { type ToolDefinition, type ToolExecutionContext, Toolbox } from "@agentic-patterns/core";
 import { type ZodType, type ZodTypeAny, z } from "zod";
+import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunnerProtocol } from "../runner/types.js";
 import { AgentStep } from "./agent-step.js";
@@ -54,11 +55,17 @@ export function nodeTool<TIn>(
       // over the construction-time closure. FORK, don't alias: run-scoped slots
       // share through the fork; branch-scoped slots stay isolated per (possibly
       // parallel) tool call. join()/merge-back is OFF for v1.
-      const host = ctx?.host as { scratchpad?: Scratchpad; deps?: DepReader } | undefined;
+      const host = ctx?.host as
+        | { scratchpad?: Scratchpad; deps?: DepReader; eventBus?: AgentEventBus }
+        | undefined;
       const result = await spec.node.run(input, {
         runner,
         scratchpad: host?.scratchpad ? host.scratchpad.fork() : (scratchpad ?? createScratchpad()),
         deps: host?.deps ?? deps,
+        // The run's event bus crosses the seam too — without it, a sub-run on a
+        // construction-time runner publishes agent.* events to that runner's
+        // constructor-bound (or global-default) bus, invisible to the session.
+        eventBus: host?.eventBus,
         // #102: join the parent trace and nest under the invoking call's span
         // so this sub-workflow's tool activity is attributable, not orphaned.
         traceId: ctx?.traceId,
