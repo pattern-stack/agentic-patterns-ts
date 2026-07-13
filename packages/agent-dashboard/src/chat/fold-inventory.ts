@@ -172,6 +172,22 @@ interface PackAcc {
 export function foldInventory(events: EventLike[], cursor?: number): InventorySnapshot {
   const upTo = Math.max(0, Math.min(cursor ?? events.length, events.length));
 
+  // ── pre-pass: which packs fan in via absorb (branch-scoped under FanOut)? ──
+  // Branch drops carry NO pad/branch discriminator on the wire (WI-1), yet a
+  // branch-scoped `backpackSlot(spec, { scope: "branch" })` gives every FanOut
+  // branch a FRESH pack emitting drops on the SAME key, each restarting at
+  // sizeBefore=0. Folding those into the parent chain would clobber the ledger
+  // and trip a false "receipts disagree" (the rail's only loud state) on every
+  // healthy parallel run. Only a branch fan-in ever emits `backpack.absorb`,
+  // so an absorb anywhere in the folded window marks its key as fanning in.
+  const fanInKeys = new Set<string>();
+  for (let i = 0; i < upTo; i += 1) {
+    const e = events[i];
+    if (!e || bare(String(e.type)) !== "backpack.absorb") continue;
+    const key = str(flatFields(e).key);
+    if (key) fanInKeys.add(key);
+  }
+
   const packs = new Map<string, PackAcc>();
   let packsDisplay: StateDisplay | undefined;
   const stages: StageSnapshot[] = [];
@@ -182,6 +198,7 @@ export function foldInventory(events: EventLike[], cursor?: number): InventorySn
   let sawStateEvent = false;
   let lastWrite: InventorySnapshot["lastWrite"];
   let syntheticOrdinal = 0; // fallback when an event carries no ordinal
+  let forkDepth = 0; // scratchpad.fork/join nesting — drops inside may be branch-pad writes
 
   const pack = (key: string): PackAcc => {
     let acc = packs.get(key);
@@ -239,6 +256,26 @@ export function foldInventory(events: EventLike[], cursor?: number): InventorySn
     sawStateEvent = true;
     switch (frame.op) {
       case "drop": {
+        // Branch-pad drops (FanOut fan-out) fold OUT of the parent pack: the
+        // join's absorb records are the authoritative fan-in, and the branch's
+        // local [#N] indexes don't map onto the parent's. Two signals, either
+        // sufficient inside a fork window: the key is known to fan in via
+        // absorb (pre-pass above), or the drop's sizeBefore breaks the parent
+        // chain (a fresh branch pack restarting at 0). Mid-stream (cursor
+        // before the joins) only the chain-break heuristic fires — the first
+        // branch's drop may fold transiently as the parent, which self-corrects
+        // once the absorbs land, without ever tripping a false mismatch.
+        const prior = packs.get(frame.key);
+        const tail = prior?.records[prior.records.length - 1];
+        if (
+          forkDepth > 0 &&
+          (fanInKeys.has(frame.key) || (tail !== undefined && frame.sizeBefore !== tail.sizeAfter))
+        ) {
+          // Still a real state write (counted, recency-ticked) — just not a
+          // parent-pack record/ledger entry.
+          markWrite("evidence", frame.key, frame.ordinal);
+          return;
+        }
         const acc = pack(frame.key);
         const seq = acc.records.length;
         const record: DropRecordSummary = {
@@ -369,7 +406,17 @@ export function foldInventory(events: EventLike[], cursor?: number): InventorySn
         }
         return;
       }
-      // fork/join/travel move nothing the rail inventories.
+      // fork/join move nothing themselves, but they bound the branch windows
+      // the drop case above needs to fold branch-pad records out of the
+      // parent chain (both are relayed live AND persisted — see
+      // RELAYED_STREAM_EVENTS / conversation.ts).
+      case "fork":
+        forkDepth += 1;
+        return;
+      case "join":
+        forkDepth = Math.max(0, forkDepth - 1);
+        return;
+      // travel is UI-derived (model.ts) — it never arrives on the wire.
       default:
         return;
     }

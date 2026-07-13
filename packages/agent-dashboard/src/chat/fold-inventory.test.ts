@@ -600,6 +600,117 @@ describe("foldInventory — pinned against the captured pipeline dump", () => {
     ]);
   });
 
+  test("FanOut branch scope: branch drops fold OUT of the parent chain — absorbs are the authoritative fan-in, no false mismatch", () => {
+    // The exact stream the runtime's own topology test pins (backpack-topology
+    // "FanOut: branch fan-in emits one innate backpack.absorb per branch"):
+    // three branch packs on the SAME key each dropping 0→2, then join absorbs
+    // [0→2, 2→3, 3→4] — every receipt internally consistent. Branch drops
+    // carry no pad discriminator, so the fold must key them out via the
+    // fork/join windows + the absorb pre-pass instead of chaining them.
+    const KEY = "backpack.evidence";
+    const fork = (ordinal: number): EventLike => ({
+      type: "scratchpad.fork",
+      origin: "innate",
+      ordinal,
+      shared_keys: [],
+    });
+    const join = (ordinal: number): EventLike => ({
+      type: "scratchpad.join",
+      origin: "innate",
+      ordinal,
+      merged_keys: [KEY],
+      discarded_keys: [],
+    });
+    const branchDrop = (ordinal: number, a: string, b: string): EventLike => ({
+      type: "backpack.drop",
+      key: KEY,
+      origin: "explicit",
+      ordinal,
+      accepted: 2,
+      merged: 0,
+      skipped: 0,
+      indexes: [1, 2],
+      size_before: 0,
+      size_after: 2,
+      previews: [
+        { index: 1, op: "added", preview: a },
+        { index: 2, op: "added", preview: b },
+      ],
+      previews_omitted: 0,
+    });
+    const absorb = (
+      ordinal: number,
+      before: number,
+      after: number,
+      appended: number[],
+    ): EventLike => ({
+      type: "backpack.absorb",
+      key: KEY,
+      origin: "innate",
+      ordinal,
+      child_size: 2,
+      accepted: after - before,
+      merged: 2 - (after - before),
+      size_before: before,
+      size_after: after,
+      appended_indexes: appended,
+    });
+    const FAN: EventLike[] = [
+      fork(1),
+      fork(2),
+      fork(3),
+      branchDrop(4, "a", "b0"),
+      branchDrop(5, "b1", "c1"),
+      branchDrop(6, "c2", "d"),
+      absorb(7, 0, 2, [1, 2]),
+      join(8),
+      absorb(9, 2, 3, [3]),
+      join(10),
+      absorb(11, 3, 4, [4]),
+      join(12),
+    ];
+
+    const snap = foldInventory(FAN);
+
+    // The rail describes the PARENT pack: 3 absorb receipts, size 4, healthy.
+    expect(snap.health).toEqual({ ok: true });
+    expect(snap.packs).toHaveLength(1);
+    const pack = snap.packs[0]!;
+    expect(pack.size).toBe(4);
+    expect(pack.reconciled).toBe(true);
+    expect(pack.records.map((r) => [r.kind, r.sizeBefore, r.sizeAfter, r.accepted])).toEqual([
+      ["absorb", 0, 2, 2],
+      ["absorb", 2, 3, 1],
+      ["absorb", 3, 4, 1],
+    ]);
+    expect(snap.dropReceipts).toBe(3);
+
+    // Branch-local previews cannot map onto parent indexes — the ledger stays
+    // honest (entries from the absorbs' appendedIndexes, preview-less) instead
+    // of letting the last branch's [#1]/[#2] clobber the parent's entries.
+    expect(pack.entries.map((e) => [e.index, e.preview ?? null, e.mintedDrop])).toEqual([
+      [1, null, 0],
+      [2, null, 0],
+      [3, null, 1],
+      [4, null, 2],
+    ]);
+
+    // The branch drops still COUNT as folded write events (they happened).
+    expect(snap.writeCount).toBe(6); // 3 branch drops + 3 absorbs
+
+    // Mid-fork scrub (cursor before any absorb): no false mismatch either —
+    // the chain-break heuristic keys out the later branches; the first
+    // branch's records self-correct once the absorbs land.
+    const mid = foldInventory(FAN, 6);
+    expect(mid.health.ok).toBe(true);
+
+    // A GENUINE corruption on the fan-in chain still trips the loud footer.
+    const corrupted = FAN.map((e) =>
+      e.type === "backpack.absorb" && e.ordinal === 11 ? { ...e, size_after: 9 } : e,
+    );
+    expect(foldInventory(corrupted).health.ok).toBe(false);
+  });
+
   test("absorb records append entries and count as DropRecords (FanOut fan-in)", () => {
     const snap = foldInventory([
       {

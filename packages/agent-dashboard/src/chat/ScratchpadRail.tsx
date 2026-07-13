@@ -73,6 +73,16 @@ const KEPT_TITLE =
 const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 const escAttr = (s: string): string => s.replace(/["\\]/g, "\\$&");
 
+/**
+ * parts.tsx stamps `data-skey` on READ frames (`.readframe`) and UI-derived
+ * TRAVEL frames (`.travel`) as well as on the producing drop/absorb/write
+ * frames — and a key's LAST match in document order is often one of those
+ * (e.g. a stage save is followed by the next stage's "→ prompt" read). Every
+ * forward seek promises the PRODUCING frame ("click a row to jump to its
+ * write"), so plain key selectors get this suffix.
+ */
+const PRODUCING = ":not(.readframe):not(.travel)";
+
 function flashEl(el: HTMLElement): void {
   el.classList.remove("flash");
   void el.offsetWidth;
@@ -84,6 +94,7 @@ export function ScratchpadRail({
   cursor,
   chatRoot,
   seekKey,
+  onSeekConsumed,
 }: {
   source: ScratchpadRailSource;
   /** Scrub cursor (events folded); omitted = the live edge. */
@@ -92,6 +103,9 @@ export function ScratchpadRail({
   chatRoot?: React.RefObject<HTMLElement | null>;
   /** Reverse-seek request from a Δ frame's `.d-key` click. */
   seekKey?: RailSeekRequest | null;
+  /** The request was handled (row flashed, or settled row-less) — the bridge
+   *  should clear it so a tab-switch remount never replays a stale seek. */
+  onSeekConsumed?: () => void;
 }) {
   const railRef = useRef<HTMLElement>(null);
 
@@ -207,7 +221,7 @@ export function ScratchpadRail({
   const jumpToWrite = useCallback(
     (packKey: string, index: number): boolean =>
       seekSelector(`[data-skey="${escAttr(packKey)}"][data-minted~="${index}"]`) ||
-      seekSelector(`[data-skey="${escAttr(packKey)}"]`),
+      seekSelector(`[data-skey="${escAttr(packKey)}"]${PRODUCING}`),
     [seekSelector],
   );
 
@@ -226,8 +240,41 @@ export function ScratchpadRail({
   );
 
   // ── frame `.d-key` → rail row (the reverse seek, bridged by ChatPage) ────
+  // The request is CONSUMABLE and RETRY-ABLE: in replay the rail can mount
+  // (inside ChatPage's flushSync) before `fetchRunEvents` resolves — no rows
+  // yet — so the effect keys on the FOLD's view of the target and re-runs
+  // when the events land. Once handled (row flashed, or the feed settled with
+  // no such row) it notifies ChatPage via `onSeekConsumed` and pins the nonce
+  // in a ref, so neither a later fold change nor a tab-switch remount can
+  // replay a stale seek.
+  // In flight = rows can still appear: the replay fetch hasn't delivered OR
+  // the loading flag hasn't cleared yet (the two land in separate commits —
+  // rows render only once BOTH have; `showBody` below hides them meanwhile).
+  const replayInFlight =
+    source.kind === "replay" &&
+    !!replayRunId &&
+    replayError === null &&
+    (replayEvents === null || replayLoading);
+  const seekTargetInFold =
+    seekKey != null &&
+    (snap.packs.some((p) => p.key === seekKey.key) ||
+      snap.slots.some((s) => s.key === seekKey.key) ||
+      snap.stages.some((s) => `agents.${s.name}` === seekKey.key));
+  const handledSeekNonce = useRef<number | null>(null);
   useEffect(() => {
-    if (!seekKey) return;
+    if (!seekKey || handledSeekNonce.current === seekKey.nonce) return;
+    // Leave the request pending while replay events are in flight — this
+    // effect re-runs when they land (deps below).
+    if (replayInFlight) return;
+    const consume = () => {
+      handledSeekNonce.current = seekKey.nonce;
+      onSeekConsumed?.();
+    };
+    if (!seekTargetInFold) {
+      // Feed settled and the key has no row — consume, never fire later.
+      consume();
+      return;
+    }
     const root = railRef.current;
     if (!root) return;
     const target = root.querySelector<HTMLElement>(`[data-key="${escAttr(seekKey.key)}"]`);
@@ -243,7 +290,8 @@ export function ScratchpadRail({
       });
     }
     flashEl(target);
-  }, [seekKey]);
+    consume();
+  }, [seekKey, seekTargetInFold, replayInFlight, onSeekConsumed]);
 
   // ── [#N] hover in chat → cross-highlight / peek (delegated) ──────────────
   useEffect(() => {
@@ -369,7 +417,12 @@ export function ScratchpadRail({
                     rowEnter={rowEnter}
                     rowLeave={rowLeave}
                     rowClick={rowClick}
-                    onSeek={() => seekSelector(`[data-skey="${escAttr(pack.key)}"]`)}
+                    onSeek={() =>
+                      // Prefer the drop/absorb frames' explicit stamp; the
+                      // PRODUCING fallback still skips read/travel frames.
+                      seekSelector(`[data-skey="${escAttr(pack.key)}"][data-drop-seq]`) ||
+                      seekSelector(`[data-skey="${escAttr(pack.key)}"]${PRODUCING}`)
+                    }
                     onJump={(index) => {
                       const found = jumpToWrite(pack.key, index);
                       if (!found) setPinned({ key: pack.key, idx: index, missing: true });
@@ -395,7 +448,10 @@ export function ScratchpadRail({
                   recentAnimKey={
                     recent?.section === "stages" ? recentKey("stages", recent.key) : ""
                   }
-                  onSeekStage={(name) => seekSelector(`[data-skey="agents.${escAttr(name)}"]`)}
+                  onSeekStage={(name) =>
+                    // The WriteFrame (stage save), not a later "→ prompt" read.
+                    seekSelector(`[data-skey="agents.${escAttr(name)}"]${PRODUCING}`)
+                  }
                 />
               </div>
             )}
@@ -411,7 +467,7 @@ export function ScratchpadRail({
                     key={slot.key + recentKey("kept", slot.key)}
                     slot={slot}
                     recentClass={recentClass("kept", slot.key)}
-                    onSeek={() => seekSelector(`[data-skey="${escAttr(slot.key)}"]`)}
+                    onSeek={() => seekSelector(`[data-skey="${escAttr(slot.key)}"]${PRODUCING}`)}
                   />
                 ))}
               </div>
@@ -429,7 +485,7 @@ export function ScratchpadRail({
             const m = snap.health.mismatch;
             if (!m) return;
             if (!seekSelector(`[data-skey="${escAttr(m.key)}"][data-drop-seq="${m.recordSeq}"]`))
-              seekSelector(`[data-skey="${escAttr(m.key)}"]`);
+              seekSelector(`[data-skey="${escAttr(m.key)}"]${PRODUCING}`);
           }}
         />
       )}

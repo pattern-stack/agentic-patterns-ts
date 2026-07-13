@@ -113,6 +113,10 @@ export function ChatPage() {
   // and hand the key to the rail, which scrolls to + flashes the slot's row.
   const [railSeek, setRailSeek] = useState<RailSeekRequest | null>(null);
   const railSeekNonce = useRef(0);
+  // The rail consumes the request once handled (or once the replay feed
+  // settles without the row) — clearing it here means a tab-switch remount
+  // can never replay a stale seek (an unprompted scroll+flash).
+  const clearRailSeek = useCallback(() => setRailSeek(null), []);
   useEffect(() => {
     const el = chatColRef.current;
     if (!el) return;
@@ -352,7 +356,12 @@ export function ChatPage() {
                 ) : railTab === "trace" ? (
                   <TraceRail source={traceSource} />
                 ) : (
-                  <ScratchpadRail source={traceSource} chatRoot={chatColRef} seekKey={railSeek} />
+                  <ScratchpadRail
+                    source={traceSource}
+                    chatRoot={chatColRef}
+                    seekKey={railSeek}
+                    onSeekConsumed={clearRailSeek}
+                  />
                 )}
               </div>
             )}

@@ -12,10 +12,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EventLike } from "../../graph/trace-from-events";
 import { type RailSeekRequest, ScratchpadRail, type ScratchpadRailSource } from "../ScratchpadRail";
 
+// Replay mode fetches the linked run's events — mocked so the seek tests can
+// control WHEN the feed lands (the mount-before-events retry seam).
+const fetchRunEventsMock = vi.hoisted(() => vi.fn());
+vi.mock("../../lib/runsApi", () => ({ fetchRunEvents: fetchRunEventsMock }));
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  fetchRunEventsMock.mockReset();
 });
 
 // ---------------------------------------------------------------------------
@@ -85,6 +91,7 @@ function Harness({
   density = "writes",
   frames = true,
   source,
+  onSeekConsumed,
 }: {
   events?: EventLike[];
   streaming?: boolean;
@@ -93,6 +100,7 @@ function Harness({
   density?: string;
   frames?: boolean;
   source?: ScratchpadRailSource;
+  onSeekConsumed?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   return (
@@ -125,6 +133,27 @@ function Harness({
                 >
                   <summary>Δ</summary>
                 </details>
+                {/* LATER in document order: the same keys' read + derived
+                    travel frames — parts.tsx stamps data-skey on those too.
+                    Producing-frame seeks must NOT land here even though these
+                    are each key's LAST match. */}
+                <details
+                  className="travel sd"
+                  data-skey="backpack.observations"
+                  data-testid="frame-travel"
+                >
+                  <summary>⇄</summary>
+                </details>
+                <div
+                  className="strip sd readframe"
+                  data-skey="agents.retrieve"
+                  data-testid="frame-stage-read"
+                />
+                <div
+                  className="strip sd readframe"
+                  data-skey="brief.highlights"
+                  data-testid="frame-slot-read"
+                />
                 <button type="button" className="cite" data-idx="1">
                   [#1]
                 </button>
@@ -138,6 +167,7 @@ function Harness({
         cursor={cursor}
         chatRoot={ref}
         seekKey={seekKey}
+        onSeekConsumed={onSeekConsumed}
       />
     </div>
   );
@@ -337,15 +367,22 @@ describe("ledger overflow", () => {
 // ---------------------------------------------------------------------------
 
 describe("seeks", () => {
-  it("rail row → producing frame: opens + flashes inside the chat column", () => {
+  it("rail row → producing frame: opens + flashes the DROP frame, not the key's later travel frame", () => {
     const { container } = render(<Harness />);
     fireEvent.click(rail(container).querySelector(".hero-main") as HTMLElement);
     const frame = container.querySelector('[data-testid="frame-drop"]') as HTMLDetailsElement;
     expect(frame.open).toBe(true);
     expect(frame.classList.contains("flash")).toBe(true);
+    // The travel frame is the key's LAST [data-skey] match in document order —
+    // a bare last-match seek would land there instead of the write.
+    expect(
+      (container.querySelector('[data-testid="frame-travel"]') as HTMLElement).classList.contains(
+        "flash",
+      ),
+    ).toBe(false);
   });
 
-  it("stage row and slot row seek their write frames", () => {
+  it("stage row and slot row seek their WRITE frames, skipping the keys' later read frames", () => {
     const { container } = render(<Harness />);
     const r = rail(container);
     fireEvent.click(r.querySelector('[aria-controls="rail-stage-rows"]') as HTMLElement);
@@ -355,12 +392,23 @@ describe("seeks", () => {
         "flash",
       ),
     ).toBe(true);
+    // agents.retrieve's later "→ prompt" ReadFrame carries the same data-skey.
+    expect(
+      (
+        container.querySelector('[data-testid="frame-stage-read"]') as HTMLElement
+      ).classList.contains("flash"),
+    ).toBe(false);
     fireEvent.click(r.querySelector('.slot-row[data-key="brief.highlights"]') as HTMLElement);
     expect(
       (container.querySelector('[data-testid="frame-slot"]') as HTMLElement).classList.contains(
         "flash",
       ),
     ).toBe(true);
+    expect(
+      (
+        container.querySelector('[data-testid="frame-slot-read"]') as HTMLElement
+      ).classList.contains("flash"),
+    ).toBe(false);
   });
 
   it("density Off: a rail seek bubbles the honest reveal event before seeking", () => {
@@ -391,6 +439,78 @@ describe("seeks", () => {
         "flash",
       ),
     ).toBe(true);
+  });
+
+  it("a handled reverse seek is CONSUMED exactly once — a re-render can't replay the same nonce", () => {
+    const onSeekConsumed = vi.fn();
+    const { container, rerender } = render(
+      <Harness seekKey={{ key: "brief.highlights", nonce: 5 }} onSeekConsumed={onSeekConsumed} />,
+    );
+    expect(
+      (
+        rail(container).querySelector('[data-key="brief.highlights"]') as HTMLElement
+      ).classList.contains("flash"),
+    ).toBe(true);
+    expect(onSeekConsumed).toHaveBeenCalledTimes(1);
+    // The bridge not yet cleared: a NEW request object with the SAME nonce
+    // (fresh effect run) must be recognized as already handled.
+    rerender(
+      <Harness seekKey={{ key: "brief.highlights", nonce: 5 }} onSeekConsumed={onSeekConsumed} />,
+    );
+    expect(onSeekConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reverse seek for a key with no row consumes once the feed is settled (live)", () => {
+    const onSeekConsumed = vi.fn();
+    render(<Harness seekKey={{ key: "not.carried", nonce: 6 }} onSeekConsumed={onSeekConsumed} />);
+    expect(onSeekConsumed).toHaveBeenCalledTimes(1);
+  });
+
+  it("replay: a seek arriving before the run's events load RETRIES once the fold lands, then consumes", async () => {
+    let resolveEvents!: (v: unknown) => void;
+    fetchRunEventsMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveEvents = resolve;
+      }),
+    );
+    const onSeekConsumed = vi.fn();
+    const { container } = render(
+      <Harness
+        source={{ kind: "replay", runId: "run-1" }}
+        seekKey={{ key: "brief.highlights", nonce: 7 }}
+        onSeekConsumed={onSeekConsumed}
+      />,
+    );
+    // Events still in flight: no rows yet — the request must stay PENDING
+    // (not silently dropped, not consumed).
+    expect(rail(container).querySelector('[data-key="brief.highlights"]')).toBeNull();
+    expect(onSeekConsumed).not.toHaveBeenCalled();
+
+    // The feed lands (persisted rows: `{ ...data, type }` — persistedToEventLike).
+    await act(async () => {
+      resolveEvents({
+        kind: "ok",
+        data: {
+          runId: "run-1",
+          events: EVENTS.map((e, i) => ({
+            id: i + 1,
+            type: `agent.${e.type}`,
+            timestamp: "2026-07-12T00:00:00Z",
+            traceId: "t",
+            runId: "run-1",
+            spanId: null,
+            ccSessionId: null,
+            ccHookName: null,
+            ccCwd: null,
+            data: { ...e, type: `agent.${e.type}` },
+          })),
+        },
+      });
+    });
+
+    const row = rail(container).querySelector('[data-key="brief.highlights"]') as HTMLElement;
+    expect(row.classList.contains("flash")).toBe(true);
+    expect(onSeekConsumed).toHaveBeenCalledTimes(1);
   });
 });
 
