@@ -12,7 +12,7 @@
  * it, and the run then either executes the tool (approve) or errors (deny).
  */
 
-import type { AgentEvent, RunOptions } from "@agentic-patterns/runtime";
+import type { AgentEvent, BaseEvent, RunOptions } from "@agentic-patterns/runtime";
 import {
   AgentEventBus,
   InMemoryAdminService,
@@ -68,7 +68,7 @@ function makeGatedRunner() {
 
       // Gate check #2 (block detection) — memoized, no second prompt.
       let blocked = false;
-      const onRejected = (r: AgentEvent) => {
+      const onRejected = (r: BaseEvent) => {
         const oi = (r as { originalIntent?: { toolCallId?: string } }).originalIntent;
         if (oi?.toolCallId === "call-1") blocked = true;
       };
