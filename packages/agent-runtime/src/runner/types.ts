@@ -120,6 +120,12 @@ export interface RunOptions {
   maxIterations?: number;
   /** Optional trace ID for multi-agent orchestration. */
   traceId?: string;
+  /**
+   * Optional run correlation id (#226). Honored by `NodeBackedRunner`, which
+   * threads it onto `NodeRunContext.runId` so state-delta events share the
+   * stream lifecycle's runId. `AgentRunner` currently mints its own per run.
+   */
+  runId?: string;
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
   /**

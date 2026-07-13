@@ -274,6 +274,141 @@ export interface ErrorEvent extends BaseEvent {
 }
 
 // ---------------------------------------------------------------------------
+// State-delta events (#226) — Backpack / Scratchpad mutations made visible.
+// Published ONLY by the observed emission layer (`workflows/observed-*.ts`);
+// a run with no event bus emits none of these. Payload previews are
+// byte-capped AT CONSTRUCTION (512B/row, 2KB/frame, explicit "(preview only)"
+// marker) — the formatter and every exporter pass them through verbatim.
+// ---------------------------------------------------------------------------
+
+/**
+ * Who initiated a state mutation: `"innate"` = the framework's own machinery
+ * (a sequentialAgent stage emission, a FanOut fork/join), `"explicit"` =
+ * consumer code (a tool drop, an `onEmit` slot write, a custom prompt read).
+ */
+export type StateOrigin = "innate" | "explicit";
+
+/** Fields shared by every state-delta event. */
+export interface StateEventBase extends BaseEvent {
+  readonly origin: StateOrigin;
+  /**
+   * Monotonic per-run state ordinal — ONE stream across backpack + scratchpad,
+   * minted at the emission layer. Keys UI ordering, coalescing, and the rail's
+   * delta animation.
+   */
+  readonly ordinal: number;
+  /** The causing tool call, when the mutation happened inside a tool dispatch. */
+  readonly toolCallId?: string;
+}
+
+/**
+ * Per-BackpackSpec display metadata threaded verbatim onto `agent.backpack.*`
+ * payloads (structural twin of `BackpackSpec.display` — the type is duplicated
+ * so `backpack.ts` stays import-free and events stay a lower layer).
+ */
+export interface BackpackDisplay {
+  readonly caption?: string;
+  readonly attribution?: string;
+}
+
+/** One byte-capped row preview in a {@link BackpackDropEvent}. */
+export interface BackpackRowPreview {
+  /** Canonical 1-based [#N] index (append-only, never renumbered). */
+  readonly index: number;
+  /** How this drop touched the row: net-new identity vs folded into an existing one. */
+  readonly op: "added" | "merged";
+  readonly preview: string;
+}
+
+export interface BackpackDropEvent extends StateEventBase {
+  readonly type: "agent.backpack.drop";
+  /** The pack's slot key (`backpack.<spec.key>`) — the mono join key across UI surfaces. */
+  readonly key: string;
+  /** New identities (mirrors `DropReceipt.accepted`). */
+  readonly accepted: number;
+  /** Re-dropped identities folded via merge (mirrors `DropReceipt.merged`). */
+  readonly merged: number;
+  /** Raws skipped by `expand()` (mirrors `DropReceipt.skipped`). */
+  readonly skipped: number;
+  /** Canonical [#N] indexes touched, raw order, skips omitted (mirrors `DropReceipt.indexes`). */
+  readonly indexes: readonly number[];
+  readonly sizeBefore: number;
+  readonly sizeAfter: number;
+  /** Byte-capped per-row previews of touched entries (512B/row, 2KB/frame total). */
+  readonly previews: readonly BackpackRowPreview[];
+  /** Rows left out of `previews` by the per-frame preview budget — never silently clipped. */
+  readonly previewsOmitted: number;
+  /** Byte-capped preview of the caller-supplied drop tag, when one was given. */
+  readonly tag?: string;
+  readonly display?: BackpackDisplay;
+}
+
+export interface BackpackReadEvent extends StateEventBase {
+  readonly type: "agent.backpack.read";
+  readonly key: string;
+  /** True when `finalized()` was served from the per-write-generation memo. */
+  readonly memoHit: boolean;
+  /** Pack size at read time. */
+  readonly size: number;
+  /** Byte-capped preview of the finalized value. */
+  readonly preview: string;
+  readonly display?: BackpackDisplay;
+}
+
+export interface BackpackAbsorbEvent extends StateEventBase {
+  readonly type: "agent.backpack.absorb";
+  readonly key: string;
+  /** Entries in the absorbed (child) pack. */
+  readonly childSize: number;
+  /** New identities appended to the parent by this absorb. */
+  readonly accepted: number;
+  /** Identities folded into existing parent entries. */
+  readonly merged: number;
+  readonly sizeBefore: number;
+  readonly sizeAfter: number;
+  /** Canonical [#N] indexes appended by this absorb (`sizeBefore+1 .. sizeAfter`). */
+  readonly appendedIndexes: readonly number[];
+  readonly display?: BackpackDisplay;
+}
+
+export interface ScratchpadWriteEvent extends StateEventBase {
+  readonly type: "agent.scratchpad.write";
+  /** The slot key written (e.g. `agents.retrieve`, `brief.highlights`). */
+  readonly key: string;
+  readonly op: "set" | "update";
+  /** True when the slot had been materialized before this write. */
+  readonly hadValue: boolean;
+  /** Byte-capped preview of the previous value; absent when `hadValue` is false. */
+  readonly before?: string;
+  /** Byte-capped preview of the new value. */
+  readonly after: string;
+}
+
+export interface ScratchpadReadEvent extends StateEventBase {
+  readonly type: "agent.scratchpad.read";
+  readonly key: string;
+  /** Byte-capped preview of the value read. */
+  readonly preview: string;
+}
+
+export interface ScratchpadForkEvent extends StateEventBase {
+  readonly type: "agent.scratchpad.fork";
+  /** Run-scoped slot keys shared (by reference) into the fork at fork time. */
+  readonly sharedKeys: readonly string[];
+}
+
+export interface ScratchpadJoinEvent extends StateEventBase {
+  readonly type: "agent.scratchpad.join";
+  /** Branch-scoped keys folded into the parent via their `Slot.merge` reducer. */
+  readonly mergedKeys: readonly string[];
+  /**
+   * Branch-scoped keys DISCARDED at join (no merge reducer) — the classic
+   * silent-loss debugging trap, made visible.
+   */
+  readonly discardedKeys: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
 // Discriminated union
 // ---------------------------------------------------------------------------
 
@@ -299,6 +434,13 @@ export type AgentEvent =
   | LLMCallStartEvent
   | LLMCallEndEvent
   | ErrorEvent
+  | BackpackDropEvent
+  | BackpackReadEvent
+  | BackpackAbsorbEvent
+  | ScratchpadWriteEvent
+  | ScratchpadReadEvent
+  | ScratchpadForkEvent
+  | ScratchpadJoinEvent
   | ClaudeCodeHookEvent;
 
 /** All possible agent event type strings. */

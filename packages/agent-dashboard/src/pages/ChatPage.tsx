@@ -27,6 +27,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { type AgentSummary, listAgents } from "../api/chat-client";
 import { fetchJSON } from "../api/client";
 import type {
@@ -39,6 +40,7 @@ import { CaptureCasePanel } from "../chat/CaptureCasePanel";
 import type { ChatMessage } from "../chat/model";
 import { storedMessagesToChat } from "../chat/stored-parts";
 import "./chat-route.css";
+import { type RailSeekRequest, ScratchpadRail } from "../chat/ScratchpadRail";
 import { AgentUniverse } from "../components/AgentUniverse";
 import { TraceRail, type TraceRailSource } from "../components/TraceRail";
 import { Badge } from "../components/atoms/Badge";
@@ -52,10 +54,29 @@ import { relTime, shortId, statusTone } from "../lib/format";
 import { sessionsForAgent } from "../lib/sessions";
 import { T } from "../ui/tokens";
 
-type RailTab = "universe" | "trace";
-const RAIL_TAB_OPTIONS: { value: RailTab; label: string }[] = [
+type RailTab = "universe" | "trace" | "scratchpad";
+const RAIL_TAB_OPTIONS: { value: RailTab; label: string; title?: string }[] = [
   { value: "universe", label: "Universe" },
   { value: "trace", label: "Trace" },
+  {
+    value: "scratchpad",
+    label: "Scratchpad",
+    title: "What this run carries between stages — not user memory",
+  },
+];
+
+/** #226 — how many Backpack/Scratchpad state frames render in the timeline.
+ *  Applied as `data-density` on the chat column; chat.css does the rest
+ *  (Off hides `.sd` frames, Writes compacts closed reads/innate frames). */
+type ScratchpadDensity = "all" | "writes" | "off";
+const DENSITY_OPTIONS: { value: ScratchpadDensity; label: string; title: string }[] = [
+  { value: "all", label: "All", title: "Every state frame, full size" },
+  {
+    value: "writes",
+    label: "Writes",
+    title: "Write frames full size; reads and framework (auto) frames compact",
+  },
+  { value: "off", label: "Off", title: "Hide state frames (the escape hatch)" },
 ];
 
 export function ChatPage() {
@@ -65,6 +86,52 @@ export function ChatPage() {
   const [maxIterations, setMaxIterations] = useState(10); // matches the runner default
   const [railOpen, setRailOpen] = useState(true);
   const [railTab, setRailTab] = useState<RailTab>("universe");
+  const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
+
+  // #226: a [#N] cite seek with density Off would scroll to a hidden frame —
+  // parts.tsx bubbles `chat:reveal-state-frames` instead, and we honestly flip
+  // the toggle back to Writes before the seek lands (never seek to nothing).
+  // flushSync is load-bearing: the dispatching seek (parts.tsx seekCite)
+  // measures the frame's rect synchronously after dispatchEvent returns, and
+  // under React's automatic batching a plain setDensity would commit a frame
+  // LATER — the seek would measure a still-display:none frame (zero rect) and
+  // scroll to the top of the column instead of the frame. dispatchEvent runs
+  // this listener synchronously, so flushSync makes the CSS flip visible
+  // before seekCite continues.
+  const chatColRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = chatColRef.current;
+    if (!el) return;
+    const reveal = () => flushSync(() => setDensity((d) => (d === "off" ? "writes" : d)));
+    el.addEventListener("chat:reveal-state-frames", reveal);
+    return () => el.removeEventListener("chat:reveal-state-frames", reveal);
+  }, []);
+
+  // #226: the REVERSE seek — clicking a mono `.d-key` inside any Δ frame
+  // bubbles `chat:seek-rail`; we open the side panel on the Scratchpad tab
+  // (inside flushSync, so the rail is mounted before the seek request lands)
+  // and hand the key to the rail, which scrolls to + flashes the slot's row.
+  const [railSeek, setRailSeek] = useState<RailSeekRequest | null>(null);
+  const railSeekNonce = useRef(0);
+  // The rail consumes the request once handled (or once the replay feed
+  // settles without the row) — clearing it here means a tab-switch remount
+  // can never replay a stale seek (an unprompted scroll+flash).
+  const clearRailSeek = useCallback(() => setRailSeek(null), []);
+  useEffect(() => {
+    const el = chatColRef.current;
+    if (!el) return;
+    const onSeekRail = (ev: Event) => {
+      const key = (ev as CustomEvent<{ key?: string }>).detail?.key;
+      if (!key) return;
+      flushSync(() => {
+        setRailOpen(true);
+        setRailTab("scratchpad");
+        setRailSeek({ key, nonce: ++railSeekNonce.current });
+      });
+    };
+    el.addEventListener("chat:seek-rail", onSeekRail);
+    return () => el.removeEventListener("chat:seek-rail", onSeekRail);
+  }, []);
 
   // Sessions (S8 Console upgrade): GET /admin/conversations has no per-agent
   // query param — filter + sort client-side (lib/sessions.ts).
@@ -204,6 +271,8 @@ export function ChatPage() {
         description={selected?.description}
         maxIterations={maxIterations}
         onMaxIterations={setMaxIterations}
+        density={density}
+        onDensity={setDensity}
         sessions={sessions}
         sessionsError={sessionsError}
         viewingId={viewingId}
@@ -221,7 +290,12 @@ export function ChatPage() {
           <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>{viewingError}</div>
         )}
         <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 16 }}>
-          <div className="chat-route" style={{ flex: 1, minWidth: 0 }}>
+          <div
+            ref={chatColRef}
+            className="chat-route"
+            style={{ flex: 1, minWidth: 0 }}
+            data-density={density}
+          >
             <ChatPanel
               messages={displayMessages}
               fill
@@ -280,8 +354,15 @@ export function ChatPage() {
                 />
                 {railTab === "universe" ? (
                   <AgentUniverse agentId={selectedId} />
-                ) : (
+                ) : railTab === "trace" ? (
                   <TraceRail source={traceSource} />
+                ) : (
+                  <ScratchpadRail
+                    source={traceSource}
+                    chatRoot={chatColRef}
+                    seekKey={railSeek}
+                    onSeekConsumed={clearRailSeek}
+                  />
                 )}
               </div>
             )}
@@ -306,6 +387,8 @@ interface HeaderProps {
   description?: string;
   maxIterations: number;
   onMaxIterations: (n: number) => void;
+  density: ScratchpadDensity;
+  onDensity: (d: ScratchpadDensity) => void;
   sessions: ConversationSummary[];
   sessionsError: string | null;
   viewingId: string | null;
@@ -327,6 +410,8 @@ function Header({
   description,
   maxIterations,
   onMaxIterations,
+  density,
+  onDensity,
   sessions,
   sessionsError,
   viewingId,
@@ -394,6 +479,25 @@ function Header({
             style={{ ...inputStyle, width: 56, padding: "6px 8px" }}
           />
         </label>
+        <div
+          title="How many Backpack/Scratchpad state frames render in the timeline. The run's scratchpad — what it carries between stages — not user memory."
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+          }}
+        >
+          scratchpad
+          <Segmented
+            options={DENSITY_OPTIONS}
+            value={density}
+            onChange={onDensity}
+            size="sm"
+            aria-label="Scratchpad frame density"
+          />
+        </div>
         <div style={{ flex: 1 }} />
         {selected && (
           <Badge tone="ok" variant="outline">

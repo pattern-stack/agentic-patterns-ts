@@ -95,7 +95,12 @@ describe("promoted-agent registration — server introspection", () => {
     const body = (await res.json()) as Array<Record<string, unknown>>;
     const entry = body.find((a) => a.id === "promoted-pipe");
     expect(entry).toBeDefined();
-    expect(entry?.readiness).toMatchObject({ ready: true, missing: [] });
+    // #222: a bare promoted agent declares no model (asAgent no longer pins a
+    // default "sonnet"), so the /agents readiness contract — a model must
+    // statically resolve — honestly reports it not-ready. The route still
+    // RENDERS (status 200, no throw) on the missing composition, which is what
+    // this test guards.
+    expect(entry?.readiness).toMatchObject({ ready: false, missing: ["model"] });
   });
 
   it("GET /agents/:id/composition renders a promoted registration without throwing (empty mission)", async () => {

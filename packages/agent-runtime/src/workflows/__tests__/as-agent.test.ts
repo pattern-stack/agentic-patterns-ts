@@ -18,7 +18,9 @@ import { AgentStep } from "../agent-step.js";
 import { NodeBackedRunner, asAgent, isPromotedAgent } from "../as-agent.js";
 import { FunctionStep } from "../function-step.js";
 import type { Node, NodeRunContext } from "../node.js";
+import { ObservedScratchpad } from "../observed-scratchpad.js";
 import { Sequential } from "../sequential.js";
+import { DefaultScratchpad, slot } from "../slot.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -340,10 +342,11 @@ describe("asAgent", () => {
     expect(promoted.renderInitialPrompt()).toBe(promoted.renderInitialPrompt());
   });
 
-  it("defaults getModel() to a sensible tier string, overridable via opts.model", () => {
+  it("leaves getModel() undefined by default — no framework model default (#179/#222) — overridable via opts.model", () => {
     const pipeline = new FunctionStep<string, string>({ fn: (s) => s });
     const promoted = asAgent(pipeline, { role: { name: "M" } });
-    expect(typeof promoted.getModel()).toBe("string");
+    // Unset → undefined; the runner resolves the model or fails loud (never a silent pin).
+    expect(promoted.getModel()).toBeUndefined();
 
     const overridden = asAgent(pipeline, { role: { name: "M" }, model: "opus" });
     expect(overridden.getModel()).toBe("opus");
@@ -440,5 +443,99 @@ describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
 
     expect(captured).toHaveLength(1);
     expect(captured[0]?.parentSpanId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Observed scratchpad installation + runId threading (#226)
+// ---------------------------------------------------------------------------
+
+describe("NodeBackedRunner — observed scratchpad + runId threading (#226)", () => {
+  const probeSlot = slot<string | null>({ key: "probe.note", scope: "run", init: () => null });
+
+  /** A node that captures its ctx and performs one slot write. */
+  function makeProbe(): { node: Node<string, string>; ctx: () => NodeRunContext } {
+    let captured: NodeRunContext | undefined;
+    const node: Node<string, string> = {
+      name: "probe",
+      async run(input: string, ctx: NodeRunContext) {
+        captured = ctx;
+        ctx.scratchpad?.set(probeSlot, "written");
+        return { output: input, succeeded: true, totalInputTokens: 0, totalOutputTokens: 0 };
+      },
+    };
+    return {
+      node,
+      ctx: () => {
+        if (!captured) throw new Error("probe never ran");
+        return captured;
+      },
+    };
+  }
+
+  it("run() with an eventBus installs an ObservedScratchpad whose state events carry the ctx's ids", async () => {
+    const probe = makeProbe();
+    const promoted = asAgent(probe.node, { role: { name: "Probe" } });
+    const bus = new AgentEventBus();
+    const events: AgentEvent[] = [];
+    bus.subscribeAll((e) => void events.push(e as AgentEvent));
+
+    await new NodeBackedRunner(new MockRunner()).run(promoted, "hi", { eventBus: bus });
+
+    const ctx = probe.ctx();
+    expect(ctx.scratchpad).toBeInstanceOf(ObservedScratchpad);
+    expect(ctx.runId).toBeDefined();
+    expect(ctx.traceId).toBeDefined();
+
+    const writes = events.filter((e) => e.type === "agent.scratchpad.write");
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      key: "probe.note",
+      runId: ctx.runId,
+      traceId: ctx.traceId,
+      origin: "explicit",
+    });
+  });
+
+  it("run() without an eventBus installs a PLAIN scratchpad — zero emission, today's behavior", async () => {
+    const probe = makeProbe();
+    const promoted = asAgent(probe.node, { role: { name: "Probe" } });
+
+    const result = await new NodeBackedRunner(new MockRunner()).run(promoted, "hi");
+
+    expect(result.response).toBe("hi");
+    const ctx = probe.ctx();
+    expect(ctx.scratchpad).toBeInstanceOf(DefaultScratchpad);
+    expect(ctx.scratchpad instanceof ObservedScratchpad).toBe(false);
+    expect(ctx.runId).toBeDefined(); // runId is threaded regardless of a bus
+  });
+
+  it("stream() threads its minted traceId/runId into the node ctx, and relays state events live", async () => {
+    const probe = makeProbe();
+    const promoted = asAgent(probe.node, { role: { name: "Probe" } });
+    const runner = new NodeBackedRunner(new MockRunner());
+
+    const events: AgentEvent[] = [];
+    for await (const event of runner.stream(promoted, "yo")) events.push(event);
+
+    // WI-2 (#226): state-delta events joined the relay allowlist — the node's
+    // scratchpad write reaches the yielded stream in publish order, between
+    // the message lifecycle events. This is the playground's ONLY route to
+    // the client (conversation SSE), so an event missing here dies silently.
+    expect(events.map((e) => e.type)).toEqual([
+      "agent.message.start",
+      "agent.scratchpad.write",
+      "agent.message.chunk",
+      "agent.message.complete",
+    ]);
+
+    // The stream's lifecycle ids and the node ctx's ids are ONE run.
+    const ctx = probe.ctx();
+    expect(ctx.runId).toBe(events[0]?.runId);
+    expect(ctx.traceId).toBe(events[0]?.traceId);
+    expect(ctx.scratchpad).toBeInstanceOf(ObservedScratchpad);
+    // The relayed write is the SAME run, not a re-minted identity.
+    const write = events.find((e) => e.type === "agent.scratchpad.write");
+    expect(write).toMatchObject({ key: "probe.note", runId: ctx.runId, traceId: ctx.traceId });
   });
 });

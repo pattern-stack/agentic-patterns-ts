@@ -66,12 +66,23 @@ export function RelativeTime({ at }: { at?: number }) {
  * Renders LLM markdown via the dependency-free `md()`. The `.answer .md` classes
  * carry the child element styling; `chat-bubble` (in chat.css) neutralizes the
  * .answer container chrome so the bubble owns the box. */
-export function Markdown({ content, className }: { content: string; className?: string }) {
+export function Markdown({
+  content,
+  className,
+  postprocess,
+}: {
+  content: string;
+  className?: string;
+  /** Optional HTML rewrite applied AFTER md() (e.g. [#N] cite-chip linkification
+   *  — parts.tsx `linkifyCites`). Receives md()'s escaped, controlled-tag output. */
+  postprocess?: (html: string) => string;
+}) {
+  const html = md(content);
   return (
     <div
       className={`answer md ${className ?? ""}`}
       // biome-ignore lint/security/noDangerouslySetInnerHtml: md() emits a controlled tag set on escaped input.
-      dangerouslySetInnerHTML={{ __html: md(content) }}
+      dangerouslySetInnerHTML={{ __html: postprocess ? postprocess(html) : html }}
     />
   );
 }

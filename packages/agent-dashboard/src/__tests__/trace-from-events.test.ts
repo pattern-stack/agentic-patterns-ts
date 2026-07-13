@@ -488,3 +488,57 @@ describe("persistedToEventLike + eventsToSteps — real production event dump", 
     expect("request" in REAL_RUN).toBe(false); // <- the documented gap (api/types.ts RunRow doc comment)
   });
 });
+
+describe("eventsToSteps — state-delta curation (#226)", () => {
+  const TOOLS: ToolIndex = new Map();
+
+  it("backpack.*/scratchpad.* events produce NO trace steps — they render as Δ frames in the timeline, never twice", () => {
+    // Interleave the 7 state-delta events (live snake_case wire shape) with a
+    // normal tool round-trip: the fold must yield exactly the tool steps it
+    // would without them. Pinned as explicit switch cases (not the default) in
+    // trace-from-events.ts so the Trace tab / timeline split stays deliberate.
+    const stateEvents = [
+      {
+        type: "backpack.drop",
+        key: "backpack.observations",
+        origin: "explicit",
+        ordinal: 1,
+        accepted: 1,
+        indexes: [1],
+        size_before: 0,
+        size_after: 1,
+        previews: [],
+        previews_omitted: 0,
+      },
+      { type: "backpack.read", key: "backpack.observations", ordinal: 2, memo_hit: false, size: 1 },
+      {
+        type: "backpack.absorb",
+        key: "backpack.observations",
+        ordinal: 3,
+        child_size: 1,
+        accepted: 1,
+        merged: 0,
+        size_before: 1,
+        size_after: 2,
+        appended_indexes: [2],
+      },
+      { type: "scratchpad.write", key: "agents.retrieve", origin: "innate", ordinal: 4, op: "set" },
+      { type: "scratchpad.read", key: "agents.retrieve", origin: "innate", ordinal: 5 },
+      { type: "scratchpad.fork", origin: "innate", ordinal: 6, shared_keys: [] },
+      {
+        type: "scratchpad.join",
+        origin: "innate",
+        ordinal: 7,
+        merged_keys: [],
+        discarded_keys: [],
+      },
+    ];
+    const events = [
+      { type: "tool.start", seq: 1, tool_name: "search", tool_call_id: "t1" },
+      ...stateEvents.map((e, i) => ({ ...e, seq: i + 2 })),
+      { type: "tool.end", seq: 9, tool_name: "search", tool_call_id: "t1", duration_ms: 5 },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: true });
+    expect(steps.map((s) => s.kind)).toEqual(["tool_call", "tool_result"]);
+  });
+});

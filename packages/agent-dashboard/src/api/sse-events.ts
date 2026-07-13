@@ -87,6 +87,93 @@ export type ClientEvent =
         error?: string;
       };
     }
+  // State-delta events (#226) — Backpack/Scratchpad mutations, snake_case per
+  // the runtime's `toSSEMapping`. Byte-capped previews carry an explicit
+  // "(preview only)" marker when truncated — never silently clipped.
+  | {
+      name: "backpack.drop";
+      data: {
+        key: string;
+        origin: "innate" | "explicit";
+        ordinal: number;
+        accepted: number;
+        merged: number;
+        skipped: number;
+        indexes: number[];
+        size_before: number;
+        size_after: number;
+        previews: { index: number; op: "added" | "merged"; preview: string }[];
+        previews_omitted: number;
+        tool_call_id?: string;
+        tag?: string;
+        display?: { caption?: string; attribution?: string };
+      };
+    }
+  | {
+      name: "backpack.read";
+      data: {
+        key: string;
+        origin: "innate" | "explicit";
+        ordinal: number;
+        memo_hit: boolean;
+        size: number;
+        preview: string;
+        tool_call_id?: string;
+        display?: { caption?: string; attribution?: string };
+      };
+    }
+  | {
+      name: "backpack.absorb";
+      data: {
+        key: string;
+        origin: "innate" | "explicit";
+        ordinal: number;
+        child_size: number;
+        accepted: number;
+        merged: number;
+        size_before: number;
+        size_after: number;
+        appended_indexes: number[];
+        tool_call_id?: string;
+        display?: { caption?: string; attribution?: string };
+      };
+    }
+  | {
+      name: "scratchpad.write";
+      data: {
+        key: string;
+        origin: "innate" | "explicit";
+        ordinal: number;
+        op: "set" | "update";
+        had_value: boolean;
+        after: string;
+        before?: string;
+        tool_call_id?: string;
+      };
+    }
+  | {
+      name: "scratchpad.read";
+      data: {
+        key: string;
+        origin: "innate" | "explicit";
+        ordinal: number;
+        preview: string;
+        tool_call_id?: string;
+      };
+    }
+  | {
+      name: "scratchpad.fork";
+      data: { origin: "innate" | "explicit"; ordinal: number; shared_keys: string[] };
+    }
+  | {
+      name: "scratchpad.join";
+      data: {
+        origin: "innate" | "explicit";
+        ordinal: number;
+        merged_keys: string[];
+        discarded_keys: string[];
+      };
+    }
   | {
       name: "error";
       data: { error_type: string; message: string; recoverable: boolean };

@@ -39,11 +39,15 @@
  * accepted (a Sequential stage, a Loop body, a FanOut branch, a sub-tool).
  */
 
+import { generateId } from "ai";
 import type { ZodType } from "zod";
+import type { AgentEvent } from "../events/types.js";
+import { createEvent } from "../events/types.js";
 import type { AgentLike } from "../runner/agent-runner.js";
 import { createToolboxExecutor } from "../runner/toolbox-executor.js";
 import { AgentStep } from "./agent-step.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
+import { ObservedScratchpad } from "./observed-scratchpad.js";
 import { retry } from "./retry.js";
 import {
   type ScratchpadAccess,
@@ -52,6 +56,7 @@ import {
   createScratchpad,
   slot,
 } from "./slot.js";
+import { capPreview } from "./state-events.js";
 
 // ---------------------------------------------------------------------------
 // Spec
@@ -124,6 +129,12 @@ export interface SequentialAgentOpts {
    * Default: {@link renderPriorEmission} — visibility follows the CHAIN (a
    * curation stage's cuts stay cut). Pass {@link renderSharedState} for
    * ADK-session-style all-prior visibility.
+   *
+   * OBSERVABILITY: on an observed pad the two BUILT-IN renders publish one
+   * innate `agent.scratchpad.read` per prior emission they inject (#226 — the
+   * design's prompt-read frame). A CUSTOM render function's injections are
+   * opaque to the framework, so it mints no innate read frames; reads a custom
+   * stage `prompt` makes through its `state` reader still report as explicit.
    */
   readonly render?: (input: unknown, completed: ReadonlyArray<CompletedStage>) => string;
 }
@@ -145,6 +156,13 @@ export interface SequentialAgentResult {
 // Defaults
 // ---------------------------------------------------------------------------
 
+/** The EXACT text one emission contributes to an implicit render. Shared by
+ *  both built-in renders AND the innate prompt-read frame's preview, so the
+ *  event's "exact injected text" claim holds by construction. */
+function renderEmissionBody(output: unknown): string {
+  return typeof output === "string" ? output : JSON.stringify(output, null, 1);
+}
+
 /**
  * The all-prior render (OPT-IN via `opts.render` — for reviewer-style stages that
  * should see everything established): the task + EVERY prior emission.
@@ -155,10 +173,7 @@ export function renderSharedState(
 ): string {
   const task = typeof input === "string" ? input : JSON.stringify(input, null, 1);
   if (completed.length === 0) return task;
-  const sections = completed.map(
-    (c) =>
-      `## ${c.name}\n${typeof c.output === "string" ? c.output : JSON.stringify(c.output, null, 1)}`,
-  );
+  const sections = completed.map((c) => `## ${c.name}\n${renderEmissionBody(c.output)}`);
   return `${task}\n\nWHAT PRIOR STAGES ESTABLISHED:\n\n${sections.join("\n\n")}`;
 }
 
@@ -173,9 +188,7 @@ export function renderPriorEmission(
   const task = typeof input === "string" ? input : JSON.stringify(input, null, 1);
   const prior = completed[completed.length - 1];
   if (prior == null) return task;
-  const body =
-    typeof prior.output === "string" ? prior.output : JSON.stringify(prior.output, null, 1);
-  return `${task}\n\nWHAT THE PRIOR STAGE ESTABLISHED (${prior.name}):\n${body}`;
+  return `${task}\n\nWHAT THE PRIOR STAGE ESTABLISHED (${prior.name}):\n${renderEmissionBody(prior.output)}`;
 }
 
 function isSpec(stage: AgentStage): stage is AgentStageSpec {
@@ -253,18 +266,86 @@ export function sequentialAgent(
       let tokensIn = 0;
       let tokensOut = 0;
 
+      // Step-event emission (#226): SKIPPED entirely when ctx.eventBus is
+      // absent — today's silent behavior, byte-identical. Event identity
+      // prefers the ctx's ids, then the observed pad's run-wide emitter ids
+      // (so step events correlate with the pad's state-delta events), then a
+      // one-per-run mint so the start/end pairs still cohere.
+      const bus = ctx.eventBus;
+      const observed = scratchpad instanceof ObservedScratchpad ? scratchpad : undefined;
+      const traceId = ctx.traceId ?? observed?.emitter.traceId ?? generateId();
+      const runId = ctx.runId ?? observed?.emitter.runId ?? generateId();
+      const publish = bus
+        ? (event: AgentEvent): void => {
+            try {
+              void bus.publish(event).catch(() => {
+                // Swallow — step events are best-effort observability.
+              });
+            } catch {
+              // Swallow a synchronous throw too (same non-throw contract).
+            }
+          }
+        : undefined;
+
+      // The known built-in renders and what they inject (#226): the innate
+      // prompt-read frames below report EXACTLY the emissions the render puts
+      // in the stage's user message. A custom `opts.render` is opaque — its
+      // injections are unknowable here, so it mints no innate reads.
+      const injectedByRender = (): ReadonlyArray<{ key: string; output: unknown }> => {
+        if (completed.length === 0) return [];
+        if (render === renderSharedState) {
+          return completed.map((c, j) => ({ key: emissionSlots[j]!.key, output: c.output }));
+        }
+        if (render === renderPriorEmission) {
+          const j = completed.length - 1;
+          return [{ key: emissionSlots[j]!.key, output: completed[j]!.output }];
+        }
+        return [];
+      };
+
       for (let i = 0; i < specs.length; i += 1) {
         const spec = specs[i]!;
         const name = names[i]!;
         const emissionSlot = emissionSlots[i]!;
+
+        // Declared BEFORE the step so the prompt closure below (which runs
+        // inside node.run, after step.start assigns it) sees the stage's span.
+        let stepSpanId: string | undefined;
 
         const step = new AgentStep<unknown, unknown>({
           name,
           agent: spec.agent,
           ...(spec.output != null ? { output: spec.output as ZodType<unknown> } : {}),
           ...(spec.maxIterations != null ? { maxIterations: spec.maxIterations } : {}),
-          prompt: (_input, state) =>
-            spec.prompt != null ? spec.prompt(state, input) : render(input, completed),
+          prompt: (_input, state) => {
+            if (spec.prompt != null) return spec.prompt(state, input);
+            // INNATE prompt-read frames (#226): the implicit render injects
+            // prior emissions into this stage's prompt — the framework's own
+            // read, reported per injected slot with the exact injected text
+            // (byte-capped). Published at render time, so a retried attempt's
+            // re-render honestly re-reports. Nested under the stage's step
+            // span when step events are on (falls back to the run's parent).
+            if (observed) {
+              for (const inj of injectedByRender()) {
+                observed.emitter.publish(
+                  createEvent("agent.scratchpad.read", {
+                    traceId,
+                    runId,
+                    ...(stepSpanId !== undefined
+                      ? { parentSpanId: stepSpanId }
+                      : observed.emitter.parentSpanId !== undefined
+                        ? { parentSpanId: observed.emitter.parentSpanId }
+                        : {}),
+                    origin: "innate",
+                    ordinal: observed.emitter.nextOrdinal(),
+                    key: inj.key,
+                    preview: capPreview(renderEmissionBody(inj.output)),
+                  }),
+                );
+              }
+            }
+            return render(input, completed);
+          },
         });
 
         // Per-stage executor from the agent's OWN capabilities — a tool-using stage
@@ -273,9 +354,29 @@ export function sequentialAgent(
         const hasCapabilities =
           ((spec.agent as { role?: { capabilities?: ReadonlyArray<unknown> } }).role?.capabilities
             ?.length ?? 0) > 0;
+
+        // One `agent.step.start`/`.end` pair per STAGE. The start's spanId is
+        // the stage's span: the stage ctx nests under it (parentSpanId), so the
+        // delegated agent's tool events attribute to their stage in every view.
+        const agentName = (spec.agent as { role?: { name?: string } }).role?.name;
+        const stepStartedAt = Date.now();
+        if (publish) {
+          const startEvent = createEvent("agent.step.start", {
+            traceId,
+            runId,
+            ...(ctx.parentSpanId ? { parentSpanId: ctx.parentSpanId } : {}),
+            stepName: name,
+            ...(agentName ? { agentName } : {}),
+            arguments: { input },
+          });
+          stepSpanId = startEvent.spanId;
+          publish(startEvent);
+        }
+
         const stageCtx: NodeRunContext = {
           ...ctx,
           scratchpad,
+          ...(stepSpanId ? { parentSpanId: stepSpanId } : {}),
           ...(hasCapabilities ? { toolExecutor: createToolboxExecutor(spec.agent as never) } : {}),
         };
 
@@ -288,48 +389,87 @@ export function sequentialAgent(
         const node =
           attempts > 0 ? retry(step, { maxAttempts: attempts + 1, name: `${name}:retry` }) : step;
 
-        const res = await node.run(input, stageCtx);
-        tokensIn += res.totalInputTokens;
-        tokensOut += res.totalOutputTokens;
-        if (!res.succeeded) {
-          return {
-            output: undefined as never,
-            succeeded: false,
-            error:
-              res.error ?? new Error(`sequentialAgent: stage '${name}' failed without an error`),
-            totalInputTokens: tokensIn,
-            totalOutputTokens: tokensOut,
-          };
-        }
-
-        scratchpad.set(emissionSlot, res.output);
-        outputs[name] = res.output;
-        completed.push({ name, output: res.output });
-
-        const done = (
-          stopped: SequentialAgentResult["stopped"],
-        ): NodeResult<SequentialAgentResult> => ({
-          output: { outputs, stopped },
-          succeeded: true,
-          totalInputTokens: tokensIn,
-          totalOutputTokens: tokensOut,
-        });
-
-        const stopReason = spec.stop?.(res.output, scratchpad.reader()) ?? null;
-        if (stopReason != null) return done({ stage: name, reason: stopReason });
-
-        if (spec.onEmit != null) {
-          try {
-            const emitStop = await spec.onEmit(res.output, scratchpad, { ...ctx, scratchpad });
-            if (typeof emitStop === "string") return done({ stage: name, reason: emitStop });
-          } catch (error) {
+        // `stepResult`/`stepError` feed the `finally`-emitted `agent.step.end`,
+        // which therefore covers EVERY exit: success, failure return, stop
+        // short-circuit, onEmit throw, and an unexpected throw.
+        let stepResult: unknown;
+        let stepError: string | undefined;
+        try {
+          const res = await node.run(input, stageCtx);
+          tokensIn += res.totalInputTokens;
+          tokensOut += res.totalOutputTokens;
+          if (!res.succeeded) {
+            const error =
+              res.error ?? new Error(`sequentialAgent: stage '${name}' failed without an error`);
+            stepError = error.message;
             return {
               output: undefined as never,
               succeeded: false,
-              error: error as Error,
+              error,
               totalInputTokens: tokensIn,
               totalOutputTokens: tokensOut,
             };
+          }
+          stepResult = res.output;
+
+          // The per-stage emission is the FRAMEWORK's write, not the agent's —
+          // tag it innate on an observed pad (#226). Plain pads write as before.
+          if (observed) {
+            observed.withOrigin("innate", () => scratchpad.set(emissionSlot, res.output));
+          } else {
+            scratchpad.set(emissionSlot, res.output);
+          }
+          outputs[name] = res.output;
+          completed.push({ name, output: res.output });
+
+          const done = (
+            stopped: SequentialAgentResult["stopped"],
+          ): NodeResult<SequentialAgentResult> => ({
+            output: { outputs, stopped },
+            succeeded: true,
+            totalInputTokens: tokensIn,
+            totalOutputTokens: tokensOut,
+          });
+
+          const stopReason = spec.stop?.(res.output, scratchpad.reader()) ?? null;
+          if (stopReason != null) return done({ stage: name, reason: stopReason });
+
+          if (spec.onEmit != null) {
+            try {
+              const emitStop = await spec.onEmit(res.output, scratchpad, { ...ctx, scratchpad });
+              if (typeof emitStop === "string") return done({ stage: name, reason: emitStop });
+            } catch (error) {
+              stepError = error instanceof Error ? error.message : String(error);
+              return {
+                output: undefined as never,
+                succeeded: false,
+                error: error as Error,
+                totalInputTokens: tokensIn,
+                totalOutputTokens: tokensOut,
+              };
+            }
+          }
+        } catch (error) {
+          // A nested/third-party node that throws (well-behaved leaves don't)
+          // still gets its step.end stamped before the throw propagates.
+          stepError = error instanceof Error ? error.message : String(error);
+          throw error;
+        } finally {
+          if (publish) {
+            publish(
+              createEvent("agent.step.end", {
+                traceId,
+                runId,
+                ...(stepSpanId ? { spanId: stepSpanId } : {}),
+                ...(ctx.parentSpanId ? { parentSpanId: ctx.parentSpanId } : {}),
+                stepName: name,
+                ...(agentName ? { agentName } : {}),
+                arguments: { input },
+                result: stepResult,
+                ...(stepError !== undefined ? { error: stepError } : {}),
+                durationMs: Date.now() - stepStartedAt,
+              }),
+            );
           }
         }
       }

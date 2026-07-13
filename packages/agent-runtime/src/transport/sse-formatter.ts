@@ -2,7 +2,7 @@
  * SSE (Server-Sent Events) formatter for agent events.
  *
  * Converts internal AgentEvent types to SSE-formatted strings for streaming
- * to clients over HTTP. Maps all 21 canonical events via a single typed
+ * to clients over HTTP. Maps every canonical event via a single typed
  * discriminated-union switch (`toSSEMapping`) so event name, payload, and
  * exhaustiveness live in one place.
  */
@@ -14,7 +14,7 @@ import type { AgentEvent, AgentEventType } from "../events/types.js";
 // ---------------------------------------------------------------------------
 
 /**
- * Client-facing SSE event name. Matches the 21 canonical events defined in
+ * Client-facing SSE event name. Matches the canonical events defined in
  * the admin-observability spec. Used anywhere an SSE frame is produced so
  * the compiler catches typos like `"thinking.complete"` vs `"thinking"`.
  */
@@ -40,6 +40,13 @@ export type SSEEventName =
   | "iteration.end"
   | "llm.start"
   | "llm.end"
+  | "backpack.drop"
+  | "backpack.read"
+  | "backpack.absorb"
+  | "scratchpad.write"
+  | "scratchpad.read"
+  | "scratchpad.fork"
+  | "scratchpad.join"
   | "error"
   | "claude_code.hook"
   | "done";
@@ -244,6 +251,96 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
       if (event.error !== undefined) payload.error = event.error;
       return { name: "step.end", payload };
     }
+    case "agent.backpack.drop": {
+      const payload: Record<string, unknown> = {
+        key: event.key,
+        origin: event.origin,
+        ordinal: event.ordinal,
+        accepted: event.accepted,
+        merged: event.merged,
+        skipped: event.skipped,
+        indexes: event.indexes,
+        size_before: event.sizeBefore,
+        size_after: event.sizeAfter,
+        previews: event.previews,
+        previews_omitted: event.previewsOmitted,
+      };
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      if (event.tag !== undefined) payload.tag = event.tag;
+      if (event.display !== undefined) payload.display = event.display;
+      return { name: "backpack.drop", payload };
+    }
+    case "agent.backpack.read": {
+      const payload: Record<string, unknown> = {
+        key: event.key,
+        origin: event.origin,
+        ordinal: event.ordinal,
+        memo_hit: event.memoHit,
+        size: event.size,
+        preview: event.preview,
+      };
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      if (event.display !== undefined) payload.display = event.display;
+      return { name: "backpack.read", payload };
+    }
+    case "agent.backpack.absorb": {
+      const payload: Record<string, unknown> = {
+        key: event.key,
+        origin: event.origin,
+        ordinal: event.ordinal,
+        child_size: event.childSize,
+        accepted: event.accepted,
+        merged: event.merged,
+        size_before: event.sizeBefore,
+        size_after: event.sizeAfter,
+        appended_indexes: event.appendedIndexes,
+      };
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      if (event.display !== undefined) payload.display = event.display;
+      return { name: "backpack.absorb", payload };
+    }
+    case "agent.scratchpad.write": {
+      const payload: Record<string, unknown> = {
+        key: event.key,
+        origin: event.origin,
+        ordinal: event.ordinal,
+        op: event.op,
+        had_value: event.hadValue,
+        after: event.after,
+      };
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      if (event.before !== undefined) payload.before = event.before;
+      return { name: "scratchpad.write", payload };
+    }
+    case "agent.scratchpad.read": {
+      const payload: Record<string, unknown> = {
+        key: event.key,
+        origin: event.origin,
+        ordinal: event.ordinal,
+        preview: event.preview,
+      };
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      return { name: "scratchpad.read", payload };
+    }
+    case "agent.scratchpad.fork":
+      return {
+        name: "scratchpad.fork",
+        payload: {
+          origin: event.origin,
+          ordinal: event.ordinal,
+          shared_keys: event.sharedKeys,
+        },
+      };
+    case "agent.scratchpad.join":
+      return {
+        name: "scratchpad.join",
+        payload: {
+          origin: event.origin,
+          ordinal: event.ordinal,
+          merged_keys: event.mergedKeys,
+          discarded_keys: event.discardedKeys,
+        },
+      };
     default: {
       // Exhaustiveness check — a new AgentEvent variant without a branch here
       // is a compile-time error.
@@ -286,6 +383,13 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.iteration.end": "iteration.end",
   "agent.llm.start": "llm.start",
   "agent.llm.end": "llm.end",
+  "agent.backpack.drop": "backpack.drop",
+  "agent.backpack.read": "backpack.read",
+  "agent.backpack.absorb": "backpack.absorb",
+  "agent.scratchpad.write": "scratchpad.write",
+  "agent.scratchpad.read": "scratchpad.read",
+  "agent.scratchpad.fork": "scratchpad.fork",
+  "agent.scratchpad.join": "scratchpad.join",
   "agent.error": "error",
   "claude_code.hook": "claude_code.hook",
 } as const;

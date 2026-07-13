@@ -77,7 +77,9 @@ export interface Scratchpad extends ScratchpadAccess {
 // Concrete implementation
 // ---------------------------------------------------------------------------
 
-interface SlotEntry {
+/** One materialized slot in a scratchpad table. Exported for subclasses
+ *  (`ObservedScratchpad`) that need constructor/table access — not public API. */
+export interface SlotEntry {
   readonly slot: Slot<unknown>;
   value: unknown;
 }
@@ -85,19 +87,23 @@ interface SlotEntry {
 /**
  * Default `Scratchpad`. Run-scoped state lives in a map that is shared by reference
  * across forks; branch-scoped state lives in a map that is fresh per store.
+ *
+ * The tables and `entryFor` are `protected` (not `private`) so the observed
+ * decorator subclass (`observed-scratchpad.ts`, #226) can fork/join with the
+ * exact same sharing semantics. They remain non-public API.
  */
 export class DefaultScratchpad implements Scratchpad {
   /** Shared across all forks of the same workflow run. */
-  private readonly runEntries: Map<string, SlotEntry>;
+  protected readonly runEntries: Map<string, SlotEntry>;
   /** Private to this store (fresh per branch fork). */
-  private readonly branchEntries: Map<string, SlotEntry>;
+  protected readonly branchEntries: Map<string, SlotEntry>;
 
   constructor(runEntries?: Map<string, SlotEntry>, branchEntries?: Map<string, SlotEntry>) {
     this.runEntries = runEntries ?? new Map();
     this.branchEntries = branchEntries ?? new Map();
   }
 
-  private entryFor<T>(s: Slot<T>): SlotEntry {
+  protected entryFor<T>(s: Slot<T>): SlotEntry {
     const table = s.scope === "run" ? this.runEntries : this.branchEntries;
     let entry = table.get(s.key);
     if (entry === undefined) {

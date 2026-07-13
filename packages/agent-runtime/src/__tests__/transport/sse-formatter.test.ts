@@ -49,10 +49,18 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.step.start"]).toBe("step.start");
     expect(SSE_EVENT_NAMES["agent.step.end"]).toBe("step.end");
     expect(SSE_EVENT_NAMES["agent.input.request"]).toBe("input.request");
+    // State-delta events (#226)
+    expect(SSE_EVENT_NAMES["agent.backpack.drop"]).toBe("backpack.drop");
+    expect(SSE_EVENT_NAMES["agent.backpack.read"]).toBe("backpack.read");
+    expect(SSE_EVENT_NAMES["agent.backpack.absorb"]).toBe("backpack.absorb");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.write"]).toBe("scratchpad.write");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.read"]).toBe("scratchpad.read");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.fork"]).toBe("scratchpad.fork");
+    expect(SSE_EVENT_NAMES["agent.scratchpad.join"]).toBe("scratchpad.join");
   });
 
-  it("has exactly 22 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(22);
+  it("has exactly 29 mappings", () => {
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(29);
   });
 });
 
@@ -316,6 +324,191 @@ describe("formatSSE", () => {
     expect(result).not.toBeNull();
     const { event: name } = parseSSE(result!);
     expect(name).toBe("tool.intent");
+  });
+
+  // ---------------------------------------------------------------------------
+  // State-delta events (#226) — one wire-format pin per frame family. Payload
+  // keys are snake_case (the step.start convention); optional fields are
+  // OMITTED when absent, never serialized as null/undefined.
+  // ---------------------------------------------------------------------------
+
+  it("formats backpack.drop with receipt counts, sizes, previews, and optionals", () => {
+    const event = createEvent("agent.backpack.drop", {
+      ...baseFields,
+      key: "backpack.observations",
+      origin: "explicit",
+      ordinal: 1,
+      accepted: 2,
+      merged: 1,
+      skipped: 1,
+      indexes: [10, 11, 3],
+      sizeBefore: 9,
+      sizeAfter: 12,
+      previews: [{ index: 10, op: "added", preview: "obs-10" }],
+      previewsOmitted: 2,
+      toolCallId: "tc-1",
+      tag: "search_deal_context",
+      display: { caption: "Evidence" },
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("backpack.drop");
+    expect(data.key).toBe("backpack.observations");
+    expect(data.origin).toBe("explicit");
+    expect(data.ordinal).toBe(1);
+    expect(data.accepted).toBe(2);
+    expect(data.merged).toBe(1);
+    expect(data.skipped).toBe(1);
+    expect(data.indexes).toEqual([10, 11, 3]);
+    expect(data.size_before).toBe(9);
+    expect(data.size_after).toBe(12);
+    expect(data.previews).toEqual([{ index: 10, op: "added", preview: "obs-10" }]);
+    expect(data.previews_omitted).toBe(2);
+    expect(data.tool_call_id).toBe("tc-1");
+    expect(data.tag).toBe("search_deal_context");
+    expect(data.display).toEqual({ caption: "Evidence" });
+  });
+
+  it("omits backpack.drop optionals (tool_call_id/tag/display) when absent", () => {
+    const event = createEvent("agent.backpack.drop", {
+      ...baseFields,
+      key: "backpack.observations",
+      origin: "innate",
+      ordinal: 2,
+      accepted: 0,
+      merged: 0,
+      skipped: 0,
+      indexes: [],
+      sizeBefore: 0,
+      sizeAfter: 0,
+      previews: [],
+      previewsOmitted: 0,
+    });
+    const { data } = parseSSE(formatSSE(event)!);
+    expect("tool_call_id" in data).toBe(false);
+    expect("tag" in data).toBe(false);
+    expect("display" in data).toBe(false);
+  });
+
+  it("formats backpack.read with memo hit + size + preview", () => {
+    const event = createEvent("agent.backpack.read", {
+      ...baseFields,
+      key: "backpack.observations",
+      origin: "explicit",
+      ordinal: 3,
+      memoHit: true,
+      size: 6,
+      preview: "ranked list…",
+      display: { caption: "Evidence", attribution: "added by tools" },
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("backpack.read");
+    expect(data.key).toBe("backpack.observations");
+    expect(data.memo_hit).toBe(true);
+    expect(data.size).toBe(6);
+    expect(data.preview).toBe("ranked list…");
+    expect(data.display).toEqual({ caption: "Evidence", attribution: "added by tools" });
+  });
+
+  it("formats backpack.absorb with child size + appended indexes", () => {
+    const event = createEvent("agent.backpack.absorb", {
+      ...baseFields,
+      key: "backpack.observations",
+      origin: "innate",
+      ordinal: 4,
+      childSize: 3,
+      accepted: 2,
+      merged: 1,
+      sizeBefore: 12,
+      sizeAfter: 14,
+      appendedIndexes: [13, 14],
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("backpack.absorb");
+    expect(data.child_size).toBe(3);
+    expect(data.accepted).toBe(2);
+    expect(data.merged).toBe(1);
+    expect(data.size_before).toBe(12);
+    expect(data.size_after).toBe(14);
+    expect(data.appended_indexes).toEqual([13, 14]);
+  });
+
+  it("formats scratchpad.write with op + before/after previews", () => {
+    const event = createEvent("agent.scratchpad.write", {
+      ...baseFields,
+      key: "brief.highlights",
+      origin: "explicit",
+      ordinal: 5,
+      op: "set",
+      hadValue: true,
+      before: "old value",
+      after: "new value",
+      toolCallId: "tc-2",
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("scratchpad.write");
+    expect(data.key).toBe("brief.highlights");
+    expect(data.op).toBe("set");
+    expect(data.had_value).toBe(true);
+    expect(data.before).toBe("old value");
+    expect(data.after).toBe("new value");
+    expect(data.tool_call_id).toBe("tc-2");
+  });
+
+  it("omits scratchpad.write's before preview on a first write (hadValue false)", () => {
+    const event = createEvent("agent.scratchpad.write", {
+      ...baseFields,
+      key: "agents.retrieve",
+      origin: "innate",
+      ordinal: 6,
+      op: "set",
+      hadValue: false,
+      after: "stage output",
+    });
+    const { data } = parseSSE(formatSSE(event)!);
+    expect(data.had_value).toBe(false);
+    expect("before" in data).toBe(false);
+    expect("tool_call_id" in data).toBe(false);
+  });
+
+  it("formats scratchpad.read with the value preview", () => {
+    const event = createEvent("agent.scratchpad.read", {
+      ...baseFields,
+      key: "agents.retrieve",
+      origin: "innate",
+      ordinal: 7,
+      preview: "## Prior stage output…",
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("scratchpad.read");
+    expect(data.key).toBe("agents.retrieve");
+    expect(data.origin).toBe("innate");
+    expect(data.preview).toBe("## Prior stage output…");
+  });
+
+  it("formats scratchpad.fork with shared keys", () => {
+    const event = createEvent("agent.scratchpad.fork", {
+      ...baseFields,
+      origin: "innate",
+      ordinal: 8,
+      sharedKeys: ["backpack.observations", "agents.retrieve"],
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("scratchpad.fork");
+    expect(data.shared_keys).toEqual(["backpack.observations", "agents.retrieve"]);
+  });
+
+  it("formats scratchpad.join with merged + discarded keys (the silent-loss trap, visible)", () => {
+    const event = createEvent("agent.scratchpad.join", {
+      ...baseFields,
+      origin: "innate",
+      ordinal: 9,
+      mergedKeys: ["branch.results"],
+      discardedKeys: ["branch.scratch"],
+    });
+    const { event: name, data } = parseSSE(formatSSE(event)!);
+    expect(name).toBe("scratchpad.join");
+    expect(data.merged_keys).toEqual(["branch.results"]);
+    expect(data.discarded_keys).toEqual(["branch.scratch"]);
   });
 
   // ---------------------------------------------------------------------------

@@ -1,4 +1,12 @@
-import { ToolSchema } from "@agentic-patterns/core";
+import {
+  Agent,
+  Capability,
+  Mission,
+  Persona,
+  RoleBuilder,
+  ToolSchema,
+  Toolbox,
+} from "@agentic-patterns/core";
 import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -83,6 +91,70 @@ describe("delegateTo (just pass subagents)", () => {
 
     const out = await team.execute("writer", { task: "write the intro" });
     expect(out).toBe("drafted the section");
+  });
+
+  // -------------------------------------------------------------------------
+  // Framework-gap fix: a delegated subagent gets an executor for its OWN tools.
+  //
+  // Before, `delegateTo` → `nodeTool` re-rooted the sub-run ctx WITHOUT a
+  // toolExecutor and `AgentStep` only forwarded `ctx.toolExecutor`, so the
+  // subagent's own tool calls returned "No tool executor configured" and it
+  // answered "data unavailable". `AgentStep` now derives the executor from the
+  // subagent's own capabilities. This proves the WHOLE seam end-to-end:
+  // team.execute → nodeTool → AgentStep → runner.run → derived executor → tool.
+  // -------------------------------------------------------------------------
+  it("executes a delegated subagent's OWN toolbox tool through the team seam", async () => {
+    class LedgerToolbox extends Toolbox {
+      readonly name = "ledger";
+      readonly description = "reads the household ledger";
+      ran = 0;
+      readonly tools = {
+        getBalance: {
+          description: "get a member's balance",
+          parameters: z.object({ member: z.string() }),
+          execute: async (args: Record<string, unknown>) => {
+            this.ran++;
+            return { member: args.member, balance: 42 };
+          },
+        },
+      };
+    }
+
+    const tb = new LedgerToolbox();
+    const insights = new Agent({
+      role: new RoleBuilder("insights")
+        .withPersona(
+          new Persona({
+            identity: "reads the household ledger",
+            tone: "direct",
+            priorities: ["accuracy"],
+            principles: ["cite the ledger"],
+          }),
+        )
+        .withCapability(new Capability("ledger", "ledger access", tb))
+        .withDefaultModel("mock")
+        .build(),
+      mission: new Mission({
+        objective: "answer ledger questions",
+        successCriteria: ["answered from the ledger"],
+        constraints: [],
+      }),
+    });
+
+    // When the subagent runs, its LLM "calls" getBalance. MockRunner.run
+    // dispatches configured toolCalls through `options.toolExecutor` — which is
+    // now the executor AgentStep derives from the subagent's own capabilities.
+    const runner = new MockRunner().addResponse("*", {
+      content: "dana's balance is 42",
+      toolCalls: [{ name: "getBalance", arguments: { member: "dana" } }],
+    });
+
+    const team = delegateTo(runner, [{ agent: insights, description: "answers ledger questions" }]);
+
+    const out = await team.execute("insights", { task: "what is dana's balance?" });
+
+    expect(out).toBe("dana's balance is 42");
+    expect(tb.ran).toBe(1); // the subagent's OWN tool actually executed
   });
 });
 

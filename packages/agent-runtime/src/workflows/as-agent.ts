@@ -25,7 +25,9 @@ import type { AgentLike } from "../runner/agent-runner.js";
 import type { RunOptions, RunResult, RunnerProtocol } from "../runner/types.js";
 import type { DepReader } from "./deps.js";
 import type { Node, NodeRunContext } from "./node.js";
-import { createScratchpad } from "./slot.js";
+import { ObservedScratchpad } from "./observed-scratchpad.js";
+import { type Scratchpad, createScratchpad } from "./slot.js";
+import { createStateEmitter } from "./state-events.js";
 
 // ---------------------------------------------------------------------------
 // Role identity
@@ -87,8 +89,6 @@ export interface PromotedAgent<TIn, TOut> extends AgentLike {
   readonly deps?: DepReader;
 }
 
-const DEFAULT_MODEL = "sonnet";
-
 function defaultRenderOut<TOut>(out: TOut): string {
   if (typeof out === "string") return out;
   // JSON.stringify(undefined) returns the JS value `undefined`, not a string
@@ -112,7 +112,10 @@ export function asAgent<TIn, TOut>(
 ): PromotedAgent<TIn, TOut> {
   const role = opts.role;
   const roleName = role.name;
-  const model = opts.model ?? DEFAULT_MODEL;
+  // No framework model default (#179/#222): an unset model stays `undefined` and
+  // the runner resolves it (tier/env/gateway) or fails loud — the framework never
+  // silently pins a vendor's model onto a promoted pipeline.
+  const model = opts.model;
   const coerceIn = (opts.coerceIn as ((message: string) => TIn) | undefined) ?? defaultCoerceIn;
   const renderOut = opts.renderOut ?? defaultRenderOut;
 
@@ -185,18 +188,46 @@ export class NodeBackedRunner implements RunnerProtocol {
       );
     }
 
+    // Run identity (#226): honor caller-supplied ids (stream() threads its
+    // minted pair down through RunOptions); mint only what emission needs —
+    // a traceId is minted ONLY when a bus is present (state-delta events must
+    // carry concrete ids), so bus-less callers see today's ctx byte-for-byte
+    // (modulo the new runId field).
+    const bus = options?.eventBus;
+    const runId = options?.runId ?? generateId();
+    let traceId = options?.traceId;
+
+    // The Scratchpad: OBSERVED when the run has a bus (every slot write/read/
+    // fork/join and — via the observed accessors — every backpack drop/absorb/
+    // read publishes a state-delta event), plain otherwise (today's zero-emit
+    // behavior, byte-identical).
+    let scratchpad: Scratchpad;
+    if (bus) {
+      traceId = traceId ?? generateId();
+      scratchpad = new ObservedScratchpad(
+        createStateEmitter(bus, {
+          traceId,
+          runId,
+          ...(options?.parentSpanId ? { parentSpanId: options.parentSpanId } : {}),
+        }),
+      );
+    } else {
+      scratchpad = createScratchpad();
+    }
+
     const ctx: NodeRunContext = {
       runner: this.inner,
       toolExecutor: options?.toolExecutor,
-      traceId: options?.traceId,
+      traceId,
+      runId,
       parentSpanId: options?.parentSpanId,
-      scratchpad: createScratchpad(),
+      scratchpad,
       deps: agent.deps,
       // Thread the run's event bus onto the ctx so a promoted node can publish
       // its lifecycle events (`stream()` supplies a per-run bus it relays; a
       // direct `run()` forwards the caller's bus, or none). OPTIONAL → absent
       // when no bus is provided, preserving today's no-emit behavior.
-      ...(options?.eventBus ? { eventBus: options.eventBus } : {}),
+      ...(bus ? { eventBus: bus } : {}),
     };
 
     const input = agent.coerceIn(message);
@@ -286,7 +317,10 @@ export class NodeBackedRunner implements RunnerProtocol {
     let runError: unknown;
     const runPromise = (async () => {
       try {
-        runResult = await this.run(agent, message, { ...options, eventBus: bus });
+        // Thread the stream's minted traceId/runId down (#226) so the node's
+        // intra-run events — steps, tools, state deltas — correlate with the
+        // message lifecycle events yielded above instead of minting their own.
+        runResult = await this.run(agent, message, { ...options, traceId, runId, eventBus: bus });
       } catch (err) {
         runError = err;
       } finally {
@@ -386,4 +420,15 @@ const RELAYED_STREAM_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEventTyp
   "agent.tool.progress",
   "agent.tool.end",
   "agent.tool.rejected",
+  // State-delta events (#226) — Backpack/Scratchpad mutations the observed
+  // emission layer publishes. Relayed so the playground chat can render Delta
+  // Frames + the Scratchpad rail live; the conversation SSE is this path's
+  // ONLY route to the client (events not listed here die silently).
+  "agent.backpack.drop",
+  "agent.backpack.read",
+  "agent.backpack.absorb",
+  "agent.scratchpad.write",
+  "agent.scratchpad.read",
+  "agent.scratchpad.fork",
+  "agent.scratchpad.join",
 ]);

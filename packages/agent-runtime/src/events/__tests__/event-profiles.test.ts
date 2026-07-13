@@ -36,6 +36,26 @@ describe("Event Profiles", () => {
       expect(types).toContain("agent.error");
     });
 
+    it("UX profile includes step + state-delta events (#226)", () => {
+      // Profile-attached exporters (admin collector, SSE broadcast, SQLite)
+      // only see events listed in their profile — before #226, step.start/end
+      // were in NO profile and the state-delta events did not exist.
+      const types = PROFILE_EVENT_TYPES[EventProfile.UX];
+      expect(types).toContain("agent.step.start");
+      expect(types).toContain("agent.step.end");
+      for (const stateType of [
+        "agent.backpack.drop",
+        "agent.backpack.read",
+        "agent.backpack.absorb",
+        "agent.scratchpad.write",
+        "agent.scratchpad.read",
+        "agent.scratchpad.fork",
+        "agent.scratchpad.join",
+      ]) {
+        expect(types).toContain(stateType);
+      }
+    });
+
     it("OBSERVABILITY profile excludes chunks", () => {
       const types = PROFILE_EVENT_TYPES[EventProfile.OBSERVABILITY];
       expect(types).not.toContain("agent.message.chunk");

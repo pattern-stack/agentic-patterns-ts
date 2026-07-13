@@ -276,6 +276,155 @@ describe("Conversation", () => {
     });
   });
 
+  describe("stream() state-delta persistence (#226)", () => {
+    /**
+     * A runner whose stream interleaves state-delta events between the message
+     * lifecycle — the shape `NodeBackedRunner.stream` produces once the relay
+     * allowlist includes them (WI-2).
+     */
+    function makeStateDeltaRunner(): RunnerProtocol {
+      return {
+        run: async (): Promise<RunResult> => {
+          throw new Error("run() not used in these tests");
+        },
+        async *stream(
+          _agent: unknown,
+          _message: string,
+          options?: RunOptions,
+        ): AsyncGenerator<AgentEvent> {
+          const ids = {
+            traceId: options?.traceId ?? RUNNER_RUN_ID,
+            runId: RUNNER_RUN_ID,
+          } as const;
+          yield createEvent("agent.message.start", { ...ids, agentName: "test-agent" });
+          yield createEvent("agent.backpack.drop", {
+            ...ids,
+            key: "backpack.observations",
+            origin: "explicit",
+            ordinal: 1,
+            accepted: 2,
+            merged: 0,
+            skipped: 1,
+            indexes: [1, 2],
+            sizeBefore: 0,
+            sizeAfter: 2,
+            previews: [{ index: 1, op: "added", preview: "obs-1" }],
+            previewsOmitted: 0,
+            toolCallId: "tc-1",
+            display: { caption: "Evidence" },
+          });
+          // INNATE read: the preview is the EXACT injected prompt text.
+          yield createEvent("agent.scratchpad.read", {
+            ...ids,
+            key: "agents.retrieve",
+            origin: "innate",
+            ordinal: 2,
+            preview: "## Prior stage output\nthe exact injected prompt text",
+          });
+          // EXPLICIT read: agent code reading a slot value — no prompt text.
+          yield createEvent("agent.scratchpad.read", {
+            ...ids,
+            key: "agents.retrieve",
+            origin: "explicit",
+            ordinal: 3,
+            preview: "value read by agent code",
+          });
+          yield createEvent("agent.message.complete", {
+            ...ids,
+            content: "the answer",
+            inputTokens: 10,
+            outputTokens: 5,
+            model: "test-model",
+          });
+        },
+      };
+    }
+
+    async function roundTrip() {
+      const store = new InMemoryConversationStore();
+      const conv = new Conversation(makeAgent("StateAgent"), makeStateDeltaRunner(), { store });
+      for await (const _e of conv.stream("where does the deal stand?")) {
+        // drain
+      }
+      const [summary] = await store.listConversations();
+      expect(summary).toBeDefined();
+      const messages = await store.getMessages(summary!.conversationId);
+      expect(messages).toHaveLength(2);
+      return { request: messages[0]!, response: messages[1]! };
+    }
+
+    it("persists one state_delta part per state event, in stream order, before the text part", async () => {
+      const { request, response } = await roundTrip();
+
+      // The request message is untouched by #226.
+      expect(request.parts.map((p) => p.type)).toEqual(["user_prompt"]);
+
+      // Response: frames first (run order), terminal answer text last.
+      expect(response.parts.map((p) => p.type)).toEqual([
+        "state_delta",
+        "state_delta",
+        "state_delta",
+        "text",
+      ]);
+      expect(response.parts.map((p) => p.position)).toEqual([0, 1, 2, 3]);
+      expect(response.parts[3]?.content).toBe("the answer");
+
+      // The persisted metadata IS the SSE wire payload (snake_case) plus the
+      // wire event name — replay rebuilds frames from the same bytes the live
+      // stream carried.
+      const drop = response.parts[0]!;
+      expect(drop.content).toBeUndefined();
+      expect(drop.metadata).toEqual({
+        event: "backpack.drop",
+        key: "backpack.observations",
+        origin: "explicit",
+        ordinal: 1,
+        accepted: 2,
+        merged: 0,
+        skipped: 1,
+        indexes: [1, 2],
+        size_before: 0,
+        size_after: 2,
+        previews: [{ index: 1, op: "added", preview: "obs-1" }],
+        previews_omitted: 0,
+        tool_call_id: "tc-1",
+        display: { caption: "Evidence" },
+      });
+    });
+
+    it("redacts INNATE scratchpad.read previews (injected prompt text) — thinking's posture", async () => {
+      const { response } = await roundTrip();
+
+      const innateRead = response.parts[1]!;
+      expect(innateRead.metadata.event).toBe("scratchpad.read");
+      expect(innateRead.metadata.origin).toBe("innate");
+      // The frame survives (key/ordinal), the injected text does not — and the
+      // redaction is explicit, never a silently-missing field.
+      expect(innateRead.metadata.key).toBe("agents.retrieve");
+      expect("preview" in innateRead.metadata).toBe(false);
+      expect(innateRead.metadata.preview_redacted).toBe(true);
+
+      // An EXPLICIT read keeps its value preview — it is not prompt text.
+      const explicitRead = response.parts[2]!;
+      expect(explicitRead.metadata.origin).toBe("explicit");
+      expect(explicitRead.metadata.preview).toBe("value read by agent code");
+      expect("preview_redacted" in explicitRead.metadata).toBe(false);
+    });
+
+    it("a stream with no state events persists exactly today's parts (no empty extras)", async () => {
+      const store = new InMemoryConversationStore();
+      const conv = new Conversation(makeAgent("PlainAgent"), makeStreamingRunner("hi back"), {
+        store,
+      });
+      for await (const _e of conv.stream("hello")) {
+        // drain
+      }
+      const [summary] = await store.listConversations();
+      const messages = await store.getMessages(summary!.conversationId);
+      expect(messages[1]?.parts.map((p) => p.type)).toEqual(["text"]);
+    });
+  });
+
   it("should initialize with prior history", () => {
     const history: Exchange[] = [
       {

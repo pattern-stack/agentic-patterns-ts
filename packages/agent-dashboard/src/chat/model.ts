@@ -16,6 +16,12 @@
  * This module is browser-bundled and dependency-free (no server imports).
  */
 import type { EventLike } from "../graph/trace-from-events";
+import {
+  type StateDeltaPart,
+  type StateRowPreview,
+  type TravelRecord,
+  stateDeltaFromFields,
+} from "./state-accessors";
 
 export type Role = "user" | "assistant";
 
@@ -58,6 +64,14 @@ export type Part =
       toolName?: string;
       arguments?: unknown;
     }
+  // A Backpack/Scratchpad mutation (#226) — one Δ/◇/⇄ frame per state event,
+  // nested under the causing tool via tool_call_id, standalone at boundaries.
+  // Shape defined in state-accessors.ts (shared with the Scratchpad rail fold).
+  | StateDeltaPart
+  // Render-time coalescing product (3+ consecutive explicit write frames from
+  // one site fold into one summary card) — produced by `coalesceStateParts`,
+  // never by `applyParts`.
+  | { kind: "state_group"; parts: StateDeltaPart[] }
   | { kind: "error"; errorType: string; message: string };
 
 export interface ChatMessage {
@@ -147,6 +161,182 @@ function childTarget(
   return { list: next, write: (list) => list };
 }
 
+/* ── state-delta placement (#226) ───────────────────────────────────────────
+ * A state frame nests UNDER its causing tool: inserted immediately after the
+ * `tool_call` part whose id matches the event's tool_call_id (searched at the
+ * top level, then inside every agent_step's children), after any frames that
+ * tool already caused (arrival order preserved). No tool anchor → standalone
+ * append at the end (boundary frames: innate stage writes, fork/join, reads).
+ * `next` is the caller's fresh copy — top-level splices are safe; a nested
+ * step's children array is copied before insertion (immutability for React).
+ */
+
+/** Count prior DropRecords (drops + absorbs) for a pack — mints `dropSeq`. */
+export function countDropFrames(parts: Part[], key: string): number {
+  let n = 0;
+  for (const pt of parts) {
+    if (pt.kind === "state_delta" && (pt.op === "drop" || pt.op === "absorb") && pt.key === key)
+      n++;
+    else if (pt.kind === "agent_step") n += countDropFrames(pt.children, key);
+    else if (pt.kind === "state_group") n += countDropFrames(pt.parts, key);
+  }
+  return n;
+}
+
+/** Insertion point just past the anchor tool and any frames it already caused. */
+function afterToolDeltas(list: Part[], anchorIdx: number, toolCallId: string): number {
+  let at = anchorIdx + 1;
+  while (at < list.length) {
+    const pt = list[at];
+    if (pt && pt.kind === "state_delta" && pt.toolCallId === toolCallId) at++;
+    else break;
+  }
+  return at;
+}
+
+function insertStateDelta(next: Part[], frame: StateDeltaPart): Part[] {
+  const enriched: StateDeltaPart =
+    frame.op === "drop" || frame.op === "absorb"
+      ? { ...frame, dropSeq: countDropFrames(next, frame.key) }
+      : frame;
+  const tid = enriched.toolCallId;
+  if (tid != null) {
+    const at = next.findIndex((pt) => pt.kind === "tool_call" && pt.id === tid);
+    if (at >= 0) {
+      const anchor = next[at] as Extract<Part, { kind: "tool_call" }>;
+      next.splice(afterToolDeltas(next, at, tid), 0, { ...enriched, via: anchor.name });
+      return next;
+    }
+    for (let i = 0; i < next.length; i++) {
+      const step = next[i];
+      if (!step || step.kind !== "agent_step") continue;
+      const cat = step.children.findIndex((pt) => pt.kind === "tool_call" && pt.id === tid);
+      if (cat < 0) continue;
+      const anchor = step.children[cat] as Extract<Part, { kind: "tool_call" }>;
+      const children = step.children.slice();
+      children.splice(afterToolDeltas(children, cat, tid), 0, { ...enriched, via: anchor.name });
+      next[i] = { ...step, children };
+      return next;
+    }
+  }
+  next.push(enriched);
+  return next;
+}
+
+/* ── TRAVEL derivation (#226, v1: UI-derived — no runtime emitter) ──────────
+ * At each top-level stage boundary (`step.start` with no parent span), every
+ * pack that has received drops "travels" into the new stage: one ⇄ frame per
+ * key, summarizing the manifest (records + covered counts + latest previews).
+ * A pack unchanged since its last travel frame renders the honest quiet
+ * variant ("no new drops since <stage>") instead of pretending motion.
+ */
+
+interface PackCarry {
+  items: number;
+  records: TravelRecord[];
+  previews: Map<number, string>;
+  sinceStep?: string;
+}
+
+function collectCarry(
+  parts: Part[],
+  stepName: string | undefined,
+  packs: Map<string, PackCarry>,
+  travels: Map<string, { records: number; items: number }>,
+): void {
+  for (const pt of parts) {
+    if (pt.kind === "agent_step") {
+      collectCarry(pt.children, pt.name, packs, travels);
+      continue;
+    }
+    if (pt.kind === "state_group") {
+      collectCarry(pt.parts, stepName, packs, travels);
+      continue;
+    }
+    if (pt.kind !== "state_delta") continue;
+    if (pt.op === "drop" || pt.op === "absorb") {
+      let entry = packs.get(pt.key);
+      if (!entry) {
+        entry = { items: 0, records: [], previews: new Map() };
+        packs.set(pt.key, entry);
+      }
+      entry.items = pt.sizeAfter;
+      entry.records.push({
+        drop: entry.records.length,
+        covered: pt.op === "drop" ? pt.indexes.length : pt.appendedIndexes.length,
+      });
+      if (pt.op === "drop")
+        for (const row of pt.previews) entry.previews.set(row.index, row.preview);
+      if (stepName) entry.sinceStep = stepName;
+    } else if (pt.op === "travel") {
+      travels.set(pt.key, { records: pt.records.length, items: pt.items });
+    }
+  }
+}
+
+function deriveTravelParts(parts: Part[], toStep: string): StateDeltaPart[] {
+  const packs = new Map<string, PackCarry>();
+  const travels = new Map<string, { records: number; items: number }>();
+  collectCarry(parts, undefined, packs, travels);
+  const out: StateDeltaPart[] = [];
+  for (const [key, carry] of packs) {
+    const prior = travels.get(key);
+    const quiet =
+      prior != null && prior.records === carry.records.length && prior.items === carry.items;
+    const previews: StateRowPreview[] = [...carry.previews.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([index, preview]) => ({ index, op: "added" as const, preview }));
+    out.push({
+      kind: "state_delta",
+      op: "travel",
+      key,
+      origin: "innate",
+      derived: true,
+      toStep,
+      items: carry.items,
+      records: carry.records,
+      previews,
+      ...(quiet ? { quiet: true } : {}),
+      ...(quiet && carry.sinceStep ? { sinceStep: carry.sinceStep } : {}),
+    });
+  }
+  return out;
+}
+
+/* ── render-time coalescing (#226) ──────────────────────────────────────────
+ * 3+ CONSECUTIVE explicit write frames (drop / write / absorb, uninterrupted
+ * by any other part — i.e. one write site: a Loop body, a parallel-drop tool)
+ * fold into one expandable `state_group` summary. Reads, travel frames, and
+ * innate frames break runs and never coalesce — a stage boundary's frame trio
+ * stays legible. Pure derived view: `applyParts` output is untouched; callers
+ * (MessageRow) apply this at render.
+ */
+
+const isCoalescible = (pt: Part): pt is StateDeltaPart =>
+  pt.kind === "state_delta" &&
+  pt.origin === "explicit" &&
+  (pt.op === "drop" || pt.op === "write" || pt.op === "absorb");
+
+export function coalesceStateParts(parts: Part[]): Part[] {
+  const out: Part[] = [];
+  let run: StateDeltaPart[] = [];
+  const flush = () => {
+    if (run.length >= 3) out.push({ kind: "state_group", parts: run });
+    else out.push(...run);
+    run = [];
+  };
+  for (const pt of parts) {
+    if (isCoalescible(pt)) {
+      run.push(pt);
+      continue;
+    }
+    flush();
+    out.push(pt.kind === "agent_step" ? { ...pt, children: coalesceStateParts(pt.children) } : pt);
+  }
+  flush();
+  return out;
+}
+
 /* ── incremental reducer ────────────────────────────────────────────────────
  * applyParts folds ONE SSE event into an assistant message's parts, in place of
  * arrival order. Returns a NEW parts array (immutable for React). This is the
@@ -202,6 +392,10 @@ export function applyParts(
     case "step.start": {
       const id = spanId(col, p) ?? stepName(col, p);
       if (next.some((part) => part.kind === "agent_step" && part.id === id)) return { parts };
+      // #226: a TOP-LEVEL stage boundary — any pack dropped into so far
+      // "travels" into the new stage (UI-derived ⇄ frames; nested sub-steps
+      // carry a parent span and don't re-announce the pack).
+      if (parentSpanId(col, p) == null) next.push(...deriveTravelParts(next, stepName(col, p)));
       next.push({
         kind: "agent_step",
         id,
@@ -310,6 +504,20 @@ export function applyParts(
         arguments: toolArgs(col, p),
       });
       return { parts: next };
+    }
+    // State-delta events (#226) — one Δ/◇ frame per Backpack/Scratchpad
+    // mutation, built by the shared tolerant accessor module (state-accessors,
+    // also consumed by the Scratchpad rail fold so the surfaces never drift).
+    case "backpack.drop":
+    case "backpack.read":
+    case "backpack.absorb":
+    case "scratchpad.write":
+    case "scratchpad.read":
+    case "scratchpad.fork":
+    case "scratchpad.join": {
+      const frame = stateDeltaFromFields(bare(String(e.type)), { ...col, ...p });
+      if (!frame) return { parts };
+      return { parts: insertStateDelta(next, frame) };
     }
     case "error": {
       next.push({

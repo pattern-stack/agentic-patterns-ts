@@ -24,6 +24,17 @@ export type {
   LLMCallStartEvent,
   LLMCallEndEvent,
   ErrorEvent,
+  StateOrigin,
+  StateEventBase,
+  BackpackDisplay,
+  BackpackRowPreview,
+  BackpackDropEvent,
+  BackpackReadEvent,
+  BackpackAbsorbEvent,
+  ScratchpadWriteEvent,
+  ScratchpadReadEvent,
+  ScratchpadForkEvent,
+  ScratchpadJoinEvent,
 } from "./types.js";
 
 export { createEvent } from "./types.js";

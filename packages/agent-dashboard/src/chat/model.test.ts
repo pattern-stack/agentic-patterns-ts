@@ -12,7 +12,8 @@
  */
 import { describe, expect, test } from "vitest";
 import type { EventLike } from "../graph/trace-from-events";
-import { type Part, applyParts, eventsToAssistantMessage } from "./model";
+import { type Part, applyParts, coalesceStateParts, eventsToAssistantMessage } from "./model";
+import type { StateDeltaPart } from "./state-accessors";
 
 const fold = (events: EventLike[]): Part[] => {
   let parts: Part[] = [];
@@ -226,6 +227,406 @@ describe("applyParts", () => {
       { type: "tool.end", tool_call_id: "t9", tool_name: "orphan", result: 1, duration_ms: 3 },
     ]);
     expect(parts.map((p) => p.kind)).toEqual(["agent_step", "tool_call"]);
+  });
+});
+
+/* ── state-delta frames (#226) ─────────────────────────────────────────────
+ * Wire shape per the runtime's `toSSEMapping` (snake_case, flattened by
+ * `toEventLike`); the persisted-row case pins the camelCase tolerance of the
+ * shared accessor module (state-accessors.ts).
+ */
+describe("applyParts — state deltas (#226)", () => {
+  const drop = (over: Record<string, unknown> = {}): EventLike => ({
+    type: "backpack.drop",
+    key: "backpack.observations",
+    origin: "explicit",
+    ordinal: 1,
+    accepted: 4,
+    merged: 0,
+    skipped: 1,
+    indexes: [1, 2, 3, 4],
+    size_before: 0,
+    size_after: 4,
+    previews: [
+      { index: 1, op: "added", preview: "obs · security review gating" },
+      { index: 2, op: "added", preview: "obs · CFO approved budget" },
+    ],
+    previews_omitted: 2,
+    tag: '{"facet":"observations"}',
+    display: { caption: "Evidence" },
+    ...over,
+  });
+
+  test("backpack.drop folds into a standalone state_delta drop frame", () => {
+    const parts = fold([drop()]);
+    expect(parts).toHaveLength(1);
+    const f = parts[0] as Extract<StateDeltaPart, { op: "drop" }>;
+    expect(f.kind).toBe("state_delta");
+    expect(f.op).toBe("drop");
+    expect(f.key).toBe("backpack.observations");
+    expect(f.origin).toBe("explicit");
+    expect(f.ordinal).toBe(1);
+    expect(f.accepted).toBe(4);
+    expect(f.merged).toBe(0);
+    expect(f.skipped).toBe(1);
+    expect(f.indexes).toEqual([1, 2, 3, 4]);
+    expect(f.sizeBefore).toBe(0);
+    expect(f.sizeAfter).toBe(4);
+    expect(f.previews).toEqual([
+      { index: 1, op: "added", preview: "obs · security review gating" },
+      { index: 2, op: "added", preview: "obs · CFO approved budget" },
+    ]);
+    expect(f.previewsOmitted).toBe(2);
+    expect(f.tag).toBe('{"facet":"observations"}');
+    expect(f.display).toEqual({ caption: "Evidence" });
+    expect(f.dropSeq).toBe(0); // first DropRecord for this pack
+  });
+
+  test("a drop with tool_call_id nests immediately after its causing tool (via = tool name)", () => {
+    const parts = fold([
+      { type: "tool.start", tool_call_id: "t1", tool_name: "search_deal_context" },
+      drop({ tool_call_id: "t1" }),
+      { type: "tool.end", tool_call_id: "t1", tool_name: "search_deal_context", result: {} },
+    ]);
+    expect(parts.map((p) => p.kind)).toEqual(["tool_call", "state_delta"]);
+    const f = parts[1] as Extract<StateDeltaPart, { op: "drop" }>;
+    expect(f.toolCallId).toBe("t1");
+    expect(f.via).toBe("search_deal_context");
+  });
+
+  test("a drop whose tool lives in an agent_step's children nests INSIDE the step", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "retrieve" },
+      { type: "tool.start", tool_call_id: "t1", tool_name: "search", parent_span_id: "s1" },
+      drop({ tool_call_id: "t1" }),
+      { type: "tool.end", tool_call_id: "t1", tool_name: "search", parent_span_id: "s1" },
+    ]);
+    expect(parts).toHaveLength(1);
+    const step = parts[0] as Extract<Part, { kind: "agent_step" }>;
+    expect(step.children.map((c) => c.kind)).toEqual(["tool_call", "state_delta"]);
+  });
+
+  test("a drop with an unmatched tool_call_id stays standalone (honest degradation)", () => {
+    const parts = fold([drop({ tool_call_id: "nope" })]);
+    expect(parts.map((p) => p.kind)).toEqual(["state_delta"]);
+    const f = parts[0] as Extract<StateDeltaPart, { op: "drop" }>;
+    expect(f.via).toBeUndefined();
+  });
+
+  test("dropSeq counts DropRecords per pack in fold order", () => {
+    const parts = fold([drop(), drop({ ordinal: 2, size_before: 4, size_after: 6 })]);
+    const seqs = parts.map((p) => (p as Extract<StateDeltaPart, { op: "drop" }>).dropSeq);
+    expect(seqs).toEqual([0, 1]);
+  });
+
+  test("scratchpad.write folds set/update, hadValue, before/after previews", () => {
+    const parts = fold([
+      {
+        type: "scratchpad.write",
+        key: "brief.highlights",
+        origin: "explicit",
+        ordinal: 3,
+        op: "set",
+        had_value: false,
+        after: '["#1","#2"]',
+      },
+    ]);
+    const f = parts[0] as Extract<StateDeltaPart, { op: "write" }>;
+    expect(f.op).toBe("write");
+    expect(f.writeOp).toBe("set");
+    expect(f.hadValue).toBe(false);
+    expect(f.before).toBeUndefined();
+    expect(f.after).toBe('["#1","#2"]');
+  });
+
+  test("innate scratchpad events carry origin through (the auto chip's source)", () => {
+    const parts = fold([
+      {
+        type: "scratchpad.write",
+        key: "agents.retrieve",
+        origin: "innate",
+        ordinal: 2,
+        op: "set",
+        had_value: false,
+        after: "{…}",
+      },
+    ]);
+    expect((parts[0] as StateDeltaPart).origin).toBe("innate");
+  });
+
+  test("backpack.read folds memo hit/miss with size + preview", () => {
+    const parts = fold([
+      {
+        type: "backpack.read",
+        key: "backpack.observations",
+        origin: "explicit",
+        ordinal: 4,
+        memo_hit: true,
+        size: 6,
+        preview: "{ timeline: … } (preview only)",
+      },
+    ]);
+    const f = parts[0] as Extract<StateDeltaPart, { op: "read" }>;
+    expect(f.op).toBe("read");
+    expect(f.scope).toBe("backpack");
+    expect(f.memoHit).toBe(true);
+    expect(f.size).toBe(6);
+    expect(f.preview).toBe("{ timeline: … } (preview only)");
+  });
+
+  test("scratchpad fork/join fold shared / merged+discarded keys (the silent-discard trap)", () => {
+    const parts = fold([
+      { type: "scratchpad.fork", origin: "innate", ordinal: 5, shared_keys: ["notes.draft"] },
+      {
+        type: "scratchpad.join",
+        origin: "innate",
+        ordinal: 6,
+        merged_keys: ["notes.draft"],
+        discarded_keys: ["temp.scratch"],
+      },
+    ]);
+    const fork = parts[0] as Extract<StateDeltaPart, { op: "fork" }>;
+    const join = parts[1] as Extract<StateDeltaPart, { op: "join" }>;
+    expect(fork.sharedKeys).toEqual(["notes.draft"]);
+    expect(join.mergedKeys).toEqual(["notes.draft"]);
+    expect(join.discardedKeys).toEqual(["temp.scratch"]);
+  });
+
+  test("backpack.absorb folds branch fan-in with appended indexes", () => {
+    const parts = fold([
+      {
+        type: "backpack.absorb",
+        key: "backpack.observations",
+        origin: "innate",
+        ordinal: 7,
+        child_size: 3,
+        accepted: 2,
+        merged: 1,
+        size_before: 12,
+        size_after: 14,
+        appended_indexes: [13, 14],
+      },
+    ]);
+    const f = parts[0] as Extract<StateDeltaPart, { op: "absorb" }>;
+    expect(f.op).toBe("absorb");
+    expect(f.childSize).toBe(3);
+    expect(f.appendedIndexes).toEqual([13, 14]);
+    expect(f.sizeAfter).toBe(14);
+  });
+
+  test("reads the PERSISTED row shape (camelCase payload_json) via the shared accessors", () => {
+    const parts = fold([
+      {
+        type: "agent.backpack.drop",
+        run_id: "r1",
+        payload_json: JSON.stringify({
+          key: "backpack.observations",
+          origin: "explicit",
+          ordinal: 1,
+          accepted: 2,
+          merged: 1,
+          skipped: 0,
+          indexes: [5, 6, 1],
+          sizeBefore: 4,
+          sizeAfter: 6,
+          previews: [{ index: 5, op: "added", preview: "artifact · meeting" }],
+          previewsOmitted: 0,
+          toolCallId: "t9",
+        }),
+      },
+    ]);
+    const f = parts[0] as Extract<StateDeltaPart, { op: "drop" }>;
+    expect(f.kind).toBe("state_delta");
+    expect(f.sizeBefore).toBe(4);
+    expect(f.sizeAfter).toBe(6);
+    expect(f.toolCallId).toBe("t9");
+    expect(f.previews).toEqual([{ index: 5, op: "added", preview: "artifact · meeting" }]);
+  });
+
+  test("a state event with no key is ignored, not crashed on", () => {
+    const parts = fold([{ type: "backpack.drop", origin: "explicit", ordinal: 1 }]);
+    expect(parts).toEqual([]);
+  });
+});
+
+describe("applyParts — derived TRAVEL frames (#226, v1 UI-derived)", () => {
+  const dropIn = (toolId: string, over: Record<string, unknown> = {}): EventLike[] => [
+    { type: "tool.start", tool_call_id: toolId, tool_name: "search", parent_span_id: "s1" },
+    {
+      type: "backpack.drop",
+      key: "backpack.observations",
+      origin: "explicit",
+      ordinal: 1,
+      accepted: 4,
+      merged: 0,
+      skipped: 0,
+      indexes: [1, 2, 3, 4],
+      size_before: 0,
+      size_after: 4,
+      previews: [{ index: 1, op: "added", preview: "obs · one" }],
+      previews_omitted: 0,
+      tool_call_id: toolId,
+      ...over,
+    },
+    { type: "tool.end", tool_call_id: toolId, tool_name: "search", parent_span_id: "s1" },
+  ];
+
+  test("a stage boundary after drops derives one ⇄ frame per pack, before the new step", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "retrieve" },
+      ...dropIn("t1"),
+      { type: "step.end", span_id: "s1", step_name: "retrieve", result: {} },
+      { type: "step.start", span_id: "s2", step_name: "correlate" },
+    ]);
+    expect(parts.map((p) => p.kind)).toEqual(["agent_step", "state_delta", "agent_step"]);
+    const travel = parts[1] as Extract<StateDeltaPart, { op: "travel" }>;
+    expect(travel.op).toBe("travel");
+    expect(travel.derived).toBe(true);
+    expect(travel.key).toBe("backpack.observations");
+    expect(travel.toStep).toBe("correlate");
+    expect(travel.items).toBe(4);
+    expect(travel.records).toEqual([{ drop: 0, covered: 4 }]);
+    expect(travel.previews).toEqual([{ index: 1, op: "added", preview: "obs · one" }]);
+    expect(travel.quiet).toBeUndefined();
+  });
+
+  test("no drops yet → the first step.start derives nothing", () => {
+    const parts = fold([{ type: "step.start", span_id: "s1", step_name: "retrieve" }]);
+    expect(parts.map((p) => p.kind)).toEqual(["agent_step"]);
+  });
+
+  test("a boundary with NO new drops since the last travel derives the honest quiet variant", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "retrieve" },
+      ...dropIn("t1"),
+      { type: "step.end", span_id: "s1", step_name: "retrieve", result: {} },
+      { type: "step.start", span_id: "s2", step_name: "correlate" },
+      { type: "step.end", span_id: "s2", step_name: "correlate", result: {} },
+      { type: "step.start", span_id: "s3", step_name: "brief" },
+    ]);
+    const travels = parts.filter(
+      (p): p is Extract<StateDeltaPart, { op: "travel" }> =>
+        p.kind === "state_delta" && p.op === "travel",
+    );
+    expect(travels).toHaveLength(2);
+    expect(travels[0]?.quiet).toBeUndefined();
+    expect(travels[1]?.quiet).toBe(true);
+    expect(travels[1]?.toStep).toBe("brief");
+    expect(travels[1]?.sinceStep).toBe("retrieve"); // the stage that last dropped
+    expect(travels[1]?.items).toBe(4);
+  });
+
+  test("a NESTED step.start (parent span present) derives no travel frames", () => {
+    const parts = fold([
+      { type: "step.start", span_id: "s1", step_name: "retrieve" },
+      ...dropIn("t1"),
+      { type: "step.start", span_id: "s1b", step_name: "sub", parent_span_id: "s1" },
+    ]);
+    expect(parts.filter((p) => p.kind === "state_delta").every((p) => p.op !== "travel")).toBe(
+      true,
+    );
+  });
+});
+
+describe("coalesceStateParts (#226 — 3+ consecutive same-site frames)", () => {
+  const writeEvent = (key: string, ordinal: number): EventLike => ({
+    type: "scratchpad.write",
+    key,
+    origin: "explicit",
+    ordinal,
+    op: "set",
+    had_value: false,
+    after: "v",
+  });
+
+  test("3+ consecutive explicit write frames fold into one state_group", () => {
+    const parts = fold([writeEvent("a", 1), writeEvent("b", 2), writeEvent("c", 3)]);
+    const view = coalesceStateParts(parts);
+    expect(view).toHaveLength(1);
+    const group = view[0] as Extract<Part, { kind: "state_group" }>;
+    expect(group.kind).toBe("state_group");
+    expect(group.parts).toHaveLength(3);
+  });
+
+  test("2 consecutive frames stay individual", () => {
+    const parts = fold([writeEvent("a", 1), writeEvent("b", 2)]);
+    expect(coalesceStateParts(parts).map((p) => p.kind)).toEqual(["state_delta", "state_delta"]);
+  });
+
+  test("any other part breaks the run", () => {
+    const parts = fold([
+      writeEvent("a", 1),
+      writeEvent("b", 2),
+      { type: "message.delta", delta: "hi" },
+      writeEvent("c", 3),
+    ]);
+    expect(coalesceStateParts(parts).map((p) => p.kind)).toEqual([
+      "state_delta",
+      "state_delta",
+      "text",
+      "state_delta",
+    ]);
+  });
+
+  test("innate frames and reads never coalesce (the stage-boundary trio stays legible)", () => {
+    const parts = fold([
+      {
+        type: "scratchpad.write",
+        key: "agents.retrieve",
+        origin: "innate",
+        ordinal: 1,
+        op: "set",
+        had_value: false,
+        after: "{…}",
+      },
+      {
+        type: "scratchpad.read",
+        key: "agents.retrieve",
+        origin: "innate",
+        ordinal: 2,
+        preview: "TASK: …",
+      },
+      {
+        type: "backpack.read",
+        key: "backpack.observations",
+        origin: "explicit",
+        ordinal: 3,
+        memo_hit: true,
+        size: 6,
+        preview: "p",
+      },
+    ]);
+    expect(coalesceStateParts(parts).every((p) => p.kind === "state_delta")).toBe(true);
+  });
+
+  test("coalesces inside an agent_step's children too", () => {
+    const events: EventLike[] = [
+      { type: "step.start", span_id: "s1", step_name: "loop" },
+      { type: "tool.start", tool_call_id: "t1", tool_name: "process", parent_span_id: "s1" },
+    ];
+    for (let i = 0; i < 4; i++) {
+      events.push({
+        type: "backpack.drop",
+        key: "backpack.observations",
+        origin: "explicit",
+        ordinal: i + 1,
+        accepted: 1,
+        merged: 0,
+        skipped: 0,
+        indexes: [i + 1],
+        size_before: i,
+        size_after: i + 1,
+        previews: [],
+        previews_omitted: 0,
+        tool_call_id: "t1",
+      });
+    }
+    const parts = fold(events);
+    const view = coalesceStateParts(parts);
+    const step = view[0] as Extract<Part, { kind: "agent_step" }>;
+    expect(step.children.map((c) => c.kind)).toEqual(["tool_call", "state_group"]);
+    const group = step.children[1] as Extract<Part, { kind: "state_group" }>;
+    expect(group.parts).toHaveLength(4);
   });
 });
 

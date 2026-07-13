@@ -32,6 +32,14 @@ export interface NodeRunContext {
   readonly toolExecutor?: ToolExecutor;
   readonly traceId?: string;
   /**
+   * The run's correlation id — matches `BaseEvent.runId` on every event this
+   * run publishes (#226). OPTIONAL / engine-defaulted: `NodeBackedRunner` sets
+   * it when executing a promoted pipeline; emission layers mint a fallback
+   * when absent. Existing callers that pass `{ runner }` keep compiling and
+   * behave identically — the back-compat hinge.
+   */
+  readonly runId?: string;
+  /**
    * The invoking tool call's span id, when this node is being run as a
    * sub-workflow (agent-as-tool / CoordinatorStep / a promoted pipeline)
    * (#102). Nests this node's `agent.tool.*` events under the parent call's
