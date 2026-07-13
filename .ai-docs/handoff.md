@@ -1,21 +1,15 @@
-# Handoff — 2026-07-09
+# Handoff — 2026-07-13
 
-**Branch:** `main` (clean, synced)
-**Last action:** **Primitive-knowledge rework SHIPPED + PUBLISHED.** Stack #216 → #217 → #218 merged sequentially to main (c264e69); publish job succeeded — npm dist-tags verified: **core 0.9.0**, runtime/server/cli **0.21.0** (dashboard untouched). Old PR #90 closed with a pointer. The stack: camelCase atom keys + `scripts/migrate-to-camelcase.ts` codemod (#216) → Tone/Methodology/Recovery wired into Role/rendering/AgentConfig + one section-composed prompt path (#217) → `getSystemPrompt`/`renderSystemPrompt` removed from core + the `AgentLike` contract, release bump (#218).
-**Next action:** Nothing mid-flight. Follow-up candidates below, or start fresh.
-**Obstacles:** none blocking.
+**Branch:** `feat/226-state-viz` (clean, pushed)
+**Last action:** **State-viz built end-to-end and PR opened.** Ultracode workflow implemented issue #226 (Delta Frames timeline + Scratchpad rail) as 7 commits on `feat/226-state-viz` — 4 feature commits (one per work item WI-1..WI-4) + 3 review-fix commits, each work item gated by a 3-lens adversarial review. Final gate: full `bun run check` green, 1,967 tests (core 347 · dashboard 360 · runtime 959 · server 214 · cli 87), 47 files +9,059/−90. **PR #227** open, `Closes #226`.
+**Next action:** Live verification of the two *needs-live-run* acceptance criteria in `.claude/specs/2026-07-12-state-viz-implementation.md`: boot the playground (`ap playground` or agent-server + agent-dashboard dev), run the pipeline demo, confirm (a) state_delta frames render inline per the mockup (`.claude/specs/2026-07-12-backpack-scratchpad-state-viz.mockup.html`), (b) rail footer reconciliation shows `✓ matches all write receipts`. Then review/merge #227.
+**Obstacles:**
+- Live run needs a configured model provider key on this machine (unverified).
+- PR #227 is large (47 files) — consider splitting per-WI with stack tooling before human review.
+- Long workflows tripped session usage limits twice; `resumeFromRunId` recovery worked cleanly both times — budget for resume cycles on multi-hour builds.
 
-## Records of the work
-- **ADR 0002** (`docs/adr/0002-primitive-knowledge-rework.md`) — why + what shipped + full key-rename table + migration one-liner.
-- **Spec of record + Gate 2.5 review** (`.ai-docs/stacks/primitive-knowledge/specs/primitive-knowledge.md`) — approved plan + paired-lens diff review: Adherence PASS_WITH_NOTES / Quality PASS_WITH_NOTES, 0 blockers total.
-- `build-on-agentic-patterns` SKILL.md (repo + plugin-template mirror) now teaches the three knowledge slots + single prompt path.
-
-## Notes / follow-up candidates
-- **`AgentConfig.toPrompt()` is a fourth render path** (quality review's real finding, `agent-config.ts:99`): renders persona without the Tone object then appends flat tone/methodology/recovery blocks — a config with both `persona.tone` and `rt.tone` double-renders tone in that preview. Small reconcile-onto-sections change; shifts preview text + tests.
-- **Consumer migration when upgrading** swe-brain / query-agent-poc / retrieval-agent (all pin old versions): `bun scripts/migrate-to-camelcase.ts --keys --methods --write <dir>`.
-- Nits from review: vestigial `getSystemPrompt` in two backward-compat discover fixtures (legitimate; could carry a comment); `Persona.toPrompt(opts)` is the only atom `toPrompt` taking an argument.
-- `as-agent.ts` `DEFAULT_MODEL = "sonnet"` for promoted agents still brushes the #179 no-framework-default philosophy — candidate issue.
-- `State`/`Roster` atoms: keys renamed but still unwired — wiring them is its own decision.
-- Open board items unchanged: #205 (z.infer enum leak root cause), #206 (better-sqlite3 ABI), #158, #157, #120/#119, #110, #54, #43, #42.
-- **Stacked-merge gotcha (process):** `gh pr merge --delete-branch` on the bottom PR **closes** dependent stacked PRs instead of retargeting them. Recovery: `git push origin <sha>:refs/heads/<base-branch>` to restore the ref → `gh pr reopen` → `gh pr edit --base main` → merge without `--delete-branch` → delete branches at the end.
-- Untracked leftover: `.ai-docs/research/adk-plugin.md` (pre-existing, ADK plugin design — unimplemented, targets core; still relevant).
+## Notes
+- Design lineage lives in `.claude/specs/2026-07-12-backpack-scratchpad-state-viz.md` (concept, vocabulary decisions: rail = "Scratchpad" — "memory" is reserved for cross-session user memory; prose says "added", bare "dropped" banned; rejected alternatives) + the interactive mockup beside it. Implementation plan with verified seams: `2026-07-12-state-viz-implementation.md`.
+- Docs-only spec branch `claude/prime-66nzhc` is merged INTO `feat/226-state-viz`; PR #227 carries both.
+- WI-1 divergence worth knowing: SSE mapping mechanics (wire names, formatter count pin 21→28) were pulled forward into WI-1's commit because the AgentEvent union trips compiler-forced exhaustiveness — WI-2 didn't redo them.
+- Prior session's follow-up candidates (AgentConfig.toPrompt fourth render path, consumer camelCase migration, board items #205/#206/#158/#157/#120/#119/#110/#54/#43/#42, stacked-merge gotcha) — see git history of this file @ 2026-07-09.
