@@ -84,6 +84,23 @@ describe("AgentConfig", () => {
     expect(prompt).toContain("Keep the backlog healthy");
   });
 
+  it("toPrompt renders tone once, from the Tone slot, when both a persona tone and a Tone are set (#221)", () => {
+    const cfg = new AgentConfig({
+      roleTemplate: {
+        ...minimalRoleTemplate,
+        // persona.tone is a plain string ("concise"); the richer Tone slot supersedes it.
+        tone: { name: "direct", prompt: "Be blunt and specific." },
+      },
+      mission: { objective: "x" },
+    });
+    const prompt = cfg.toPrompt();
+    // The Tone slot wins — its prompt is rendered under a single `### Tone` heading…
+    expect(prompt).toContain("Be blunt and specific.");
+    expect(prompt.match(/### Tone/g)?.length ?? 0).toBe(1);
+    // …and the persona's plain-string tone is no longer double-rendered alongside it.
+    expect(prompt).not.toContain("concise");
+  });
+
   it("requires a mission objective", () => {
     expect(() =>
       AgentConfigSchema.parse({ roleTemplate: minimalRoleTemplate, mission: {} }),
