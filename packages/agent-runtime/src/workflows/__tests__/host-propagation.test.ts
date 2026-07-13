@@ -8,14 +8,16 @@
  */
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
-import { Agent, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
+import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
 import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
+import type { ToolCallStartEvent } from "../../events/types.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { AgentRunner } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
+import type { RunOptions, RunResult, RunnerProtocol } from "../../runner/types.js";
 import { AgentStep } from "../agent-step.js";
 import { CoordinatorStep } from "../coordinator-step.js";
 import { depKey, provideDeps } from "../deps.js";
@@ -320,5 +322,224 @@ describe("host propagation — precedence + back-compat", () => {
     expect(await tool.execute({}, undefined)).toBe("closure-default");
     // ctx present but no host.
     expect(await tool.execute({}, {})).toBe("closure-default");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test 6 — the run's EVENT BUS crosses the seam (the third leg: #124 threaded
+// scratchpad+deps, #102 threaded trace ids; without this leg a delegated
+// subagent on a construction-time runner publishes agent.* events to that
+// runner's constructor-bound — or global-default — bus, invisible to the
+// session that owns the run).
+// ---------------------------------------------------------------------------
+
+/** Records every RunOptions handed to `run` (mirrors agent-step.test.ts). */
+function recordingRunner(captured: RunOptions[]): RunnerProtocol {
+  return {
+    async run(_agent: AgentLike, _message: string, options?: RunOptions): Promise<RunResult> {
+      if (options) captured.push(options);
+      return {
+        response: "unused",
+        inputTokens: 0,
+        outputTokens: 0,
+        toolCallsCount: 0,
+        iterations: 1,
+        finishReason: "stop",
+      };
+    },
+  };
+}
+
+/** A real toolbox with one executable tool, so the child emits agent.tool.* events. */
+class ProbeToolbox extends Toolbox {
+  readonly name = "ledger";
+  readonly description = "reads the household ledger";
+  readonly tools = {
+    getBalance: {
+      description: "get a member's balance",
+      parameters: z.object({ member: z.string() }),
+      execute: async (args: Record<string, unknown>) => ({ member: args.member, balance: 42 }),
+    },
+  };
+}
+
+function agentWithProbe(): Agent {
+  const role = new RoleBuilder("insights")
+    .withPersona(
+      new Persona({
+        identity: "reads the household ledger",
+        tone: "direct",
+        priorities: ["accuracy"],
+        principles: ["cite the ledger"],
+      }),
+    )
+    .withCapability(new Capability("ledger", "ledger access", new ProbeToolbox()))
+    .withDefaultModel("mock")
+    .build();
+  return new Agent({
+    role,
+    mission: new Mission({
+      objective: "answer ledger questions",
+      successCriteria: ["answered from the ledger"],
+      constraints: [],
+    }),
+  });
+}
+
+describe("host propagation — event bus crosses the seam", () => {
+  it("AgentStep threads ctx.eventBus into RunOptions.eventBus AND host.eventBus", async () => {
+    const bus = new AgentEventBus();
+    const captured: RunOptions[] = [];
+    const step = new AgentStep<string, string>({
+      name: "leaf",
+      agent: makeAgent("leaf"),
+      prompt: (input) => input,
+    });
+
+    await step.run("go", {
+      runner: recordingRunner(captured),
+      scratchpad: createScratchpad(),
+      eventBus: bus,
+    });
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.eventBus).toBe(bus);
+    expect((captured[0]?.host as { eventBus?: AgentEventBus })?.eventBus).toBe(bus);
+  });
+
+  it("nodeTool re-roots the live caller's bus into the sub-run ctx (and stays absent without a host)", async () => {
+    const bus = new AgentEventBus();
+    const runner = new MockRunner();
+    const probe = new FunctionStep<Record<string, never>, string>({
+      fn: (_input, _scratchpad, ctx) =>
+        ctx.eventBus === bus ? "same-bus" : ctx.eventBus === undefined ? "no-bus" : "other-bus",
+    });
+    const tool = nodeTool({ description: "x", parameters: z.object({}), node: probe }, runner);
+
+    expect(
+      await tool.execute({}, { host: { scratchpad: createScratchpad(), eventBus: bus } }),
+    ).toBe("same-bus");
+    // Back-compat: no host → no ambient bus, byte-identical to before.
+    expect(await tool.execute({}, {})).toBe("no-bus");
+  });
+
+  it("full rail: a delegated subagent on a PRIVATE bus-less runner publishes its tool events on the session bus", async () => {
+    const sessionBus = new AgentEventBus();
+    const toolStarts: string[] = [];
+    sessionBus.subscribe("agent.tool.start", (e) => {
+      toolStarts.push((e as ToolCallStartEvent).toolName);
+    });
+
+    // The child: a real Agent with a real capability, whose model makes one
+    // tool call then answers — run on a runner with NO constructor bus (the
+    // production trap: it would fall back to the global default bus).
+    let childCalls = 0;
+    const childModel = new MockLanguageModelV2({
+      doGenerate: async () => {
+        childCalls++;
+        if (childCalls === 1) {
+          return {
+            content: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "child-tc-1",
+                toolName: "getBalance",
+                input: JSON.stringify({ member: "sam" }),
+              },
+            ],
+            finishReason: "tool-calls" as const,
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: "sam owes 42" }],
+          finishReason: "stop" as const,
+          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          warnings: [],
+        };
+      },
+    });
+    const privateChildRunner = new AgentRunner(childModel);
+
+    const childNode = new AgentStep<{ task: string }, string>({
+      name: "child",
+      agent: agentWithProbe(),
+      prompt: (input) => input.task,
+    });
+    const team = new NodeToolbox({
+      name: "team",
+      description: "team",
+      runner: privateChildRunner,
+      tools: {
+        child: {
+          description: "invoke the child sub-agent",
+          parameters: z.object({ task: z.string() }),
+          node: childNode,
+        },
+      },
+    });
+
+    // The outer coordinator's LLM: delegate to "child", then answer, then
+    // tier 2's structured finish (same 3-call script as Test 1).
+    let outerCalls = 0;
+    const outerModel = new MockLanguageModelV2({
+      doGenerate: async () => {
+        outerCalls++;
+        if (outerCalls === 1) {
+          return {
+            content: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "outer-tc-1",
+                toolName: "child",
+                input: JSON.stringify({ task: "balances please" }),
+              },
+            ],
+            finishReason: "tool-calls" as const,
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            warnings: [],
+          };
+        }
+        if (outerCalls === 2) {
+          return {
+            content: [{ type: "text" as const, text: "outer done" }],
+            finishReason: "stop" as const,
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ title: "ok" }) }],
+          finishReason: "stop" as const,
+          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          warnings: [],
+        };
+      },
+    });
+    const sessionRunner = new AgentRunner(outerModel, sessionBus);
+
+    const Template = z.object({ title: z.string() });
+    const author = new CoordinatorStep<{ instruction: string }, z.infer<typeof Template>>({
+      name: "CanvasAuthor",
+      agent: coordinatorAgent(),
+      team,
+      output: Template,
+      prompt: (input) => input.instruction,
+    });
+
+    const result = await author.run(
+      { instruction: "please delegate" },
+      { runner: sessionRunner, scratchpad: createScratchpad(), eventBus: sessionBus },
+    );
+    // Let any fire-and-forget publishes settle before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result.succeeded).toBe(true);
+    // The delegation call itself (outer runner, constructor-bound to the bus)…
+    expect(toolStarts).toContain("child");
+    // …and the child's INNER tool call, published by the private bus-less
+    // runner — only reaches the session bus because the bus rode the seam.
+    expect(toolStarts).toContain("getBalance");
   });
 });

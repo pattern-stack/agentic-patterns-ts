@@ -128,7 +128,13 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
       maxIterations: this.spec.maxIterations,
       traceId: ctx.traceId,
       parentSpanId: ctx.parentSpanId,
-      host: { scratchpad: ctx.scratchpad, deps: ctx.deps }, // #124
+      // The run's bus rides both legs of the seam: as `RunOptions.eventBus` so
+      // THIS leaf's runner publishes agent.* events on the run's bus rather
+      // than its constructor-bound (or global-default) one, and inside `host`
+      // so `nodeTool` can re-root it into a delegated sub-run — otherwise a
+      // subagent on a private runner emits into a bus nobody watches.
+      eventBus: ctx.eventBus,
+      host: { scratchpad: ctx.scratchpad, deps: ctx.deps, eventBus: ctx.eventBus }, // #124
     };
 
     try {
