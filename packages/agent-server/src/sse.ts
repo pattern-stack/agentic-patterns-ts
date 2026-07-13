@@ -5,10 +5,12 @@
  * streamSSE writeSSE() method.
  *
  * Delegates wire-name and payload mapping to the runtime's canonical
- * `toSSEMapping` so the server stays in sync with the 20-event vocabulary
- * defined in the spec. Only internal observability events (iteration.* and
- * llm.*) are filtered here — they remain available over the admin SSE
- * stream (SSEExporter) for operators.
+ * `toSSEMapping` so the server stays in sync with the canonical event
+ * vocabulary with zero changes here — new runtime events (e.g. the #226
+ * `backpack.*`/`scratchpad.*` state deltas) flow through automatically.
+ * Only internal observability events (iteration.* and llm.*) are filtered
+ * here — they remain available over the admin SSE stream (SSEExporter)
+ * for operators.
  */
 
 import type { AgentEvent, AgentEventType } from "@agentic-patterns/runtime";

@@ -44,6 +44,21 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     "agent.tool.start",
     "agent.tool.end",
     "agent.tool.progress",
+    // Step / delegation spans (#226) — previously in NO profile, so
+    // profile-attached exporters (admin collector, SSE broadcast, SQLite)
+    // never saw a stage boundary.
+    "agent.step.start",
+    "agent.step.end",
+    // State-delta events (#226) — Backpack/Scratchpad mutations the dashboard
+    // renders as Delta Frames + the Scratchpad rail. UI-facing by design;
+    // never aggregated (the collector records them into the ring buffer only).
+    "agent.backpack.drop",
+    "agent.backpack.read",
+    "agent.backpack.absorb",
+    "agent.scratchpad.write",
+    "agent.scratchpad.read",
+    "agent.scratchpad.fork",
+    "agent.scratchpad.join",
     "agent.error",
     "claude_code.hook",
   ],

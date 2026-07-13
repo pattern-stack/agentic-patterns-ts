@@ -419,4 +419,15 @@ const RELAYED_STREAM_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEventTyp
   "agent.tool.progress",
   "agent.tool.end",
   "agent.tool.rejected",
+  // State-delta events (#226) — Backpack/Scratchpad mutations the observed
+  // emission layer publishes. Relayed so the playground chat can render Delta
+  // Frames + the Scratchpad rail live; the conversation SSE is this path's
+  // ONLY route to the client (events not listed here die silently).
+  "agent.backpack.drop",
+  "agent.backpack.read",
+  "agent.backpack.absorb",
+  "agent.scratchpad.write",
+  "agent.scratchpad.read",
+  "agent.scratchpad.fork",
+  "agent.scratchpad.join",
 ]);

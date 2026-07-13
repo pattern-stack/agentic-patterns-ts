@@ -509,7 +509,7 @@ describe("NodeBackedRunner — observed scratchpad + runId threading (#226)", ()
     expect(ctx.runId).toBeDefined(); // runId is threaded regardless of a bus
   });
 
-  it("stream() threads its minted traceId/runId into the node ctx, and state events stay OFF the yielded stream", async () => {
+  it("stream() threads its minted traceId/runId into the node ctx, and relays state events live", async () => {
     const probe = makeProbe();
     const promoted = asAgent(probe.node, { role: { name: "Probe" } });
     const runner = new NodeBackedRunner(new MockRunner());
@@ -517,10 +517,13 @@ describe("NodeBackedRunner — observed scratchpad + runId threading (#226)", ()
     const events: AgentEvent[] = [];
     for await (const event of runner.stream(promoted, "yo")) events.push(event);
 
-    // Unchanged yield shape: state-delta events are not in the relay allowlist
-    // (they exist on the bus; nothing consumes them yet — WI-2 wires the wire).
+    // WI-2 (#226): state-delta events joined the relay allowlist — the node's
+    // scratchpad write reaches the yielded stream in publish order, between
+    // the message lifecycle events. This is the playground's ONLY route to
+    // the client (conversation SSE), so an event missing here dies silently.
     expect(events.map((e) => e.type)).toEqual([
       "agent.message.start",
+      "agent.scratchpad.write",
       "agent.message.chunk",
       "agent.message.complete",
     ]);
@@ -530,5 +533,8 @@ describe("NodeBackedRunner — observed scratchpad + runId threading (#226)", ()
     expect(ctx.runId).toBe(events[0]?.runId);
     expect(ctx.traceId).toBe(events[0]?.traceId);
     expect(ctx.scratchpad).toBeInstanceOf(ObservedScratchpad);
+    // The relayed write is the SAME run, not a re-minted identity.
+    const write = events.find((e) => e.type === "agent.scratchpad.write");
+    expect(write).toMatchObject({ key: "probe.note", runId: ctx.runId, traceId: ctx.traceId });
   });
 });

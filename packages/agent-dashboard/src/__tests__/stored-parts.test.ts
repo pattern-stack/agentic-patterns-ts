@@ -156,6 +156,30 @@ describe("storedPartsToParts", () => {
     const parts = [mkPart({ id: "p1", type: "mystery", position: 0 })];
     expect(storedPartsToParts(parts)).toEqual([{ kind: "text", content: "[mystery]" }]);
   });
+
+  it("degrades a persisted state_delta part (#226) to labeled text — the old-reader contract", () => {
+    // WI-2 persists state_delta parts (runtime `conversation.ts`) BEFORE this
+    // reader learns to render them (WI-3 adds the case; this pin is superseded
+    // then). Until that lands, the default case must degrade them to labeled
+    // text — visible, never a crash, never dropped. Metadata shape mirrors
+    // what `Conversation._persistExchange` actually writes: the SSE wire
+    // payload plus the wire event name.
+    const parts = [
+      mkPart({
+        id: "p1",
+        type: "state_delta",
+        position: 0,
+        metadata: { event: "backpack.drop", key: "backpack.observations", ordinal: 1 },
+      }),
+    ];
+    expect(storedPartsToParts(parts)).toEqual([
+      {
+        kind: "text",
+        content:
+          '[state_delta] {"event":"backpack.drop","key":"backpack.observations","ordinal":1}',
+      },
+    ]);
+  });
 });
 
 describe("storedMessageToChatMessage", () => {
