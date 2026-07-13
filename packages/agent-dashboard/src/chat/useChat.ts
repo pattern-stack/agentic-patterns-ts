@@ -14,9 +14,15 @@
  * mark the message `aborted`) from a real transport failure (→ `error`).
  */
 import { useCallback, useRef, useState } from "react";
-import { type SendOptions, createConversation, streamMessage } from "../api/chat-client";
+import {
+  type SendOptions,
+  createConversation,
+  sendInputResponse,
+  streamMessage,
+} from "../api/chat-client";
 import { toEventLike } from "../api/event-adapter";
 import type { EventLike } from "../graph/trace-from-events";
+import type { InputAnswer } from "./input-responder";
 import { type ChatMessage, applyParts } from "./model";
 
 export interface UseChatResult {
@@ -26,6 +32,8 @@ export interface UseChatResult {
   /** The server conversation id for this thread (null until the first send). */
   conversationId: string | null;
   send: (content: string) => Promise<void>;
+  /** Answer an inline `input_request` (approval gate / tool ask) for this thread. */
+  respondInput: (correlationId: string, answer: InputAnswer) => Promise<void>;
   abort: () => void;
   reset: () => void;
   /**
@@ -107,6 +115,12 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     [streaming, agentId, patch, nextId],
   );
 
+  const respondInput = useCallback(async (correlationId: string, answer: InputAnswer) => {
+    const convId = convIdRef.current;
+    if (!convId) return;
+    await sendInputResponse(convId, correlationId, answer);
+  }, []);
+
   const abort = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -121,5 +135,15 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     setTraceEvents([]);
   }, []);
 
-  return { messages, streaming, error, conversationId, send, abort, reset, traceEvents };
+  return {
+    messages,
+    streaming,
+    error,
+    conversationId,
+    send,
+    respondInput,
+    abort,
+    reset,
+    traceEvents,
+  };
 }

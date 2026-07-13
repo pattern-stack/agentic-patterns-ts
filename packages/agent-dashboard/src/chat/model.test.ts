@@ -31,6 +31,54 @@ describe("applyParts", () => {
     expect(parts).toEqual([{ kind: "text", content: "Hello world" }]);
   });
 
+  test("folds input.request into an inline approval card (deduped by correlation_id)", () => {
+    const parts = fold([
+      {
+        type: "input.request",
+        correlation_id: "call-1",
+        kind: "approval",
+        prompt: 'Approve "ratify_definition"?',
+        tool_name: "ratify_definition",
+        arguments: { id: "def-1" },
+      },
+      // A re-delivered request for the same correlation id is a no-op.
+      {
+        type: "input.request",
+        correlation_id: "call-1",
+        kind: "approval",
+        prompt: "dup",
+      },
+    ]);
+    expect(parts).toEqual([
+      {
+        kind: "input_request",
+        correlationId: "call-1",
+        inputKind: "approval",
+        prompt: 'Approve "ratify_definition"?',
+        options: undefined,
+        toolName: "ratify_definition",
+        arguments: { id: "def-1" },
+      },
+    ]);
+  });
+
+  test("folds a select input.request carrying options", () => {
+    const parts = fold([
+      {
+        type: "input.request",
+        correlation_id: "pick-1",
+        kind: "select",
+        prompt: "Pick a stage",
+        options: ["Discovery", "Negotiation"],
+      },
+    ]);
+    expect(parts[0]).toMatchObject({
+      kind: "input_request",
+      inputKind: "select",
+      options: ["Discovery", "Negotiation"],
+    });
+  });
+
   test("pairs tool.start with tool.end on the same tool_call_id", () => {
     const parts = fold([
       {

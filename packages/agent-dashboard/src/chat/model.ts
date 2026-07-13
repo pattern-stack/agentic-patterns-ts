@@ -52,6 +52,18 @@ export type Part =
       durationMs?: number;
       children: Part[];
     }
+  | {
+      // A human-in-the-loop pause: the run is BLOCKED awaiting a decision
+      // (an approval gate, or a tool asking the user to pick / type). Rendered
+      // as an inline card that POSTs the answer back to unblock the run.
+      kind: "input_request";
+      correlationId: string;
+      inputKind: "approval" | "select" | "text";
+      prompt: string;
+      options?: string[];
+      toolName?: string;
+      arguments?: unknown;
+    }
   // A Backpack/Scratchpad mutation (#226) — one Δ/◇/⇄ frame per state event,
   // nested under the causing tool via tool_call_id, standalone at boundaries.
   // Shape defined in state-accessors.ts (shared with the Scratchpad rail fold).
@@ -466,6 +478,32 @@ export function applyParts(
       if (idx >= 0) copy[idx] = filled;
       else copy.push(filled);
       return { parts: write(copy) };
+    }
+    // Human-in-the-loop request — the run is blocked awaiting a decision. Push
+    // an inline card (dedupe by correlationId; a re-delivered request is a
+    // no-op). The card component resolves it via POST /conversations/:id/input.
+    case "input.request": {
+      const correlationId =
+        str(col.correlation_id) ?? str(p.correlationId) ?? str(p.correlation_id);
+      if (correlationId == null) return { parts };
+      if (next.some((pt) => pt.kind === "input_request" && pt.correlationId === correlationId))
+        return { parts };
+      const rawKind = str(col.kind) ?? str(p.kind);
+      const inputKind: "approval" | "select" | "text" =
+        rawKind === "select" || rawKind === "text" ? rawKind : "approval";
+      const rawOptions = col.options ?? p.options;
+      next.push({
+        kind: "input_request",
+        correlationId,
+        inputKind,
+        prompt: str(col.prompt) ?? str(p.prompt) ?? "Approval required",
+        options: Array.isArray(rawOptions)
+          ? rawOptions.filter((o): o is string => typeof o === "string")
+          : undefined,
+        toolName: str(col.tool_name) ?? str(p.toolName) ?? str(p.tool_name),
+        arguments: toolArgs(col, p),
+      });
+      return { parts: next };
     }
     // State-delta events (#226) — one Δ/◇ frame per Backpack/Scratchpad
     // mutation, built by the shared tolerant accessor module (state-accessors,

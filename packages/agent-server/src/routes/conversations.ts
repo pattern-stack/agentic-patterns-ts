@@ -15,8 +15,11 @@
  */
 
 import type {
+  AgentEvent,
   AgentEventBus,
+  BaseEvent,
   ConversationStore,
+  PendingInputRegistry,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
 import { Conversation, createToolboxExecutor } from "@agentic-patterns/runtime";
@@ -36,6 +39,7 @@ export function conversationRoutes(
   conversations: Map<string, ConversationEntry>,
   eventBus: AgentEventBus,
   store: ConversationStore | undefined,
+  inputRegistry?: PendingInputRegistry,
 ): Hono {
   const app = new Hono();
 
@@ -198,15 +202,94 @@ export function conversationRoutes(
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
     return streamSSE(c, async (stream) => {
-      for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
-        const msg = agentEventToSSE(event);
-        if (msg) {
-          await stream.writeSSE(msg);
+      // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
+      // `bus.publish`, so the runner generator (which this loop drains) is
+      // parked and can't yield the prompt itself. The gate instead PUBLISHES
+      // an `agent.input.request` on the bus; we surface it onto THIS turn's
+      // stream, correlated by traceId so a concurrent conversation's prompt
+      // never bleeds in. The client answers via `POST /conversations/:id/input`
+      // (below), which resolves the registry and unblocks the gate.
+      let turnTraceId: string | undefined;
+      const pendingForTurn = new Set<string>();
+      const onInputRequest = async (ev: BaseEvent): Promise<void> => {
+        const e = ev as AgentEvent;
+        if (e.type !== "agent.input.request") return;
+        if (turnTraceId !== undefined && e.traceId !== turnTraceId) return;
+        pendingForTurn.add(e.correlationId);
+        const msg = agentEventToSSE(e);
+        // The runner is blocked here, so no concurrent writeSSE races this.
+        if (msg) await stream.writeSSE(msg);
+      };
+      eventBus.subscribe("agent.input.request", onInputRequest);
+
+      try {
+        for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
+          turnTraceId ??= event.traceId;
+          const msg = agentEventToSSE(event);
+          if (msg) {
+            await stream.writeSSE(msg);
+          }
+        }
+
+        await stream.writeSSE({ event: "done", data: "{}" });
+      } finally {
+        eventBus.unsubscribe("agent.input.request", onInputRequest);
+        // Fail closed: if the client disconnects mid-approval, deny any of THIS
+        // turn's still-pending requests so the blocked gate resolves (deny)
+        // instead of hanging the run forever.
+        if (inputRegistry) {
+          for (const correlationId of pendingForTurn) {
+            inputRegistry.resolve(correlationId, { decision: "deny" });
+          }
         }
       }
-
-      await stream.writeSSE({ event: "done", data: "{}" });
     });
+  });
+
+  // POST /conversations/:id/input — the return leg of a human-in-the-loop
+  // round-trip. Resolves an `agent.input.request` (delivered on the message
+  // stream above) by `correlation_id`, unblocking the gate that is holding the
+  // run. Per-conversation by URL, but the registry is keyed by the globally
+  // unique `correlation_id` (the guarded tool call's id) — the `:id` is
+  // addressing sugar, not a second key. 501 when no registry is wired (no gate
+  // is active, so nothing is ever blocked awaiting input).
+  app.post("/conversations/:id/input", async (c) => {
+    if (!inputRegistry) {
+      return c.json(
+        {
+          error: "human-input not configured",
+          hint: "start `ap playground` with AP_APPROVAL_TOOLS set to enable approval gating",
+        },
+        501,
+      );
+    }
+
+    const body = await c.req.json<{
+      correlation_id?: string;
+      decision?: "approve" | "deny";
+      value?: string;
+    }>();
+
+    const correlationId = body.correlation_id;
+    if (!correlationId || typeof correlationId !== "string") {
+      return c.json({ error: "correlation_id is required" }, 400);
+    }
+
+    // Approval semantics: an explicit decision wins; otherwise a supplied
+    // `value` (a select/text answer) implies approval, and a bare call denies.
+    const decision: "approve" | "deny" =
+      body.decision ?? (body.value !== undefined ? "approve" : "deny");
+
+    const resolved = inputRegistry.resolve(correlationId, {
+      decision,
+      ...(body.value !== undefined ? { value: body.value } : {}),
+    });
+
+    if (!resolved) {
+      return c.json({ error: "no pending input for correlation_id", correlationId }, 404);
+    }
+
+    return c.json({ ok: true, correlationId, decision }, 200);
   });
 
   return app;

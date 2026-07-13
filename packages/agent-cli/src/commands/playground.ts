@@ -23,9 +23,11 @@ import {
   InMemoryAdminService,
   InMemoryEventCollector,
   NodeBackedRunner,
+  PendingInputRegistry,
   RunStoreExporter,
   SQLiteExporter,
   SSEExporter,
+  createHumanInputApprovalGate,
   createToolboxExecutor,
   isPromotedAgent,
   loadConversationStore,
@@ -82,6 +84,27 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
 
   const sseExporter = new SSEExporter();
   sseExporter.attach(eventBus);
+
+  // Human-in-the-loop: OPT-IN approval gating. `AP_APPROVAL_TOOLS` is a
+  // comma-separated list of tool names that require a human's yes before they
+  // run (e.g. `ratify_definition,retire_definition`). Empty/unset → no gate is
+  // attached and behavior is unchanged. When set, the gate blocks each listed
+  // tool call, the chat surfaces an inline approval prompt, and the human's
+  // answer flows back through `POST /conversations/:id/input`.
+  const inputRegistry = new PendingInputRegistry();
+  const approvalTools = parseApprovalTools(process.env.AP_APPROVAL_TOOLS);
+  if (approvalTools.size > 0) {
+    eventBus.addGate(
+      createHumanInputApprovalGate({
+        bus: eventBus,
+        registry: inputRegistry,
+        tools: approvalTools,
+        ...(parsePositiveInt(process.env.AP_APPROVAL_TIMEOUT_MS) !== undefined
+          ? { timeoutMs: parsePositiveInt(process.env.AP_APPROVAL_TIMEOUT_MS) }
+          : {}),
+      }),
+    );
+  }
 
   // Durable event log (SQLite). Optional — degrades to memory-only when
   // better-sqlite3 isn't installed or AP_PERSISTENCE=0 is set.
@@ -152,6 +175,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     adminService,
     eventBus,
     sseExporter,
+    inputRegistry,
     store,
     eventStore: store,
     evalStore: store,
@@ -221,6 +245,9 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     `  agents     ${agentList}`,
     `  runner     ${selection.source} — ${selection.reason}`,
     `  storage    ${persistence.banner}`,
+    ...(approvalTools.size > 0
+      ? [`  approvals  human-gated: ${[...approvalTools].join(", ")}`]
+      : []),
     "",
   ];
   process.stdout.write(`${lines.join("\n")}\n`);
@@ -556,4 +583,19 @@ function parsePositiveInt(s: string | undefined): number | undefined {
   if (!s) return undefined;
   const n = Number.parseInt(s, 10);
   return Number.isNaN(n) || n <= 0 ? undefined : n;
+}
+
+/**
+ * Parse `AP_APPROVAL_TOOLS` — a comma-separated list of tool names that require
+ * human approval before executing. Trims blanks; empty/unset → an empty set
+ * (no gating).
+ */
+function parseApprovalTools(s: string | undefined): Set<string> {
+  if (!s) return new Set();
+  return new Set(
+    s
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t.length > 0),
+  );
 }

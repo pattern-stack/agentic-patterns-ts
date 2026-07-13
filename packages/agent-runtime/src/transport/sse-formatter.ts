@@ -25,6 +25,7 @@ export type SSEEventName =
   | "message.delta"
   | "message.complete"
   | "message.cancel"
+  | "input.request"
   | "thinking.start"
   | "thinking"
   | "thinking.complete"
@@ -101,6 +102,18 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
       };
     case "agent.message.cancel":
       return { name: "message.cancel", payload: { reason: event.reason } };
+    case "agent.input.request": {
+      const payload: Record<string, unknown> = {
+        correlation_id: event.correlationId,
+        kind: event.kind,
+        prompt: event.prompt,
+      };
+      if (event.options !== undefined) payload.options = event.options;
+      if (event.toolName !== undefined) payload.tool_name = event.toolName;
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      if (event.arguments !== undefined) payload.arguments = event.arguments;
+      return { name: "input.request", payload };
+    }
     case "agent.thinking.start":
       return { name: "thinking.start", payload: {} };
     case "agent.reasoning":
@@ -356,6 +369,7 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.message.chunk": "message.delta",
   "agent.message.complete": "message.complete",
   "agent.message.cancel": "message.cancel",
+  "agent.input.request": "input.request",
   "agent.thinking.start": "thinking.start",
   "agent.reasoning": "thinking",
   "agent.tool.intent": "tool.intent",

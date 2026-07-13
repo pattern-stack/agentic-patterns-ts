@@ -9,6 +9,7 @@ import type {
   ConversationStore,
   EvalStore,
   EventStore,
+  PendingInputRegistry,
   RunResult,
   RunStore,
   RunnerProtocol,
@@ -139,6 +140,13 @@ export interface ServerConfig {
   readonly adminService: AdminServiceProtocol;
   readonly eventBus: AgentEventBus;
   readonly sseExporter: SSEExporterLike;
+  /**
+   * Optional human-in-the-loop registry — the return leg for approval gates /
+   * tool-driven input requests. When present, `POST /conversations/:id/input`
+   * resolves a blocked run's `agent.input.request` by `correlation_id`; absent
+   * → that route 501s (no gate is wired, so nothing ever blocks on it).
+   */
+  readonly inputRegistry?: PendingInputRegistry;
   /**
    * Optional structured conversation store — enables `Conversation` to
    * persist request/response messages (wired into `POST /conversations`,

@@ -48,6 +48,7 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.llm.end"]).toBe("llm.end");
     expect(SSE_EVENT_NAMES["agent.step.start"]).toBe("step.start");
     expect(SSE_EVENT_NAMES["agent.step.end"]).toBe("step.end");
+    expect(SSE_EVENT_NAMES["agent.input.request"]).toBe("input.request");
     // State-delta events (#226)
     expect(SSE_EVENT_NAMES["agent.backpack.drop"]).toBe("backpack.drop");
     expect(SSE_EVENT_NAMES["agent.backpack.read"]).toBe("backpack.read");
@@ -58,8 +59,8 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.scratchpad.join"]).toBe("scratchpad.join");
   });
 
-  it("has exactly 28 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(28);
+  it("has exactly 29 mappings", () => {
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(29);
   });
 });
 
@@ -82,6 +83,28 @@ describe("formatSSE", () => {
     expect(data.chunk_index).toBe(0);
     expect(data.traceId).toBe("trace-1");
     expect(data.timestamp).toBeDefined();
+  });
+
+  it("formats input.request with snake_case correlation + tool context", () => {
+    const event = createEvent("agent.input.request", {
+      ...baseFields,
+      correlationId: "call-9",
+      kind: "approval",
+      prompt: 'Approve "ratify_definition"?',
+      toolName: "ratify_definition",
+      toolCallId: "call-9",
+      arguments: { id: "def-1" },
+    });
+    const result = formatSSE(event);
+    expect(result).not.toBeNull();
+    const { event: name, data } = parseSSE(result!);
+    expect(name).toBe("input.request");
+    expect(data.correlation_id).toBe("call-9");
+    expect(data.kind).toBe("approval");
+    expect(data.prompt).toBe('Approve "ratify_definition"?');
+    expect(data.tool_name).toBe("ratify_definition");
+    expect(data.tool_call_id).toBe("call-9");
+    expect(data.arguments).toEqual({ id: "def-1" });
   });
 
   it("formats message.complete", () => {

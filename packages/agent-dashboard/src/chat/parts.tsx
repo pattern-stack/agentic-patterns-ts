@@ -2,8 +2,9 @@
  * Part renderers — one component per `Part` kind, plus a dispatcher. Adding a
  * new part kind = add a case here; nothing else changes.
  */
-import { Fragment, useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { CodeBlock, Cursor, Markdown } from "./atoms";
+import { type InputAnswer, useInputResponder } from "./input-responder";
 import type { Part } from "./model";
 import type { StateDeltaPart as StateDelta } from "./state-accessors";
 
@@ -308,6 +309,113 @@ function AgentStepPart({
         )}
       </div>
     </details>
+  );
+}
+
+/* ── human-input request (approval / select / text) ──────────────────────────*/
+function InputRequestPart({ part }: { part: Extract<Part, { kind: "input_request" }> }) {
+  const respond = useInputResponder();
+  const [answered, setAnswered] = useState<InputAnswer | null>(null);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const answer = async (a: InputAnswer) => {
+    if (answered || busy || !respond) return;
+    setBusy(true);
+    try {
+      await respond(part.correlationId, a);
+      setAnswered(a);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const args = fmt(part.arguments);
+  const resolved =
+    answered &&
+    (answered.decision === "deny"
+      ? "⊘ Denied"
+      : answered.value !== undefined
+        ? `✓ ${answered.value}`
+        : "✓ Approved");
+
+  return (
+    <div className={`chat-approval${answered ? " resolved" : ""}`}>
+      <div className="approval-head">
+        <span aria-hidden>⏸</span>
+        <span className="approval-prompt">{part.prompt}</span>
+        {part.toolName && <span className="approval-tool">{part.toolName}</span>}
+      </div>
+      {args && (
+        <div className="approval-args">
+          <CodeBlock text={args} copyable maxHeight={140} />
+        </div>
+      )}
+      {resolved ? (
+        <div className="approval-resolved">{resolved}</div>
+      ) : !respond ? (
+        <div className="approval-readonly">Awaiting a decision (read-only view).</div>
+      ) : part.inputKind === "select" ? (
+        <div className="approval-actions">
+          {(part.options ?? []).map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              className="approval-btn"
+              disabled={busy}
+              onClick={() => answer({ decision: "approve", value: opt })}
+            >
+              {opt}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="approval-btn deny"
+            disabled={busy}
+            onClick={() => answer({ decision: "deny" })}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : part.inputKind === "text" ? (
+        <form
+          className="approval-actions"
+          onSubmit={(e) => {
+            e.preventDefault();
+            answer({ decision: "approve", value: text });
+          }}
+        >
+          <input
+            className="approval-input"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Type a response…"
+          />
+          <button type="submit" className="approval-btn" disabled={busy || !text.trim()}>
+            Send
+          </button>
+        </form>
+      ) : (
+        <div className="approval-actions">
+          <button
+            type="button"
+            className="approval-btn approve"
+            disabled={busy}
+            onClick={() => answer({ decision: "approve" })}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            className="approval-btn deny"
+            disabled={busy}
+            onClick={() => answer({ decision: "deny" })}
+          >
+            Deny
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -821,6 +929,8 @@ export function PartView({
       return <ToolCallPart part={part} />;
     case "agent_step":
       return <AgentStepPart part={part} role={role} streaming={streaming} />;
+    case "input_request":
+      return <InputRequestPart part={part} />;
     case "state_delta":
       return <StateDeltaPart part={part} />;
     case "state_group":
