@@ -14,6 +14,7 @@
 
 import { ZodString, type ZodType } from "zod";
 import type { AgentLike } from "../runner/agent-runner.js";
+import { deriveToolboxExecutor } from "../runner/toolbox-executor.js";
 import type { RunOptions, RunnerProtocol } from "../runner/types.js";
 import { applyStepModel } from "./base.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
@@ -111,8 +112,19 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
     const agent = applyStepModel(this.spec.agent, this.spec.model);
     const runner = this.spec.runner ?? ctx.runner; // #116
     const message = this.spec.prompt(input, slotReader(ctx.scratchpad));
+    // An AgentStep leaf gets no executor for its OWN tools unless one is handed
+    // to it: `nodeTool` correctly re-roots the sub-run ctx WITHOUT a toolExecutor
+    // (a subagent must run its own tools, not the parent's), and a bare
+    // pipeline never sets one. So the running agent's tool calls silently return
+    // "No tool executor configured" and it answers "data unavailable". Fix:
+    // when no executor is ambient, DERIVE one from the agent we are about to run
+    // (its tools ARE its own capabilities). An explicitly-passed executor always
+    // wins (e.g. CoordinatorStep's team executor covering team + direct tools);
+    // a capability-less agent derives `undefined`, keeping the no-tools path
+    // byte-identical.
+    const toolExecutor = ctx.toolExecutor ?? deriveToolboxExecutor(agent);
     const opts: RunOptions = {
-      toolExecutor: ctx.toolExecutor,
+      toolExecutor,
       maxIterations: this.spec.maxIterations,
       traceId: ctx.traceId,
       parentSpanId: ctx.parentSpanId,

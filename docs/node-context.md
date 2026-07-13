@@ -202,6 +202,46 @@ then it's captured, not inherited). #99 makes it ambient.
 
 ---
 
+## `toolExecutor` at the same seam — **derive, don't forward**
+
+`toolExecutor` is the third `NodeRunContext` field that meets the runner → tool boundary
+(`node.ts:32`), and it exposed the same class of bug as #99: a delegated subagent got **no executor
+for its OWN tools**. The coordinator's LLM routes to the subagent fine (the team executor
+`CoordinatorStep` derives covers the *team* tools one level up), but when the subagent's own LLM then
+calls one of *its* tools, every call returned `{ error: "No tool executor configured" }` and the
+subagent answered "data unavailable". Root cause: `nodeTool` re-roots the sub-run ctx **without** a
+`toolExecutor` (correctly — see below), and `AgentStep` only forwarded `ctx.toolExecutor`, never
+deriving one from the agent it runs.
+
+The resolution is the **opposite** of #99/#102's. Trace, scratchpad, and deps are *parent run state*
+that must be **forwarded** across the seam because they can't be reconstructed. A `toolExecutor` is
+**not** parent state — it is a pure function of the agent (`createToolboxExecutor(agent)`), and each
+agent needs **its own**: forwarding the coordinator's executor to a subagent would wrongly expose the
+coordinator's tools instead of the subagent's. That is exactly *why* `nodeTool` does not forward
+`toolExecutor` — and the fix is not to start forwarding it, but to **derive** it at the leaf:
+
+```ts
+// agent-step.ts — AgentStep.run
+const toolExecutor = ctx.toolExecutor ?? deriveToolboxExecutor(agent);
+```
+
+- **Explicit wins.** An executor already in `ctx.toolExecutor` (e.g. `CoordinatorStep`'s team
+  executor, covering team + the coordinator's direct tools) is used verbatim — `deriveToolboxExecutor`
+  never runs. `CoordinatorStep` is unchanged and byte-identical.
+- **Capability-less is byte-identical.** `deriveToolboxExecutor` returns `undefined` when the agent
+  has no capabilities (a structural, non-`instanceof` check — the repo's dual-core makes `instanceof
+  Agent` unreliable across the package boundary), so `RunOptions.toolExecutor` stays unset exactly as
+  before. A tool-less agent can't emit a tool call anyway.
+- **General, not seam-local.** Because the derivation lives in `AgentStep` (the one node that holds a
+  concrete agent), it fixes *every* AgentStep leaf — not just `delegateTo`, but any bare
+  `Sequential`/`Parallel`/`Loop` of agents that carry their own capabilities. Behavioral note:
+  tool calls in such bare pipelines that were **silently no-ops** now execute — intended.
+
+This is the last of the three boundary fields to be reconciled: trace rides the rail (#102),
+scratchpad/deps ride the rail (#99), and the executor is derived per-agent at the leaf.
+
+---
+
 ## Deferred-with-intent: AgentNode ↔ Node-world consolidation
 
 We have **two agent-orchestration paradigms**, and they overlap at the continuity layer:
