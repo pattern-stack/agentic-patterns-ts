@@ -136,7 +136,51 @@ Gate types: `SafetyGate`, `HumanApprovalGate`, `RateLimitGate`, `AuditGate`
 
 ### Workflows (`src/workflows/`)
 
-Composable workflow patterns for multi-step and iterative agent execution. All patterns implement `PatternProtocol` and share common types.
+Composable workflow patterns for multi-step and iterative agent execution: the typed `Node` layer (below) and the original string-pinned pattern layer (further down).
+
+#### Typed Node compositions
+
+Everything implements one contract — `Node<TIn, TOut>` (`run(input, ctx)` → `{ output, succeeded, error?, totalInputTokens, totalOutputTokens }`) — so leaves and composites nest freely: `AgentStep` (LLM leaf, structured output by default), `FunctionStep` (deterministic glue), typed `Sequential`/`Parallel`/`FanOut`/`Loop`/`Retry`/`Accumulate`, `CoordinatorStep` (a model-driven coordinator as a leaf), and the run-scoped `Scratchpad` slot store.
+
+##### sequentialAgent
+
+Agents AND nodes in sequence over one implicitly shared Scratchpad. Stage knobs: `name` / `output` / `prompt` / `slot` / `onEmit` / `stop` / `reads` / `writes` / `retry` / `input`. Per-stage tool executors derive from each agent's own capabilities.
+
+```typescript
+import { type Node, FunctionStep, sequentialAgent } from "@agentic-patterns/runtime";
+
+// Untyped: Node<unknown, SequentialAgentResult> — { outputs, stopped }
+const pipeline = sequentialAgent([interpretAgent, { agent: judge, output: Verdict }]);
+
+// Typed: a COMPOSITE-designated emitting stage types the node — the output IS
+// that stage's emission, zero casts. input:'prior' hands a node stage the
+// previous stage's emission (the compiler-checked spine → tail seam).
+const typed: Node<string, Contract> = sequentialAgent<Contract, string>(
+  [{ node: coordinatorSpine }, { node: answerTail, input: "prior" }],
+  { emit: "answer" }, // type arguments REQUIRE emit; there is no stage-level marker
+);
+```
+
+##### parallelAgent
+
+Fixed, NAMED branches fanned out over a shared input (`FanOut` remains the tool for dynamic-N over runtime lists). Deterministic index-order join keyed by branch name; leaf-never-throws is lifted into the join — a failed branch becomes a `{ succeeded: false, error }` outcome while the composite still succeeds (check `failed.length` to hard-fail). Stop policy is complete-all: a branch's `stop` is a first-in-index-order signal, never a cancellation.
+
+```typescript
+const sections = parallelAgent<{ overview: string; pricing: Pricing }>(
+  [
+    { agent: overviewDrafter, prompt: (_state, input) => `overview for: ${input}` },
+    { agent: pricingDrafter, output: PricingShape },
+  ],
+  { maxConcurrency: 2 },
+);
+// → Node<unknown, ParallelAgentResult<…>>: { branches, failed, stopped }
+```
+
+Full semantics (stop lanes, emission slots, build-time race guards) live in the module docs: `src/workflows/sequential-agents.ts`, `src/workflows/parallel-agents.ts`.
+
+#### Legacy string-pinned patterns
+
+The original pattern layer. All patterns implement `PatternProtocol` and share common types.
 
 #### Base Types
 

@@ -170,7 +170,48 @@ exporter.stop();
 ## Workflows
 
 The workflow layer provides composable patterns for multi-step and
-iterative agent execution.
+iterative agent execution. Everything below composes through one typed
+contract — `Node<TIn, TOut>` — so leaves and composites nest freely.
+
+### sequentialAgent -- agents and nodes in sequence, typed end to end
+
+Stages share one Scratchpad, each later stage's prompt implicitly carries
+the prior emission, and per-stage tool executors derive from each agent's
+own capabilities. A stage may be a bare agent, a spec with knobs
+(`output`/`slot`/`onEmit`/`stop`/`retry`/…), or a `{ node }` — a
+`CoordinatorStep` spine, a deterministic `FunctionStep` tail.
+
+```typescript
+import { type Node, sequentialAgent } from "@agentic-patterns/runtime";
+
+// A COMPOSITE-designated emitting stage types the pipeline: its output IS
+// that stage's emission (zero casts), and input:'prior' hands the tail the
+// spine's emission — a compiler-checked seam, no nullable slot read.
+const pipeline: Node<string, AnswerContract> = sequentialAgent<AnswerContract, string>(
+  [{ node: coordinatorSpine }, { node: answerTail, input: "prior" }],
+  { emit: "answer" },
+);
+```
+
+### parallelAgent -- fixed-branch fan-out with a deterministic join
+
+Named branches over a shared input, joined in declaration order. A failed
+branch becomes a `{ succeeded: false, error }` outcome inside the join —
+one bad branch never fails the fan-out. (`FanOut` remains the tool for
+dynamic-N over runtime lists.)
+
+```typescript
+import { parallelAgent } from "@agentic-patterns/runtime";
+
+const sections = parallelAgent<{ overview: string; pricing: Pricing }>(
+  [
+    { agent: overviewDrafter },
+    { agent: pricingDrafter, output: PricingShape },
+  ],
+  { maxConcurrency: 2 },
+);
+// → Node<unknown, ParallelAgentResult<…>>: { branches, failed, stopped }
+```
 
 ### Sequential -- chain agents in order
 
@@ -342,7 +383,7 @@ Capability = Toolbox + Manual + Playbook
 | 7 | runtime | `src/runner/` | AgentRunner (Vercel AI SDK), MockRunner, ClaudeCodeRunner |
 | 8 | runtime | `src/transport/` | InProcessTransport, MessagingToolbox |
 | 9 | runtime | `src/runtime/` | AgentNode, AgencyRuntime |
-| 10 | runtime | `src/workflows/` | Sequential, Parallel, TaskLoop, EvaluatorLoop, RetryLoop, ConversationLoop |
+| 10 | runtime | `src/workflows/` | sequentialAgent, parallelAgent, Sequential, Parallel, FanOut, Loop, Retry, TaskLoop, EvaluatorLoop, ConversationLoop |
 | 11 | runtime | `src/conversation/` | Conversation, ConversationStore, InMemoryConversationStore |
 | 12 | runtime | `src/exporters/` | Console, Langfuse, OpenTelemetry |
 | 13 | runtime | `src/presets/` | Pre-built roles, judgments, responsibilities |
