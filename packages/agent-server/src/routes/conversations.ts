@@ -210,6 +210,13 @@ export function conversationRoutes(
       // never bleeds in. The client answers via `POST /conversations/:id/input`
       // (below), which resolves the registry and unblocks the gate.
       let turnTraceId: string | undefined;
+      // The turn's TOP-LEVEL run id — the id `RunStoreExporter` keys the run
+      // row by, i.e. the FIRST `agent.message.start`'s runId (the conversation
+      // wrapper stamps its own runId on `conversation.start`, which never gets
+      // a row; nested sub-agent runs carry their own). Emitted on the `done`
+      // frame so the client can link straight to this turn's persisted trace
+      // (`/run?run=<id>`) without waiting for the session store to round-trip.
+      let turnRunId: string | undefined;
       const pendingForTurn = new Set<string>();
       const onInputRequest = async (ev: BaseEvent): Promise<void> => {
         const e = ev as AgentEvent;
@@ -225,13 +232,19 @@ export function conversationRoutes(
       try {
         for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
           turnTraceId ??= event.traceId;
+          if (turnRunId === undefined && event.type === "agent.message.start") {
+            turnRunId = event.runId;
+          }
           const msg = agentEventToSSE(event);
           if (msg) {
             await stream.writeSSE(msg);
           }
         }
 
-        await stream.writeSSE({ event: "done", data: "{}" });
+        await stream.writeSSE({
+          event: "done",
+          data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
+        });
       } finally {
         eventBus.unsubscribe("agent.input.request", onInputRequest);
         // Fail closed: if the client disconnects mid-approval, deny any of THIS

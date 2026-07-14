@@ -44,6 +44,13 @@ export interface UseChatResult {
    * Purely additive — no existing consumer of `useChat` reads this field.
    */
   traceEvents: EventLike[];
+  /**
+   * The persisted run id of the most recent COMPLETED live turn — from the
+   * `done` frame's `run_id` (the turn's top-level run, written by
+   * `RunStoreExporter`). Null until a turn finishes, reset on every `send()`.
+   * Feeds the trace rail's "Full trace" deep link (`/run?run=<id>`).
+   */
+  lastRunId: string | null;
 }
 
 export function useChat(agentId: string | null, runOptions?: SendOptions): UseChatResult {
@@ -52,6 +59,7 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [traceEvents, setTraceEvents] = useState<EventLike[]>([]);
+  const [lastRunId, setLastRunId] = useState<string | null>(null);
   const convIdRef = useRef<string | null>(null);
   // keep run options current without re-creating `send` each render.
   const runOptionsRef = useRef<SendOptions | undefined>(runOptions);
@@ -80,6 +88,7 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
       ]);
       setStreaming(true);
       setTraceEvents([]); // this turn's trace rail starts fresh
+      setLastRunId(null);
       const ctrl = new AbortController();
       abortRef.current = ctrl;
 
@@ -94,6 +103,9 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
         }
 
         for await (const ev of streamMessage(convId, q, runOptionsRef.current, ctrl.signal)) {
+          if (ev.name === "done" && typeof ev.data.run_id === "string") {
+            setLastRunId(ev.data.run_id);
+          }
           const e = toEventLike(ev);
           setTraceEvents((prev) => [...prev, e]);
           patch(assistantId, (m) => {
@@ -133,6 +145,7 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     setStreaming(false);
     setError(null);
     setTraceEvents([]);
+    setLastRunId(null);
   }, []);
 
   return {
@@ -145,5 +158,6 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     abort,
     reset,
     traceEvents,
+    lastRunId,
   };
 }

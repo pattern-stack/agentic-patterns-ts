@@ -24,6 +24,7 @@
  * the raw event log + free-form chat.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   type AgentCompositionDetail,
   type AgentSummary,
@@ -263,6 +264,12 @@ export function RunSurfacePage() {
 
   const convIdRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Deep link (?run=<id>) — the chat trace rail's "Full ↗" link lands here.
+  // `appliedRunParamRef` distinguishes an EXTERNAL param change (navigate /
+  // paste a link → load that run) from our own write-backs after an in-page
+  // pick (which must not re-trigger a redundant fetch).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const appliedRunParamRef = useRef<string | null>(null);
   // Monotonic pick-token: rapid-clicking two run chips fires two concurrent
   // `pickRun` calls whose `Promise.all` can resolve in EITHER order — without
   // this, the last one to RETURN wins the state commit, not the last one
@@ -320,38 +327,61 @@ export function RunSurfacePage() {
   // its events, adapt through persistedToEventLike, and idle at cursor -1 (the
   // engine resets on runKey change) — Play replays through the untouched
   // buildGraph -> eventsToSteps -> useRunReplay stack.
-  const pickRun = useCallback(async (runId: string) => {
-    const token = ++pickTokenRef.current;
-    abortRef.current?.abort();
-    setStreaming(false);
-    setLiveEvents([]);
-    setError(null);
-    setReplayLoading(true);
-    try {
-      const [runRes, eventsRes] = await Promise.all([fetchRun(runId), fetchRunEvents(runId)]);
-      // A newer pickRun call started after this one — its resolution (or a
-      // still-pending one) owns the state now; drop this stale result.
-      if (token !== pickTokenRef.current) return;
-      if (runRes.kind === "unconfigured" || eventsRes.kind === "unconfigured") {
-        setError("run history is not configured on this server");
-        return;
+  const pickRun = useCallback(
+    async (runId: string) => {
+      const token = ++pickTokenRef.current;
+      abortRef.current?.abort();
+      setStreaming(false);
+      setLiveEvents([]);
+      setError(null);
+      setReplayLoading(true);
+      try {
+        const [runRes, eventsRes] = await Promise.all([fetchRun(runId), fetchRunEvents(runId)]);
+        // A newer pickRun call started after this one — its resolution (or a
+        // still-pending one) owns the state now; drop this stale result.
+        if (token !== pickTokenRef.current) return;
+        if (runRes.kind === "unconfigured" || eventsRes.kind === "unconfigured") {
+          setError("run history is not configured on this server");
+          return;
+        }
+        if (runRes.kind === "not-found" || eventsRes.kind === "not-found") {
+          setError(`run "${shortId(runId)}" was not found (it may have expired)`);
+          return;
+        }
+        const events = eventsRes.data.events.map(persistedToEventLike);
+        setReplayRun({ run: runRes.data, events });
+        setRunKey(runId);
+        setSelectedNodeId(null);
+        // keep the URL shareable — an in-page pick and a followed deep link
+        // should leave the address bar in the same state.
+        appliedRunParamRef.current = runId;
+        setSearchParams(
+          (prev) => {
+            prev.set("run", runId);
+            return prev;
+          },
+          { replace: true },
+        );
+      } catch (e) {
+        if (token === pickTokenRef.current) {
+          setError(e instanceof Error ? e.message : "Failed to load run");
+        }
+      } finally {
+        if (token === pickTokenRef.current) setReplayLoading(false);
       }
-      if (runRes.kind === "not-found" || eventsRes.kind === "not-found") {
-        setError(`run "${shortId(runId)}" was not found (it may have expired)`);
-        return;
-      }
-      const events = eventsRes.data.events.map(persistedToEventLike);
-      setReplayRun({ run: runRes.data, events });
-      setRunKey(runId);
-      setSelectedNodeId(null);
-    } catch (e) {
-      if (token === pickTokenRef.current) {
-        setError(e instanceof Error ? e.message : "Failed to load run");
-      }
-    } finally {
-      if (token === pickTokenRef.current) setReplayLoading(false);
-    }
-  }, []);
+    },
+    [setSearchParams],
+  );
+
+  // Apply an EXTERNAL ?run=<id> (initial mount via the chat rail's "Full ↗"
+  // link, a pasted URL, or an in-app <Link> while already on /run). Our own
+  // write-backs above set `appliedRunParamRef` first, so they no-op here.
+  const runParam = searchParams.get("run");
+  useEffect(() => {
+    if (!runParam || runParam === appliedRunParamRef.current) return;
+    appliedRunParamRef.current = runParam;
+    void pickRun(runParam);
+  }, [runParam, pickRun]);
 
   // Return to the demo sample trace (port-map §3.4 acceptance: "switch back
   // to demo" — there was previously NO way back short of a full reload).
@@ -364,7 +394,15 @@ export function RunSurfacePage() {
     setRunKey("demo");
     setSelectedNodeId(null);
     setError(null);
-  }, []);
+    appliedRunParamRef.current = null;
+    setSearchParams(
+      (prev) => {
+        prev.delete("run");
+        return prev;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
 
   // fetch the selected agent's declared composition (for composition mode) + its
   // full introspection with per-slot provenance (for the inspector's Provenance tab)
@@ -460,6 +498,15 @@ export function RunSurfacePage() {
       setSentMsg(content);
       setLiveEvents([]);
       setReplayRun(null); // a fresh send always supersedes any picked replay
+      // …and the URL follows: a stale ?run= would reload the OLD run on refresh.
+      appliedRunParamRef.current = null;
+      setSearchParams(
+        (prev) => {
+          prev.delete("run");
+          return prev;
+        },
+        { replace: true },
+      );
       setRunKey(String(Date.now()));
       setStreaming(true);
       setInput("");
@@ -480,7 +527,7 @@ export function RunSurfacePage() {
         setStreaming(false);
       }
     },
-    [selectedId, streaming, refreshRuns],
+    [selectedId, streaming, refreshRuns, setSearchParams],
   );
 
   const selectAgent = (id: string) => {

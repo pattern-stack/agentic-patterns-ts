@@ -19,6 +19,7 @@
  * sits above both, without either needing to know about the other.
  */
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { buildToolIndex } from "../graph/composition";
 import { type EventLike, eventsToSteps, persistedToEventLike } from "../graph/trace-from-events";
 import type { TraceStep } from "../graph/types";
@@ -36,7 +37,14 @@ const LENS_OPTIONS: { value: LensMode; label: string }[] = [
 ];
 
 export type TraceRailSource =
-  | { kind: "live"; events: EventLike[]; streaming: boolean }
+  | {
+      kind: "live";
+      events: EventLike[];
+      streaming: boolean;
+      /** The completed turn's persisted run id (useChat `lastRunId`) — feeds
+       *  the "Full ↗" deep link. Null/absent until the turn finishes. */
+      runId?: string | null;
+    }
   | { kind: "replay"; runId: string | null };
 
 function Hint({ children }: { children: React.ReactNode }) {
@@ -100,6 +108,11 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
       ? eventsToSteps(source.events, TOOL_INDEX, { terminal: !source.streaming })
       : replaySteps;
 
+  // Deep link to the full-page trace explorer (/run?run=<id>) — the rail is a
+  // glance surface; the explorer owns scrubbing, the constellation, and the
+  // node inspector. Live turns link once complete (runId arrives on `done`).
+  const fullTraceRunId = (source.kind === "live" ? (source.runId ?? null) : source.runId) || null;
+
   return (
     <aside
       style={{
@@ -136,6 +149,21 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
         >
           Trace{steps ? ` (${steps.length})` : ""}
         </span>
+        {fullTraceRunId && (
+          <Link
+            to={`/run?run=${encodeURIComponent(fullTraceRunId)}`}
+            title="Open this run in the full trace explorer"
+            style={{
+              fontSize: "var(--fz-tiny)",
+              fontWeight: 600,
+              color: "var(--accent-ink)",
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Full ↗
+          </Link>
+        )}
         <Segmented
           options={LENS_OPTIONS}
           value={lens}
@@ -164,7 +192,7 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
           // Keyed by run identity: seq restarts at 1 per run, so an unkeyed
           // waterfall would carry row-expand state from one run into the next.
           (lens === "waterfall" ? (
-            <TraceWaterfall key={replayRunId ?? "live"} steps={steps} />
+            <TraceWaterfall key={replayRunId ?? "live"} steps={steps} layout="narrow" />
           ) : (
             <TraceLog key={replayRunId ?? "live"} steps={steps} />
           ))}
