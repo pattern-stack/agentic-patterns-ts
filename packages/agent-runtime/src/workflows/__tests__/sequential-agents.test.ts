@@ -17,6 +17,8 @@ import type {
   StructuredRunResult,
 } from "../../runner/types.js";
 import type { PatternHooks } from "../base.js";
+import { FunctionStep } from "../function-step.js";
+import type { Node, NodeResult, NodeRunContext } from "../node.js";
 import { ObservedScratchpad } from "../observed-scratchpad.js";
 import { renderSharedState, sequentialAgent } from "../sequential-agents.js";
 import { createScratchpad, slot } from "../slot.js";
@@ -661,5 +663,257 @@ describe("sequentialAgent: innate prompt-read frames (#226)", () => {
     expect(res.succeeded).toBe(true);
     const reads = scratchpadReadsOf(events);
     expect(reads.map((r) => [r.key, r.origin])).toEqual([["kept.note", "explicit"]]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Node stages — a stage that already IS a Node (CoordinatorStep, FunctionStep,
+// a nested sequential) participates without an AgentStep wrap.
+// ---------------------------------------------------------------------------
+
+/**
+ * A minimal `CoordinatorStep`-shaped spine: a Node that drives an agent through
+ * the ctx runner (the real one delegates to a team) and reports its tokens.
+ * Enough to prove a coordinator can BE the sequence's spine — the case that
+ * previously forced consumers off `sequentialAgent` onto the raw builder.
+ */
+function miniCoordinator(name: string): Node<unknown, string> {
+  return {
+    name,
+    async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<string>> {
+      const r = await ctx.runner.run(makeAgent(name), `COORDINATE[${String(input)}]`);
+      return {
+        output: r.response,
+        succeeded: true,
+        totalInputTokens: r.inputTokens,
+        totalOutputTokens: r.outputTokens,
+      };
+    },
+  };
+}
+
+describe("sequentialAgent: node stages", () => {
+  it("a FunctionStep mid-stage is a first-class stage: pipeline input in, pad readable, emission → slot → onEmit → the next stage's render", async () => {
+    const runner = new MockRunner()
+      // Registered FIRST: fires ONLY if the node stage's emission reached stage 3's render.
+      .addResponse("ENRICHED:FINDING", { content: "SAW-THE-TAIL" })
+      .addResponse("the task", { content: "FINDING" });
+
+    const finding = slot<string | null>({ key: "finder.out", scope: "run", init: () => null });
+    const enriched = slot<string | null>({ key: "enrich.out", scope: "run", init: () => null });
+    const derived = slot<number | null>({ key: "derived.len", scope: "run", init: () => null });
+    const pad = createScratchpad();
+    const seen: unknown[] = [];
+
+    const enrich = new FunctionStep<unknown, string>({
+      name: "enrich",
+      // The node gets the PIPELINE input (like every stage) and reads what the
+      // chain established off the PAD — it has no prompt render.
+      fn: (input, p) => {
+        seen.push(input);
+        return `ENRICHED:${p.get(finding)}`;
+      },
+    });
+
+    const node = sequentialAgent([
+      { agent: makeAgent("finder"), slot: finding },
+      {
+        node: enrich,
+        slot: enriched,
+        onEmit: (out: string, p) => void p.set(derived, out.length),
+      },
+      makeAgent("concluder"),
+    ]);
+    const res = await node.run("the task", { runner, scratchpad: pad });
+
+    expect(res.succeeded).toBe(true);
+    expect(seen).toEqual(["the task"]); // the pipeline input, not the prior emission
+    expect(res.output.outputs).toEqual({
+      finder: "FINDING",
+      enrich: "ENRICHED:FINDING",
+      concluder: "SAW-THE-TAIL",
+    });
+    expect(pad.get(enriched)).toBe("ENRICHED:FINDING"); // emission landed in its slot
+    expect(pad.get(derived)).toBe("ENRICHED:FINDING".length); // onEmit's follow-through ran
+  });
+
+  it("a BARE Node in the stages array seats as a node stage (an AgentLike still seats as an agent)", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const tail = new FunctionStep<unknown, string>({ name: "tail", fn: () => "TAIL-RAN" });
+
+    const res = await sequentialAgent([makeAgent("lead"), tail]).run("go", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs).toEqual({ lead: "OUT", tail: "TAIL-RAN" });
+  });
+
+  it("stop() on a node stage short-circuits: later stages never run", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "SHOULD-NEVER-RUN" });
+    const gate = new FunctionStep<unknown, { ok: boolean }>({
+      name: "gate",
+      fn: () => ({ ok: false }),
+    });
+
+    const node = sequentialAgent([
+      {
+        node: gate,
+        stop: (out: { ok: boolean }) => (out.ok ? null : "refuse: nothing resolved"),
+      },
+      makeAgent("curate"),
+    ]);
+    const res = await node.run("q", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output.stopped).toEqual({ stage: "gate", reason: "refuse: nothing resolved" });
+    expect(res.output.outputs.curate).toBeUndefined();
+  });
+
+  it("a coordinator-shaped Node is the SPINE: it runs its own agent, rolls tokens up, and feeds the deterministic tail", async () => {
+    const runner = new MockRunner().addResponse("COORDINATE[", {
+      content: "PLAN-DONE",
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+    const answer = slot<string | null>({ key: "coord.out", scope: "run", init: () => null });
+
+    const node = sequentialAgent([
+      { node: miniCoordinator("coordinate"), slot: answer },
+      {
+        node: new FunctionStep<unknown, string>({
+          name: "render",
+          fn: (_i, p) => `ANSWER(${p.get(answer)})`,
+        }),
+      },
+    ]);
+    const res = await node.run("who owns it?", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output.outputs).toEqual({ coordinate: "PLAN-DONE", render: "ANSWER(PLAN-DONE)" });
+    expect(res.totalInputTokens).toBe(7); // the node's tokens roll into the sequence
+    expect(res.totalOutputTokens).toBe(3);
+  });
+
+  it("output on a node stage ASSERTS the node's result (emission verbatim); a mismatch fails the stage and `retry` re-runs it", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const Shape = z.object({ verdict: z.string() }); // non-strict: extra keys survive the assert
+
+    // Passes the assert — and the emission is the node's OWN output, NOT the
+    // zod-parsed value (`extra` would be stripped by a parse).
+    const ok = sequentialAgent([
+      {
+        node: new FunctionStep<unknown, { verdict: string; extra: number }>({
+          name: "judge",
+          fn: () => ({ verdict: "yes", extra: 1 }),
+        }),
+        output: Shape,
+      },
+    ]);
+    const okRes = await ok.run("go", { runner });
+    expect(okRes.succeeded).toBe(true);
+    expect(okRes.output.outputs.judge).toEqual({ verdict: "yes", extra: 1 });
+
+    // Fails the assert → the stage fails BEFORE emitting, so `retry` re-runs the
+    // node on a fresh attempt; the second attempt conforms and the run succeeds.
+    let attempts = 0;
+    const flaky = sequentialAgent([
+      {
+        node: new FunctionStep<unknown, unknown>({
+          name: "judge",
+          fn: () => {
+            attempts += 1;
+            return attempts === 1 ? { verdict: 42 } : { verdict: "recovered" };
+          },
+        }),
+        output: Shape,
+        retry: 1,
+      },
+    ]);
+    const retried = await flaky.run("go", { runner });
+    expect(attempts).toBe(2);
+    expect(retried.succeeded).toBe(true);
+    expect(retried.output.outputs.judge).toEqual({ verdict: "recovered" });
+
+    // Exhausted → the schema failure surfaces on the sequence.
+    const bad = sequentialAgent([
+      {
+        node: new FunctionStep<unknown, unknown>({ name: "judge", fn: () => ({ verdict: 42 }) }),
+        output: Shape,
+      },
+    ]);
+    const badRes = await bad.run("go", { runner });
+    expect(badRes.succeeded).toBe(false);
+    expect(badRes.error?.message).toContain("failed its `output` schema");
+  });
+
+  it("a failing node stage fails the sequence (leaf contract unchanged)", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const boom = new FunctionStep<unknown, never>({
+      name: "boom",
+      fn: () => {
+        throw new Error("tail exploded");
+      },
+    });
+    const res = await sequentialAgent([boom, makeAgent("never")]).run("go", { runner });
+
+    expect(res.succeeded).toBe(false);
+    expect(res.error?.message).toContain("tail exploded");
+  });
+
+  it("publishes the stage's step.start/end pair and tags its emission write innate — no agentName (there is no agent)", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const { bus, events } = captureBus();
+    const pad = new ObservedScratchpad(createStateEmitter(bus, { traceId: "t-1", runId: "r-1" }));
+
+    const node = sequentialAgent([
+      { node: new FunctionStep<unknown, string>({ name: "tail", fn: () => "TAIL" }) },
+    ]);
+    const res = await node.run("go", {
+      runner,
+      scratchpad: pad,
+      eventBus: bus,
+      traceId: "t-1",
+      runId: "r-1",
+    });
+
+    expect(res.succeeded).toBe(true);
+    const starts = stepStarts(events);
+    const ends = stepEnds(events);
+    expect(starts.map((s) => s.stepName)).toEqual(["tail"]); // default name = the node's name
+    expect(starts[0]!.agentName).toBeUndefined();
+    expect(ends[0]!.spanId).toBe(starts[0]!.spanId);
+    expect(ends[0]!.result).toBe("TAIL");
+    const writes = events.filter(
+      (e) => e.type === "agent.scratchpad.write",
+    ) as ScratchpadWriteEvent[];
+    expect(writes.map((w) => [w.key, w.origin])).toEqual([["agents.tail", "innate"]]);
+  });
+
+  it("build-time guards: exactly one leaf per stage; the AgentStep-only knobs are rejected on a node stage", () => {
+    const fn = new FunctionStep<unknown, string>({ name: "n", fn: () => "x" });
+
+    expect(() => sequentialAgent([{ agent: makeAgent("a"), node: fn }])).toThrow(
+      /sets BOTH `agent` and `node`/,
+    );
+    expect(() => sequentialAgent([{ node: fn, prompt: () => "hi" }])).toThrow(
+      /sets `prompt` on a `node` stage/,
+    );
+    expect(() => sequentialAgent([{ node: fn, maxIterations: 3 }])).toThrow(
+      /sets `maxIterations` on a `node` stage/,
+    );
+    // A stage that seats NO leaf — a `{ name }`-only spec and a stray non-stage
+    // object are the same mistake, and get the same message.
+    expect(() => sequentialAgent([{ name: "empty" }])).toThrow(/sets NEITHER `agent` nor `node`/);
+    expect(() => sequentialAgent([{ nope: true } as unknown as AgentLike])).toThrow(
+      /sets NEITHER `agent` nor `node`/,
+    );
+    // A non-object entry is not a stage at all.
+    expect(() => sequentialAgent(["nope" as unknown as AgentLike])).toThrow(/is not a stage/);
+    // The emission-level knobs are FINE on a node stage.
+    expect(() =>
+      sequentialAgent([
+        { node: fn, slot: slot<string>({ key: "k", scope: "run", init: () => "" }) },
+        { agent: makeAgent("a"), reads: [{ key: "k" }] },
+      ]),
+    ).not.toThrow();
   });
 });
