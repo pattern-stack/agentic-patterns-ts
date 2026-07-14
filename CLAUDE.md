@@ -67,6 +67,10 @@ bun run --filter=@agentic-patterns/core test
 bun run --filter=@agentic-patterns/runtime typecheck
 ```
 
+### Landing changes
+
+`main` is protected (required status: `check`) — **every commit lands via PR**, docs included. Versioning: runtime/server/cli bump in lockstep, core floats independently (`just bump-lockstep` / `bump-core` / `bump-both`); publish fires on merge to `main` when versions changed. Decision records live in `docs/adr/NNNN-*.md`.
+
 ## Tech Stack
 
 - **TypeScript 5.7+** — strict mode compilation
