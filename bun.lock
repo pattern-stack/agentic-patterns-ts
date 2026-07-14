@@ -21,7 +21,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -48,7 +48,7 @@
     },
     "packages/agent-core": {
       "name": "@agentic-patterns/core",
-      "version": "0.9.1",
+      "version": "0.10.0",
       "dependencies": {
         "zod-to-json-schema": "^3.24.0",
       },
@@ -86,7 +86,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/provider": "^2.0.0",
@@ -123,7 +123,7 @@
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.22.0",
+      "version": "0.23.0",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@agentic-patterns/runtime": "workspace:^",
