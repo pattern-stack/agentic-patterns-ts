@@ -87,6 +87,38 @@ export interface PromotedAgent<TIn, TOut> extends AgentLike {
   readonly renderOut: (out: TOut) => string;
   /** Deps bound at promotion time (see {@link PromoteOptions.deps}). */
   readonly deps?: DepReader;
+  /**
+   * The full core `Role` this pipeline was promoted with — DISPLAY ONLY, and
+   * `undefined` when `opts.role` was a bare `{name, description}` shell.
+   *
+   * WHY THIS EXISTS AS A SECOND FIELD (do not "simplify" it away by widening
+   * `role`): display richness and execution semantics are two different
+   * concerns that happened to share one field, and merging them re-opens a
+   * shipped bug.
+   *
+   * - DISPLAY wants the real Role: the server's introspection routes
+   *   (`GET /agents`, `/agents/:id/capabilities`, `/agents/:id/composition`,
+   *   `/roles`, `/capabilities`) read a registration's role to render the
+   *   playground's Build pages. Reading the narrow `{name}` role renders every
+   *   promoted pipeline as an EMPTY agent — no capabilities, no tools, no
+   *   role slots.
+   * - EXECUTION needs `role` to stay NARROW. `AgentStep` arms a nested agent's
+   *   tools via `ctx.toolExecutor ?? deriveToolboxExecutor(agent)`, and
+   *   `deriveToolboxExecutor` keys off `role.capabilities`. The server derives
+   *   a conversation's executor from the REGISTERED agent: a capability-less
+   *   promoted agent yields `undefined`, so each nested `AgentStep` derives its
+   *   OWN executor. If `role` carried the pipeline's capabilities, the server
+   *   would arm an OUTER executor that rides `RunOptions.toolExecutor` →
+   *   `NodeBackedRunner` → `ctx.toolExecutor` and SHADOWS that per-agent
+   *   fallback — silently disarming the inner agents' real tools while traces
+   *   still look healthy. That is exactly the #13 class of bug #241 fixed.
+   *
+   * So: `role` stays `{ name }` and `getTools()` stays `() => []` (execution
+   * honesty); `displayRole` carries the truth for anything that only RENDERS.
+   * Server display reads use `(agent.displayRole ?? agent.role)`; execution
+   * paths (`deriveToolboxExecutor`) deliberately never look at `displayRole`.
+   */
+  readonly displayRole?: Role;
 }
 
 function defaultRenderOut<TOut>(out: TOut): string {
@@ -122,6 +154,9 @@ export function asAgent<TIn, TOut>(
   const systemPrompt = isFullRole(role) ? role.toPrompt() : minimalRoleDescriptor(node, role);
 
   const promoted: PromotedAgent<TIn, TOut> = {
+    // NARROW by design — `deriveToolboxExecutor` keys off `role.capabilities`,
+    // and a promoted pipeline must NOT arm an outer executor (see
+    // {@link PromotedAgent.displayRole} for the full rationale).
     role: { name: roleName },
     getModel: () => model,
     getTools: () => [],
@@ -130,6 +165,8 @@ export function asAgent<TIn, TOut>(
     coerceIn,
     renderOut,
     deps: opts.deps,
+    // The full Role, kept for DISPLAY only (undefined for a `{name}` shell).
+    ...(isFullRole(role) ? { displayRole: role } : {}),
   };
 
   return Object.freeze(promoted);

@@ -9,7 +9,7 @@
 
 import { Hono } from "hono";
 import type { AgentRegistration } from "../config.js";
-import { buildRoleEntries } from "./composition.js";
+import { buildRoleEntries, displayRoleOf } from "./composition.js";
 
 /* Structural view of an agent's declared composition — read without importing the
  * core classes, so any AgentLike (or a looser registration) introspects safely. */
@@ -23,6 +23,8 @@ interface CapabilityLike {
 }
 interface AgentIntrospect {
   role?: { name?: string; capabilities?: ReadonlyArray<CapabilityLike> };
+  /** A promoted pipeline's real Role — DISPLAY only (see `displayRoleOf`). */
+  displayRole?: { name?: string; capabilities?: ReadonlyArray<CapabilityLike> };
   getModel?: () => string;
 }
 
@@ -60,7 +62,9 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
     if (!reg) return c.json({ error: "Agent not found" }, 404);
 
     const a = reg.agent as unknown as AgentIntrospect;
-    const capabilities = (a.role?.capabilities ?? []).map((cap) => ({
+    // Display read — a promoted pipeline's capabilities live on `displayRole`
+    // (its registered `role` is narrow by design; see `displayRoleOf`).
+    const capabilities = (displayRoleOf(a)?.capabilities ?? []).map((cap) => ({
       name: cap.name ?? "capability",
       toolbox: cap.toolbox?.name,
       tools: Object.entries(cap.toolbox?.tools ?? {}).map(([name, def]) => ({
