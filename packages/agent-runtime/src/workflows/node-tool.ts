@@ -132,6 +132,22 @@ export interface SubagentSpec {
   readonly name?: string;
   /** Optional structured output schema; omit for a free-text answer. */
   readonly output?: ZodType<unknown>;
+  /**
+   * Per-subagent execution budget/binding forwarded into the wrapped
+   * {@link AgentStep} — the seam that makes a coordinator host's per-step
+   * budget table (model + iteration caps) bind to delegated subagents.
+   * Without it these are silently the runner defaults. Fields map 1:1 onto
+   * {@link AgentStepSpec}: `model` (per-step model override via
+   * `applyStepModel`), `maxIterations` (forwarded into `RunOptions`), and
+   * `runner` (per-node runner override, `spec.runner ?? ctx.runner`).
+   * (Per-subagent timeout is NOT forwardable today — no `RunOptions.timeout`
+   * plumbing exists; see the PR follow-up note.)
+   */
+  readonly runOptions?: {
+    readonly model?: string;
+    readonly maxIterations?: number;
+    readonly runner?: RunnerProtocol;
+  };
 }
 
 /**
@@ -164,6 +180,12 @@ export function delegateTo(
         agent: sub.agent,
         output: sub.output,
         prompt: (input) => input.task,
+        // Per-subagent budget/binding: bind the coordinator host's per-step
+        // budget table onto the wrapped AgentStep. Left undefined when the
+        // spec carries no runOptions → runner defaults, unchanged behavior.
+        model: sub.runOptions?.model,
+        maxIterations: sub.runOptions?.maxIterations,
+        runner: sub.runOptions?.runner,
       }),
     };
   }
