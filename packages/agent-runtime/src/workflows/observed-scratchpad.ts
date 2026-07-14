@@ -63,6 +63,10 @@ export class ObservedScratchpad extends DefaultScratchpad {
     branchEntries?: Map<string, SlotEntry>,
   ) {
     super(runEntries, branchEntries);
+    // Object-attached brand: lets a DIFFERENT copy of this package (dual-copy
+    // playground: CLI install + consumer node_modules) discover the emitter
+    // where its `instanceof ObservedScratchpad` check fails.
+    brandReaderEmitter(this, emitter);
   }
 
   /**
@@ -111,9 +115,13 @@ export class ObservedScratchpad extends DefaultScratchpad {
    * reads that never see a `ToolExecutionContext`.
    */
   override reader(): ScratchpadReader {
-    const view = super.reader();
+    // Not `super.reader()`: the base view is frozen on construction, which
+    // forces the brand into the same-copy WeakMap fallback. Building the view
+    // here lets the brand ride the object itself (cross-copy discoverable),
+    // THEN freeze — same shape as the base class otherwise.
+    const view = { get: <T>(s: Slot<T>): T => this.get(s) };
     brandReaderEmitter(view, this.emitter);
-    return view;
+    return Object.freeze(view);
   }
 
   override get<T>(s: Slot<T>): T {

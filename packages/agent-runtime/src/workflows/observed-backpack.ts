@@ -56,7 +56,11 @@ import {
 function emitterFromCtx(ctx: ToolExecutionContext | undefined): StateEmitter | undefined {
   const host = ctx?.host as { scratchpad?: unknown } | undefined;
   const pad = host?.scratchpad;
-  return pad instanceof ObservedScratchpad ? pad.emitter : undefined;
+  if (pad instanceof ObservedScratchpad) return pad.emitter;
+  // Dual-copy seam: a pad minted by ANOTHER copy of this package (CLI install
+  // vs consumer node_modules) fails instanceof — the object brand still finds
+  // its emitter. Without this, drops land but emit nothing.
+  return typeof pad === "object" && pad !== null ? readerEmitter(pad) : undefined;
 }
 
 /** Pad-side twin of {@link emitterFromCtx}: the pad itself, or a reader minted

@@ -90,25 +90,47 @@ export function createStateEmitter(
 // ---------------------------------------------------------------------------
 
 /**
- * `ScratchpadReader` → the run's emitter, branded by
- * `ObservedScratchpad.reader()`. Lets pad-side accessors (the observed
- * `readBackpack`) discover the emission context through a read-only view
- * WITHOUT widening the `ScratchpadReader` interface — a reader minted by a
- * plain pad simply isn't in the map, so it stays emission-free.
+ * Pad/reader → the run's emitter, branded by `ObservedScratchpad` (its
+ * constructor brands the pad; `reader()` brands its view). Lets accessors
+ * (the observed `readBackpack`/`openBackpack`) discover the emission context
+ * WITHOUT widening the `ScratchpadReader` interface — an object minted by a
+ * plain pad simply isn't branded, so it stays emission-free.
+ *
+ * The brand rides the object itself under a GLOBAL-REGISTRY symbol
+ * (`Symbol.for`), not only a module-scoped WeakMap: a WeakMap lives per
+ * package COPY, and a playground routinely runs two copies of this package
+ * in one process (the CLI's install and the consumer's node_modules). The
+ * consumer copy's accessor must find the emitter on a pad the CLI copy
+ * minted — `instanceof` and per-copy WeakMaps both fail across that seam and
+ * silently strip observability (drops land, no events emit). The WeakMap
+ * remains only as a same-copy fallback for objects too frozen to carry the
+ * property.
  *
  * Lives here (not in `observed-scratchpad.ts`) so `observed-backpack.ts` can
  * consume it without a circular import.
  */
+const EMITTER_BRAND = Symbol.for("agentic-patterns.state-emitter");
+
 const readerEmitters = new WeakMap<object, StateEmitter>();
 
-/** Brand a reader with its pad's emitter (called by `ObservedScratchpad.reader()`). */
+/** Brand a pad or reader with its emitter (called by `ObservedScratchpad`). */
 export function brandReaderEmitter(reader: object, emitter: StateEmitter): void {
-  readerEmitters.set(reader, emitter);
+  if (Object.isExtensible(reader)) {
+    Object.defineProperty(reader, EMITTER_BRAND, {
+      value: emitter,
+      enumerable: false,
+      configurable: true,
+    });
+  } else {
+    // Frozen/sealed object — same-copy WeakMap is the best we can do.
+    readerEmitters.set(reader, emitter);
+  }
 }
 
-/** The emitter a reader was branded with, if any. */
+/** The emitter a pad/reader was branded with, if any. */
 export function readerEmitter(reader: object): StateEmitter | undefined {
-  return readerEmitters.get(reader);
+  const branded = (reader as Record<symbol, unknown>)[EMITTER_BRAND] as StateEmitter | undefined;
+  return branded ?? readerEmitters.get(reader);
 }
 
 // ---------------------------------------------------------------------------
