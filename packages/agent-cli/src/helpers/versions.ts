@@ -145,13 +145,34 @@ export function isBehind(installed: string | null, latest: string | null): boole
 // Package manager detection
 // ---------------------------------------------------------------------------
 
-/** Infer the package manager from the lockfile at `root` (default npm). */
-export function detectPackageManager(root: string): PackageManager {
-  if (fs.existsSync(path.join(root, "bun.lock")) || fs.existsSync(path.join(root, "bun.lockb")))
+/** The manager owning a lockfile in `dir`, or null if `dir` has none. */
+function managerForLockfileIn(dir: string): PackageManager | null {
+  if (fs.existsSync(path.join(dir, "bun.lock")) || fs.existsSync(path.join(dir, "bun.lockb")))
     return "bun";
-  if (fs.existsSync(path.join(root, "pnpm-lock.yaml"))) return "pnpm";
-  if (fs.existsSync(path.join(root, "yarn.lock"))) return "yarn";
-  return "npm";
+  if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) return "pnpm";
+  if (fs.existsSync(path.join(dir, "yarn.lock"))) return "yarn";
+  if (fs.existsSync(path.join(dir, "package-lock.json"))) return "npm";
+  return null;
+}
+
+/**
+ * Infer the package manager from the nearest lockfile, walking UP from `root`.
+ *
+ * `root` is the nearest package.json dir (see `findProjectRoot`), but in a
+ * workspace/monorepo the lockfile lives at the REPO root — an ancestor of the
+ * package `ap update` runs in. Checking only `root` misses it and wrongly
+ * defaults to npm, which then dies on `workspace:*` deps (`EUNSUPPORTEDPROTOCOL`).
+ * The nearest lockfile wins; npm is the fallback only when none exists upward.
+ */
+export function detectPackageManager(root: string): PackageManager {
+  let dir = path.resolve(root);
+  while (true) {
+    const pm = managerForLockfileIn(dir);
+    if (pm) return pm;
+    const parent = path.dirname(dir);
+    if (parent === dir) return "npm";
+    dir = parent;
+  }
 }
 
 /** The `add <pkg>@latest …` argv for a manager (add = pin the new range). */

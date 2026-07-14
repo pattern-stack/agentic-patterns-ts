@@ -116,4 +116,21 @@ describe("fs-backed helpers", () => {
     fs.writeFileSync(path.join(dir, "bun.lock"), "");
     expect(detectPackageManager(dir)).toBe("bun");
   });
+
+  it("detectPackageManager walks UP to the workspace-root lockfile", () => {
+    // The lockfile lives at the repo root; `ap update` runs in a package dir
+    // below it (apps/backend). A single-dir check would miss it → wrong npm.
+    fs.writeFileSync(path.join(dir, "bun.lock"), "");
+    const pkgDir = path.join(dir, "apps", "backend");
+    fs.mkdirSync(pkgDir, { recursive: true });
+    expect(detectPackageManager(pkgDir)).toBe("bun");
+  });
+
+  it("detectPackageManager lets the NEAREST lockfile win over an ancestor", () => {
+    fs.writeFileSync(path.join(dir, "bun.lock"), ""); // workspace root: bun
+    const pkgDir = path.join(dir, "packages", "standalone");
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(path.join(pkgDir, "package-lock.json"), "{}"); // own npm lock
+    expect(detectPackageManager(pkgDir)).toBe("npm");
+  });
 });
