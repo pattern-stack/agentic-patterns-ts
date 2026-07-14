@@ -487,4 +487,85 @@ describe("AgentRunner.stream()", () => {
     const convEnd = events.find((e) => e.type === "agent.conversation.end");
     expect((convEnd as { reason?: string }).reason).toBe("completed");
   });
+
+  // BOUNDED COMPLETION (parity with run()): a terminal tool that keeps erroring
+  // ends the stream as terminal_tool_error on the SECOND failure rather than
+  // burning to max_iterations.
+  it("ends the stream as terminal_tool_error on the SECOND errored terminal call", async () => {
+    const model = new MockLanguageModelV2({
+      doStream: async () =>
+        streamFrom([
+          toolCallPart("tc-1", "finish", { summary: "done?" }),
+          finishPart("tool-calls", 10, 5),
+        ])(),
+    });
+
+    const finishSchema = z.object({ summary: z.string() });
+    const tools = [ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true)];
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent({ getTools: () => tools });
+
+    const events = await collectStream(
+      runner.stream(agent, "Gather", {
+        toolExecutor: {
+          execute: async () => {
+            throw new Error("facet 2 still uncovered");
+          },
+        },
+        maxIterations: 20,
+      }),
+    );
+
+    // Bounded: exactly two iterations (first continues, second ends).
+    const iterStarts = events.filter((e) => e.type === "agent.iteration.start");
+    expect(iterStarts.length).toBe(2);
+
+    const iterEnd = events.filter((e) => e.type === "agent.iteration.end").at(-1);
+    expect((iterEnd as { hasMore?: boolean }).hasMore).toBe(false);
+
+    const complete = events.find((e) => e.type === "agent.message.complete");
+    expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool_error");
+    expect((complete as { content?: string }).content).toBe("facet 2 still uncovered");
+
+    const convEnd = events.find((e) => e.type === "agent.conversation.end");
+    expect((convEnd as { reason?: string }).reason).toBe("completed");
+  });
+
+  it("stream: terminal errors ONCE then succeeds — clean terminal_tool exit", async () => {
+    const model = new MockLanguageModelV2({
+      doStream: async () =>
+        streamFrom([
+          toolCallPart("tc-1", "finish", { summary: "done" }),
+          finishPart("tool-calls", 10, 5),
+        ])(),
+    });
+
+    const finishSchema = z.object({ summary: z.string() });
+    const tools = [ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true)];
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent({ getTools: () => tools });
+
+    let calls = 0;
+    const events = await collectStream(
+      runner.stream(agent, "Gather", {
+        toolExecutor: {
+          execute: async (_name, args) => {
+            calls++;
+            if (calls === 1) throw new Error("too early");
+            return args.summary;
+          },
+        },
+        maxIterations: 5,
+      }),
+    );
+
+    const iterStarts = events.filter((e) => e.type === "agent.iteration.start");
+    expect(iterStarts.length).toBe(2);
+
+    const complete = events.find((e) => e.type === "agent.message.complete");
+    expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool");
+    expect((complete as { content?: string }).content).toBe("done");
+  });
 });
