@@ -1,6 +1,6 @@
 ---
 name: build-on-agentic-patterns
-description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), and compose multiple steps/agents through the typed Node layer (AgentStep/FunctionStep, Sequential/Parallel/FanOut/Loop, Scratchpad, agent-as-tool, CoordinatorStep) — not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when wiring a multi-step workflow or a model-driven coordinator over subagents, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
+description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), and compose multiple steps/agents through the typed Node layer (AgentStep/FunctionStep, the sequentialAgent/parallelAgent stage sugar with typed emit + input:'prior', Sequential/Parallel/FanOut/Loop, Scratchpad, agent-as-tool, CoordinatorStep) — not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when wiring a multi-step workflow or a model-driven coordinator over subagents, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
 when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "compose a workflow / pipeline of steps", "make a coordinator that routes to subagents", "agent-as-a-tool", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", working in a repo that imports @agentic-patterns/core or @agentic-patterns/runtime.
 # --- SDLC metadata (documentation only; not consumed by the Claude Code runtime) ---
 status: active
@@ -174,6 +174,29 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 
 **`Scratchpad`** — a run-scoped shared slot store (`slot({...})`, `createScratchpad()`). Pass it on `ctx.scratchpad`; steps `set`/`get` typed slots; `FanOut` branches read it from inside their forks. The name signals SHARED.
 
+### The stage sugar: `sequentialAgent` / `parallelAgent` (start here for agent pipelines)
+
+The raw composites above thread typed seams but make you hand-seat every agent in an `AgentStep` (prompt builder in, wiring out). The **stage layer** removes that ceremony: a stage/branch is a bare `AgentLike`, a bare `Node`, or a spec with knobs (`name`/`output`/`prompt`/`slot`/`onEmit`/`stop`/`reads`/`writes`/`retry`), all over one shared Scratchpad — and per-stage tool executors derive from each agent's OWN capabilities, so the forgotten-executor failure can't happen inside one.
+
+- **`sequentialAgent(stages)`** — stages in order; each later stage's prompt implicitly carries the prior emission (chain visibility; `render: renderSharedState` for all-prior). A stage may BE a node (`{ node }`): a `CoordinatorStep` spine, a `FunctionStep` tail, a nested composite. Two 0.26 features close the contract-carrying gap (#255):
+  - **Typed output**: designate the emitting stage at the COMPOSITE level — `sequentialAgent<TContract>(stages, { emit: 'answer' })` types the pipeline `Node<TIn, TContract>` and its output IS that stage's emission verbatim (no envelope, zero casts, `asAgent`-ready). Type args REQUIRE `emit` (compile error without it); stage-level `emit: true` does not exist and is rejected loudly — composite-level is the convention that generalizes to the parallel sibling. A `stop` before the emitting stage fails the node (the contract was never produced); a failure anywhere fails it too — only a stop AT/AFTER the emit stage is a successful early exit.
+  - **`input: 'prior'`** (node stages only): hands the leaf the immediately-prior emission instead of the pipeline input — the compiler-checked spine → tail seam, e.g. `{ node: answerTail /* FunctionStep<TEmission, TContract> */, input: 'prior' }` with no nullable slot read.
+- **`parallelAgent(branches)`** — FIXED, named branches over the shared input (section drafts, parallel lookups, judge panels); `FanOut` stays the tool for dynamic-N over runtime lists. Deterministic INDEX-ORDER join keyed by branch name: `{ branches, failed, stopped }`. **Leaf-never-throws is lifted into the join** — a failed branch is a `{ succeeded: false, error }` outcome, never a composite failure (check `failed.length` to hard-fail). Stop policy is **complete-all**: a branch's `stop` is a SIGNAL (`stopped` = first in index order), not a cancellation — nothing in-flight can be aborted yet. Type the join with a declared record: `parallelAgent<{ overview: string; pricing: Pricing }>(...)`. Guards reject the races concurrency creates (duplicate emission-slot keys, cross-branch reads of sibling writes) and the knobs with no parallel analogue (`input`, `emit`).
+
+Both compose — the canvas shape, typed end to end with zero casts:
+
+```ts
+const assemble = new FunctionStep<ParallelAgentResult<Sections>, Canvas>({
+  name: "assemble",
+  fn: (join) => renderCanvas(join.branches),   // input compiler-checked; branches typed per name
+});
+const pipeline: Node<string, Canvas> = sequentialAgent<Canvas, string>(
+  [{ node: parallelAgent<Sections>([introDrafter, bodyDrafter]), name: "sections" },
+   { node: assemble, input: "prior" }],
+  { emit: "assemble" },
+);
+```
+
 ### Agent-as-a-tool (let the model route)
 
 A static graph is deterministic. When you want an **LLM to decide** which sub-node to call, expose sub-nodes as tools:
@@ -211,7 +234,7 @@ Because it's a `Node`, it composes like any other: a coordinator can be a `Seque
 
 | You have | Use |
 |---|---|
-| Fixed steps, known order | `Sequential` / `FanOut` — deterministic, cheaper, debuggable |
+| Fixed steps, known order | `sequentialAgent` / `parallelAgent` (the stage sugar — typed emit, shared pad, per-stage executors); drop to raw `Sequential`/`FanOut` for hand-wired output→input seams or dynamic-N fan-out |
 | LLM must pick among specialists | `CoordinatorStep` / `delegateTo` — call-and-return routing |
 | Concurrent peers, NO single owner | the async `AgencyRuntime` swarm — choreography, not orchestration; the one mechanism *outside* the Node type, so reach for it last |
 
