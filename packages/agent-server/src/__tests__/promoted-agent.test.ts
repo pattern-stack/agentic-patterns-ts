@@ -6,16 +6,21 @@
  * that absence and render without throwing, rather than rebuilding anything.
  */
 
+import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
 import {
   AgentEventBus,
+  AgentStep,
   FunctionStep,
   NodeBackedRunner,
   RunStore,
   RunStoreExporter,
   asAgent,
+  deriveToolboxExecutor,
 } from "@agentic-patterns/runtime";
+import type { AgentLike, RunOptions, RunResult, RunnerProtocol } from "@agentic-patterns/runtime";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createServer } from "../app.js";
 import type { AgentRegistration, ServerConfig } from "../config.js";
 
@@ -235,5 +240,188 @@ describe("promoted-agent registration — chat persists a run without changing t
     expect(row?.agentName).toBe("Promoted Pipe");
     expect(row?.status).toBe("ok");
     expect(row?.finalAnswer).toBe("HELLO");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression — a truthy-but-EMPTY executor disarmed a promoted agent's tools.
+//
+// `createToolboxExecutor` ALWAYS returns a truthy executor; for a PromotedAgent
+// (asAgent()) — whose synthetic role has NO capabilities — its lookup maps are
+// EMPTY, so every `execute()` throws `Tool "X" not found`. The conversation
+// route used to set that empty executor as `RunOptions.toolExecutor`, and it
+// BEAT the AgentStep-level `ctx.toolExecutor ?? deriveToolboxExecutor(agent)`
+// fallback that arms the NESTED agent's own tools — silently disarming them
+// (traces looked healthy). The fix: DERIVE (returns `undefined` for a
+// capability-less agent), leaving the per-agent derivation intact.
+// ---------------------------------------------------------------------------
+
+/** A real toolbox with one executable tool, counting how often it ran. */
+class LedgerToolbox extends Toolbox {
+  readonly name = "ledger";
+  readonly description = "reads the household ledger";
+  ran = 0;
+  readonly tools = {
+    getBalance: {
+      description: "get a member's balance",
+      parameters: z.object({ member: z.string() }),
+      execute: async (args: Record<string, unknown>) => {
+        this.ran++;
+        return { member: args.member, balance: 42 };
+      },
+    },
+  };
+}
+
+/** A full core Agent carrying the ledger toolbox as a real Capability. */
+function agentWithLedger(tb: Toolbox): Agent {
+  const role = new RoleBuilder("insights")
+    .withPersona(
+      new Persona({
+        identity: "reads the household ledger",
+        tone: "direct",
+        priorities: ["accuracy"],
+        principles: ["cite the ledger"],
+      }),
+    )
+    .withCapability(new Capability("ledger", "ledger access", tb))
+    .withDefaultModel("mock")
+    .build();
+  return new Agent({
+    role,
+    mission: new Mission({
+      objective: "answer ledger questions",
+      successCriteria: ["answered from the ledger"],
+      constraints: [],
+    }),
+  });
+}
+
+/**
+ * The NodeBackedRunner's INNER (LLM-stand-in) runner. It doesn't loop — it
+ * simply dispatches the ledger tool through whatever executor reached it in
+ * `opts.toolExecutor` and reports the balance. This is the pivot: post-fix the
+ * AgentStep derives the real executor (the route passes `undefined`); pre-fix
+ * the route's empty executor arrives here and `execute()` throws.
+ */
+function ledgerDispatchingRunner(): RunnerProtocol {
+  return {
+    async run(_agent: AgentLike, _message: string, opts?: RunOptions): Promise<RunResult> {
+      const executor = opts?.toolExecutor;
+      if (!executor) throw new Error("no toolExecutor reached the inner runner");
+      const out = (await executor.execute("getBalance", { member: "dana" })) as {
+        balance: number;
+      };
+      return {
+        response: `balance is ${out.balance}`,
+        inputTokens: 0,
+        outputTokens: 0,
+        toolCallsCount: 1,
+        iterations: 1,
+        finishReason: "stop",
+      };
+    },
+  };
+}
+
+function stubAdminService(): ServerConfig["adminService"] {
+  return {
+    async getDashboardStats() {
+      return {
+        agents: [],
+        activeAgentCount: 0,
+        totalTokensUsed: 0,
+        totalToolCalls: 0,
+        totalErrors: 0,
+        activeConversationCount: 0,
+        uptimeMs: 0,
+      };
+    },
+    async getAgentStats() {
+      return undefined;
+    },
+    async getAllAgentStats() {
+      return [];
+    },
+    async getRecentEvents() {
+      return [];
+    },
+    async getTraceSummaries() {
+      return [];
+    },
+    async getConversations() {
+      return [];
+    },
+    async getToolAnalytics() {
+      return [];
+    },
+    async getTokenUsage() {
+      return [];
+    },
+  };
+}
+
+describe("promoted-agent registration — the conversation route arms nested tools", () => {
+  it("POST /conversations then /messages actually dispatches the inner agent's tool (pre-fix: 'Tool not found')", async () => {
+    const eventBus = new AgentEventBus();
+    const tb = new LedgerToolbox();
+
+    // A promoted node whose INNER agent HAS a real toolbox.
+    const step = new AgentStep<string, string>({
+      name: "insights",
+      agent: agentWithLedger(tb),
+      prompt: (q) => q, // string path → generateText (the inner runner above)
+    });
+    const promoted = asAgent(step, { role: { name: "Ledger Pipe" } });
+
+    const registration: AgentRegistration = {
+      id: "ledger-pipe",
+      name: "Ledger Pipe",
+      agent: promoted,
+      runner: new NodeBackedRunner(ledgerDispatchingRunner(), eventBus),
+    };
+
+    const app = createServer({
+      agents: [registration],
+      adminService: stubAdminService(),
+      eventBus,
+      sseExporter: { connect: () => new ReadableStream(), disconnect: () => {} },
+    });
+
+    const createRes = await app.request("/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: "ledger-pipe" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { id } = (await createRes.json()) as { id: string };
+
+    const msgRes = await app.request(`/conversations/${id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "what is dana's balance?" }),
+    });
+    expect(msgRes.status).toBe(200);
+    const sseBody = await msgRes.text();
+
+    // The tool actually ran, and its result reached the client stream. Pre-fix
+    // the route's truthy-empty executor beat the AgentStep derivation, so the
+    // inner runner got an executor that threw `Tool "getBalance" not found`.
+    expect(tb.ran).toBe(1);
+    expect(sseBody).toContain("balance is 42");
+    expect(sseBody).not.toContain("not found");
+  });
+
+  it("deriveToolboxExecutor selects the right branch: undefined for a promoted agent, an executor for a capability-bearing one", () => {
+    const promoted = asAgent(new FunctionStep<string, string>({ name: "id", fn: (s) => s }), {
+      role: { name: "Bare Pipe" },
+    });
+    // The route's swap: a promoted agent has no capabilities → no forced empty
+    // executor (undefined restores the AgentStep-level derivation).
+    expect(deriveToolboxExecutor(promoted)).toBeUndefined();
+
+    // A real capability-bearing agent still gets its own executor at the route.
+    const withTools = agentWithLedger(new LedgerToolbox());
+    expect(deriveToolboxExecutor(withTools)).toBeDefined();
   });
 });
