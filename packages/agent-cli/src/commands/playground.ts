@@ -31,6 +31,7 @@ import {
   createToolboxExecutor,
   isPromotedAgent,
   loadConversationStore,
+  setAgentEventBus,
 } from "@agentic-patterns/runtime";
 import type { SQLiteConversationStore } from "@agentic-patterns/runtime";
 import { createServer } from "@agentic-patterns/server";
@@ -76,6 +77,10 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
   // -------------------------------------------------------------------------
 
   const eventBus = new AgentEventBus();
+  // Make the process-global default THE server bus, so user-project runners/
+  // conversations constructed without explicit bus threading (they default to
+  // getAgentEventBus()) are visible to the collector/SSE/persistence.
+  setAgentEventBus(eventBus);
 
   const collector = new InMemoryEventCollector();
   collector.attach(eventBus);
