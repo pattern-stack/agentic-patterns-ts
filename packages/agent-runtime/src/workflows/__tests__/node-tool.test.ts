@@ -156,6 +156,64 @@ describe("delegateTo (just pass subagents)", () => {
     expect(out).toBe("dana's balance is 42");
     expect(tb.ran).toBe(1); // the subagent's OWN tool actually executed
   });
+
+  // -------------------------------------------------------------------------
+  // SubagentSpec.runOptions — per-subagent budget/binding forwarded through
+  // delegateTo into the wrapped AgentStep. MockRunner.callHistory records
+  // { agentName, model, maxIterations } — the assertion surface.
+  // -------------------------------------------------------------------------
+  describe("runOptions — per-subagent model/maxIterations/runner binding", () => {
+    it("forwards maxIterations into the wrapped step's RunOptions", async () => {
+      const runner = new MockRunner().addResponse("*", { content: "done" });
+      const team = delegateTo(runner, [
+        { agent: agent("writer"), description: "writes", runOptions: { maxIterations: 7 } },
+      ]);
+
+      await team.execute("writer", { task: "write it" });
+
+      const call = runner.callHistory.find((c) => c.agentName === "writer");
+      expect(call?.maxIterations).toBe(7);
+    });
+
+    it("forwards model via the applyStepModel path", async () => {
+      const runner = new MockRunner().addResponse("*", { content: "done" });
+      const team = delegateTo(runner, [
+        { agent: agent("writer"), description: "writes", runOptions: { model: "gpt-budget" } },
+      ]);
+
+      await team.execute("writer", { task: "write it" });
+
+      const call = runner.callHistory.find((c) => c.agentName === "writer");
+      expect(call?.model).toBe("gpt-budget");
+    });
+
+    it("routes the subagent onto runOptions.runner, not ctx's runner", async () => {
+      const ctxRunner = new MockRunner().addResponse("*", { content: "ctx runner answered" });
+      const budgetRunner = new MockRunner().addResponse("*", { content: "budget runner answered" });
+
+      // delegateTo(ctxRunner, ...) — but the subagent binds its OWN runner.
+      const team = delegateTo(ctxRunner, [
+        { agent: agent("writer"), description: "writes", runOptions: { runner: budgetRunner } },
+      ]);
+
+      const out = await team.execute("writer", { task: "write it" });
+
+      // executed on the bound runner (spec.runner ?? ctx.runner → spec.runner)
+      expect(out).toBe("budget runner answered");
+      expect(budgetRunner.callHistory.some((c) => c.agentName === "writer")).toBe(true);
+      expect(ctxRunner.callHistory.some((c) => c.agentName === "writer")).toBe(false);
+    });
+
+    it("leaves maxIterations undefined when no runOptions given (unchanged)", async () => {
+      const runner = new MockRunner().addResponse("*", { content: "done" });
+      const team = delegateTo(runner, [{ agent: agent("writer"), description: "writes" }]);
+
+      await team.execute("writer", { task: "write it" });
+
+      const call = runner.callHistory.find((c) => c.agentName === "writer");
+      expect(call?.maxIterations).toBeUndefined();
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
