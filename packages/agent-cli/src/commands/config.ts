@@ -46,7 +46,12 @@ export const TRACKED_ENV: readonly EnvVarSpec[] = [
   { key: "AP_GATEWAY_BASIC_PASS", label: "Gateway HTTP Basic password", secret: true },
   {
     key: "AP_GATEWAY_MODEL_PREFIX",
-    label: "Gateway model prefix (e.g. anthropic/)",
+    label: 'Gateway model prefix — literal (e.g. anthropic/) or "auto" (per-id vendor)',
+    secret: false,
+  },
+  {
+    key: "AP_GATEWAY_TIER_PROVIDER",
+    label: "Gateway tier map for opus|sonnet|haiku (default anthropic)",
     secret: false,
   },
   { key: "AGENT_TIER", label: "Default tier (opus | sonnet | haiku)", secret: false },

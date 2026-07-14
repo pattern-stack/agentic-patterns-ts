@@ -78,3 +78,30 @@ export function resolveModelId(
 ): string {
   return explicitModelId ?? provider.tiers[tier];
 }
+
+/** The cross-provider tier words an agent may declare in place of a model id. */
+export const PROVIDER_TIERS: readonly ProviderTier[] = ["opus", "sonnet", "haiku"];
+
+/**
+ * Whether a declared id is a cross-provider tier alias rather than a real model
+ * id. Tier words are the ONE id family that is not addressable upstream — every
+ * dispatch path has to translate them through a provider's tier map first.
+ */
+export function isProviderTier(modelId: string): modelId is ProviderTier {
+  return (PROVIDER_TIERS as readonly string[]).includes(modelId.toLowerCase());
+}
+
+/**
+ * Translate a declared id that MAY be a tier alias into a concrete model id,
+ * reading `provider`'s tier map. Non-alias ids pass through untouched, so this
+ * is safe to call on any declared id.
+ *
+ * This is the single translation point for tier words: the direct-provider path
+ * reaches it via {@link resolveModelId} (createRunner's pinned ladder) and the
+ * gateway path via `model-resolver`'s gateway id translation — both read the same
+ * `PROVIDERS[p].tiers` map, so `haiku` can never mean two different things.
+ */
+export function resolveTierAlias(modelId: string, provider: ProviderProtocol): string {
+  const lower = modelId.toLowerCase();
+  return isProviderTier(lower) ? provider.tiers[lower] : modelId;
+}

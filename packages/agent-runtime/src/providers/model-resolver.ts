@@ -19,8 +19,9 @@
  *      to one of the named providers.
  *   2. a configured {@link GatewayConfig} (if any) — routes the id through one
  *      OpenAI-compatible gateway (e.g. Bifrost): one endpoint, the agent's model
- *      id passed through (optionally prefixed/qualified). Profiles still win, so
- *      a profile is the per-id escape hatch to go direct.
+ *      id translated to the gateway's namespace by {@link toGatewayModelId}
+ *      (tier alias → canonical id, then any configured prefix/qualifier).
+ *      Profiles still win, so a profile is the per-id escape hatch to go direct.
  *   3. a pattern-matched well-known family (`gemini-*` → google, `gpt-*`/`o1`/`o3`
  *      → openai, `claude-*` → anthropic, …) — zero-config for the common clouds.
  *   4. a helpful error listing the known families + registered profiles.
@@ -29,7 +30,7 @@
 import type { LanguageModelV2 } from "@ai-sdk/provider";
 import { z } from "zod";
 
-import { PROVIDERS, type SupportedProvider } from "./index.js";
+import { PROVIDERS, type SupportedProvider, resolveTierAlias } from "./index.js";
 
 /**
  * Dynamically import an optional package, throwing an accurate,
@@ -121,8 +122,8 @@ export type ModelProfiles = z.infer<typeof ModelProfilesSchema>;
  * A gateway is "just the URL (+ key)": one endpoint that fronts many upstream
  * models and does its own routing / load-balancing / failover. Agents stay
  * clean — each agent still declares its own model id (`agent.getModel()`),
- * which is passed through to the gateway, optionally prefixed/qualified to the
- * gateway's namespace (e.g. `claude-sonnet-4-5` → `anthropic/claude-sonnet-4-5`).
+ * which {@link toGatewayModelId} translates into the gateway's namespace before
+ * dispatch (tier alias → canonical id; optional vendor qualification).
  *
  * When a resolver has a gateway, it routes every id through it EXCEPT ids that
  * have an explicit profile — so a profile is the per-id escape hatch to go
@@ -138,11 +139,43 @@ export interface GatewayConfig {
   /** Extra request headers (e.g. a gateway routing / virtual-key header). */
   readonly headers?: Readonly<Record<string, string>>;
   /**
-   * Prepended to the agent's declared id to form the gateway model id (gateways
-   * often namespace by vendor). Ignored when {@link GatewayConfig.qualify} is set.
+   * How to qualify a canonical id into the gateway's namespace. Two forms:
+   *
+   *   • a literal prefix (e.g. `"anthropic/"`) — prepended verbatim. The right
+   *     choice for a single-vendor gateway.
+   *   • {@link GATEWAY_AUTO_PREFIX} (`"auto"`) — derive the vendor segment per id
+   *     via {@link inferProvider}, giving `«vendor»/«id»` (e.g. `gpt-4o` →
+   *     `openai/gpt-4o`). The right choice for a multi-vendor gateway that
+   *     REQUIRES `provider/model` addressing, which one static prefix cannot serve.
+   *     An id no rule classifies then fails loud (see {@link toGatewayModelId})
+   *     rather than being sent as an unqualified guess.
+   *
+   * Left unset, a canonical id is sent bare — many gateways (Bifrost, LiteLLM)
+   * auto-resolve a bare id against their catalog, and that is the behaviour this
+   * library has always had. Prefixing is therefore opt-in: explicit config beats
+   * inference, and inference beats nothing.
+   *
+   * Ids that ALREADY carry a `/` segment are never touched by any of this — the
+   * caller has namespaced them deliberately. Ignored when
+   * {@link GatewayConfig.qualify} is set. Env: `AP_GATEWAY_MODEL_PREFIX`.
    */
   readonly modelPrefix?: string;
-  /** Full control over agent-id → gateway-id mapping. Overrides `modelPrefix`. */
+  /**
+   * Which provider's tier map translates a declared tier word (`opus` / `sonnet`
+   * / `haiku`) into a concrete model id on this gateway. Tier words are not
+   * addressable upstream — a gateway 400s on a raw `haiku` — so they are always
+   * resolved before dispatch, and this says whose ladder to climb: a gateway
+   * fronting Gemini wants `"google"` (haiku → `gemini-2.5-flash-lite`), one
+   * fronting Claude wants `"anthropic"` (haiku → `claude-haiku-4-5`).
+   *
+   * Default `"anthropic"`. Env: `AP_GATEWAY_TIER_PROVIDER`.
+   */
+  readonly tierProvider?: SupportedProvider;
+  /**
+   * Full control over agent-id → gateway-id mapping. Overrides `modelPrefix`.
+   * Receives the CANONICAL id (tier aliases already resolved), so a custom
+   * qualifier never has to re-implement the tier map.
+   */
   readonly qualify?: (modelId: string) => string;
   /**
    * Whether this gateway faithfully forwards OpenAI `response_format` json-schema
@@ -156,13 +189,6 @@ export interface GatewayConfig {
    * gateway). Env: `AP_GATEWAY_STRUCTURED_OUTPUTS`.
    */
   readonly supportsStructuredOutputs?: boolean;
-}
-
-/** Map an agent's declared id to the id the gateway expects. */
-function qualifyGatewayId(modelId: string, gw: GatewayConfig): string {
-  if (gw.qualify) return gw.qualify(modelId);
-  if (gw.modelPrefix) return `${gw.modelPrefix}${modelId}`;
-  return modelId;
 }
 
 // ---------------------------------------------------------------------------
@@ -300,10 +326,95 @@ function buildFromProfile(id: string, profile: ModelProfile): Promise<LanguageMo
 }
 
 // ---------------------------------------------------------------------------
+// Gateway id translation
+// ---------------------------------------------------------------------------
+
+/** {@link GatewayConfig.modelPrefix} value selecting per-id vendor inference. */
+export const GATEWAY_AUTO_PREFIX = "auto";
+
+/** Tier map used for a gateway's tier words when it names no {@link GatewayConfig.tierProvider}. */
+const DEFAULT_GATEWAY_TIER_PROVIDER: SupportedProvider = "anthropic";
+
+/**
+ * Translate an agent's *declared* id into the id this gateway expects.
+ *
+ * The contract this exists to keep: model selection is implementation-agnostic.
+ * An agent declares `haiku` (or `claude-haiku-4-5`, or `gemini-3.1-flash-lite`)
+ * once, and it runs on a direct provider AND through a gateway — the resolver
+ * layer owns the naming, not the agent. A name we cannot translate fails HERE,
+ * with the translation story, rather than reaching the gateway as a nonsense id.
+ *
+ * Precedence (first match wins):
+ *   1. tier alias → canonical id. `opus`/`sonnet`/`haiku` are ladder rungs, not
+ *      model ids; they are resolved through `tierProvider`'s tier map (the same
+ *      `PROVIDERS[p].tiers` the direct path uses) BEFORE anything below. This is
+ *      unconditional — every later rule sees a real model id.
+ *   2. `gw.qualify()` — full caller control, given the canonical id.
+ *   3. an id that already carries a `/` segment — passed through untouched. The
+ *      caller namespaced it deliberately; we never double-prefix.
+ *   4. `modelPrefix === "auto"` — infer the vendor segment per id → `«vendor»/«id»`.
+ *      Unclassifiable ids throw (below): in auto mode a bare id is a translation
+ *      failure, and a guess would 400 at the gateway with a worse message.
+ *   5. a literal `modelPrefix` — prepended verbatim (single-vendor gateway).
+ *   6. otherwise — the canonical id, bare. Gateways such as Bifrost and LiteLLM
+ *      auto-resolve a bare canonical id against their own catalog (verified:
+ *      `gemini-3.1-flash-lite` and `gpt-4o-mini` both resolve unprefixed), so
+ *      prefixing is opt-in and this path stays byte-for-byte what shipped before.
+ */
+export function toGatewayModelId(modelId: string, gw: GatewayConfig): string {
+  const tierProvider = PROVIDERS[gw.tierProvider ?? DEFAULT_GATEWAY_TIER_PROVIDER];
+  const canonical = resolveTierAlias(modelId, tierProvider);
+
+  if (gw.qualify) return gw.qualify(canonical);
+  if (canonical.includes("/")) return canonical;
+
+  if (gw.modelPrefix === GATEWAY_AUTO_PREFIX) {
+    const vendor = inferProvider(canonical);
+    if (!vendor) throw new Error(untranslatableGatewayIdError(modelId, canonical, gw));
+    return `${vendor}/${canonical}`;
+  }
+  if (gw.modelPrefix) return `${gw.modelPrefix}${canonical}`;
+
+  return canonical;
+}
+
+/**
+ * The loud failure for `modelPrefix: "auto"` when no vendor rule claims the id.
+ * Tells the whole translation story — what was declared, what it resolved to, and
+ * each way to make it resolvable — because the alternative (shipping the bare id)
+ * is exactly the nonsense-id 400 this translation layer exists to prevent.
+ */
+function untranslatableGatewayIdError(
+  declared: string,
+  canonical: string,
+  gw: GatewayConfig,
+): string {
+  const tierProvider = gw.tierProvider ?? DEFAULT_GATEWAY_TIER_PROVIDER;
+  const tried =
+    declared === canonical
+      ? `"${declared}" is not a tier alias (opus/sonnet/haiku), and it`
+      : `"${declared}" resolved to "${canonical}" via the ${tierProvider} tier map, which then`;
+  return [
+    `ModelResolver: cannot translate model id "${declared}" for gateway ${gw.baseURL}.`,
+    `${tried} matched no known vendor prefix`,
+    "(claude-*, gpt-*/o1/o3/o4, gemini-*, grok-*, deepseek-*, mistral-*),",
+    'so AP_GATEWAY_MODEL_PREFIX="auto" cannot derive the «vendor»/«model» segment this gateway needs.',
+    "Fix with any one of:",
+    `  • declare it already qualified (e.g. "openai/${canonical}") — slash ids pass through untouched;`,
+    `  • register a profile — resolver.register("${declared}", { provider: "openai", model: "${canonical}" })`,
+    "    or a models.yaml entry loaded with loadModelProfiles (profiles win over the gateway);",
+    '  • set AP_GATEWAY_MODEL_PREFIX to a literal prefix (e.g. "openai/") for a single-vendor gateway.',
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // Gateway → LanguageModelV2
 // ---------------------------------------------------------------------------
 
 async function buildFromGateway(modelId: string, gw: GatewayConfig): Promise<LanguageModelV2> {
+  // Translate BEFORE loading the adapter: an untranslatable id is a config error
+  // the caller should hear about whether or not the optional package is installed.
+  const gatewayId = toGatewayModelId(modelId, gw);
   const apiKey = gw.apiKey ?? (gw.apiKeyEnv ? process.env[gw.apiKeyEnv] : undefined);
   const mod = await importOptional(
     "@ai-sdk/openai-compatible",
@@ -318,7 +429,7 @@ async function buildFromGateway(modelId: string, gw: GatewayConfig): Promise<Lan
     // json-schema `response_format` (default false → stripped). Opt-in per gateway.
     ...(gw.supportsStructuredOutputs ? { supportsStructuredOutputs: true } : {}),
   });
-  return provider(qualifyGatewayId(modelId, gw));
+  return provider(gatewayId);
 }
 
 // ---------------------------------------------------------------------------
