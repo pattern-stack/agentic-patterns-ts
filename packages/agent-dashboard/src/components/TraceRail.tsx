@@ -192,7 +192,7 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
           // Keyed by run identity: seq restarts at 1 per run, so an unkeyed
           // waterfall would carry row-expand state from one run into the next.
           (lens === "waterfall" ? (
-            <TraceWaterfall key={replayRunId ?? "live"} steps={steps} />
+            <TraceWaterfall key={replayRunId ?? "live"} steps={steps} layout="narrow" />
           ) : (
             <TraceLog key={replayRunId ?? "live"} steps={steps} />
           ))}

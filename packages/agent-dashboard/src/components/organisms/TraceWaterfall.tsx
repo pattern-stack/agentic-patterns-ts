@@ -85,7 +85,240 @@ function barFill(kind: TraceStepKind): string {
   return "var(--mute)";
 }
 
-export function TraceWaterfall({ steps }: { steps: TraceStep[] }) {
+/** Row indent for the meta/detail/expander lines under the row-1 tile+label —
+ *  22px tile + 8px gap, so text lines up under the label rather than the tile. */
+const NARROW_INDENT = 30;
+
+/**
+ * `layout="narrow"` step row — spec's "Narrow step anatomy": stacked full-width
+ * rows (header · meta · detail · bar) instead of the wide 4-column grid. Same
+ * `toggle`/`open` state, same `barFill`/`maxMs` math, same test hooks — only
+ * the arrangement changes.
+ */
+function NarrowStepRow({
+  step,
+  tile,
+  hasJson,
+  isOpen,
+  maxMs,
+  toggle,
+}: {
+  step: TraceStep;
+  tile: { background: string; color: string; borderColor: string };
+  hasJson: boolean;
+  isOpen: boolean;
+  maxMs: number;
+  toggle: (seq: number) => void;
+}) {
+  const isToolish = step.kind === "tool_call" || step.kind === "tool_result";
+
+  // Row 2 (meta): KIND · blast · model tokens · tool capability · result note —
+  // whichever apply, joined with " · " and ellipsized as one line. Keyed by a
+  // descriptive slot name (not array index) since the parts are conditional.
+  const metaNodes: { key: string; node: React.ReactNode }[] = [
+    { key: "kind", node: KIND_LABEL[step.kind] },
+  ];
+  if (step.blast) {
+    metaNodes.push({
+      key: "blast",
+      node: <span style={{ color: BLAST_INK[step.blast] }}>● {step.blast}</span>,
+    });
+  }
+  if (step.kind === "model" && step.outTokens != null) {
+    metaNodes.push({
+      key: "tokens",
+      node: `${step.ctxTokens ? `${step.ctxTokens.toLocaleString()} ctx · ` : ""}${step.outTokens} out`,
+    });
+  }
+  if (step.kind === "tool_call" && step.capability) {
+    metaNodes.push({ key: "capability", node: `via ${step.capability}` });
+  }
+  if (step.kind === "tool_result" && step.note) {
+    metaNodes.push({ key: "note", node: step.note });
+  }
+
+  // Row-wide click-to-toggle (the wide layout's convenience) is deliberately
+  // NOT reused here — the explicit ▸ button below is the sole toggle
+  // affordance in narrow, so the row itself needs no onClick/keyboard pairing.
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        padding: "7px 4px",
+        borderRadius: T.radius.sm,
+      }}
+    >
+      {/* row 1: tile · label (flex, ellipsizes) · duration (right-aligned, tool_result gets an "ok · "/"error · " prefix here — no room to spare in row 3 at 320px). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          style={{
+            flex: "none",
+            width: 22,
+            height: 22,
+            borderRadius: T.radius.sm,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: T.font.mono,
+            fontSize: T.fz.micro,
+            fontWeight: 600,
+            border: `1px solid ${tile.borderColor}`,
+            background: tile.background,
+            color: tile.color,
+          }}
+        >
+          {TILE_GLYPH[step.kind]}
+        </span>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: T.fz.small,
+            fontWeight: isToolish ? 600 : 500,
+            fontFamily: isToolish ? T.font.mono : undefined,
+          }}
+        >
+          {isToolish ? step.tool : step.label}
+        </span>
+        <span
+          style={{
+            flex: "none",
+            fontFamily: T.font.mono,
+            fontSize: T.fz.small,
+            fontWeight: 600,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {step.kind === "tool_result" && step.status && (
+            // ok green, error/rejected red (`--err`, TraceRail's own error ink) —
+            // the failure case is the one a glanceable rail most needs to flag.
+            <span style={{ color: step.status === "ok" ? "var(--ok-ink)" : "var(--err)" }}>
+              {step.status} ·{" "}
+            </span>
+          )}
+          {step.ms === 0 ? "—" : `${step.ms}ms`}
+        </span>
+      </div>
+
+      {/* row 2: meta line */}
+      <div
+        style={{
+          fontFamily: T.font.mono,
+          fontSize: T.fz.micro,
+          color: "var(--mute)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          paddingLeft: NARROW_INDENT,
+        }}
+      >
+        {metaNodes.map((m, i) => (
+          <span key={m.key}>
+            {i > 0 && " · "}
+            {m.node}
+          </span>
+        ))}
+      </div>
+
+      {/* row 3: detail sentence (context/model/finish/rejected only — tool_call's
+       *  redundant "calls <tool>" prose is dropped, the header IS the tool name) */}
+      {step.detail && (
+        <div
+          style={{
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+            lineHeight: 1.45,
+            paddingLeft: NARROW_INDENT,
+          }}
+        >
+          {step.detail}
+        </div>
+      )}
+
+      {hasJson && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle(step.seq);
+          }}
+          style={{
+            appearance: "none",
+            background: "none",
+            border: "none",
+            padding: 0,
+            paddingLeft: NARROW_INDENT,
+            fontFamily: T.font.mono,
+            fontSize: T.fz.micro,
+            color: "var(--mute)",
+            cursor: "pointer",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 5,
+            alignSelf: "flex-start",
+          }}
+        >
+          {isOpen ? "▾" : "▸"} {step.args !== undefined ? "args" : "result"}
+        </button>
+      )}
+      {hasJson && isOpen && (
+        <JsonBlock
+          value={step.args !== undefined ? step.args : step.output}
+          style={{
+            marginLeft: NARROW_INDENT,
+            background: "color-mix(in oklch, var(--fill) 55%, var(--paper))",
+            padding: "9px 11px",
+            fontSize: T.fz.tiny,
+            lineHeight: 1.55,
+          }}
+        />
+      )}
+
+      {/* row 4: duration bar, full row width (not indented — spans edge to edge) */}
+      <div
+        style={{
+          height: 6,
+          borderRadius: 4,
+          background: "var(--fill)",
+          marginTop: 2,
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          data-testid={`waterfall-bar-${step.seq}`}
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: 0,
+            width: `${Math.max(3, (step.ms / maxMs) * 100)}%`,
+            borderRadius: 4,
+            background: barFill(step.kind),
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function TraceWaterfall({
+  steps,
+  layout = "wide",
+}: {
+  steps: TraceStep[];
+  /** `"wide"` (default) — today's 4-column grid, byte-for-byte unchanged (Agent
+   *  Lens Runs lens). `"narrow"` — stacked full-width rows for the fixed-320px
+   *  chat trace rail (`.ai-docs/specs/trace-rail-narrow-waterfall.md`): kind
+   *  tile + label + duration on row 1, a meta line, the detail sentence, then
+   *  a full-width duration bar. */
+  layout?: "wide" | "narrow";
+}) {
   const [open, setOpen] = useState<Set<number>>(() => new Set());
   const maxMs = Math.max(...steps.map((s) => s.ms)) || 1;
   const toggle = (seq: number) =>
@@ -132,181 +365,196 @@ export function TraceWaterfall({ steps }: { steps: TraceStep[] }) {
                 {step.iter === 0 ? "setup" : `iteration ${step.iter}`}
               </div>
             )}
-            {/* biome-ignore lint/a11y/useKeyWithClickEvents: row toggle has an explicit button affordance below; the row click is a non-essential convenience */}
-            <div
-              onClick={hasJson ? () => toggle(step.seq) : undefined}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "30px 150px 1fr 116px",
-                gap: "var(--space-3)",
-                alignItems: "start",
-                padding: "7px 4px",
-                borderRadius: T.radius.sm,
-                cursor: hasJson ? "pointer" : "default",
-              }}
-            >
+            {layout === "narrow" ? (
+              <NarrowStepRow
+                step={step}
+                tile={tile}
+                hasJson={hasJson}
+                isOpen={isOpen}
+                maxMs={maxMs}
+                toggle={toggle}
+              />
+            ) : (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: row toggle has an explicit button affordance below; the row click is a non-essential convenience
               <div
-                style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}
+                onClick={hasJson ? () => toggle(step.seq) : undefined}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "30px 150px 1fr 116px",
+                  gap: "var(--space-3)",
+                  alignItems: "start",
+                  padding: "7px 4px",
+                  borderRadius: T.radius.sm,
+                  cursor: hasJson ? "pointer" : "default",
+                }}
               >
-                <span
-                  style={{
-                    width: 22,
-                    height: 22,
-                    borderRadius: T.radius.sm,
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: T.font.mono,
-                    fontSize: T.fz.micro,
-                    fontWeight: 600,
-                    border: `1px solid ${tile.borderColor}`,
-                    background: tile.background,
-                    color: tile.color,
-                  }}
-                >
-                  {TILE_GLYPH[step.kind]}
-                </span>
-                <span style={{ fontFamily: T.font.mono, fontSize: "9px", color: "var(--mute)" }}>
-                  {String(step.seq).padStart(2, "0")}
-                </span>
-              </div>
-
-              <div style={{ paddingTop: 2 }}>
-                <div style={{ fontSize: T.fz.small, fontWeight: 500 }}>
-                  {step.kind === "tool_call" || step.kind === "tool_result" ? (
-                    <span style={{ fontFamily: T.font.mono, fontWeight: 600 }}>{step.tool}</span>
-                  ) : (
-                    step.label
-                  )}
-                </div>
                 <div
-                  style={{
-                    fontFamily: T.font.mono,
-                    fontSize: T.fz.micro,
-                    color: "var(--mute)",
-                    marginTop: 2,
-                  }}
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}
                 >
-                  {KIND_LABEL[step.kind]}
-                  {step.blast && (
-                    <>
-                      {" · "}
-                      <span style={{ color: BLAST_INK[step.blast] }}>● {step.blast}</span>
-                    </>
-                  )}
+                  <span
+                    style={{
+                      width: 22,
+                      height: 22,
+                      borderRadius: T.radius.sm,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontFamily: T.font.mono,
+                      fontSize: T.fz.micro,
+                      fontWeight: 600,
+                      border: `1px solid ${tile.borderColor}`,
+                      background: tile.background,
+                      color: tile.color,
+                    }}
+                  >
+                    {TILE_GLYPH[step.kind]}
+                  </span>
+                  <span style={{ fontFamily: T.font.mono, fontSize: "9px", color: "var(--mute)" }}>
+                    {String(step.seq).padStart(2, "0")}
+                  </span>
                 </div>
-              </div>
 
-              <div style={{ minWidth: 0, paddingTop: 1 }}>
-                {(step.kind === "tool_call" || step.kind === "tool_result") && (
-                  <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.45 }}>
-                    {step.kind === "tool_call" ? (
-                      <>
-                        calls <span style={{ fontFamily: T.font.mono }}>{step.tool}</span>
-                        {step.capability && (
-                          <>
-                            {" "}
-                            via <span style={{ fontFamily: T.font.mono }}>{step.capability}</span>
-                          </>
-                        )}
-                      </>
+                <div style={{ paddingTop: 2 }}>
+                  <div style={{ fontSize: T.fz.small, fontWeight: 500 }}>
+                    {step.kind === "tool_call" || step.kind === "tool_result" ? (
+                      <span style={{ fontFamily: T.font.mono, fontWeight: 600 }}>{step.tool}</span>
                     ) : (
-                      <>
-                        {step.note} · status <b>{step.status}</b>
-                      </>
+                      step.label
                     )}
                   </div>
-                )}
-                {step.detail && (
-                  <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.45 }}>
-                    {step.detail}
-                  </div>
-                )}
-                <div
-                  style={{
-                    height: 7,
-                    borderRadius: 4,
-                    background: "var(--fill)",
-                    marginTop: 7,
-                    position: "relative",
-                    overflow: "hidden",
-                  }}
-                >
                   <div
-                    data-testid={`waterfall-bar-${step.seq}`}
                     style={{
-                      position: "absolute",
-                      top: 0,
-                      bottom: 0,
-                      left: 0,
-                      width: `${Math.max(3, (step.ms / maxMs) * 100)}%`,
-                      borderRadius: 4,
-                      background: barFill(step.kind),
-                    }}
-                  />
-                </div>
-                {hasJson && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggle(step.seq);
-                    }}
-                    style={{
-                      appearance: "none",
-                      background: "none",
-                      border: "none",
-                      padding: "4px 0 0",
                       fontFamily: T.font.mono,
                       fontSize: T.fz.micro,
                       color: "var(--mute)",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 5,
+                      marginTop: 2,
                     }}
                   >
-                    {isOpen ? "▾" : "▸"} {step.args !== undefined ? "args" : "result"}
-                    {step.kind === "tool_result" && step.note ? ` (${step.note})` : ""}
-                  </button>
-                )}
-                {hasJson && isOpen && (
-                  <JsonBlock
-                    value={step.args !== undefined ? step.args : step.output}
-                    style={{
-                      marginTop: 7,
-                      background: "color-mix(in oklch, var(--fill) 55%, var(--paper))",
-                      padding: "9px 11px",
-                      fontSize: T.fz.tiny,
-                      lineHeight: 1.55,
-                    }}
-                  />
-                )}
-              </div>
+                    {KIND_LABEL[step.kind]}
+                    {step.blast && (
+                      <>
+                        {" · "}
+                        <span style={{ color: BLAST_INK[step.blast] }}>● {step.blast}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
 
-              <div
-                style={{
-                  textAlign: "right",
-                  paddingTop: 2,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 3,
-                  alignItems: "flex-end",
-                }}
-              >
-                <span style={{ fontFamily: T.font.mono, fontSize: T.fz.small, fontWeight: 600 }}>
-                  {step.ms === 0 ? "—" : `${step.ms}ms`}
-                </span>
-                {step.outTokens != null && (
-                  <span
-                    style={{ fontFamily: T.font.mono, fontSize: T.fz.micro, color: "var(--mute)" }}
+                <div style={{ minWidth: 0, paddingTop: 1 }}>
+                  {(step.kind === "tool_call" || step.kind === "tool_result") && (
+                    <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.45 }}>
+                      {step.kind === "tool_call" ? (
+                        <>
+                          calls <span style={{ fontFamily: T.font.mono }}>{step.tool}</span>
+                          {step.capability && (
+                            <>
+                              {" "}
+                              via <span style={{ fontFamily: T.font.mono }}>{step.capability}</span>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {step.note} · status <b>{step.status}</b>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {step.detail && (
+                    <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.45 }}>
+                      {step.detail}
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      height: 7,
+                      borderRadius: 4,
+                      background: "var(--fill)",
+                      marginTop: 7,
+                      position: "relative",
+                      overflow: "hidden",
+                    }}
                   >
-                    {step.ctxTokens ? `${step.ctxTokens.toLocaleString()} ctx · ` : ""}
-                    {step.outTokens} out
+                    <div
+                      data-testid={`waterfall-bar-${step.seq}`}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        bottom: 0,
+                        left: 0,
+                        width: `${Math.max(3, (step.ms / maxMs) * 100)}%`,
+                        borderRadius: 4,
+                        background: barFill(step.kind),
+                      }}
+                    />
+                  </div>
+                  {hasJson && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggle(step.seq);
+                      }}
+                      style={{
+                        appearance: "none",
+                        background: "none",
+                        border: "none",
+                        padding: "4px 0 0",
+                        fontFamily: T.font.mono,
+                        fontSize: T.fz.micro,
+                        color: "var(--mute)",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
+                      {isOpen ? "▾" : "▸"} {step.args !== undefined ? "args" : "result"}
+                      {step.kind === "tool_result" && step.note ? ` (${step.note})` : ""}
+                    </button>
+                  )}
+                  {hasJson && isOpen && (
+                    <JsonBlock
+                      value={step.args !== undefined ? step.args : step.output}
+                      style={{
+                        marginTop: 7,
+                        background: "color-mix(in oklch, var(--fill) 55%, var(--paper))",
+                        padding: "9px 11px",
+                        fontSize: T.fz.tiny,
+                        lineHeight: 1.55,
+                      }}
+                    />
+                  )}
+                </div>
+
+                <div
+                  style={{
+                    textAlign: "right",
+                    paddingTop: 2,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 3,
+                    alignItems: "flex-end",
+                  }}
+                >
+                  <span style={{ fontFamily: T.font.mono, fontSize: T.fz.small, fontWeight: 600 }}>
+                    {step.ms === 0 ? "—" : `${step.ms}ms`}
                   </span>
-                )}
+                  {step.outTokens != null && (
+                    <span
+                      style={{
+                        fontFamily: T.font.mono,
+                        fontSize: T.fz.micro,
+                        color: "var(--mute)",
+                      }}
+                    >
+                      {step.ctxTokens ? `${step.ctxTokens.toLocaleString()} ctx · ` : ""}
+                      {step.outTokens} out
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         );
       })}
