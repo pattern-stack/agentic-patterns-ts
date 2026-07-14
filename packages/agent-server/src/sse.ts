@@ -8,12 +8,17 @@
  * `toSSEMapping` so the server stays in sync with the canonical event
  * vocabulary with zero changes here — new runtime events (e.g. the #226
  * `backpack.*`/`scratchpad.*` state deltas) flow through automatically.
- * Only internal observability events (iteration.* and llm.*) are filtered
- * here — they remain available over the admin SSE stream (SSEExporter)
- * for operators.
+ *
+ * The FULL vocabulary is forwarded, including `iteration.*` and `llm.*`.
+ * Those were previously filtered as "internal observability" — which starved
+ * the dashboard's chat trace rail of its model-call steps (durations, ctx/out
+ * tokens, iteration grouping) while the very same events flowed to SQLite and
+ * the admin stream. The chat client's reducer is the single authority on what
+ * renders (`sse-events.ts` WireFrame doc) — curation belongs there, not in
+ * transit.
  */
 
-import type { AgentEvent, AgentEventType } from "@agentic-patterns/runtime";
+import type { AgentEvent } from "@agentic-patterns/runtime";
 import { toSSEMapping } from "@agentic-patterns/runtime";
 
 /** SSE message shape for Hono's writeSSE(). */
@@ -23,24 +28,12 @@ export interface SSEMessage {
 }
 
 /**
- * Internal observability events not surfaced to end clients. They remain
- * available over the admin SSE stream for operators.
- */
-const INTERNAL_EVENT_TYPES: ReadonlySet<AgentEventType> = new Set<AgentEventType>([
-  "agent.iteration.start",
-  "agent.iteration.end",
-  "agent.llm.start",
-  "agent.llm.end",
-]);
-
-/**
  * Convert an AgentEvent to an SSE message for Hono streaming.
  *
- * Returns `null` for events that are not part of the client-facing
- * protocol (internal observability events, or events with no SSE mapping).
+ * Returns `null` for events with no SSE mapping (a non-AgentEvent that
+ * slips through at runtime).
  */
 export function agentEventToSSE(event: AgentEvent): SSEMessage | null {
-  if (INTERNAL_EVENT_TYPES.has(event.type)) return null;
   const mapping = toSSEMapping(event);
   if (!mapping) return null;
   return { event: mapping.name, data: JSON.stringify(mapping.payload) };

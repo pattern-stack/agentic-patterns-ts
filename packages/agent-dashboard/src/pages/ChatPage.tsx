@@ -239,7 +239,12 @@ export function ChatPage() {
   const displayMessages = viewing ? (viewingMessages ?? []) : chat.messages;
   const traceSource: TraceRailSource = viewing
     ? { kind: "replay", runId: viewingRunId }
-    : { kind: "live", events: chat.traceEvents, streaming: chat.streaming };
+    : {
+        kind: "live",
+        events: chat.traceEvents,
+        streaming: chat.streaming,
+        runId: chat.lastRunId,
+      };
 
   return (
     <div

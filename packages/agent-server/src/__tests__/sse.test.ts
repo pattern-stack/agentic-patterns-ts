@@ -229,9 +229,8 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
 
   // ---------------------------------------------------------------------------
   // State-delta events (#226) — pass through with ZERO server changes. The
-  // delegation to the runtime's `toSSEMapping` carries them automatically;
-  // only iteration.*/llm.* are filtered here. These pins make that verified
-  // claim executable.
+  // delegation to the runtime's `toSSEMapping` carries them automatically.
+  // These pins make that verified claim executable.
   // ---------------------------------------------------------------------------
 
   it("maps backpack.drop with the snake_case receipt payload (no server-side allowlist)", () => {
@@ -296,20 +295,25 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Internal events are filtered from the client protocol
+  // iteration.*/llm.* forward to the client — the chat trace rail folds them
+  // into model-call steps (durations, ctx/out tokens, iteration grouping).
+  // Previously filtered as "internal observability", which starved the rail.
   // ---------------------------------------------------------------------------
 
-  it("returns null for iteration.start", () => {
+  it("maps iteration.start with iteration + max_iterations", () => {
     const result = agentEventToSSE({
       type: "agent.iteration.start",
       iteration: 1,
       maxIterations: 10,
       ...base,
     });
-    expect(result).toBeNull();
+    expect(result?.event).toBe("iteration.start");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.iteration).toBe(1);
+    expect(parsed.max_iterations).toBe(10);
   });
 
-  it("returns null for iteration.end", () => {
+  it("maps iteration.end with tool_calls_count + has_more", () => {
     const result = agentEventToSSE({
       type: "agent.iteration.end",
       iteration: 1,
@@ -317,10 +321,14 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
       hasMore: false,
       ...base,
     });
-    expect(result).toBeNull();
+    expect(result?.event).toBe("iteration.end");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.iteration).toBe(1);
+    expect(parsed.tool_calls_count).toBe(0);
+    expect(parsed.has_more).toBe(false);
   });
 
-  it("returns null for llm.start", () => {
+  it("maps llm.start with model + message_count + has_tools", () => {
     const result = agentEventToSSE({
       type: "agent.llm.start",
       model: "test",
@@ -328,10 +336,14 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
       hasTools: false,
       ...base,
     });
-    expect(result).toBeNull();
+    expect(result?.event).toBe("llm.start");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.model).toBe("test");
+    expect(parsed.message_count).toBe(1);
+    expect(parsed.has_tools).toBe(false);
   });
 
-  it("returns null for llm.end", () => {
+  it("maps llm.end with tokens + duration_ms + finish_reason", () => {
     const result = agentEventToSSE({
       type: "agent.llm.end",
       model: "test",
@@ -342,6 +354,11 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
       hasToolCalls: false,
       ...base,
     });
-    expect(result).toBeNull();
+    expect(result?.event).toBe("llm.end");
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.input_tokens).toBe(5);
+    expect(parsed.output_tokens).toBe(3);
+    expect(parsed.duration_ms).toBe(100);
+    expect(parsed.finish_reason).toBe("stop");
   });
 });
