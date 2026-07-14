@@ -122,6 +122,7 @@ export {
   type CompletedStage,
   type SequentialAgentOpts,
   type SequentialAgentResult,
+  type TypedSequentialAgentOpts,
   renderPriorEmission,
   renderSharedState,
   sequentialAgent,

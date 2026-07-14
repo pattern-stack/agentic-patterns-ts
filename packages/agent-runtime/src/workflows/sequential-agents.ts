@@ -48,6 +48,21 @@
  *    `slot` and read it inside the node (`FunctionStep`'s fn takes a
  *    `ScratchpadAccess`). `output` (zod) on a node stage is an ASSERT over the
  *    node's own output, not a `runStructured` driver — see the field doc.
+ *  - TYPED OUTPUT (#255): `sequentialAgent<TOut>(stages, { emit: '<stage>' })`
+ *    designates ONE stage's emission as the composite's own output — the node
+ *    types as `Node<TIn, TOut>` instead of the untyped `SequentialAgentResult`
+ *    envelope. Designation is COMPOSITE-level (an opts key naming the stage —
+ *    not a per-stage marker, not last-stage-wins) so the convention
+ *    generalizes to a parallel sibling, whose natural emission is the joined
+ *    record. Stop interplay: a `stop` AT or AFTER the designated stage still
+ *    resolves to the emission (the stop only prunes later stages); a stop
+ *    BEFORE it fails the node — the contract was never produced. See
+ *    {@link TypedSequentialAgentOpts.emit}.
+ *  - `input: 'prior'` (#255, node stages only) hands the stage's leaf the
+ *    immediately-prior stage's emission instead of the pipeline input — the
+ *    typed spine → tail seam (`CoordinatorStep<string, TEmission>` feeding a
+ *    `FunctionStep<TEmission, TContract>`) with no nullable slot read. The
+ *    default stays 'pipeline' (#245's behavior, unchanged).
  *
  * The built object implements {@link Node}, so it nests anywhere a node is
  * accepted (a Sequential stage, a Loop body, a FanOut branch, a sub-tool).
@@ -105,6 +120,23 @@ export interface AgentStageSpec<TOut = unknown> {
    */
   // biome-ignore lint/suspicious/noExplicitAny: a stage node's TIn is the pipeline input (unknown at the seam) and Node is contravariant in it — `any` is the deliberate variance escape so typed nodes (FunctionStep<Q,R>, CoordinatorStep<Q,R>) seat WITHOUT casts, same escape as AgentStage below.
   readonly node?: Node<any, unknown>;
+  /**
+   * What this stage's NODE receives as its run input (#255):
+   *  - `'pipeline'` (default) — the sequence's own input; #245's behavior,
+   *    unchanged.
+   *  - `'prior'` — the immediately-prior stage's emission, VERBATIM. Seats the
+   *    deterministic tail without degrading its seam to a nullable slot read:
+   *    the spine emits `TEmission`, the tail is a
+   *    `FunctionStep<TEmission, TContract>`, and the tail's `fn` input is
+   *    compiler-checked at its own boundary. A `retry` re-runs the leaf with
+   *    the SAME resolved input.
+   *
+   * NODE stages only — rejected at build time on an `agent` stage (an agent
+   * stage already receives the prior emission through its implicit render;
+   * override `prompt` or `opts.render` to reshape what it sees). Rejected on
+   * the FIRST stage (there is no prior emission to receive).
+   */
+  readonly input?: "pipeline" | "prior";
   /**
    * Stage name = the emission's slot key + the progress label. Default: the
    * agent's role name (agent stages) / the node's `name` (node stages).
@@ -211,6 +243,42 @@ export interface SequentialAgentOpts {
    * stage `prompt` makes through its `state` reader still report as explicit.
    */
   readonly render?: (input: unknown, completed: ReadonlyArray<CompletedStage>) => string;
+}
+
+/**
+ * The TYPED form's options (#255): {@link SequentialAgentOpts} + a designated
+ * emitting stage. `sequentialAgent<TOut>(stages, { emit: '<stage name>' })`
+ * types the composite `Node<TIn, TOut>` and resolves its output to that
+ * stage's emission verbatim.
+ */
+export interface TypedSequentialAgentOpts extends SequentialAgentOpts {
+  /**
+   * The DESIGNATED EMITTING STAGE, by stage name: the composite's output is
+   * this stage's emission (VERBATIM — the same value its slot receives), and
+   * the composite types as `Node<TIn, TOut>` instead of the untyped
+   * `SequentialAgentResult` envelope. A name no stage carries is a build-time
+   * error.
+   *
+   * COMPOSITE-level by design (#255): an opts key naming the stage — NOT a
+   * per-stage marker and NOT last-stage-wins — so the convention generalizes
+   * to a parallel sibling (a fan-out's natural emission is the joined record;
+   * it has no "last stage"). A stage-spec `emit` key is rejected at build time
+   * with a pointer here.
+   *
+   * The designated stage need not be terminal: later stages still run (their
+   * emissions land on the pad as usual); the composite's OUTPUT is pinned to
+   * the designated emission. STOP interplay: `stop`/`onEmit` fire only after
+   * an emission materializes, so a stop AT or AFTER the designated stage still
+   * resolves the output; a stop BEFORE it returns `{ succeeded: false }` — the
+   * pipeline never produced its contract. Pipelines with clarify/refuse lanes
+   * UPSTREAM of the emitting stage should stay on the untyped form and branch
+   * on `stopped`, or fold those lanes into the contract type itself.
+   * FAILURE interplay: a stage failure (or `onEmit` throw) anywhere in the
+   * sequence — including AFTER a non-terminal designated stage has already
+   * emitted — fails the composite and discards the captured emission. A real
+   * error outranks the contract; only a STOP is a successful early exit.
+   */
+  readonly emit: string;
 }
 
 /** One completed stage's contribution to the shared context render. */
@@ -330,11 +398,30 @@ function assertingNode(
 /**
  * Seat `stages` in order over one shared Scratchpad and return the pipeline as
  * a {@link Node}. See the module doc for semantics.
+ *
+ * Two forms (#255):
+ *  - `sequentialAgent(stages, opts?)` — the untyped envelope,
+ *    `Node<unknown, SequentialAgentResult>` (today's shape, unchanged).
+ *  - `sequentialAgent<TOut[, TIn]>(stages, { emit: '<stage>' })` — a
+ *    designated emitting stage types the composite `Node<TIn, TOut>` and
+ *    resolves its output to that stage's emission. The overloads make the
+ *    pairing STRUCTURAL: a type argument requires `emit` (no typed call whose
+ *    runtime output is secretly the envelope), and `emit` diverts the return
+ *    type even without a type argument (`TOut` defaults to `unknown` —
+ *    honest, narrow at the consumer).
  */
 export function sequentialAgent(
   stages: ReadonlyArray<AgentStage>,
-  opts: SequentialAgentOpts = {},
-): Node<unknown, SequentialAgentResult> {
+  opts?: SequentialAgentOpts & { readonly emit?: undefined },
+): Node<unknown, SequentialAgentResult>;
+export function sequentialAgent<TOut = unknown, TIn = unknown>(
+  stages: ReadonlyArray<AgentStage>,
+  opts: TypedSequentialAgentOpts,
+): Node<TIn, TOut>;
+export function sequentialAgent(
+  stages: ReadonlyArray<AgentStage>,
+  opts: SequentialAgentOpts & { readonly emit?: string } = {},
+): Node<unknown, unknown> {
   if (stages.length === 0) throw new Error("sequentialAgent: at least one stage is required");
   const specs = stages.map((s, i) => toSpec(s, i));
 
@@ -389,6 +476,55 @@ export function sequentialAgent(
     }
   });
 
+  // Build-time assert (#255): `emit` is NOT a stage knob — designation is
+  // COMPOSITE-level so the convention generalizes to parallel siblings (a
+  // fan-out has no terminal stage). Rejected rather than silently ignored.
+  specs.forEach((s, i) => {
+    if ("emit" in s) {
+      throw new Error(
+        `sequentialAgent: stage '${names[i]}' sets \`emit\` on the stage spec — the emitting stage is designated at the COMPOSITE level: sequentialAgent<TOut>(stages, { emit: '${names[i]}' })`,
+      );
+    }
+  });
+
+  // Build-time assert (#255): `input` is a NODE-stage knob. On an agent stage
+  // the prior emission already arrives through the implicit render; on the
+  // first stage there is nothing prior to receive. Same reject-loudly ethos.
+  specs.forEach((s, i) => {
+    if (s.input === undefined) return;
+    // The structural error first: on an agent stage the knob is wrong however
+    // it is spelled, so that message outranks the invalid-value one.
+    if (s.node === undefined) {
+      throw new Error(
+        `sequentialAgent: stage '${names[i]}' sets \`input\` on an \`agent\` stage — \`input\` is a node-stage knob (an agent stage already sees the prior emission through its implicit render; override \`prompt\` or \`opts.render\` to reshape it)`,
+      );
+    }
+    if (s.input !== "pipeline" && s.input !== "prior") {
+      throw new Error(
+        `sequentialAgent: stage '${names[i]}' has invalid input '${String(s.input)}' — expected 'pipeline' or 'prior'`,
+      );
+    }
+    if (s.input === "prior" && i === 0) {
+      throw new Error(
+        `sequentialAgent: stage '${names[i]}' sets input: 'prior' but is the FIRST stage — there is no prior emission (the first stage receives the pipeline input)`,
+      );
+    }
+  });
+
+  // COMPOSITE-level emit designation (#255): resolve + validate the name now —
+  // a typo is a construction error, not a silently envelope-shaped output.
+  if (opts.emit !== undefined && typeof opts.emit !== "string") {
+    throw new Error(
+      `sequentialAgent: \`emit\` must be a stage NAME (string) — got ${typeof opts.emit}. Designation is composite-level; there is no boolean stage marker (see #255).`,
+    );
+  }
+  const emitIndex = opts.emit !== undefined ? names.indexOf(opts.emit) : -1;
+  if (opts.emit !== undefined && emitIndex < 0) {
+    throw new Error(
+      `sequentialAgent: \`emit\` designates stage '${opts.emit}' but no stage has that name — stages: ${names.join(", ")}`,
+    );
+  }
+
   // Emission slots: auto per stage unless the caller provided one.
   const emissionSlots = specs.map(
     (s, i) =>
@@ -413,13 +549,54 @@ export function sequentialAgent(
 
   return {
     name: opts.name ?? "sequential-agents",
-    async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<SequentialAgentResult>> {
+    async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<unknown>> {
       const scratchpad = ctx.scratchpad ?? createScratchpad();
       const render = opts.render ?? renderPriorEmission;
       const completed: CompletedStage[] = [];
       const outputs: Record<string, unknown> = {};
       let tokensIn = 0;
       let tokensOut = 0;
+
+      // The designated stage's emission (#255), captured the moment it lands.
+      let emitted: { readonly value: unknown } | null = null;
+
+      // Resolve the composite's result for BOTH successful exit lanes (a stop
+      // short-circuit, or the sequence completing). Untyped → the envelope,
+      // byte-identical to today. Emit-designated → the designated emission —
+      // or an HONEST failure when the sequence stopped before that emission
+      // ever materialized (the typed composite has no contract to return).
+      const finish = (stopped: SequentialAgentResult["stopped"]): NodeResult<unknown> => {
+        if (emitIndex < 0) {
+          return {
+            output: { outputs, stopped } satisfies SequentialAgentResult,
+            succeeded: true,
+            totalInputTokens: tokensIn,
+            totalOutputTokens: tokensOut,
+          };
+        }
+        if (emitted !== null) {
+          return {
+            output: emitted.value,
+            succeeded: true,
+            totalInputTokens: tokensIn,
+            totalOutputTokens: tokensOut,
+          };
+        }
+        // The `stopped == null` arm is defensively unreachable: completing the
+        // loop means the designated stage ran and captured `emitted` (every
+        // earlier failure or stop returned first).
+        return {
+          output: undefined as never,
+          succeeded: false,
+          error: new Error(
+            stopped != null
+              ? `sequentialAgent: stopped at stage '${stopped.stage}' (${stopped.reason}) before the designated emit stage '${opts.emit}' emitted — the typed composite has no output. Keep stop lanes downstream of the emit stage, or use the untyped form and branch on \`stopped\`.`
+              : `sequentialAgent: the sequence completed without the designated emit stage '${opts.emit}' emitting`,
+          ),
+          totalInputTokens: tokensIn,
+          totalOutputTokens: tokensOut,
+        };
+      };
 
       // Step-event emission (#226): SKIPPED entirely when ctx.eventBus is
       // absent — today's silent behavior, byte-identical. Event identity
@@ -462,6 +639,13 @@ export function sequentialAgent(
         const spec = specs[i]!;
         const name = names[i]!;
         const emissionSlot = emissionSlots[i]!;
+
+        // What this stage's leaf RECEIVES (#255): the pipeline input, or — on
+        // an `input: 'prior'` node stage — the immediately-prior emission (the
+        // build guards guarantee a prior stage exists, and reaching stage i
+        // means every prior stage emitted). Step events below record it, so
+        // the trace shows what the leaf actually ran with.
+        const leafInput = spec.input === "prior" ? completed[i - 1]!.output : input;
 
         // Declared BEFORE the step so the prompt closure below (which runs
         // inside node.run, after step.start assigns it) sees the stage's span.
@@ -537,7 +721,7 @@ export function sequentialAgent(
             ...(ctx.parentSpanId ? { parentSpanId: ctx.parentSpanId } : {}),
             stepName: name,
             ...(agentName ? { agentName } : {}),
-            arguments: { input },
+            arguments: { input: leafInput },
           });
           stepSpanId = startEvent.spanId;
           publish(startEvent);
@@ -565,7 +749,7 @@ export function sequentialAgent(
         let stepResult: unknown;
         let stepError: string | undefined;
         try {
-          const res = await node.run(input, stageCtx);
+          const res = await node.run(leafInput, stageCtx);
           tokensIn += res.totalInputTokens;
           tokensOut += res.totalOutputTokens;
           if (!res.succeeded) {
@@ -591,23 +775,15 @@ export function sequentialAgent(
           }
           outputs[name] = res.output;
           completed.push({ name, output: res.output });
-
-          const done = (
-            stopped: SequentialAgentResult["stopped"],
-          ): NodeResult<SequentialAgentResult> => ({
-            output: { outputs, stopped },
-            succeeded: true,
-            totalInputTokens: tokensIn,
-            totalOutputTokens: tokensOut,
-          });
+          if (i === emitIndex) emitted = { value: res.output };
 
           const stopReason = spec.stop?.(res.output, scratchpad.reader()) ?? null;
-          if (stopReason != null) return done({ stage: name, reason: stopReason });
+          if (stopReason != null) return finish({ stage: name, reason: stopReason });
 
           if (spec.onEmit != null) {
             try {
               const emitStop = await spec.onEmit(res.output, scratchpad, { ...ctx, scratchpad });
-              if (typeof emitStop === "string") return done({ stage: name, reason: emitStop });
+              if (typeof emitStop === "string") return finish({ stage: name, reason: emitStop });
             } catch (error) {
               stepError = error instanceof Error ? error.message : String(error);
               return {
@@ -634,7 +810,7 @@ export function sequentialAgent(
                 ...(ctx.parentSpanId ? { parentSpanId: ctx.parentSpanId } : {}),
                 stepName: name,
                 ...(agentName ? { agentName } : {}),
-                arguments: { input },
+                arguments: { input: leafInput },
                 result: stepResult,
                 ...(stepError !== undefined ? { error: stepError } : {}),
                 durationMs: Date.now() - stepStartedAt,
@@ -644,12 +820,7 @@ export function sequentialAgent(
         }
       }
 
-      return {
-        output: { outputs, stopped: null },
-        succeeded: true,
-        totalInputTokens: tokensIn,
-        totalOutputTokens: tokensOut,
-      };
+      return finish(null);
     },
   };
 }
