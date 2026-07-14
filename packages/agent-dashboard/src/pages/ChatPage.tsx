@@ -48,6 +48,7 @@ import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
 import { DropdownMenu } from "../components/kit/DropdownMenu";
 import { inputStyle } from "../components/kit/Field";
+import { Markdown } from "../components/kit/Markdown";
 import { Segmented } from "../components/kit/Segmented";
 import { useAdminData } from "../hooks/useAdminData";
 import { relTime, shortId, statusTone } from "../lib/format";
@@ -532,7 +533,9 @@ function Header({
         )}
       </div>
       {description && (
-        <div style={{ fontSize: T.fz.small, color: "var(--ink-2)" }}>{description}</div>
+        <div style={{ fontSize: T.fz.small, color: "var(--ink-2)" }}>
+          <Markdown content={description} gate />
+        </div>
       )}
       {loadError && (
         <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>

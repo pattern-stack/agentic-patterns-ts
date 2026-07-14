@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import type { CapabilityBlock, ProvenanceChip as ProvChip, Slot } from "../../api/composition";
+import { looksMarkdown } from "../../lib/markdown";
 import { Card } from "../atoms/Card";
 import { Chip, ProvenanceChip } from "../atoms/Chip";
+import { Markdown } from "../kit/Markdown";
 
 /**
  * The slot stack — an agent/role's composition rendered as labeled cards, each
@@ -44,16 +46,12 @@ function SlotCard({
         )}
       </div>
       {text && (
-        <div
-          style={{
-            fontSize: 13,
-            lineHeight: 1.55,
-            color: "var(--ink-2)",
-            whiteSpace: "pre-wrap",
-            fontFamily: "var(--font-sans)",
-          }}
-        >
-          {text}
+        <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--ink-2)" }}>
+          {looksMarkdown(text) ? (
+            <Markdown content={text} />
+          ) : (
+            <div style={{ whiteSpace: "pre-wrap", fontFamily: "var(--font-sans)" }}>{text}</div>
+          )}
         </div>
       )}
       {footer}

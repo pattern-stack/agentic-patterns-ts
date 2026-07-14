@@ -13,6 +13,7 @@ import type { RosterAgent } from "../../api/composition";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
+import { Markdown } from "../../components/kit/Markdown";
 import { FamilyTabs } from "../../components/molecules/FamilyTabs";
 import { DetailPageShell } from "../../components/organisms/DetailPageShell";
 import { useAdminData } from "../../hooks/useAdminData";
@@ -160,7 +161,7 @@ function AgentCard({ agent: a, navigate }: { agent: RosterAgent; navigate: Navig
       <div style={{ fontWeight: 600, color: "var(--ink)" }}>{a.name}</div>
       {a.description && (
         <div style={{ marginTop: 6, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.5 }}>
-          {a.description}
+          <Markdown content={a.description} gate />
         </div>
       )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>

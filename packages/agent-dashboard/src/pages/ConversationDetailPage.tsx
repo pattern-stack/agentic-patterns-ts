@@ -23,6 +23,7 @@ import { Badge, type BadgeTone } from "../components/atoms/Badge";
 import { Card } from "../components/atoms/Card";
 import { AsyncState } from "../components/kit/AsyncState";
 import { JsonBlock } from "../components/kit/JsonBlock";
+import { Markdown } from "../components/kit/Markdown";
 import { formatDuration, statusTone } from "../lib/format";
 
 type MessageWithParts = ConversationMessage & { parts: ConversationMessagePart[] };
@@ -162,21 +163,27 @@ function MessageCard({ message }: { message: MessageWithParts }) {
           message.parts
             .slice()
             .sort((a, b) => a.position - b.position)
-            .map((p) => <PartBlock key={p.id} part={p} />)
+            .map((p) => <PartBlock key={p.id} part={p} isAssistant={message.kind === "response"} />)
         )}
       </div>
     </Card>
   );
 }
 
-function PartBlock({ part }: { part: ConversationMessagePart }) {
+function PartBlock({ part, isAssistant }: { part: ConversationMessagePart; isAssistant: boolean }) {
   const label = <Badge tone="mute">{part.type}</Badge>;
 
+  // Matches the live chat's convention (chat/parts.tsx TextPart): user text is
+  // plain, assistant text is markdown.
   if (part.type === "user_prompt" || part.type === "text") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {label}
-        <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{part.content ?? ""}</div>
+        {isAssistant ? (
+          <Markdown content={part.content ?? ""} />
+        ) : (
+          <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{part.content ?? ""}</div>
+        )}
       </div>
     );
   }
