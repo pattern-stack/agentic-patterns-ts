@@ -1,6 +1,11 @@
 /**
  * Calculator agent preset — a fully-built agent that performs arithmetic
  * and algebraic calculations using dedicated tools.
+ *
+ * NO MODEL (#179/#222): pins no model. It runs on whatever model the runner
+ * resolves (tier / `AGENT_MODEL` / gateway / profiles) — e.g. `createRunner({
+ * tier })` in `agent-server/examples/live-demo.ts`. Pin one explicitly with
+ * `buildCalculatorAgent().withModel(id)` if you need a specific model.
  */
 
 import {
@@ -157,7 +162,6 @@ export function buildCalculatorAgent() {
         description: "Perform calculations accurately using tools",
       }),
     )
-    .withDefaultModel("sonnet")
     .build();
 
   const mission = new Mission({

@@ -80,7 +80,13 @@ export interface JudgeScorerOptions {
   /**
    * Judge model id, returned by the default judge agent's getModel(). Honored
    * by resolver-backed/gateway runners (agent-runner.ts:293-297); fixed-model
-   * runners judge on their own model. Default "sonnet".
+   * runners judge on their own model.
+   *
+   * NO DEFAULT (#179/#222): when unset the judge agent declares NO model, so a
+   * resolver-backed/gateway runner resolves it from the environment or fails
+   * loud — the framework never silently judges on a vendor's model the consumer
+   * never chose (this scorer's whole point is "no vendor hardcoding"). Set it
+   * to judge on a specific model regardless of the target's.
    */
   model?: string;
   /**
@@ -307,7 +313,7 @@ export function judgeScorer(opts: JudgeScorerOptions): Scorer<unknown, unknown, 
   const judgeSystem = opts.system ?? DEFAULT_JUDGE_SYSTEM;
   const defaultAgent: AgentLike = {
     role: { name: "eval-judge" },
-    getModel: () => opts.model ?? "sonnet",
+    getModel: () => opts.model,
     getTools: () => [],
     // Every runner reads renderInitialPrompt() for the system message, so the
     // rubric+schema reaches the model regardless of runner.

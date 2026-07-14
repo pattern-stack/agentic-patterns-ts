@@ -1,6 +1,10 @@
 /**
  * Writing Coach — a tools-free agent preset that demonstrates
  * pure persona + reasoning without any toolbox or capability.
+ *
+ * NO MODEL (#179/#222): pins no model. It runs on whatever model the runner
+ * resolves (tier / `AGENT_MODEL` / gateway / profiles). Pin one explicitly with
+ * `buildWritingCoachAgent().withModel(id)` if you need a specific model.
  */
 
 import {
@@ -44,7 +48,6 @@ export function buildWritingCoachAgent() {
         description: "Review and improve written content",
       }),
     )
-    .withDefaultModel("sonnet")
     .build();
 
   const mission = new Mission({

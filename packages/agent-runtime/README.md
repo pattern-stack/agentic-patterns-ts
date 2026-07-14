@@ -400,3 +400,14 @@ import { coordinatorRole, ROUTING, ORCHESTRATION } from "@agentic-patterns/runti
 
 const role = coordinatorRole("lead", persona);
 ```
+
+**No model defaults (#179/#222).** No preset — role or demo agent — pins a
+`defaultModel`. A framework DECLARATION never names a vendor's model: you would
+inherit a model you never chose, on a provider you may not use, and introspection
+(the playground's Roles page) would render it as THE model. Set the model where
+you compose the agent (`AgentBuilder.withModel(id)` / your own
+`role.withDefaultModel(id)`), or let the runner resolve it from the environment
+(`AGENT_TIER` / `AGENT_MODEL`, a gateway, or `models.yaml` profiles). Resolving a
+model from the ENVIRONMENT at run time is the supported mechanism; pinning one in
+a declaration is not. An agent that declares no model on a resolver-backed runner
+fails loud rather than defaulting to a vendor.
