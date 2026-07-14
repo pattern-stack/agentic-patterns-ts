@@ -1,11 +1,14 @@
 /**
  * Chat atoms — the smallest themed primitives the chat organism composes from.
- * All token-driven (scoped chat tokens via chat.css class hooks). Kept dependency
- * free; markdown reuses the hand-rolled `md()` + `.answer .md-*` styles.
+ * All token-driven (scoped chat tokens via chat.css class hooks).
  */
 import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
-import { md } from "../lib/markdown";
 import type { Role } from "./model";
+
+// Re-exported for this file's existing call sites — canonical definition now
+// lives in components/kit/Markdown.tsx so non-chat surfaces can reuse it
+// without reaching into `chat/`.
+export { Markdown } from "../components/kit/Markdown";
 
 /* ── Avatar ─────────────────────────────────────────────────────────────────*/
 export function Avatar({ role }: { role: Role }) {
@@ -59,31 +62,6 @@ export function RelativeTime({ at }: { at?: number }) {
     >
       {relative(at)}
     </time>
-  );
-}
-
-/* ── Markdown ───────────────────────────────────────────────────────────────
- * Renders LLM markdown via the dependency-free `md()`. The `.answer .md` classes
- * carry the child element styling; `chat-bubble` (in chat.css) neutralizes the
- * .answer container chrome so the bubble owns the box. */
-export function Markdown({
-  content,
-  className,
-  postprocess,
-}: {
-  content: string;
-  className?: string;
-  /** Optional HTML rewrite applied AFTER md() (e.g. [#N] cite-chip linkification
-   *  — parts.tsx `linkifyCites`). Receives md()'s escaped, controlled-tag output. */
-  postprocess?: (html: string) => string;
-}) {
-  const html = md(content);
-  return (
-    <div
-      className={`answer md ${className ?? ""}`}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: md() emits a controlled tag set on escaped input.
-      dangerouslySetInnerHTML={{ __html: postprocess ? postprocess(html) : html }}
-    />
   );
 }
 

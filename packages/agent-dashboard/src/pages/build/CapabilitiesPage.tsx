@@ -33,6 +33,7 @@ import { Chip, ProvenanceChip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
 import { AsyncState } from "../../components/kit/AsyncState";
 import { JsonBlock } from "../../components/kit/JsonBlock";
+import { Markdown } from "../../components/kit/Markdown";
 import { SectionHeading } from "../../components/kit/SectionHeading";
 import { Segmented } from "../../components/kit/Segmented";
 import { FamilyTabs } from "../../components/molecules/FamilyTabs";
@@ -41,7 +42,7 @@ import { DataTable } from "../../components/organisms/DataTable";
 import { DetailPageShell, Labeled } from "../../components/organisms/DetailPageShell";
 import { ToolRunner } from "../../components/organisms/ToolRunner";
 import { useAdminData } from "../../hooks/useAdminData";
-import { md } from "../../lib/markdown";
+import { looksMarkdown } from "../../lib/markdown";
 import { type ToolParam, foldToolParams } from "../../lib/toolParams";
 import { T } from "../../ui/tokens";
 
@@ -134,18 +135,6 @@ function CapabilitiesList() {
 // --------------------------------------------------------------------------
 // Detail view — /capabilities/:id
 // --------------------------------------------------------------------------
-
-/** Heuristic: does this flattened manual text look markdown-ish? A TextManual
- *  always starts `# <name>\n\n…` so it always qualifies; a plain-prose
- *  duck-typed manual degrades to a raw `<pre>` instead of guessing wrong. */
-function looksMarkdown(text: string): boolean {
-  return (
-    /^#{1,6}\s/m.test(text) ||
-    /^[-*]\s/m.test(text) ||
-    /\*\*[^*]+\*\*/.test(text) ||
-    /^```/m.test(text)
-  );
-}
 
 function useToggleSet(initial: Iterable<string> = []) {
   const [open, setOpen] = useState<Set<string>>(() => new Set(initial));
@@ -334,12 +323,9 @@ function ManualView({ manual }: { manual: CapabilityDetail["manual"] }) {
     return (
       <Card>
         {looksMarkdown(manual.text) ? (
-          <div
-            className="md"
-            style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.6 }}
-            // biome-ignore lint/security/noDangerouslySetInnerHtml: md() emits a controlled tag set on escaped input.
-            dangerouslySetInnerHTML={{ __html: md(manual.text) }}
-          />
+          <div style={{ fontSize: T.fz.small, color: "var(--ink-2)", lineHeight: 1.6 }}>
+            <Markdown content={manual.text} />
+          </div>
         ) : (
           <JsonBlock value={manual.text} raw />
         )}
@@ -661,7 +647,7 @@ function CapabilityDetailView({ id }: { id: string }) {
           </div>
           {data.description && (
             <div style={{ marginTop: 6, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>
-              {data.description}
+              <Markdown content={data.description} gate />
             </div>
           )}
           <div

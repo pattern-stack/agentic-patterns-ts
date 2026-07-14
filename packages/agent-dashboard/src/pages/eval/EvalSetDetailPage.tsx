@@ -18,6 +18,7 @@ import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
 import { Chip } from "../../components/atoms/Chip";
 import { AsyncState } from "../../components/kit/AsyncState";
+import { Markdown } from "../../components/kit/Markdown";
 import { DataTable } from "../../components/organisms/DataTable";
 import {
   type EvalRunFilters,
@@ -237,7 +238,9 @@ export function EvalSetDetailPage() {
           <Badge tone="mute">created · {relTime(set.createdTs)}</Badge>
         </div>
         {set.description && (
-          <div style={{ marginTop: 10, fontSize: 14, color: "var(--mute)" }}>{set.description}</div>
+          <div style={{ marginTop: 10, fontSize: 14, color: "var(--mute)" }}>
+            <Markdown content={set.description} gate />
+          </div>
         )}
       </Card>
 

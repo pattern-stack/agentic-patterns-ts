@@ -24,6 +24,7 @@ import { Spinner } from "../../components/atoms/Spinner";
 import { AsyncState } from "../../components/kit/AsyncState";
 import { inputStyle } from "../../components/kit/Field";
 import { JsonBlock } from "../../components/kit/JsonBlock";
+import { Markdown } from "../../components/kit/Markdown";
 import { Segmented } from "../../components/kit/Segmented";
 import { HonestyBanner } from "../../components/molecules/HonestyBanner";
 import { DetailPageShell, Labeled } from "../../components/organisms/DetailPageShell";
@@ -242,7 +243,7 @@ export function AgentLensPage() {
         </div>
         {data.description && (
           <div style={{ marginTop: 6, fontSize: 14, color: "var(--ink-2)", lineHeight: 1.5 }}>
-            {data.description}
+            <Markdown content={data.description} gate />
           </div>
         )}
       </Card>

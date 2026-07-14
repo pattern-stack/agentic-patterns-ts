@@ -23,6 +23,21 @@ export const fmtJson = (s: unknown): string => {
   }
 };
 
+/** Heuristic: does this text look markdown-ish? Prose that merely mentions a
+ *  dash or asterisk shouldn't be forced through the renderer, so this looks
+ *  for markdown's structural markers (heading/list line starts, bold, fences)
+ *  rather than any single punctuation character. Callers gate `md()`/
+ *  `&lt;Markdown&gt;` on this so plain strings degrade to a raw render instead of
+ *  guessing wrong. */
+export function looksMarkdown(text: string): boolean {
+  return (
+    /^#{1,6}\s/m.test(text) ||
+    /^[-*]\s/m.test(text) ||
+    /\*\*[^*]+\*\*/.test(text) ||
+    /^```/m.test(text)
+  );
+}
+
 const BT = String.fromCharCode(96);
 
 function mdEmphasis(s: string): string {

@@ -8,6 +8,7 @@ export { AsyncState, type AsyncStateKind, type AsyncStateProps } from "./AsyncSt
 export { DropdownMenu, type DropdownMenuProps } from "./DropdownMenu";
 export { Field, inputStyle } from "./Field";
 export { JsonBlock } from "./JsonBlock";
+export { Markdown } from "./Markdown";
 export { PageHeader } from "./PageHeader";
 export { SectionHeading, sectionMicroHeadingStyle } from "./SectionHeading";
 export { Segmented, type SegmentedOption, type SegmentedProps } from "./Segmented";
