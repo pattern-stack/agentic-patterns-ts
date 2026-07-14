@@ -972,5 +972,96 @@ describe("AgentRunner", () => {
       expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool");
       expect((complete as { content?: string }).content).toBe("done");
     });
+
+    // BOUNDED COMPLETION: the first errored terminal call continues (test
+    // above), but a terminal tool that KEEPS erroring must not burn every
+    // remaining iteration and return an empty "max_iterations" response.
+    it("ends as terminal_tool_error on the SECOND errored terminal call — does not burn to max_iterations", async () => {
+      // The model tool-calls finish on every iteration; the tool always throws.
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "finish", input: { summary: "done?" } },
+            20,
+            10,
+          ),
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => {
+        throw new Error("facet 2 still uncovered");
+      });
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "Gather", {
+        toolExecutor: executor,
+        maxIterations: 20,
+      });
+
+      expect(result.finishReason).toBe("terminal_tool_error");
+      // The response carries the error so a lost summary isn't silently dropped.
+      expect(result.response).toContain("facet 2 still uncovered");
+      expect(result.response).toContain("finish");
+      // Bounded: it stops on the second attempt, nowhere near maxIterations.
+      expect(result.iterations).toBe(2);
+    });
+
+    it("emits message.complete (terminal_tool_error) with the error text as content", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "finish", input: { summary: "done?" } },
+            20,
+            10,
+          ),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => {
+        throw new Error("still uncovered");
+      });
+
+      const runner = new AgentRunner(model, bus);
+      await runner.run(agent, "Gather", { toolExecutor: executor, maxIterations: 20 });
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool_error");
+      expect((complete as { content?: string }).content).toBe("still uncovered");
+      // No max_iterations completion was emitted.
+      const maxIter = events.find(
+        (e) =>
+          e.type === "agent.message.complete" &&
+          (e as { finishReason?: string }).finishReason === "max_iterations",
+      );
+      expect(maxIter).toBeUndefined();
+    });
+
+    it("terminal errors ONCE then succeeds — clean terminal_tool exit (correct-and-retry still works)", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          ),
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      let calls = 0;
+      const executor = makeToolExecutor(async (_name, args) => {
+        calls++;
+        if (calls === 1) throw new Error("too early");
+        return args.summary as string;
+      });
+
+      const runner = new AgentRunner(model);
+      const result = await runner.run(agent, "Gather", {
+        toolExecutor: executor,
+        maxIterations: 5,
+      });
+
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.response).toBe("done");
+      expect(result.iterations).toBe(2);
+    });
   });
 });

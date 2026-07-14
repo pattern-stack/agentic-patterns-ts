@@ -334,6 +334,11 @@ export class AgentRunner implements RunnerProtocol {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let totalToolCalls = 0;
+    // BOUNDED COMPLETION: how many iterations have ended with an ERRORED
+    // terminal call. The first one CONTINUES (the model sees the error and
+    // gets one chance to correct — see the exit check below); the second ends
+    // the run as `terminal_tool_error` instead of burning to max_iterations.
+    let terminalErrorCount = 0;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       // Emit iteration start
@@ -642,6 +647,60 @@ export class AgentRunner implements RunnerProtocol {
           iterations: iteration + 1,
           finishReason: "terminal_tool",
         };
+      }
+
+      // BOUNDED COMPLETION: no terminal call SUCCEEDED this iteration — but did
+      // one ERROR? The pinned design keeps the first errored terminal call
+      // going (the model sees the error and corrects; the fall-through below
+      // appends the error into the transcript). But an errored terminal that
+      // recurs must not silently burn every remaining iteration and return an
+      // empty "max_iterations" response — a lost summary + a wasted budget that
+      // reads as a hang at high maxIterations. On the SECOND errored terminal
+      // attempt we end the run cleanly as `terminal_tool_error`, surfacing the
+      // error text as the response.
+      const terminalError = toolResults.find(
+        (tr) => terminalTools.has(tr.toolName) && tr.error !== undefined,
+      );
+      if (terminalError) {
+        terminalErrorCount++;
+        if (terminalErrorCount >= 2) {
+          const errText = terminalError.error ?? "unknown error";
+
+          await this.emit(
+            createEvent("agent.iteration.end", {
+              traceId: effectiveTraceId,
+              runId,
+              spanId: iterSpanId,
+              parentSpanId: rootSpanId,
+              iteration,
+              toolCallsCount: resultToolCalls.length,
+              hasMore: false,
+            }),
+          );
+
+          await this.emit(
+            createEvent("agent.message.complete", {
+              traceId: effectiveTraceId,
+              runId,
+              spanId: rootSpanId,
+              parentSpanId: rootSpanId,
+              content: errText,
+              inputTokens: totalInputTokens,
+              outputTokens: totalOutputTokens,
+              model: modelName,
+              finishReason: "terminal_tool_error",
+            }),
+          );
+
+          return {
+            response: `terminal tool "${terminalError.toolName}" failed: ${errText}`,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            toolCallsCount: totalToolCalls,
+            iterations: iteration + 1,
+            finishReason: "terminal_tool_error",
+          };
+        }
       }
 
       // Append messages for next iteration.
@@ -1046,6 +1105,9 @@ export class AgentRunner implements RunnerProtocol {
     let totalOutputTokens = 0;
     let totalToolCalls = 0;
     let fullText = "";
+    // BOUNDED COMPLETION (parity with run()): errored-terminal attempt tally.
+    // First error continues; second ends the run as `terminal_tool_error`.
+    let terminalErrorCount = 0;
 
     // Conversation start
     const convStart = createEvent("agent.conversation.start", {
@@ -1345,6 +1407,9 @@ export class AgentRunner implements RunnerProtocol {
       // Process tool calls
       let terminalFired = false;
       let terminalResult: unknown;
+      // BOUNDED COMPLETION: first errored terminal call in this batch (if any).
+      let terminalErrorName: string | undefined;
+      let terminalErrorMsg: string | undefined;
       for (const tc of pendingToolCalls) {
         const intent = createEvent("agent.tool.intent", {
           traceId: effectiveTraceId,
@@ -1430,10 +1495,19 @@ export class AgentRunner implements RunnerProtocol {
         tc.result = toolResult;
 
         // Terminal-tool exit (parity with run()): first successful terminal
-        // call wins; an errored one does not terminate.
+        // call wins; an errored one does not terminate immediately (bounded
+        // completion below handles the second consecutive failure). Capture the
+        // first errored terminal call so the post-loop check can tally it.
         if (!terminalFired && errorMsg === undefined && terminalTools.has(tc.toolName)) {
           terminalFired = true;
           terminalResult = toolResult;
+        } else if (
+          errorMsg !== undefined &&
+          terminalTools.has(tc.toolName) &&
+          terminalErrorName === undefined
+        ) {
+          terminalErrorName = tc.toolName;
+          terminalErrorMsg = errorMsg;
         }
 
         const tcEnd = createEvent("agent.tool.end", {
@@ -1496,6 +1570,54 @@ export class AgentRunner implements RunnerProtocol {
         await this.emit(convEnd);
         yield convEnd;
         return;
+      }
+
+      // BOUNDED COMPLETION (parity with run()): no terminal call SUCCEEDED, but
+      // did one ERROR? The first errored terminal call continues (the model
+      // sees the error, appended below, and gets one chance to correct); the
+      // second ends the run cleanly as `terminal_tool_error` rather than
+      // burning to max_iterations with an empty response.
+      if (terminalErrorName !== undefined) {
+        terminalErrorCount++;
+        if (terminalErrorCount >= 2) {
+          const errText = terminalErrorMsg ?? "unknown error";
+
+          const iterEnd = createEvent("agent.iteration.end", {
+            traceId: effectiveTraceId,
+            runId,
+            spanId: iterSpanId,
+            parentSpanId: rootSpanId,
+            iteration,
+            toolCallsCount: pendingToolCalls.length,
+            hasMore: false,
+          });
+          await this.emit(iterEnd);
+          yield iterEnd;
+
+          const msgComplete = createEvent("agent.message.complete", {
+            traceId: effectiveTraceId,
+            runId,
+            spanId: rootSpanId,
+            parentSpanId: rootSpanId,
+            content: errText,
+            inputTokens: totalInputTokens,
+            outputTokens: totalOutputTokens,
+            model: modelName,
+            finishReason: "terminal_tool_error",
+          });
+          await this.emit(msgComplete);
+          yield msgComplete;
+
+          const convEnd = createEvent("agent.conversation.end", {
+            traceId: effectiveTraceId,
+            runId,
+            conversationId,
+            reason: "completed" as const,
+          });
+          await this.emit(convEnd);
+          yield convEnd;
+          return;
+        }
       }
 
       // Build messages for next iteration.
