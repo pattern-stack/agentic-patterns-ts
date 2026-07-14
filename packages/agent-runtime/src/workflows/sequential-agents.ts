@@ -34,6 +34,20 @@
  *    forgotten-executor failure cannot happen inside a sequence.
  *  - Declared `reads`/`writes` get a build-time write-before-read assert, so
  *    re-ordering stages is a construction error, not a silent empty run.
+ *  - A stage may be a NODE instead of an agent (`{ node }`, or a bare `Node` in
+ *    the stages array): a `CoordinatorStep` spine, a deterministic
+ *    `FunctionStep` tail, a nested `sequentialAgent`. It is seated as the
+ *    stage's leaf directly (no `AgentStep` wrap) and is a first-class stage —
+ *    its emission lands in a slot, `onEmit`/`stop`/`reads`/`writes`/`retry` all
+ *    apply, and the NEXT stage's implicit render carries it. What does NOT
+ *    apply are the two AgentStep-only knobs — `prompt` and `maxIterations` —
+ *    which are REJECTED at build time rather than silently ignored (a node
+ *    renders no prompt and runs no tool loop of its own). A node stage receives
+ *    the pipeline INPUT (same as every other stage); it sees what the chain
+ *    established through the PAD, so give the producing stage an explicit
+ *    `slot` and read it inside the node (`FunctionStep`'s fn takes a
+ *    `ScratchpadAccess`). `output` (zod) on a node stage is an ASSERT over the
+ *    node's own output, not a `runStructured` driver — see the field doc.
  *
  * The built object implements {@link Node}, so it nests anywhere a node is
  * accepted (a Sequential stage, a Loop body, a FanOut branch, a sub-tool).
@@ -49,6 +63,7 @@ import { AgentStep } from "./agent-step.js";
 import type { Node, NodeResult, NodeRunContext } from "./node.js";
 import { ObservedScratchpad } from "./observed-scratchpad.js";
 import { retry } from "./retry.js";
+import { isAgentLikeShape, isNodeShape } from "./shapes.js";
 import {
   type ScratchpadAccess,
   type ScratchpadReader,
@@ -62,16 +77,57 @@ import { capPreview } from "./state-events.js";
 // Spec
 // ---------------------------------------------------------------------------
 
-/** One seated stage. A bare `AgentLike` is accepted wherever a spec is (all defaults). */
+/**
+ * One seated stage — an AGENT (`agent`) or a NODE (`node`). EXACTLY ONE of the
+ * two is required; both, or neither, is a build-time error.
+ *
+ * A bare `AgentLike` or a bare `Node` is accepted wherever a spec is (all
+ * defaults).
+ */
 export interface AgentStageSpec<TOut = unknown> {
-  readonly agent: AgentLike;
-  /** Stage name = the emission's slot key + the progress label. Default: the agent's role name. */
+  /** The agent seated in this stage (wrapped in an `AgentStep`). Mutually exclusive with `node`. */
+  readonly agent?: AgentLike;
+  /**
+   * A NODE seated as this stage's leaf directly — a `CoordinatorStep` spine, a
+   * deterministic `FunctionStep` tail, a nested `sequentialAgent`. Mutually
+   * exclusive with `agent`.
+   *
+   * It runs with the pipeline `input` and the sequence's shared pad on its ctx,
+   * and its result IS the stage's emission — so `slot`, `onEmit`, `stop`,
+   * `reads`/`writes` and `retry` all apply exactly as they do to an agent
+   * stage, and the next stage's implicit render carries it. The two
+   * AgentStep-only knobs (`prompt`, `maxIterations`) are REJECTED at build time
+   * when combined with `node`.
+   *
+   * A node has no prompt render, so it reads what the chain established through
+   * the PAD (`ctx.scratchpad` / `FunctionStep`'s `ScratchpadAccess`): give the
+   * producing stage an explicit `slot` and read that slot inside the node.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: a stage node's TIn is the pipeline input (unknown at the seam) and Node is contravariant in it — `any` is the deliberate variance escape so typed nodes (FunctionStep<Q,R>, CoordinatorStep<Q,R>) seat WITHOUT casts, same escape as AgentStage below.
+  readonly node?: Node<any, unknown>;
+  /**
+   * Stage name = the emission's slot key + the progress label. Default: the
+   * agent's role name (agent stages) / the node's `name` (node stages).
+   */
   readonly name?: string;
-  /** Structured emission schema → `runStructured`. Omit for the raw-text path. */
+  /**
+   * AGENT stage: the structured emission schema → `runStructured` (omit for the
+   * raw-text path).
+   *
+   * NODE stage: an ASSERT, not a driver — the node is already typed at its own
+   * boundary, so there is nothing to steer. The node's output is validated
+   * against the schema (a mismatch fails the stage BEFORE it emits, so an
+   * opted-in `retry` re-runs it), and the EMISSION is the node's own output
+   * VERBATIM — never the zod-parsed value. So a schema with transforms/strips
+   * validates but does not rewrite what the stage emits.
+   */
   readonly output?: ZodType<TOut>;
   /**
    * Override the implicit state render for THIS stage's user message. Default:
    * the pipeline input + every prior stage's emission (see `renderSharedState`).
+   *
+   * AGENT stages only — rejected at build time on a `node` stage (a node has no
+   * user message; it reads the pad).
    */
   readonly prompt?: (state: ScratchpadReader, input: unknown) => string;
   /** Where the emission lands. Default: an auto slot keyed `agents.<name>`. */
@@ -86,15 +142,22 @@ export interface AgentStageSpec<TOut = unknown> {
   readonly onEmit?: (output: TOut, pad: ScratchpadAccess, ctx: NodeRunContext) => unknown;
   /** Emission-level stop rule (clarify/refuse lanes): a string stops the sequence. */
   readonly stop?: (output: TOut, state: ScratchpadReader) => string | null;
-  /** Tool/2-tier loop cap for this stage (AgentStep semantics). */
+  /**
+   * Tool/2-tier loop cap for this stage (AgentStep semantics).
+   *
+   * AGENT stages only — rejected at build time on a `node` stage (a node runs
+   * no agent loop of its own; cap it inside the node — e.g. the coordinator
+   * agent's own `maxIterations`).
+   */
   readonly maxIterations?: number;
   /**
-   * Re-run this stage's agent (a FRESH attempt — the poisoned transcript is
-   * discarded, the prompt render is unchanged) up to N times when the run fails
-   * BEFORE an emission materializes (agent-run error / no structured output —
-   * e.g. a tool loop that burns `maxIterations` and never emits). Default `0`
-   * (today's behavior: one attempt, and a pre-emission failure aborts the
-   * sequence).
+   * Re-run this stage's leaf — the agent, or the `node` — as a FRESH attempt
+   * (the poisoned transcript is discarded, the prompt render is unchanged) up
+   * to N times when the run fails BEFORE an emission materializes (agent-run
+   * error / no structured output — e.g. a tool loop that burns `maxIterations`
+   * and never emits; for a node stage: a failed `NodeResult`, or an `output`
+   * schema the node's result did not satisfy). Default `0` (today's behavior:
+   * one attempt, and a pre-emission failure aborts the sequence).
    *
    * SCOPE: pre-emission failures only. `runStructured`'s own shape re-prompting
    * lives inside a single attempt and is NOT multiplied by this. `stop`/`onEmit`
@@ -119,8 +182,19 @@ export interface AgentStageSpec<TOut = unknown> {
   readonly writes?: ReadonlyArray<{ readonly key: string }>;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: TOut appears contravariantly in the stage callbacks (onEmit/stop), so AgentStageSpec<T> would never assign to AgentStageSpec<unknown> — `any` is the deliberate variance escape so typed specs seat WITHOUT casts (the SequentialBuilder precedent).
-export type AgentStage = AgentLike | AgentStageSpec<any>;
+/**
+ * What the stages array accepts: a bare `AgentLike`, a bare `Node`, or a
+ * {@link AgentStageSpec} (`{ agent }` or `{ node }` + the stage knobs).
+ *
+ * Bare-value discrimination is by DUCK TYPE ({@link isAgentLikeShape} then
+ * {@link isNodeShape}) — agent-shape is checked FIRST, so an `AgentLike` that
+ * also happens to carry a `run` method (and an `asAgent`-promoted pipeline,
+ * which is deliberately AgentLike-shaped) still seats as an AGENT, exactly as
+ * it does today. There is no ambiguity in the other direction: a bare `Node`
+ * has no `role`/`getModel`/`renderInitialPrompt`.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: TOut appears contravariantly in the stage callbacks (onEmit/stop) and TIn contravariantly in a stage Node, so AgentStageSpec<T>/Node<T,…> would never assign to their `unknown` forms — `any` is the deliberate variance escape so typed specs and typed nodes seat WITHOUT casts (the SequentialBuilder precedent).
+export type AgentStage = AgentLike | Node<any, unknown> | AgentStageSpec<any>;
 
 export interface SequentialAgentOpts {
   readonly name?: string;
@@ -191,14 +265,62 @@ export function renderPriorEmission(
   return `${task}\n\nWHAT THE PRIOR STAGE ESTABLISHED (${prior.name}):\n${renderEmissionBody(prior.output)}`;
 }
 
-function isSpec(stage: AgentStage): stage is AgentStageSpec {
-  return (stage as AgentStageSpec).agent !== undefined;
+/**
+ * Normalize a stages entry to a spec: a bare `AgentLike` / bare `Node` is
+ * duck-typed into one (agent-shape FIRST — see {@link AgentStage}); anything
+ * else object-shaped is taken AS a spec and left to the exactly-one-leaf guard,
+ * which owns the message (a `{ name }`-only object and a stray non-stage object
+ * are the same authoring mistake — an entry that seats no leaf).
+ */
+function toSpec(stage: AgentStage, index: number): AgentStageSpec {
+  if (isAgentLikeShape(stage)) return { agent: stage };
+  if (isNodeShape(stage)) return { node: stage };
+  if (stage && typeof stage === "object") return stage as AgentStageSpec;
+  throw new Error(
+    `sequentialAgent: stage ${index + 1} is not a stage — pass an AgentLike, a Node, or { agent } / { node }`,
+  );
 }
 
 function stageName(stage: AgentStageSpec, index: number): string {
   return (
-    stage.name ?? (stage.agent as { role?: { name?: string } }).role?.name ?? `stage-${index + 1}`
+    stage.name ??
+    (stage.agent as { role?: { name?: string } } | undefined)?.role?.name ??
+    stage.node?.name ??
+    `stage-${index + 1}`
   );
+}
+
+/**
+ * The node stage's `output` ASSERT (see {@link AgentStageSpec.output}): validate
+ * the node's result, emit the node's OWN output verbatim (never the parsed
+ * value — a node is typed at its own boundary; a zod transform/strip must not
+ * silently rewrite what the stage emits). A mismatch fails the leaf BEFORE the
+ * emission materializes, so it sits inside `retry`'s scope like any other
+ * pre-emission failure.
+ */
+function assertingNode(
+  node: Node<unknown, unknown>,
+  schema: ZodType<unknown>,
+  name: string,
+): Node<unknown, unknown> {
+  return {
+    name: node.name ?? name,
+    async run(input: unknown, ctx: NodeRunContext): Promise<NodeResult<unknown>> {
+      const res = await node.run(input, ctx);
+      if (!res.succeeded) return res;
+      const parsed = schema.safeParse(res.output);
+      if (parsed.success) return res;
+      return {
+        output: undefined as never,
+        succeeded: false,
+        error: new Error(
+          `sequentialAgent: stage '${name}' node output failed its \`output\` schema — ${parsed.error.message}`,
+        ),
+        totalInputTokens: res.totalInputTokens,
+        totalOutputTokens: res.totalOutputTokens,
+      };
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +336,24 @@ export function sequentialAgent(
   opts: SequentialAgentOpts = {},
 ): Node<unknown, SequentialAgentResult> {
   if (stages.length === 0) throw new Error("sequentialAgent: at least one stage is required");
-  const specs = stages.map((s) => (isSpec(s) ? s : { agent: s }));
+  const specs = stages.map((s, i) => toSpec(s, i));
+
+  // Build-time assert: EXACTLY ONE leaf per stage. Both is an authoring
+  // ambiguity (which one runs?); neither is an empty stage — fail loud on the
+  // spec form rather than silently seating one and dropping the other.
+  specs.forEach((s, i) => {
+    if (s.agent !== undefined && s.node !== undefined) {
+      throw new Error(
+        `sequentialAgent: stage ${i + 1} sets BOTH \`agent\` and \`node\` — exactly one is required`,
+      );
+    }
+    if (s.agent === undefined && s.node === undefined) {
+      throw new Error(
+        `sequentialAgent: stage ${i + 1} sets NEITHER \`agent\` nor \`node\` — exactly one is required (pass an AgentLike, a Node, or { agent } / { node })`,
+      );
+    }
+  });
+
   const names = specs.map((s, i) => stageName(s, i));
   const dupe = names.find((n, i) => names.indexOf(n) !== i);
   if (dupe != null) {
@@ -231,6 +370,22 @@ export function sequentialAgent(
       throw new Error(
         `sequentialAgent: stage '${names[i]}' has invalid retry ${s.retry} — must be a non-negative integer`,
       );
+    }
+  });
+
+  // Build-time assert: the AgentStep-only knobs are REJECTED on a node stage
+  // rather than silently ignored — a node renders no user message (`prompt`)
+  // and runs no agent loop of its own (`maxIterations`). The knobs that operate
+  // on the stage's EMISSION (`slot`/`onEmit`/`stop`/`reads`/`writes`/`retry`,
+  // and `output` as an assert) all apply to node stages, so they are not listed.
+  specs.forEach((s, i) => {
+    if (s.node === undefined) return;
+    for (const knob of ["prompt", "maxIterations"] as const) {
+      if (s[knob] !== undefined) {
+        throw new Error(
+          `sequentialAgent: stage '${names[i]}' sets \`${knob}\` on a \`node\` stage — \`${knob}\` is an AgentStep-only knob (a node renders no prompt and runs no agent loop). A node reads the pad; cap iterations inside the node.`,
+        );
+      }
     }
   });
 
@@ -312,53 +467,68 @@ export function sequentialAgent(
         // inside node.run, after step.start assigns it) sees the stage's span.
         let stepSpanId: string | undefined;
 
-        const step = new AgentStep<unknown, unknown>({
-          name,
-          agent: spec.agent,
-          ...(spec.output != null ? { output: spec.output as ZodType<unknown> } : {}),
-          ...(spec.maxIterations != null ? { maxIterations: spec.maxIterations } : {}),
-          prompt: (_input, state) => {
-            if (spec.prompt != null) return spec.prompt(state, input);
-            // INNATE prompt-read frames (#226): the implicit render injects
-            // prior emissions into this stage's prompt — the framework's own
-            // read, reported per injected slot with the exact injected text
-            // (byte-capped). Published at render time, so a retried attempt's
-            // re-render honestly re-reports. Nested under the stage's step
-            // span when step events are on (falls back to the run's parent).
-            if (observed) {
-              for (const inj of injectedByRender()) {
-                observed.emitter.publish(
-                  createEvent("agent.scratchpad.read", {
-                    traceId,
-                    runId,
-                    ...(stepSpanId !== undefined
-                      ? { parentSpanId: stepSpanId }
-                      : observed.emitter.parentSpanId !== undefined
-                        ? { parentSpanId: observed.emitter.parentSpanId }
-                        : {}),
-                    origin: "innate",
-                    ordinal: observed.emitter.nextOrdinal(),
-                    key: inj.key,
-                    preview: capPreview(renderEmissionBody(inj.output)),
-                  }),
-                );
-              }
-            }
-            return render(input, completed);
-          },
-        });
+        // The stage's LEAF. A NODE stage is its own leaf — seated directly, no
+        // AgentStep wrap (it has no prompt to render and no agent to run), with
+        // `output` (when given) as an assert over its result. Everything
+        // downstream of `step` (retry, the emission write, stop/onEmit, the step
+        // events) is shared: a node stage is a stage like any other.
+        const step: Node<unknown, unknown> = spec.node
+          ? spec.output != null
+            ? assertingNode(spec.node, spec.output as ZodType<unknown>, name)
+            : spec.node
+          : new AgentStep<unknown, unknown>({
+              name,
+              agent: spec.agent as AgentLike,
+              ...(spec.output != null ? { output: spec.output as ZodType<unknown> } : {}),
+              ...(spec.maxIterations != null ? { maxIterations: spec.maxIterations } : {}),
+              prompt: (_input, state) => {
+                if (spec.prompt != null) return spec.prompt(state, input);
+                // INNATE prompt-read frames (#226): the implicit render injects
+                // prior emissions into this stage's prompt — the framework's own
+                // read, reported per injected slot with the exact injected text
+                // (byte-capped). Published at render time, so a retried attempt's
+                // re-render honestly re-reports. Nested under the stage's step
+                // span when step events are on (falls back to the run's parent).
+                if (observed) {
+                  for (const inj of injectedByRender()) {
+                    observed.emitter.publish(
+                      createEvent("agent.scratchpad.read", {
+                        traceId,
+                        runId,
+                        ...(stepSpanId !== undefined
+                          ? { parentSpanId: stepSpanId }
+                          : observed.emitter.parentSpanId !== undefined
+                            ? { parentSpanId: observed.emitter.parentSpanId }
+                            : {}),
+                        origin: "innate",
+                        ordinal: observed.emitter.nextOrdinal(),
+                        key: inj.key,
+                        preview: capPreview(renderEmissionBody(inj.output)),
+                      }),
+                    );
+                  }
+                }
+                return render(input, completed);
+              },
+            });
 
         // Per-stage executor from the agent's OWN capabilities — a tool-using stage
         // can never hit the forgotten-executor failure inside a sequence. Tool-less
         // stages keep whatever executor the caller threaded (usually none).
+        // A NODE stage derives NOTHING here: a node owns its own tool wiring
+        // (CoordinatorStep builds its team executor; a nested AgentStep derives
+        // from the agent it is about to run), so it inherits the ctx's executor
+        // untouched — overriding it would hand a coordinator its parent's tools.
         const hasCapabilities =
-          ((spec.agent as { role?: { capabilities?: ReadonlyArray<unknown> } }).role?.capabilities
-            ?.length ?? 0) > 0;
+          ((spec.agent as { role?: { capabilities?: ReadonlyArray<unknown> } } | undefined)?.role
+            ?.capabilities?.length ?? 0) > 0;
 
         // One `agent.step.start`/`.end` pair per STAGE. The start's spanId is
         // the stage's span: the stage ctx nests under it (parentSpanId), so the
         // delegated agent's tool events attribute to their stage in every view.
-        const agentName = (spec.agent as { role?: { name?: string } }).role?.name;
+        // `agentName` is the AGENT's role name — omitted for a node stage (there
+        // is no single agent behind it; the stage name identifies it).
+        const agentName = (spec.agent as { role?: { name?: string } } | undefined)?.role?.name;
         const stepStartedAt = Date.now();
         if (publish) {
           const startEvent = createEvent("agent.step.start", {
