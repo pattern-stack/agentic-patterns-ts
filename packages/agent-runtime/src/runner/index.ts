@@ -32,7 +32,7 @@ export { buildAgentServers, buildCapabilityServer } from "./sdk-bridge.js";
 export type { AgentLikeForBridge } from "./sdk-bridge.js";
 export { MockRunner } from "./mock-runner.js";
 export type { MockResponse, MockCall } from "./mock-runner.js";
-export { createToolboxExecutor } from "./toolbox-executor.js";
+export { createToolboxExecutor, deriveToolboxExecutor } from "./toolbox-executor.js";
 export { createRunner } from "./create-runner.js";
 export type {
   CreateRunnerOptions,

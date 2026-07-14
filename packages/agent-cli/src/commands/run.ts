@@ -12,7 +12,7 @@
 import {
   Conversation,
   NodeBackedRunner,
-  createToolboxExecutor,
+  deriveToolboxExecutor,
   getAgentEventBus,
   isPromotedAgent,
 } from "@agentic-patterns/runtime";
@@ -59,8 +59,15 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
   // too (parity with `llmRunner`, which already got it via resolveRunner()).
   const runner = isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner, eventBus) : llmRunner;
 
+  // DERIVE, don't force-create: a PromotedAgent (asAgent()) has no role
+  // capabilities, so `createToolboxExecutor` would return a truthy-but-EMPTY
+  // executor that throws `Tool "X" not found` for every call — and, as a set
+  // `RunOptions.toolExecutor`, would BEAT the AgentStep-level fallback that
+  // arms the nested agent's own tools. `deriveToolboxExecutor` returns
+  // `undefined` for a capability-less agent, restoring that per-agent
+  // derivation; real-capability agents still get their executor here.
   const conversation = new Conversation(reg.agent, runner, {
-    toolExecutor: createToolboxExecutor(reg.agent),
+    toolExecutor: deriveToolboxExecutor(reg.agent),
   });
 
   if (opts.message !== undefined) {

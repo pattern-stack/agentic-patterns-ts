@@ -22,7 +22,7 @@ import type {
   PendingInputRegistry,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
-import { Conversation, createToolboxExecutor } from "@agentic-patterns/runtime";
+import { Conversation, deriveToolboxExecutor } from "@agentic-patterns/runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
@@ -55,8 +55,17 @@ export function conversationRoutes(
 
     // Wire a ToolExecutor so AgentRunner can actually execute tool calls
     // from the agent's Capability toolboxes (not just format them for the LLM).
-    const toolExecutor = createToolboxExecutor(
-      reg.agent as unknown as Parameters<typeof createToolboxExecutor>[0],
+    //
+    // DERIVE, don't force-create: `deriveToolboxExecutor` returns `undefined`
+    // for a capability-less agent. That matters for a PromotedAgent (asAgent()),
+    // whose synthetic role has NO capabilities — `createToolboxExecutor` would
+    // hand back a truthy-but-EMPTY executor that throws `Tool "X" not found` for
+    // every call, and (as a set `RunOptions.toolExecutor`) would BEAT the
+    // AgentStep-level `deriveToolboxExecutor(agent)` fallback that arms the
+    // nested agent's own tools. Leaving it `undefined` restores that per-agent
+    // derivation; real-capability agents still get their executor here.
+    const toolExecutor = deriveToolboxExecutor(
+      reg.agent as unknown as Parameters<typeof deriveToolboxExecutor>[0],
     );
     // `store` (when configured) makes `Conversation._persistExchange` actually
     // write request/response messages — previously accepted and never used.
