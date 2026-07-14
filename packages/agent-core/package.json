@@ -40,13 +40,16 @@
     "test": "vitest run",
     "lint": "biome check src/"
   },
+  "peerDependencies": {
+    "zod": "^3.25.0 || ^4.1.8"
+  },
   "dependencies": {
-    "zod": "^3.23.0",
     "zod-to-json-schema": "^3.24.0"
   },
   "devDependencies": {
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "zod": "^3.25.76"
   }
 }
