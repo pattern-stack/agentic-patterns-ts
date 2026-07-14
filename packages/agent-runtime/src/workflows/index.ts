@@ -129,6 +129,15 @@ export {
 } from "./sequential-agents.js";
 
 export {
+  type ParallelAgentBranch,
+  type ParallelAgentBranchOutcome,
+  type ParallelAgentBranchSpec,
+  type ParallelAgentOpts,
+  type ParallelAgentResult,
+  parallelAgent,
+} from "./parallel-agents.js";
+
+export {
   type RetryFailure,
   type RetryPredicate,
   type RetryBackoff,

@@ -365,11 +365,15 @@ function stageName(stage: AgentStageSpec, index: number): string {
  * silently rewrite what the stage emits). A mismatch fails the leaf BEFORE the
  * emission materializes, so it sits inside `retry`'s scope like any other
  * pre-emission failure.
+ *
+ * Shared with `parallelAgent` (same assert semantics per branch) — `label` is
+ * the throwing composite's error prefix. NOT part of the public barrel.
  */
-function assertingNode(
+export function assertingNode(
   node: Node<unknown, unknown>,
   schema: ZodType<unknown>,
   name: string,
+  label = "sequentialAgent: stage",
 ): Node<unknown, unknown> {
   return {
     name: node.name ?? name,
@@ -382,7 +386,7 @@ function assertingNode(
         output: undefined as never,
         succeeded: false,
         error: new Error(
-          `sequentialAgent: stage '${name}' node output failed its \`output\` schema — ${parsed.error.message}`,
+          `${label} '${name}' node output failed its \`output\` schema — ${parsed.error.message}`,
         ),
         totalInputTokens: res.totalInputTokens,
         totalOutputTokens: res.totalOutputTokens,
