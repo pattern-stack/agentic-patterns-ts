@@ -122,6 +122,11 @@ export interface ParallelAgentBranchSpec<TOut = unknown> {
    * policy — see the module doc; siblings still settle); any other return
    * value is ignored. A THROW fails the branch (its outcome carries the
    * error), not the composite.
+   *
+   * NOTE: the emission slot is written BEFORE `onEmit` runs, and the branch's
+   * fork merges back regardless of outcome — so a failed-via-`onEmit` branch
+   * still populates its slot on the merged pad. The JOIN outcome, not the
+   * slot, is the source of truth for a branch's success.
    */
   readonly onEmit?: (output: TOut, pad: ScratchpadAccess, ctx: NodeRunContext) => unknown;
   /**

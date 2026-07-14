@@ -388,4 +388,31 @@ describe("parallelAgent", () => {
     expect(() => parallelAgent([{ node: a, reads: [{ key: "seeded.before" }] }])).not.toThrow();
     expect(() => parallelAgent([{ node: a, retry: -1 }])).toThrow(/invalid retry -1/);
   });
+
+  it("maxConcurrency bounds in-flight branches; the join stays complete and deterministic", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "X" });
+    let inFlight = 0;
+    let peak = 0;
+    const mk = (name: string) =>
+      new FunctionStep<unknown, string>({
+        name,
+        fn: async () => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await new Promise((r) => setTimeout(r, 10));
+          inFlight -= 1;
+          return name.toUpperCase();
+        },
+      });
+
+    const res = await parallelAgent([mk("a"), mk("b"), mk("c"), mk("d")], {
+      maxConcurrency: 2,
+    }).run("go", { runner });
+
+    expect(peak).toBeGreaterThan(0);
+    expect(peak).toBeLessThanOrEqual(2); // the pool actually caps
+    expect(res.output.failed).toEqual([]);
+    expect(Object.keys(res.output.branches)).toEqual(["a", "b", "c", "d"]); // join complete, declaration order
+    expect(res.output.branches.c).toEqual({ succeeded: true, output: "C" });
+  });
 });
