@@ -425,3 +425,238 @@ describe("promoted-agent registration — the conversation route arms nested too
     expect(deriveToolboxExecutor(withTools)).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// `PromotedAgent.displayRole` — the display/execution DECOUPLING.
+//
+// A promoted pipeline registers a NARROW `role: { name }` so that
+// `deriveToolboxExecutor` declines to build an outer executor (arming one would
+// shadow the per-AgentStep `ctx.toolExecutor ?? deriveToolboxExecutor(agent)`
+// derivation and disarm nested agents' tools — the #13 bug fixed in #241). The
+// cost, until now, was that every Build page rendered a promoted pipeline as an
+// EMPTY agent. `displayRole` carries the real Role for DISPLAY reads only, so
+// the Build pages get the truth while the executor derivation stays blind to it.
+// ---------------------------------------------------------------------------
+
+/** The pipeline's DISPLAY capability — 2 tools, and a DIFFERENT toolbox than the
+ *  nested agent's. If the outer executor were ever (re-)armed from `displayRole`,
+ *  it would ride `RunOptions.toolExecutor` into the inner runner and shadow the
+ *  nested agent's own tools — so the guard below asserts these never run. */
+class PipelineToolbox extends Toolbox {
+  readonly name = "pipeline-surface";
+  readonly description = "the promoted pipeline's declared surface";
+  ran = 0;
+  readonly tools = {
+    summarize: {
+      description: "summarize the ledger",
+      parameters: z.object({ scope: z.string() }),
+      execute: async () => {
+        this.ran++;
+        return { summary: "n/a" };
+      },
+    },
+    forecast: {
+      description: "forecast next month",
+      parameters: z.object({ months: z.number() }),
+      execute: async () => {
+        this.ran++;
+        return { forecast: "n/a" };
+      },
+    },
+  };
+}
+
+/** A full core Role carrying the display capability — what `asAgent` keeps on
+ *  `displayRole` and the Build pages render. */
+function pipelineDisplayRole(tb: Toolbox) {
+  return new RoleBuilder("Ledger Insights")
+    .withPersona(
+      new Persona({
+        identity: "a ledger insights pipeline",
+        tone: "direct",
+        priorities: ["accuracy"],
+        principles: ["cite the ledger"],
+      }),
+    )
+    .withCapability(new Capability("insights", "ledger insights", tb))
+    .withDefaultModel("mock")
+    .build();
+}
+
+describe("promoted-agent registration — displayRole renders the Build pages", () => {
+  /** The promoted pipeline under test: a nested ledger AGENT (its real tools)
+   *  promoted with a rich display Role (its declared surface). */
+  function setup() {
+    const eventBus = new AgentEventBus();
+    const ledgerTb = new LedgerToolbox(); // the NESTED agent's real tools
+    const displayTb = new PipelineToolbox(); // the pipeline's DISPLAY surface
+
+    const step = new AgentStep<string, string>({
+      name: "insights",
+      agent: agentWithLedger(ledgerTb),
+      prompt: (q) => q,
+    });
+    const promoted = asAgent(step, { role: pipelineDisplayRole(displayTb) });
+
+    const registration: AgentRegistration = {
+      id: "insights-pipe",
+      name: "Insights Pipe",
+      description: "ledger insights",
+      agent: promoted,
+      runner: new NodeBackedRunner(ledgerDispatchingRunner(), eventBus),
+    };
+    const app = createServer({
+      agents: [registration],
+      adminService: stubAdminService(),
+      eventBus,
+      sseExporter: { connect: () => new ReadableStream(), disconnect: () => {} },
+    });
+    return { app, promoted, ledgerTb, displayTb };
+  }
+
+  it("GET /agents/:id/capabilities lists the displayRole's capability and its 2 tools (pre-fix: empty)", async () => {
+    const { app } = setup();
+    const res = await app.request("/agents/insights-pipe/capabilities");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      capabilities: Array<{ name: string; toolbox?: string; tools: Array<{ name: string }> }>;
+    };
+    expect(body.capabilities).toHaveLength(1);
+    expect(body.capabilities[0]?.name).toBe("insights");
+    expect(body.capabilities[0]?.toolbox).toBe("pipeline-surface");
+    expect(body.capabilities[0]?.tools.map((t) => t.name).sort()).toEqual([
+      "forecast",
+      "summarize",
+    ]);
+  });
+
+  it("GET /agents groups two pipelines promoted with the SAME Role into ONE role entry (pre-fix: two look-alike entries)", async () => {
+    // Pre-fix each `asAgent` minted its own `{name}` literal, so N pipelines
+    // sharing one Role produced N distinct catalog entries ("ledger-insights",
+    // "ledger-insights-2", …) — the Universe page showed phantom roles. Reading
+    // `displayRole` restores REFERENCE identity: one Role object, one entry.
+    const eventBus = new AgentEventBus();
+    const sharedRole = pipelineDisplayRole(new PipelineToolbox());
+    const mk = (id: string): AgentRegistration => ({
+      id,
+      name: id,
+      agent: asAgent(new FunctionStep<string, string>({ name: id, fn: (s) => s }), {
+        role: sharedRole,
+      }),
+      runner: new NodeBackedRunner(ledgerDispatchingRunner(), eventBus),
+    });
+    const app = createServer({
+      agents: [mk("pipe-a"), mk("pipe-b")],
+      adminService: stubAdminService(),
+      eventBus,
+      sseExporter: { connect: () => new ReadableStream(), disconnect: () => {} },
+    });
+
+    const agentsBody = (await (await app.request("/agents")).json()) as Array<{
+      id: string;
+      role: { id: string; name: string } | null;
+    }>;
+    // Both instances point at the SAME role entry in the identity catalog.
+    expect(agentsBody.map((a) => a.role?.id)).toEqual(["ledger-insights", "ledger-insights"]);
+    expect(agentsBody.every((a) => a.role?.name === "Ledger Insights")).toBe(true);
+
+    const roles = (await (await app.request("/roles")).json()) as Array<{
+      id: string;
+      agents: Array<{ id: string }>;
+    }>;
+    expect(roles).toHaveLength(1);
+    expect(roles[0]?.agents.map((a) => a.id)).toEqual(["pipe-a", "pipe-b"]);
+  });
+
+  it("GET /agents/:id/composition renders the real role slots (persona + capabilities)", async () => {
+    const { app } = setup();
+    const res = await app.request("/agents/insights-pipe/composition");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      role: {
+        name: string;
+        defaultModel: string;
+        persona: { text: string };
+        capabilities: Array<{ name: string }>;
+      };
+    };
+    expect(body.role.name).toBe("Ledger Insights");
+    expect(body.role.defaultModel).toBe("mock");
+    expect(body.role.persona.text).toContain("ledger insights pipeline");
+    expect(body.role.capabilities.map((c) => c.name)).toEqual(["insights"]);
+  });
+
+  it("GET /roles and /capabilities catalog the promoted pipeline (the Universe pages)", async () => {
+    const { app } = setup();
+
+    const rolesRes = await app.request("/roles");
+    const roles = (await rolesRes.json()) as Array<{
+      id: string;
+      name: string;
+      defaultModel: string;
+      agents: Array<{ id: string }>;
+    }>;
+    expect(roles).toHaveLength(1);
+    expect(roles[0]?.name).toBe("Ledger Insights");
+    // Pre-fix the narrow `{name}` role had no defaultModel — the catalog rendered "".
+    expect(roles[0]?.defaultModel).toBe("mock");
+    expect(roles[0]?.agents.map((a) => a.id)).toEqual(["insights-pipe"]);
+
+    const capsRes = await app.request("/capabilities");
+    const caps = (await capsRes.json()) as Array<{
+      name: string;
+      toolbox: { name: string };
+      usedBy: { agents: string[] };
+    }>;
+    expect(caps).toHaveLength(1);
+    expect(caps[0]?.name).toBe("insights");
+    expect(caps[0]?.toolbox.name).toBe("pipeline-surface");
+    expect(caps[0]?.usedBy.agents).toEqual(["insights-pipe"]);
+  });
+
+  // -------------------------------------------------------------------------
+  // THE REGRESSION GUARD (#13/#241). displayRole must NOT re-arm the outer
+  // executor. If it did, the conversation route would set it as
+  // `RunOptions.toolExecutor`, it would ride NodeBackedRunner → ctx.toolExecutor
+  // and SHADOW the AgentStep's own derivation — so the nested ledger agent would
+  // dispatch into the PIPELINE's toolbox (which has no `getBalance`) instead of
+  // its own. The toolbox split makes that failure loud rather than coincidental.
+  // -------------------------------------------------------------------------
+
+  it("does NOT re-arm the outer executor: deriveToolboxExecutor still returns undefined for a displayRole-bearing promoted agent", () => {
+    const { promoted } = setup();
+    // The registered `role` is narrow; `displayRole` is where the capability
+    // lives — and the executor derivation reads the former, by design.
+    expect(deriveToolboxExecutor(promoted)).toBeUndefined();
+    expect(promoted.role).toEqual({ name: "Ledger Insights" });
+    expect(promoted.displayRole?.capabilities).toHaveLength(1);
+    expect(promoted.getTools()).toEqual([]);
+  });
+
+  it("nested tool dispatch still works exactly as #241 proves — the inner agent's OWN tool runs, the display toolbox never does", async () => {
+    const { app, ledgerTb, displayTb } = setup();
+
+    const createRes = await app.request("/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: "insights-pipe" }),
+    });
+    expect(createRes.status).toBe(201);
+    const { id } = (await createRes.json()) as { id: string };
+
+    const msgRes = await app.request(`/conversations/${id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "what is dana's balance?" }),
+    });
+    expect(msgRes.status).toBe(200);
+    const sseBody = await msgRes.text();
+
+    // The NESTED agent's own tool ran (the AgentStep derived its executor) …
+    expect(ledgerTb.ran).toBe(1);
+    expect(sseBody).toContain("balance is 42");
+    expect(sseBody).not.toContain("not found");
+    // … and the pipeline's DISPLAY toolbox was never armed for execution.
+    expect(displayTb.ran).toBe(0);
+  });
+});

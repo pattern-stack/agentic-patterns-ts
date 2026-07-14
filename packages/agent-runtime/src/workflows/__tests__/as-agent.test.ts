@@ -1,19 +1,23 @@
 import {
+  Capability,
   Judgment,
   Methodology,
   Persona,
   Recovery,
   RoleBuilder,
   Tone,
+  Toolbox,
 } from "@agentic-patterns/core";
 import { MockLanguageModelV2 } from "ai/test";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent } from "../../events/types.js";
 import { createEvent } from "../../events/types.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { AgentRunner } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
+import { deriveToolboxExecutor } from "../../runner/toolbox-executor.js";
 import { AgentStep } from "../agent-step.js";
 import { NodeBackedRunner, asAgent, isPromotedAgent } from "../as-agent.js";
 import { FunctionStep } from "../function-step.js";
@@ -32,6 +36,19 @@ function makeAgent(name = "test-agent"): AgentLike {
     getModel: () => "mock-model",
     getTools: () => [],
     renderInitialPrompt: () => "Initial prompt",
+  };
+}
+
+/** A real toolbox, so a promoted agent's `displayRole` carries genuine tools. */
+class DisplayToolbox extends Toolbox {
+  readonly name = "ledger";
+  readonly description = "reads the household ledger";
+  readonly tools = {
+    getBalance: {
+      description: "get a member's balance",
+      parameters: z.object({ member: z.string() }),
+      execute: async (args: Record<string, unknown>) => ({ member: args.member, balance: 42 }),
+    },
   };
 }
 
@@ -356,6 +373,59 @@ describe("asAgent", () => {
     const pipeline = new FunctionStep<string, string>({ fn: (s) => s });
     const promoted = asAgent(pipeline, { role: { name: "T" } });
     expect(promoted.getTools()).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // displayRole — the display/execution decoupling.
+  //
+  // A full core Role is kept on `displayRole` (so the server's Build pages can
+  // render a promoted pipeline's real composition) while `role` stays the
+  // narrow `{name}` and `getTools()` stays empty — because
+  // `deriveToolboxExecutor` keys off `role.capabilities`, and arming an outer
+  // executor for a promoted agent shadows the per-AgentStep derivation that
+  // arms nested agents' own tools (the #13 bug fixed in #241).
+  // -------------------------------------------------------------------------
+
+  it("carries a full core Role on displayRole, while role stays narrow and getTools() stays empty", () => {
+    const role = new RoleBuilder("Displayed")
+      .withPersona(new Persona({ identity: "a displayed role", tone: "terse" }))
+      .withCapability(new Capability("ledger", "ledger access", new DisplayToolbox()))
+      .build();
+
+    const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });
+    const promoted = asAgent(pipeline, { role });
+
+    // Display: the REAL role object, by reference — capabilities and all.
+    expect(promoted.displayRole).toBe(role);
+    expect(promoted.displayRole?.capabilities).toHaveLength(1);
+    expect(promoted.displayRole?.capabilities[0]?.name).toBe("ledger");
+
+    // Execution: unchanged. Narrow role, no capabilities, no tools.
+    expect(promoted.role).toEqual({ name: "Displayed" });
+    expect((promoted.role as { capabilities?: unknown }).capabilities).toBeUndefined();
+    expect(promoted.getTools()).toEqual([]);
+  });
+
+  it("leaves displayRole undefined for a minimal {name, description} role shell", () => {
+    const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });
+    const promoted = asAgent(pipeline, {
+      role: { name: "Minimal", description: "does the thing" },
+    });
+    expect(promoted.displayRole).toBeUndefined();
+    expect(promoted.role).toEqual({ name: "Minimal" });
+  });
+
+  it("deriveToolboxExecutor stays blind to displayRole — a promoted agent never arms an outer executor", () => {
+    const role = new RoleBuilder("Displayed")
+      .withPersona(new Persona({ identity: "a displayed role", tone: "terse" }))
+      .withCapability(new Capability("ledger", "ledger access", new DisplayToolbox()))
+      .build();
+    const pipeline = new FunctionStep<string, string>({ name: "n", fn: (s) => s });
+    const promoted = asAgent(pipeline, { role });
+
+    // THE GUARD: displayRole carries capabilities, but the executor derivation
+    // reads `role` — so it must still decline to build one.
+    expect(deriveToolboxExecutor(promoted)).toBeUndefined();
   });
 });
 

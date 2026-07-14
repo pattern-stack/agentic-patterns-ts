@@ -13,6 +13,7 @@
  * MCP bridge) reads to know what this server can do.
  */
 
+import { displayRoleOf } from "../routes/composition.js";
 import { introspectRoutes, resolveRouteDoc, zodJsonSchema } from "./openapi.js";
 import type { HonoLike } from "./openapi.js";
 
@@ -36,6 +37,10 @@ interface RoleLike {
 }
 interface AgentLike {
   role?: RoleLike;
+  /** A promoted pipeline's real Role — DISPLAY only (see `routes/composition.ts`
+   *  `displayRoleOf`). This manifest is a static description, never an execution
+   *  path, so it reads it like the other introspection surfaces. */
+  displayRole?: RoleLike;
 }
 /** Minimal shape of a registration this manifest reads. */
 export interface RegistrationLike {
@@ -111,7 +116,7 @@ function apiTools(app: HonoLike): McpTool[] {
 function capabilityTools(agents: ReadonlyArray<RegistrationLike>): McpTool[] {
   const out: McpTool[] = [];
   for (const reg of agents) {
-    const caps = reg.agent?.role?.capabilities ?? [];
+    const caps = displayRoleOf(reg.agent)?.capabilities ?? [];
     for (const cap of caps) {
       const schemas =
         typeof cap.toolbox?.getToolSchemas === "function" ? cap.toolbox.getToolSchemas() : [];

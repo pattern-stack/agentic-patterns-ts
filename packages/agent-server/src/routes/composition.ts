@@ -98,6 +98,11 @@ interface RoleLike {
 }
 interface AgentIntrospect {
   role?: RoleLike;
+  /**
+   * A `PromotedAgent`'s (runtime `asAgent()`) full core Role, carried for
+   * DISPLAY only — see {@link displayRoleOf}.
+   */
+  displayRole?: RoleLike;
   background?: { data?: unknown };
   awareness?: { data?: { domains?: ReadonlyArray<AwarenessDomainLike> } };
   mission?: { data?: unknown };
@@ -128,6 +133,26 @@ interface CoherenceWarning {
 /* ------------------------------------------------------------------------ */
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------ */
+
+/**
+ * THE DISPLAY READ. Every route that RENDERS an agent's composition (Universe /
+ * Roles / Agents / Capabilities) must resolve its role through here.
+ *
+ * A `PromotedAgent` (runtime `asAgent()`) registers a deliberately NARROW
+ * `role: { name }` — `deriveToolboxExecutor` keys off `role.capabilities`, and
+ * arming an outer executor for a promoted pipeline would shadow the
+ * `ctx.toolExecutor ?? deriveToolboxExecutor(agent)` fallback that arms each
+ * nested `AgentStep`'s OWN tools (the #13 disarmed-tools bug, fixed in #241).
+ * Its full core Role therefore rides a SEPARATE `displayRole` field.
+ *
+ * Display reads take `displayRole ?? role`; EXECUTION reads (conversations.ts →
+ * `deriveToolboxExecutor(reg.agent)`) must keep reading the real `role` and stay
+ * blind to `displayRole`. Plain core Agents have no `displayRole`, so this is a
+ * no-op for them.
+ */
+export function displayRoleOf<R>(agent: { role?: R; displayRole?: R } | undefined): R | undefined {
+  return agent?.displayRole ?? agent?.role;
+}
 
 /** Lowercase and strip everything but [a-z0-9] — the matching normal form. */
 function slugNorm(s: string): string {
@@ -387,7 +412,7 @@ function coherenceWarnings(agent: AgentIntrospect): CoherenceWarning[] {
 
   // Name sets per capability: the capability's own name, its toolbox name,
   // and every tool name — any of these "reaching" a domain counts.
-  const capabilities = (agent.role?.capabilities ?? []).map((cap) => {
+  const capabilities = (displayRoleOf(agent)?.capabilities ?? []).map((cap) => {
     const names = [cap.name ?? "", cap.toolbox?.name ?? ""];
     for (const t of toolSchemasOf(cap.toolbox)) names.push(t.name ?? "");
     return { name: cap.name ?? "capability", names: names.filter((n) => n !== "") };
@@ -465,7 +490,11 @@ export function buildRoleEntries(agents: AgentRegistration[]): RoleEntry[] {
   const takenIds = new Set<string>();
 
   for (const reg of agents) {
-    const role = (reg.agent as unknown as AgentIntrospect).role;
+    // Display read: a promoted pipeline's real Role rides `displayRole` (the
+    // registered `role` is a narrow `{name}` — see `displayRoleOf`). Grouping
+    // on it also means two pipelines promoted with the SAME Role object group
+    // into one catalog entry, exactly like two core Agents sharing a Role.
+    const role = displayRoleOf(reg.agent as unknown as AgentIntrospect);
     if (!role || typeof role !== "object") continue;
     const existing = byRef.get(role);
     if (existing) {
@@ -630,7 +659,7 @@ function slotEdgesFor(
  */
 function agentCompositionPayload(reg: AgentRegistration, agent: unknown) {
   const a = agent as AgentIntrospect;
-  const role = a.role ?? {};
+  const role = displayRoleOf(a) ?? {};
 
   // Render path caveat (§6): report which prompt path the payload carries.
   // Newer cores expose renderSections(); older ones only the joined string —
