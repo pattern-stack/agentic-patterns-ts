@@ -20,7 +20,12 @@ import type { PatternHooks } from "../base.js";
 import { FunctionStep } from "../function-step.js";
 import type { Node, NodeResult, NodeRunContext } from "../node.js";
 import { ObservedScratchpad } from "../observed-scratchpad.js";
-import { renderSharedState, sequentialAgent } from "../sequential-agents.js";
+import {
+  type AgentStageSpec,
+  type SequentialAgentOpts,
+  renderSharedState,
+  sequentialAgent,
+} from "../sequential-agents.js";
 import { createScratchpad, slot } from "../slot.js";
 import { createStateEmitter } from "../state-events.js";
 
@@ -915,5 +920,263 @@ describe("sequentialAgent: node stages", () => {
         { agent: makeAgent("a"), reads: [{ key: "k" }] },
       ]),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Typed emit + prior-emission input (#255) — the contract-carrying pipeline:
+// a designated emitting stage types the composite `Node<TIn, TOut>`, and
+// `input: 'prior'` seats the deterministic tail on a compiler-checked seam.
+// ---------------------------------------------------------------------------
+
+describe("sequentialAgent: typed emit + input:'prior' (#255)", () => {
+  interface Contract {
+    readonly answer: string;
+    readonly confidence: number;
+  }
+
+  it("opts.emit designates the emitting stage: the composite's OUTPUT is that stage's emission", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "SPINE-OUT" });
+    const tail = new FunctionStep<unknown, Contract>({
+      name: "tail",
+      fn: () => ({ answer: "42", confidence: 0.9 }),
+    });
+
+    const node = sequentialAgent<Contract>([makeAgent("spine"), { node: tail }], {
+      emit: "tail",
+    });
+    const res = await node.run("q", { runner });
+
+    expect(res.succeeded).toBe(true);
+    // No envelope, no cast: the output IS the contract.
+    expect(res.output).toEqual({ answer: "42", confidence: 0.9 });
+    expect(res.output.answer).toBe("42"); // typed access — compiles without narrowing
+  });
+
+  it("the definition-of-done shape: coordinator spine → deterministic tail via input:'prior', Node<string, TContract>, zero casts", async () => {
+    interface Emission {
+      readonly plan: string;
+      readonly hits: number;
+    }
+    const runner = new MockRunner().addResponse("COORDINATE[", {
+      content: "PLAN-DONE",
+      inputTokens: 7,
+      outputTokens: 3,
+    });
+
+    // The spine: a coordinator-shaped node with a TYPED emission.
+    const spine: Node<unknown, Emission> = {
+      name: "coordinate",
+      async run(input, ctx) {
+        const r = await ctx.runner.run(makeAgent("coordinate"), `COORDINATE[${String(input)}]`);
+        return {
+          output: { plan: r.response, hits: 2 },
+          succeeded: true,
+          totalInputTokens: r.inputTokens,
+          totalOutputTokens: r.outputTokens,
+        };
+      },
+    };
+    // The tail: its fn INPUT is compiler-checked as Emission at its own
+    // boundary — no nullable slot fetch, no cast.
+    const tail = new FunctionStep<Emission, Contract>({
+      name: "answer",
+      fn: (emission) => ({ answer: emission.plan, confidence: emission.hits / 10 }),
+    });
+
+    // The composite seats both typed nodes AND types as Node<string, Contract>
+    // — zero casts anywhere in this test.
+    const pipeline: Node<string, Contract> = sequentialAgent<Contract, string>(
+      [{ node: spine }, { node: tail, input: "prior" }],
+      { emit: "answer" },
+    );
+    const res = await pipeline.run("who owns it?", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output).toEqual({ answer: "PLAN-DONE", confidence: 0.2 });
+    expect(res.totalInputTokens).toBe(7); // the spine's tokens still roll up
+    expect(res.totalOutputTokens).toBe(3);
+  });
+
+  it("input:'prior' hands the node the previous stage's emission (not the pipeline input); step events record it", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "FINDING" });
+    const seen: unknown[] = [];
+    const tail = new FunctionStep<unknown, string>({
+      name: "tail",
+      fn: (input) => {
+        seen.push(input);
+        return `TAIL(${String(input)})`;
+      },
+    });
+    const { bus, events } = captureBus();
+
+    const node = sequentialAgent([makeAgent("finder"), { node: tail, input: "prior" }]);
+    const res = await node.run("the task", { runner, eventBus: bus });
+
+    expect(res.succeeded).toBe(true);
+    expect(seen).toEqual(["FINDING"]); // the PRIOR emission — not "the task"
+    expect(res.output.outputs).toEqual({ finder: "FINDING", tail: "TAIL(FINDING)" });
+    // The trace shows what the leaf ACTUALLY ran with; the default lane is untouched.
+    const starts = stepStarts(events);
+    const ends = stepEnds(events);
+    expect(starts[0]!.arguments).toEqual({ input: "the task" });
+    expect(starts[1]!.arguments).toEqual({ input: "FINDING" });
+    expect(ends[1]!.arguments).toEqual({ input: "FINDING" });
+  });
+
+  it("input:'pipeline' explicit is byte-identical to the default", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const seen: unknown[] = [];
+    const tail = new FunctionStep<unknown, string>({
+      name: "tail",
+      fn: (input) => {
+        seen.push(input);
+        return "T";
+      },
+    });
+
+    const res = await sequentialAgent([makeAgent("lead"), { node: tail, input: "pipeline" }]).run(
+      "go",
+      { runner },
+    );
+
+    expect(res.succeeded).toBe(true);
+    expect(seen).toEqual(["go"]); // the pipeline input, like an unmarked node stage
+  });
+
+  it("input:'prior' + retry re-runs the leaf with the SAME resolved input", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "FINDING" });
+    const attempts: unknown[] = [];
+    const flaky = new FunctionStep<unknown, string>({
+      name: "tail",
+      fn: (input) => {
+        attempts.push(input);
+        if (attempts.length === 1) throw new Error("first attempt flakes");
+        return `TAIL(${String(input)})`;
+      },
+    });
+
+    const res = await sequentialAgent([
+      makeAgent("finder"),
+      { node: flaky, input: "prior", retry: 1 },
+    ]).run("the task", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(attempts).toEqual(["FINDING", "FINDING"]); // both attempts got the prior emission
+    expect(res.output.outputs.tail).toBe("TAIL(FINDING)");
+  });
+
+  it("a stop AT the emitting stage still resolves the emission (the stop only prunes later stages)", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "SHOULD-NEVER-RUN" });
+    const gate = new FunctionStep<unknown, string>({ name: "gate", fn: () => "EMITTED" });
+
+    const node = sequentialAgent<string>(
+      [{ node: gate, stop: () => "prune the rest" }, makeAgent("never")],
+      { emit: "gate" },
+    );
+    const res = await node.run("q", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output).toBe("EMITTED");
+  });
+
+  it("a stop BEFORE the emitting stage fails the node — the contract was never produced", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "AMBIGUOUS" });
+    const tail = new FunctionStep<unknown, string>({ name: "tail", fn: () => "x" });
+
+    const node = sequentialAgent<string>(
+      [{ agent: makeAgent("interpret"), stop: () => "clarify: which one?" }, { node: tail }],
+      { emit: "tail" },
+    );
+    const res = await node.run("q", { runner });
+
+    expect(res.succeeded).toBe(false);
+    expect(res.error?.message).toContain("before the designated emit stage 'tail'");
+    expect(res.error?.message).toContain("clarify: which one?");
+  });
+
+  it("the designated stage need not be terminal: later stages still run; the output stays pinned", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "AFTER" });
+    const gate = new FunctionStep<unknown, string>({ name: "gate", fn: () => "PINNED" });
+
+    const node = sequentialAgent<string>([{ node: gate }, makeAgent("after")], { emit: "gate" });
+    const res = await node.run("q", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output).toBe("PINNED"); // not "AFTER", and not the envelope
+  });
+
+  it("emit without a type argument stays honest: the output is the emission, typed unknown", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const gate = new FunctionStep<unknown, string>({ name: "gate", fn: () => "EMITTED" });
+
+    const res = await sequentialAgent([{ node: gate }], { emit: "gate" }).run("q", { runner });
+
+    expect(res.succeeded).toBe(true);
+    expect(res.output).toBe("EMITTED");
+  });
+
+  it("a failing stage under emit designation keeps the leaf failure contract", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const boom = new FunctionStep<unknown, never>({
+      name: "boom",
+      fn: () => {
+        throw new Error("spine exploded");
+      },
+    });
+
+    const res = await sequentialAgent<string>(
+      [{ node: boom }, { node: new FunctionStep<unknown, string>({ name: "t", fn: () => "x" }) }],
+      { emit: "t" },
+    ).run("q", { runner });
+
+    expect(res.succeeded).toBe(false);
+    expect(res.error?.message).toContain("spine exploded");
+  });
+
+  it("build-time guards (#255): emit typos, boolean emit, stage-level emit, input misuse", () => {
+    const fn = new FunctionStep<unknown, string>({ name: "n", fn: () => "x" });
+
+    expect(() => sequentialAgent<string>([{ node: fn }], { emit: "nope" })).toThrow(
+      /designates stage 'nope' but no stage has that name/,
+    );
+    expect(() => sequentialAgent([{ node: fn }], { emit: true as unknown as string })).toThrow(
+      /must be a stage NAME/,
+    );
+    // The dod sketch's stage-level marker — rejected with a pointer to opts.emit.
+    expect(() => sequentialAgent([{ node: fn, emit: true } as unknown as AgentStageSpec])).toThrow(
+      /sets `emit` on the stage spec/,
+    );
+    // `input` is a node-stage knob…
+    expect(() =>
+      sequentialAgent([makeAgent("a"), { agent: makeAgent("b"), input: "prior" }]),
+    ).toThrow(/sets `input` on an `agent` stage/);
+    // …with no prior emission on the first stage…
+    expect(() => sequentialAgent([{ node: fn, input: "prior" }])).toThrow(
+      /FIRST stage — there is no prior emission/,
+    );
+    // …and only two lanes.
+    expect(() =>
+      sequentialAgent([makeAgent("a"), { node: fn, input: "sideways" as "prior" }]),
+    ).toThrow(/invalid input 'sideways'/);
+  });
+
+  it("type surface: a type argument REQUIRES a designated emit stage (no silently-envelope typed call)", () => {
+    const fn = new FunctionStep<unknown, string>({ name: "n", fn: () => "x" });
+    // @ts-expect-error — sequentialAgent<TOut> without `{ emit }` opts must not compile
+    const bad = sequentialAgent<string>([{ node: fn }]);
+    void bad;
+  });
+
+  it("backward compat: an opts object ANNOTATED as SequentialAgentOpts still takes the untyped overload", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "OUT" });
+    const o: SequentialAgentOpts = { name: "compat" };
+
+    const res = await sequentialAgent([makeAgent("a")], o).run("go", { runner });
+
+    // Typed access to the envelope proves overload resolution picked the
+    // untyped form — this line fails to compile otherwise.
+    expect(res.output.outputs).toEqual({ a: "OUT" });
+    expect(res.output.stopped).toBeNull();
   });
 });
