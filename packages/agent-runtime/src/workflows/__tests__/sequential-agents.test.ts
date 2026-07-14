@@ -1179,4 +1179,35 @@ describe("sequentialAgent: typed emit + input:'prior' (#255)", () => {
     expect(res.output.outputs).toEqual({ a: "OUT" });
     expect(res.output.stopped).toBeNull();
   });
+
+  it("the emit stage may emit null: the sentinel distinguishes 'emitted null' from 'never emitted'", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "X" });
+    const nullish = new FunctionStep<unknown, null>({ name: "nullish", fn: () => null });
+
+    const res = await sequentialAgent<null>([{ node: nullish }], { emit: "nullish" }).run("q", {
+      runner,
+    });
+
+    expect(res.succeeded).toBe(true); // NOT the never-emitted failure lane
+    expect(res.output).toBeNull();
+    expect(res.error).toBeUndefined();
+  });
+
+  it("a FAILURE after a non-terminal emit stage discards the captured emission (a real error outranks the contract)", async () => {
+    const runner = new MockRunner().addResponse("*", { content: "X" });
+    const gate = new FunctionStep<unknown, string>({ name: "gate", fn: () => "PINNED" });
+    const boom = new FunctionStep<unknown, never>({
+      name: "boom",
+      fn: () => {
+        throw new Error("later stage exploded");
+      },
+    });
+
+    const res = await sequentialAgent<string>([{ node: gate }, { node: boom }], {
+      emit: "gate",
+    }).run("q", { runner });
+
+    expect(res.succeeded).toBe(false); // not succeeded-with-PINNED — only a STOP is a successful early exit
+    expect(res.error?.message).toContain("later stage exploded");
+  });
 });

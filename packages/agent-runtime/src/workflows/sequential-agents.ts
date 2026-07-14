@@ -273,6 +273,10 @@ export interface TypedSequentialAgentOpts extends SequentialAgentOpts {
    * pipeline never produced its contract. Pipelines with clarify/refuse lanes
    * UPSTREAM of the emitting stage should stay on the untyped form and branch
    * on `stopped`, or fold those lanes into the contract type itself.
+   * FAILURE interplay: a stage failure (or `onEmit` throw) anywhere in the
+   * sequence — including AFTER a non-terminal designated stage has already
+   * emitted — fails the composite and discards the captured emission. A real
+   * error outranks the contract; only a STOP is a successful early exit.
    */
   readonly emit: string;
 }
@@ -488,14 +492,16 @@ export function sequentialAgent(
   // first stage there is nothing prior to receive. Same reject-loudly ethos.
   specs.forEach((s, i) => {
     if (s.input === undefined) return;
-    if (s.input !== "pipeline" && s.input !== "prior") {
-      throw new Error(
-        `sequentialAgent: stage '${names[i]}' has invalid input '${String(s.input)}' — expected 'pipeline' or 'prior'`,
-      );
-    }
+    // The structural error first: on an agent stage the knob is wrong however
+    // it is spelled, so that message outranks the invalid-value one.
     if (s.node === undefined) {
       throw new Error(
         `sequentialAgent: stage '${names[i]}' sets \`input\` on an \`agent\` stage — \`input\` is a node-stage knob (an agent stage already sees the prior emission through its implicit render; override \`prompt\` or \`opts.render\` to reshape it)`,
+      );
+    }
+    if (s.input !== "pipeline" && s.input !== "prior") {
+      throw new Error(
+        `sequentialAgent: stage '${names[i]}' has invalid input '${String(s.input)}' — expected 'pipeline' or 'prior'`,
       );
     }
     if (s.input === "prior" && i === 0) {
@@ -576,6 +582,9 @@ export function sequentialAgent(
             totalOutputTokens: tokensOut,
           };
         }
+        // The `stopped == null` arm is defensively unreachable: completing the
+        // loop means the designated stage ran and captured `emitted` (every
+        // earlier failure or stop returned first).
         return {
           output: undefined as never,
           succeeded: false,
