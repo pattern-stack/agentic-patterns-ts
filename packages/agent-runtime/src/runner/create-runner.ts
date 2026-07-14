@@ -135,7 +135,9 @@ export interface RunnerSelection {
 
 /**
  * Build a {@link GatewayConfig} from env: `AP_GATEWAY_BASE_URL` (required),
- * `AP_GATEWAY_API_KEY`, `AP_GATEWAY_MODEL_PREFIX`,
+ * `AP_GATEWAY_API_KEY`, `AP_GATEWAY_MODEL_PREFIX` (a literal prefix, or `"auto"`
+ * to derive `«vendor»/«model»` per id), `AP_GATEWAY_TIER_PROVIDER` (whose tier
+ * map turns `haiku`/`sonnet`/`opus` into a real id — default `anthropic`),
  * `AP_GATEWAY_STRUCTURED_OUTPUTS` (1/true → the gateway forwards json-schema
  * structured outputs; see {@link GatewayConfig.supportsStructuredOutputs}).
  * Returns undefined when no gateway URL is set — so setting one env var routes
@@ -149,6 +151,15 @@ export interface RunnerSelection {
 function envGateway(): GatewayConfig | undefined {
   const baseURL = process.env.AP_GATEWAY_BASE_URL;
   if (!baseURL) return undefined;
+  // Fail loud on a typo'd provider name rather than silently falling back to the
+  // default tier map — a wrong tier map picks a real-but-unintended model.
+  const tierProvider = process.env.AP_GATEWAY_TIER_PROVIDER;
+  if (tierProvider && !(tierProvider in PROVIDERS)) {
+    throw new Error(
+      `createRunner: AP_GATEWAY_TIER_PROVIDER="${tierProvider}" is not a supported provider. ` +
+        `Expected one of: ${Object.keys(PROVIDERS).join(", ")}.`,
+    );
+  }
   const basicUser = process.env.AP_GATEWAY_BASIC_USER;
   const basicPass = process.env.AP_GATEWAY_BASIC_PASS;
   const basicHeader =
@@ -163,6 +174,7 @@ function envGateway(): GatewayConfig | undefined {
     ...(process.env.AP_GATEWAY_MODEL_PREFIX
       ? { modelPrefix: process.env.AP_GATEWAY_MODEL_PREFIX }
       : {}),
+    ...(tierProvider ? { tierProvider: tierProvider as SupportedProvider } : {}),
     ...(basicHeader ? { headers: basicHeader } : {}),
     ...(/^(1|true|yes)$/i.test(process.env.AP_GATEWAY_STRUCTURED_OUTPUTS ?? "")
       ? { supportsStructuredOutputs: true }

@@ -16,8 +16,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentRunner } from "../../runner/agent-runner.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { createRunner } from "../../runner/create-runner.js";
-import { anthropicProvider, openaiProvider } from "../index.js";
 import {
+  anthropicProvider,
+  googleProvider,
+  isProviderTier,
+  openaiProvider,
+  resolveTierAlias,
+} from "../index.js";
+import {
+  GATEWAY_AUTO_PREFIX,
   HybridModelResolver,
   ModelProfileSchema,
   type ModelResolver,
@@ -26,6 +33,7 @@ import {
   inferProvider,
   isModelResolver,
   loadModelProfiles,
+  toGatewayModelId,
 } from "../model-resolver.js";
 
 // --- fixtures ---------------------------------------------------------------
@@ -291,6 +299,159 @@ describe("GatewayConfig — gateway routing", () => {
     const { source, reason } = await createRunner({ verbose: false });
     expect(source).toBe("model-resolver");
     expect(reason).toContain("gateway https://gw.example/v1");
+  });
+});
+
+// --- Gateway id translation (#244) ------------------------------------------
+//
+// The contract: an agent declares a model ONCE and it runs on a direct provider
+// AND through a gateway. Tier words are not addressable upstream, so the gateway
+// path must translate them — a raw "haiku" reaching a gateway is a 400 (verified
+// against the dev Bifrost: `no providers found for model "haiku" ... to auto-resolve`).
+// Bare CANONICAL ids, by contrast, are auto-resolved by such gateways against their
+// own catalog (verified: `gemini-3.1-flash-lite` → 200 unprefixed), so prefixing
+// stays opt-in and must never be forced onto a working path.
+
+describe("toGatewayModelId — declared id → gateway id", () => {
+  const GW = { baseURL: "https://gw.example/v1", apiKey: "sk-test" };
+
+  it("resolves a tier alias to a canonical id via the default (anthropic) tier map", () => {
+    expect(toGatewayModelId("haiku", GW)).toBe("claude-haiku-4-5");
+    expect(toGatewayModelId("sonnet", GW)).toBe("claude-sonnet-4-5");
+    expect(toGatewayModelId("opus", GW)).toBe("claude-opus-4-5");
+  });
+
+  it("tierProvider selects whose tier ladder a tier word climbs", () => {
+    const gw = { ...GW, tierProvider: "google" as const };
+    expect(toGatewayModelId("haiku", gw)).toBe("gemini-2.5-flash-lite");
+    expect(toGatewayModelId("opus", gw)).toBe("gemini-2.5-pro");
+  });
+
+  it("reads the SAME tier map as the direct path (no second source of truth)", () => {
+    expect(toGatewayModelId("haiku", GW)).toBe(anthropicProvider.tiers.haiku);
+    expect(toGatewayModelId("haiku", { ...GW, tierProvider: "google" })).toBe(
+      googleProvider.tiers.haiku,
+    );
+  });
+
+  it("passes a bare canonical id through untouched (the path that works today)", () => {
+    expect(toGatewayModelId("gemini-3.1-flash-lite", GW)).toBe("gemini-3.1-flash-lite");
+    expect(toGatewayModelId("gpt-4o-mini", GW)).toBe("gpt-4o-mini");
+  });
+
+  it("never double-prefixes an id that already carries a / segment", () => {
+    expect(
+      toGatewayModelId("gemini/gemini-3.1-flash-lite", { ...GW, modelPrefix: "openai/" }),
+    ).toBe("gemini/gemini-3.1-flash-lite");
+    expect(
+      toGatewayModelId("anthropic/claude-haiku-4-5", { ...GW, modelPrefix: GATEWAY_AUTO_PREFIX }),
+    ).toBe("anthropic/claude-haiku-4-5");
+  });
+
+  it("a literal modelPrefix qualifies the CANONICAL id, not the alias", () => {
+    const gw = { ...GW, modelPrefix: "anthropic/" };
+    expect(toGatewayModelId("haiku", gw)).toBe("anthropic/claude-haiku-4-5");
+    expect(toGatewayModelId("claude-sonnet-4-5", gw)).toBe("anthropic/claude-sonnet-4-5");
+  });
+
+  it('modelPrefix "auto" derives the vendor segment per id', () => {
+    const gw = { ...GW, modelPrefix: GATEWAY_AUTO_PREFIX };
+    expect(toGatewayModelId("gpt-4o", gw)).toBe("openai/gpt-4o");
+    expect(toGatewayModelId("gemini-3.1-flash-lite", gw)).toBe("google/gemini-3.1-flash-lite");
+    expect(toGatewayModelId("haiku", gw)).toBe("anthropic/claude-haiku-4-5"); // alias → canonical → vendor
+  });
+
+  it('modelPrefix "auto" fails loud on an unclassifiable id, telling the translation story', () => {
+    const gw = { ...GW, modelPrefix: GATEWAY_AUTO_PREFIX };
+    expect(() => toGatewayModelId("llama-3.3-70b", gw)).toThrow(
+      /cannot translate model id "llama-3.3-70b"/,
+    );
+    // The story: what was tried, and each way to make it resolvable.
+    expect(() => toGatewayModelId("llama-3.3-70b", gw)).toThrow(/matched no known vendor prefix/);
+    expect(() => toGatewayModelId("llama-3.3-70b", gw)).toThrow(/resolver\.register/);
+    expect(() => toGatewayModelId("llama-3.3-70b", gw)).toThrow(/models\.yaml/);
+    expect(() => toGatewayModelId("llama-3.3-70b", gw)).toThrow(/AP_GATEWAY_MODEL_PREFIX/);
+  });
+
+  it("qualify() receives the canonical id — a custom qualifier never re-implements tiers", () => {
+    const seen: string[] = [];
+    const gw = {
+      ...GW,
+      modelPrefix: "ignored/",
+      qualify: (id: string) => {
+        seen.push(id);
+        return `virt:${id}`;
+      },
+    };
+    expect(toGatewayModelId("haiku", gw)).toBe("virt:claude-haiku-4-5");
+    expect(seen).toEqual(["claude-haiku-4-5"]);
+  });
+});
+
+describe("gateway id translation — end to end through the resolver", () => {
+  const GW = { baseURL: "https://gw.example/v1", apiKey: "sk-test" };
+
+  it("an agent declaring a tier alias dispatches a real model id (the #244 bug)", async () => {
+    const r = new HybridModelResolver({ gateway: GW });
+    const m = await r.resolve("haiku");
+    expect(m.modelId).toBe("claude-haiku-4-5"); // NOT the raw "haiku" that 400s
+  });
+
+  it("a bare canonical id still reaches the gateway unprefixed (no regression)", async () => {
+    const r = new HybridModelResolver({ gateway: GW });
+    const m = await r.resolve("gemini-3.1-flash-lite");
+    expect(m.modelId).toBe("gemini-3.1-flash-lite");
+  });
+
+  it("an untranslatable id in auto mode rejects instead of dispatching a guess", async () => {
+    const r = new HybridModelResolver({
+      gateway: { ...GW, modelPrefix: GATEWAY_AUTO_PREFIX },
+    });
+    await expect(r.resolve("llama-3.3-70b")).rejects.toThrow(/cannot translate model id/);
+  });
+
+  it("a profile still wins over gateway translation (top precedence, unchanged)", async () => {
+    const aSpy = vi.spyOn(anthropicProvider, "load").mockResolvedValue(fakeModel("direct"));
+    const r = new HybridModelResolver({
+      gateway: { ...GW, modelPrefix: GATEWAY_AUTO_PREFIX },
+      profiles: { haiku: { provider: "anthropic", model: "claude-haiku-4-5" } },
+    });
+    const m = await r.resolve("haiku");
+    expect(m.modelId).toBe("direct");
+    expect(aSpy).toHaveBeenCalledWith("claude-haiku-4-5");
+  });
+
+  it("createRunner reads AP_GATEWAY_TIER_PROVIDER from env", async () => {
+    vi.stubEnv("AP_GATEWAY_BASE_URL", "https://gw.example/v1");
+    vi.stubEnv("AP_GATEWAY_TIER_PROVIDER", "google");
+    const { runner } = await createRunner({ verbose: false });
+    const resolver = (runner as unknown as { _resolver: ModelResolver })._resolver;
+    const m = await resolver.resolve("haiku");
+    expect(m.modelId).toBe("gemini-2.5-flash-lite");
+  });
+
+  it("createRunner rejects a typo'd AP_GATEWAY_TIER_PROVIDER rather than silently defaulting", async () => {
+    vi.stubEnv("AP_GATEWAY_BASE_URL", "https://gw.example/v1");
+    vi.stubEnv("AP_GATEWAY_TIER_PROVIDER", "gemini"); // catalog spelling, not a provider name
+    await expect(createRunner({ verbose: false })).rejects.toThrow(
+      /AP_GATEWAY_TIER_PROVIDER="gemini" is not a supported provider/,
+    );
+  });
+});
+
+// --- Tier alias primitive (providers/index) ---------------------------------
+
+describe("isProviderTier / resolveTierAlias", () => {
+  it("classifies the three tier words, case-insensitively", () => {
+    expect(isProviderTier("haiku")).toBe(true);
+    expect(isProviderTier("SONNET")).toBe(true);
+    expect(isProviderTier("claude-haiku-4-5")).toBe(false);
+  });
+
+  it("maps a tier word through a provider's ladder and leaves real ids alone", () => {
+    expect(resolveTierAlias("opus", anthropicProvider)).toBe("claude-opus-4-5");
+    expect(resolveTierAlias("opus", googleProvider)).toBe("gemini-2.5-pro");
+    expect(resolveTierAlias("gpt-4o", openaiProvider)).toBe("gpt-4o");
   });
 });
 
