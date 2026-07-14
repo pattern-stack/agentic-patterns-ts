@@ -20,6 +20,12 @@ import { INFORMATION_RETRIEVAL } from "./responsibilities.js";
  * A retrieval agent decomposes information requests into targeted
  * search queries, executes them systematically, and organizes results
  * by the requester's stated dimensions.
+ *
+ * NO MODEL (#179/#222): this declaration pins no `defaultModel`. Set the model
+ * where you compose the agent (`AgentBuilder.withModel(id)`, or
+ * `role.withDefaultModel(id)` on your own role), or let the runner resolve it
+ * from the environment (tier / `AGENT_MODEL` / gateway / profiles). The
+ * framework never silently pins a vendor's model onto a consumer's agent.
  */
 export function retrievalRole(options?: {
   capability?: Capability;
@@ -46,8 +52,7 @@ export function retrievalRole(options?: {
     )
     .withJudgment(RETRIEVAL_STRATEGY)
     .withJudgment(EVIDENCE_QUALITY)
-    .withResponsibility(INFORMATION_RETRIEVAL)
-    .withDefaultModel("claude-sonnet-4-5-20250929");
+    .withResponsibility(INFORMATION_RETRIEVAL);
 
   if (options?.extraJudgments) {
     for (const j of options.extraJudgments) {

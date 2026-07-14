@@ -1,5 +1,8 @@
-import { Judgment, Role } from "@agentic-patterns/core";
+import { AgentBuilder, Judgment, Mission, Role } from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
+import { buildCalculatorAgent } from "../agents/calculator.js";
+import { buildTodoAgent } from "../agents/todo-manager.js";
+import { buildWritingCoachAgent } from "../agents/writing-coach.js";
 import { analystRole } from "../analyst.js";
 import { coordinatorRole } from "../coordinator.js";
 import {
@@ -200,5 +203,60 @@ describe("retrievalRole", () => {
     const prompt = role.persona.toPrompt();
     expect(prompt).toContain("intelligence analyst");
     expect(prompt).toContain("evidence");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Policy guard — no framework declaration pins a vendor model (#179/#222)
+// ---------------------------------------------------------------------------
+//
+// A preset that carries a `defaultModel` silently pins a vendor's model onto
+// every consumer who composes it — they inherit a model they never chose, it
+// misleads introspection (the Roles page renders it as THE model), and it
+// breaks anyone on another gateway/provider. An unset model must stay
+// `undefined` so the runner resolves it (tier / AGENT_MODEL / gateway /
+// profiles) or fails loud. Same policy `asAgent()` already enforces.
+
+describe("no-silent-model-defaults policy (#179/#222)", () => {
+  const roleFactories = [
+    ["coordinatorRole", coordinatorRole],
+    ["orchestratorRole", orchestratorRole],
+    ["analystRole", analystRole],
+    ["retrievalRole", retrievalRole],
+  ] as const;
+
+  for (const [name, factory] of roleFactories) {
+    it(`${name}() declares no defaultModel`, () => {
+      expect(factory().defaultModel).toBeUndefined();
+    });
+  }
+
+  const agentBuilders = [
+    ["buildCalculatorAgent", buildCalculatorAgent],
+    ["buildTodoAgent", buildTodoAgent],
+    ["buildWritingCoachAgent", buildWritingCoachAgent],
+  ] as const;
+
+  for (const [name, build] of agentBuilders) {
+    it(`${name}() declares no model`, () => {
+      const agent = build();
+      expect(agent.getModel()).toBeUndefined();
+      expect(agent.role.defaultModel).toBeUndefined();
+    });
+  }
+
+  it("an agent composed from a preset role resolves model === undefined", () => {
+    const agent = new AgentBuilder(coordinatorRole())
+      .withMission(new Mission({ objective: "route work" }))
+      .build();
+    expect(agent.getModel()).toBeUndefined();
+  });
+
+  it("a consumer's own pin still wins — the presets are composable, not opinionated", () => {
+    const agent = new AgentBuilder(coordinatorRole())
+      .withMission(new Mission({ objective: "route work" }))
+      .withModel("some-model-id")
+      .build();
+    expect(agent.getModel()).toBe("some-model-id");
   });
 });

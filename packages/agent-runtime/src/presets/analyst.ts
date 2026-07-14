@@ -20,6 +20,12 @@ import { ANALYSIS } from "./responsibilities.js";
  * An analyst receives pre-gathered context and applies domain-specific
  * judgment heuristics to produce a structured, evidence-backed
  * assessment. Analysts do not gather data -- they reason over it.
+ *
+ * NO MODEL (#179/#222): this declaration pins no `defaultModel`. Set the model
+ * where you compose the agent (`AgentBuilder.withModel(id)`, or
+ * `role.withDefaultModel(id)` on your own role), or let the runner resolve it
+ * from the environment (tier / `AGENT_MODEL` / gateway / profiles). The
+ * framework never silently pins a vendor's model onto a consumer's agent.
  */
 export function analystRole(options?: {
   domain?: string;
@@ -47,8 +53,7 @@ export function analystRole(options?: {
       }),
     )
     .withJudgment(EVIDENCE_QUALITY)
-    .withResponsibility(ANALYSIS)
-    .withDefaultModel("claude-sonnet-4-5-20250929");
+    .withResponsibility(ANALYSIS);
 
   if (options?.extraJudgments) {
     for (const j of options.extraJudgments) {

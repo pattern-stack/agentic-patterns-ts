@@ -14,6 +14,12 @@ import { INTENT_ROUTING, RESPONSE_SYNTHESIS } from "./responsibilities.js";
  * An orchestrator is the chat-facing agent that interprets what
  * users want, routes to the right specialist team, and synthesizes
  * responses. It maintains conversational context across turns.
+ *
+ * NO MODEL (#179/#222): this declaration pins no `defaultModel`. Set the model
+ * where you compose the agent (`AgentBuilder.withModel(id)`, or
+ * `role.withDefaultModel(id)` on your own role), or let the runner resolve it
+ * from the environment (tier / `AGENT_MODEL` / gateway / profiles). The
+ * framework never silently pins a vendor's model onto a consumer's agent.
  */
 export function orchestratorRole(options?: {
   capability?: Capability;
@@ -39,8 +45,7 @@ export function orchestratorRole(options?: {
     )
     .withJudgment(INTENT_CLASSIFICATION)
     .withResponsibility(INTENT_ROUTING)
-    .withResponsibility(RESPONSE_SYNTHESIS)
-    .withDefaultModel("claude-sonnet-4-5-20250929");
+    .withResponsibility(RESPONSE_SYNTHESIS);
 
   if (options?.capability) {
     builder.withCapability(options.capability);

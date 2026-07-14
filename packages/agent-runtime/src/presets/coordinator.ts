@@ -14,6 +14,12 @@ import { ORCHESTRATION, QUALITY_GATE } from "./responsibilities.js";
  * A coordinator routes work to specialists, manages execution
  * sequence, and reviews output quality. It never performs
  * specialist work directly.
+ *
+ * NO MODEL (#179/#222): this declaration pins no `defaultModel`. Set the model
+ * where you compose the agent (`AgentBuilder.withModel(id)`, or
+ * `role.withDefaultModel(id)` on your own role), or let the runner resolve it
+ * from the environment (tier / `AGENT_MODEL` / gateway / profiles). The
+ * framework never silently pins a vendor's model onto a consumer's agent.
  */
 export function coordinatorRole(options?: {
   capability?: Capability;
@@ -40,8 +46,7 @@ export function coordinatorRole(options?: {
     .withJudgment(ROUTING)
     .withJudgment(QUALITY_REVIEW)
     .withResponsibility(ORCHESTRATION)
-    .withResponsibility(QUALITY_GATE)
-    .withDefaultModel("claude-sonnet-4-5-20250929");
+    .withResponsibility(QUALITY_GATE);
 
   if (options?.capability) {
     builder.withCapability(options.capability);

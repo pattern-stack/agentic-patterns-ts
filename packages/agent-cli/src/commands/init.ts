@@ -439,7 +439,10 @@ const role = new RoleBuilder("demo-assistant")
       description: "Greet people warmly using the greet tool",
     }),
   )
-  .withDefaultModel("sonnet")
+  // No model pinned here on purpose: the runner resolves one from your env
+  // (AGENT_TIER / AGENT_MODEL in .env). Pin one with .withDefaultModel("<id>")
+  // on the role, or .withModel("<id>") on the AgentBuilder below, when you want
+  // THIS agent on a specific model regardless of the environment.
   .build();
 
 const mission = new Mission({

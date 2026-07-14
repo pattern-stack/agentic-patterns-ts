@@ -3,6 +3,10 @@
  *
  * Provides an in-memory task list managed through five tools:
  * create_task, list_tasks, complete_task, delete_task, update_task.
+ *
+ * NO MODEL (#179/#222): pins no model. It runs on whatever model the runner
+ * resolves (tier / `AGENT_MODEL` / gateway / profiles). Pin one explicitly with
+ * `buildTodoAgent().withModel(id)` if you need a specific model.
  */
 
 import {
@@ -164,7 +168,6 @@ export function buildTodoAgent() {
         description: "Manage tasks — create, update, complete, and organize",
       }),
     )
-    .withDefaultModel("sonnet")
     .build();
 
   const mission = new Mission({
