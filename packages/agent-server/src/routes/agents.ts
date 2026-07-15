@@ -18,6 +18,9 @@ interface ToolDefLike {
 }
 interface CapabilityLike {
   name?: string;
+  /** The capability's own one-line "what this is" summary (Capability ctor arg
+   *  2) — the overarching context the chat Tools rail shows above its tools. */
+  description?: string;
   toolbox?: { name?: string; description?: string; tools?: Record<string, ToolDefLike> };
   playbook?: { plays?: Record<string, unknown> };
 }
@@ -74,6 +77,9 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
     // (its registered `role` is narrow by design; see `displayRoleOf`).
     const capabilities = (displayRoleOf(a)?.capabilities ?? []).map((cap) => ({
       name: cap.name ?? "capability",
+      // The capability's own summary, falling back to the toolbox's — the
+      // overarching "what this capability is" line the Tools rail shows.
+      description: cap.description ?? cap.toolbox?.description ?? "",
       toolbox: cap.toolbox?.name,
       tools: Object.entries(cap.toolbox?.tools ?? {}).map(([name, def]) => ({
         name,

@@ -50,6 +50,9 @@ export interface CapabilityTool {
 }
 export interface AgentCapability {
   name: string;
+  /** The capability's overarching "what this is" summary (server falls back to
+   *  the toolbox description). May be "" on older servers — treat as absent. */
+  description?: string;
   toolbox?: string;
   tools: CapabilityTool[];
   plays: string[];

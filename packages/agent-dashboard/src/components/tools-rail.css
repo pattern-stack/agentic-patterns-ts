@@ -47,7 +47,83 @@
   color: var(--err);
 }
 
+/* --- scope / deps readout --------------------------------------------- */
+
+.scope {
+  margin: 2px 4px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--fill);
+}
+.scope__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.scope__title {
+  font-size: var(--fz-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-2);
+}
+.scope__tag {
+  margin-left: auto;
+  font-size: var(--fz-micro);
+  font-family: var(--font-mono);
+  color: var(--mute);
+}
+.scope__sub {
+  font-size: var(--fz-micro);
+  color: var(--mute);
+  margin-bottom: 3px;
+}
+.scope__none {
+  font-size: var(--fz-micro);
+  color: var(--mute);
+  line-height: 1.45;
+}
+.scope__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+.scope__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fz-tiny);
+}
+.scope__k {
+  flex: none;
+  color: var(--ink-3);
+}
+.scope__v {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+.scope__v--redacted {
+  color: var(--warn-ink);
+  font-style: italic;
+}
+
 /* --- capability group ------------------------------------------------- */
+
+.cap__desc {
+  font-size: var(--fz-micro);
+  color: var(--ink-2);
+  line-height: 1.45;
+  padding: 0 6px 5px;
+}
 
 .cap {
   margin-bottom: 12px;

@@ -409,7 +409,18 @@ export function ChatPage() {
             tabs={RAIL_TAB_OPTIONS}
           >
             {railTab === "tools" ? (
-              <ToolsRail agentId={selectedId} />
+              <ToolsRail
+                agentId={selectedId}
+                scope={{
+                  available: contextAvailable,
+                  defaults: selected?.instantiation?.defaults ?? null,
+                  // A replayed session carries no context of its own; showing the
+                  // live conversation's would be the wrong answer (#268), so fall
+                  // back to the declared default scope while viewing.
+                  bound: viewing ? null : chat.context,
+                  redacted: viewing ? null : chat.contextRedacted,
+                }}
+              />
             ) : railTab === "trace" ? (
               <TraceRail source={traceSource} />
             ) : (

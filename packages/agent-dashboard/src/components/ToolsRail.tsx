@@ -19,7 +19,27 @@ import {
 } from "../api/chat-client";
 import "./tools-rail.css";
 
-export function ToolsRail({ agentId }: { agentId: string | null }) {
+/**
+ * The run scope ("deps") this agent/conversation carries — who it acts on
+ * behalf of. `bound` is the live conversation's server-echoed context (once
+ * sent); `defaults` is the agent's declared seed scope (shown before send);
+ * `available` gates whether this agent can be scoped at all (has an
+ * `instantiate` hook). All absent → the agent runs unscoped.
+ */
+export interface ToolsScope {
+  available: boolean;
+  defaults: Record<string, unknown> | null;
+  bound: Record<string, unknown> | null;
+  redacted: string[] | null;
+}
+
+export function ToolsRail({
+  agentId,
+  scope,
+}: {
+  agentId: string | null;
+  scope?: ToolsScope;
+}) {
   const [comp, setComp] = useState<AgentComposition | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Which tool's detail is expanded, keyed `${capability}::${tool}` so the same
@@ -69,6 +89,7 @@ export function ToolsRail({ agentId }: { agentId: string | null }) {
       </div>
 
       <div className="tools-rail__scroll">
+        {agentId && scope && <ScopeSection scope={scope} />}
         {!agentId && <div className="tools-rail__msg">Select an agent to see what it can do.</div>}
         {error && <div className="tools-rail__msg err">{error}</div>}
         {comp && comp.capabilities.length === 0 && (
@@ -104,6 +125,7 @@ function CapabilityGroup({
           {cap.tools.length} tool{cap.tools.length === 1 ? "" : "s"}
         </span>
       </div>
+      {cap.description && <div className="cap__desc">{cap.description}</div>}
       {cap.plays.length > 0 && (
         <div className="cap__plays" title="Named plays this capability provides">
           {cap.plays.map((p) => (
@@ -167,9 +189,6 @@ function ToolItem({
             {description || "No description provided."}
           </div>
           <div className="tool__meta">
-            <span>
-              <span className="k">in</span> {capability}
-            </span>
             {toolbox && (
               <span>
                 <span className="k">toolbox</span> {toolbox}
@@ -187,4 +206,78 @@ function ToolItem({
       )}
     </div>
   );
+}
+
+/**
+ * ScopeSection — the "deps" readout: the run scope this agent/conversation acts
+ * under (who it's on behalf of). Shows the live bound context once a
+ * conversation exists, else the agent's declared default scope, else an honest
+ * "runs unscoped" note (no per-user deps). This is the framework's
+ * dependency-injection scope surfaced where the old cockpit showed it.
+ */
+function ScopeSection({ scope }: { scope: ToolsScope }) {
+  const bound = scope.bound;
+  const usingBound = bound != null;
+  const source = usingBound ? bound : scope.available ? scope.defaults : null;
+  const entries = source ? Object.entries(source) : [];
+
+  // No instantiate hook and nothing bound → this agent runs globally.
+  if (!scope.available && !usingBound) {
+    return (
+      <div className="scope">
+        <div className="scope__head">
+          <span className="scope__title">Scope</span>
+          <span className="scope__tag">unscoped</span>
+        </div>
+        <div className="scope__none">
+          No per-user deps — this agent acts globally, not on behalf of a specific user.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="scope">
+      <div className="scope__head">
+        <span className="scope__title">Scope</span>
+        <span className="scope__tag">
+          {usingBound ? "this conversation" : "default · binds on send"}
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <div className="scope__none">(no scope)</div>
+      ) : (
+        <>
+          <div className="scope__sub">acting on behalf of</div>
+          <dl className="scope__list">
+            {entries.map(([k, v]) => {
+              // Server-redacted keys arrive with their value already replaced
+              // (e.g. "[redacted]"); flag the row so it reads intentionally
+              // hidden, not like real data.
+              const isRedacted = scope.redacted?.includes(k) ?? false;
+              return (
+                <div className="scope__row" key={k}>
+                  <dt className="scope__k">{k}</dt>
+                  <dd
+                    className={`scope__v${isRedacted ? " scope__v--redacted" : ""}`}
+                    title={isRedacted ? "redacted by the server" : fmtScopeVal(v)}
+                  >
+                    {fmtScopeVal(v)}
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        </>
+      )}
+    </div>
+  );
+}
+
+function fmtScopeVal(v: unknown): string {
+  if (v === null) return "null";
+  if (typeof v === "object") {
+    return Array.isArray(v) ? `[${(v as unknown[]).length} items]` : "{…}";
+  }
+  return String(v);
 }
