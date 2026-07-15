@@ -47,7 +47,8 @@ import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Spinner } from "../components/atoms/Spinner";
 import { DropdownMenu } from "../components/kit/DropdownMenu";
-import { inputStyle } from "../components/kit/Field";
+import { Field, inputStyle } from "../components/kit/Field";
+import { JsonBlock } from "../components/kit/JsonBlock";
 import { Markdown } from "../components/kit/Markdown";
 import { Segmented } from "../components/kit/Segmented";
 import { useAdminData } from "../hooks/useAdminData";
@@ -65,6 +66,29 @@ const RAIL_TAB_OPTIONS: { value: RailTab; label: string; title?: string }[] = [
     title: "What this run carries between stages — not user memory",
   },
 ];
+
+/**
+ * Parse the scope-context editor's draft text into a request-ready object
+ * (#268) — the same "empty → undefined, else must be a JSON object" contract
+ * `AgentLensPage`'s delivered-instance composer uses
+ * (`pages/build/AgentLensPage.tsx` `compose()`), so the two context editors
+ * in this dashboard agree on what "no context" and "bad context" mean.
+ * Blocks (never silently drops) invalid JSON — a typed-in draft that gets
+ * quietly discarded on Send would misreport the scope the run actually got.
+ */
+function parseContextJson(text: string): { value?: Record<string, unknown>; error?: string } {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return {};
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { error: "Context must be a JSON object" };
+    }
+    return { value: parsed as Record<string, unknown> };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Invalid JSON" };
+  }
+}
 
 /** #226 — how many Backpack/Scratchpad state frames render in the timeline.
  *  Applied as `data-density` on the chat column; chat.css does the rest
@@ -85,6 +109,10 @@ export function ChatPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [maxIterations, setMaxIterations] = useState(10); // matches the runner default
+  // Scope-context editor draft (#268) — `null` = untouched, so the editor
+  // shows the SELECTED agent's `instantiation.defaults` until the operator
+  // types. Reseeded to `null` on agent switch / New Chat (see `newChat`).
+  const [contextText, setContextText] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
   const [railTab, setRailTab] = useState<RailTab>("universe");
   const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
@@ -176,7 +204,23 @@ export function ChatPage() {
     [allSessions, selected],
   );
 
-  const chat = useChat(selectedId, { maxIterations });
+  // Scope context (#268) — `instantiation.available` gates whether the editor
+  // + chip exist for this agent at all; `defaultsText` reseeds the editor
+  // whenever `contextText` is untouched (`null`). `contextParse` re-derives
+  // on every keystroke so Send can block on invalid JSON (never silently
+  // drop a draft the operator can see, per `parseContextJson`'s doc).
+  const contextAvailable = selected?.instantiation?.available === true;
+  const defaultsText = useMemo(
+    () => JSON.stringify(selected?.instantiation?.defaults ?? {}, null, 2),
+    [selected],
+  );
+  const contextEditorText = contextText ?? defaultsText;
+  const contextParse = useMemo(() => parseContextJson(contextEditorText), [contextEditorText]);
+
+  const chat = useChat(selectedId, { maxIterations, context: contextParse.value });
+  // Immutable once the conversation exists (Decision 2, spec §Design decisions) —
+  // the editor locks and the panel falls back to the bound (echoed) context.
+  const contextLocked = chat.conversationId != null;
   const exchangeCount = useMemo(
     () => chat.messages.filter((m) => m.role === "user").length,
     [chat.messages],
@@ -233,6 +277,9 @@ export function ChatPage() {
     setViewingMessages(null);
     setViewingRunId(null);
     setViewingError(null);
+    // Unlocks the scope editor and reseeds it from the (possibly new)
+    // agent's defaults — the "New Chat to change scope" affordance (#268).
+    setContextText(null);
     chat.reset();
   }, [chat]);
 
@@ -284,6 +331,12 @@ export function ChatPage() {
         viewingId={viewingId}
         onPickSession={pickSession}
         viewing={viewing}
+        contextAvailable={contextAvailable}
+        contextEditorText={contextEditorText}
+        onContextEditorText={setContextText}
+        contextError={contextParse.error}
+        contextLocked={contextLocked}
+        boundContext={chat.context}
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
@@ -310,7 +363,11 @@ export function ChatPage() {
               onSend={viewing ? undefined : chat.send}
               onAbort={viewing ? undefined : chat.abort}
               onRespondInput={viewing ? undefined : chat.respondInput}
-              disabled={!selected}
+              // Block Send while the scope-context draft doesn't parse — a
+              // silently dropped edit would misreport what scope the run
+              // actually got (#268; harmless once locked, `contextParse`
+              // stops mattering the instant `chat.conversationId` is set).
+              disabled={!selected || (!contextLocked && contextParse.error != null)}
               emptyLabel={
                 viewing
                   ? viewingMessages === null
@@ -400,6 +457,18 @@ interface HeaderProps {
   viewingId: string | null;
   onPickSession: (id: string) => void;
   viewing: boolean;
+  /** Whether the selected agent's registration can compose a delivered
+   *  instance (#268) — gates the scope editor + chip's very existence. */
+  contextAvailable: boolean;
+  contextEditorText: string;
+  onContextEditorText: (text: string) => void;
+  contextError?: string;
+  /** Immutable once the conversation exists (Decision 2) — locks the editor. */
+  contextLocked: boolean;
+  /** The server's echoed context for the live conversation (`useChat.context`) —
+   *  `null` until bound, or "(no scope)" once bound with none. Never the
+   *  editor's draft text (that would defeat the chip's honesty rule). */
+  boundContext: Record<string, unknown> | null;
 }
 
 function Header({
@@ -423,6 +492,12 @@ function Header({
   viewingId,
   onPickSession,
   viewing,
+  contextAvailable,
+  contextEditorText,
+  onContextEditorText,
+  contextError,
+  contextLocked,
+  boundContext,
 }: HeaderProps) {
   const selected = agents.find((a) => a.id === selectedId);
   return (
@@ -510,6 +585,14 @@ function Header({
             agent: {selected.name}
           </Badge>
         )}
+        {/* Scope chip (#268) — hidden entirely for hook-less agents; hidden
+            while VIEWING a past session too, since replayed sessions carry no
+            context (honest degradation, spec §Dashboard) and the live
+            conversation's scope behind it would be the WRONG conversation's
+            answer. Shown only once the live conversation is bound — before
+            that there is nothing server-confirmed to show yet, not even
+            "(no scope)". */}
+        {contextAvailable && !viewing && conversationId && <ScopeChip context={boundContext} />}
         {exchangeCount > 0 && (
           <Badge tone="mute" variant="outline">
             {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
@@ -545,13 +628,172 @@ function Header({
       {chatError && (
         <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>Stream error: {chatError}</div>
       )}
-      <CaptureCasePanel
-        conversationId={conversationId}
-        messages={messages}
-        exchangeCount={exchangeCount}
-        disabled={streaming || viewing}
-      />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <CaptureCasePanel
+          conversationId={conversationId}
+          messages={messages}
+          exchangeCount={exchangeCount}
+          disabled={streaming || viewing}
+        />
+        {contextAvailable && !viewing && (
+          <ScopeContextPanel
+            editorText={contextEditorText}
+            onEditorText={onContextEditorText}
+            error={contextError}
+            locked={contextLocked}
+            boundContext={boundContext}
+          />
+        )}
+      </div>
     </div>
+  );
+}
+
+/**
+ * ScopeContextPanel — the per-conversation context editor (#268), following
+ * `AgentLensPage`'s delivered-instance JSON textarea pattern
+ * (`pages/build/AgentLensPage.tsx:329`) and `CaptureCasePanel`'s
+ * collapsed-button → bordered-panel shape (this file has two "advanced"
+ * panels now; they share the same chrome on purpose). Editable until the
+ * conversation exists; once `locked`, shows the ACTUAL bound context (the
+ * server's echo) instead of the (possibly stale) draft — the same
+ * server-is-truth rule the chip follows.
+ */
+function ScopeContextPanel({
+  editorText,
+  onEditorText,
+  error,
+  locked,
+  boundContext,
+}: {
+  editorText: string;
+  onEditorText: (text: string) => void;
+  error?: string;
+  locked: boolean;
+  boundContext: Record<string, unknown> | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!expanded) {
+    return (
+      <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}>
+        Scope context{locked ? " · locked" : ""}
+      </Button>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+        padding: 10,
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius-lg)",
+        background: "var(--paper)",
+        maxWidth: 420,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Scope context</div>
+        <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>
+          Close
+        </Button>
+      </div>
+
+      {locked ? (
+        <>
+          <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+            Locked for this conversation — <b>New Chat</b> to change scope.
+          </div>
+          {boundContext === null ? (
+            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>(no scope)</div>
+          ) : (
+            <JsonBlock value={boundContext} maxHeight={200} />
+          )}
+        </>
+      ) : (
+        <Field label="Context (JSON)">
+          <textarea
+            aria-label="Scope context"
+            value={editorText}
+            onChange={(e) => onEditorText(e.target.value)}
+            spellCheck={false}
+            rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
+            style={{
+              ...inputStyle,
+              fontFamily: T.font.mono,
+              fontSize: T.fz.tiny,
+              lineHeight: 1.5,
+              resize: "vertical",
+            }}
+          />
+        </Field>
+      )}
+      {!locked && error && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
+    </div>
+  );
+}
+
+/**
+ * ScopeChip — header chip next to the agent badge (#268): the first 1-2
+ * scalar top-level context entries, full JSON on click (a `DropdownMenu`
+ * popover, the `RunPickerMenu`/`SessionsMenu` precedent). `context` is always
+ * the CREATE RESPONSE's echo — never the editor's draft — so the chip can
+ * never describe a guess. `null` renders the honest "(no scope)" (a
+ * hook-bearing agent whose effective context resolved to nothing), distinct
+ * from this component simply not being rendered at all (hook-less agent, or
+ * viewing a replayed session — see the call site).
+ */
+function ScopeChip({ context }: { context: Record<string, unknown> | null }) {
+  const scalarEntries =
+    context != null
+      ? Object.entries(context).filter(
+          ([, v]) => v === null || (typeof v !== "object" && typeof v !== "function"),
+        )
+      : [];
+  const keyCount = context != null ? Object.keys(context).length : 0;
+  const summary =
+    context == null
+      ? "(no scope)"
+      : scalarEntries.length > 0
+        ? scalarEntries
+            .slice(0, 2)
+            .map(([k, v]) => `${k}: ${String(v)}`)
+            .join(", ")
+        : keyCount > 0
+          ? `${keyCount} key${keyCount === 1 ? "" : "s"}` // all-nested-object context — no scalar to preview
+          : "(no scope)";
+
+  return (
+    <DropdownMenu
+      align="left"
+      width={280}
+      trigger={({ toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          title="Scope this conversation executes under — click for full JSON"
+          style={{
+            fontFamily: T.font.mono,
+            fontSize: T.fz.tiny,
+            padding: "2px 8px",
+            borderRadius: T.radius.pill,
+            border: "1px solid var(--line)",
+            background: "var(--fill)",
+            color: "var(--ink-2)",
+            cursor: "pointer",
+          }}
+        >
+          scope: {summary}
+        </button>
+      )}
+    >
+      <div style={{ padding: 10 }}>
+        <JsonBlock value={context ?? {}} maxHeight={240} />
+      </div>
+    </DropdownMenu>
   );
 }
 

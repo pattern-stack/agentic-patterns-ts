@@ -25,12 +25,31 @@ import type { EventLike } from "../graph/trace-from-events";
 import type { InputAnswer } from "./input-responder";
 import { type ChatMessage, applyParts } from "./model";
 
+/** `useChat`'s creation-time-only extension of `SendOptions` (#268) — `context`
+ *  is read ONCE, at the first `send()` (the call that creates the
+ *  conversation), and ignored thereafter: scope is immutable per conversation
+ *  (spec Decision 2). Everything else in `SendOptions` still applies per turn. */
+export interface UseChatOptions extends SendOptions {
+  context?: Record<string, unknown>;
+}
+
 export interface UseChatResult {
   messages: ChatMessage[];
   streaming: boolean;
   error: string | null;
   /** The server conversation id for this thread (null until the first send). */
   conversationId: string | null;
+  /**
+   * The redacted effective context this thread's conversation was bound with
+   * (#268) — the CREATE RESPONSE's echo, never the caller's draft `context`
+   * option. `null` until a conversation exists, OR once it does, for a
+   * hook-bearing registration with no scope ("(no scope)" — the `null` echo
+   * IS the honest answer, not "unknown"). Callers that need to distinguish
+   * "not yet known" from "known and empty" should key off `conversationId`.
+   */
+  context: Record<string, unknown> | null;
+  /** Top-level context keys the server redacted, when any were (#268). */
+  contextRedacted: string[] | null;
   send: (content: string) => Promise<void>;
   /** Answer an inline `input_request` (approval gate / tool ask) for this thread. */
   respondInput: (correlationId: string, answer: InputAnswer) => Promise<void>;
@@ -53,16 +72,18 @@ export interface UseChatResult {
   lastRunId: string | null;
 }
 
-export function useChat(agentId: string | null, runOptions?: SendOptions): UseChatResult {
+export function useChat(agentId: string | null, runOptions?: UseChatOptions): UseChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
+  const [context, setContext] = useState<Record<string, unknown> | null>(null);
+  const [contextRedacted, setContextRedacted] = useState<string[] | null>(null);
   const [traceEvents, setTraceEvents] = useState<EventLike[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const convIdRef = useRef<string | null>(null);
   // keep run options current without re-creating `send` each render.
-  const runOptionsRef = useRef<SendOptions | undefined>(runOptions);
+  const runOptionsRef = useRef<UseChatOptions | undefined>(runOptions);
   runOptionsRef.current = runOptions;
   const seq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -94,12 +115,18 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
 
       try {
         // Create the conversation once per thread; reuse the id for follow-ups.
+        // `context` is read from the ref HERE ONLY — this is the one moment a
+        // draft context becomes a bound scope (#268 Decision 2: immutable
+        // thereafter, regardless of what the caller's `context` option does
+        // on later renders/sends).
         let convId = convIdRef.current;
         if (!convId) {
-          const created = await createConversation(agentId);
+          const created = await createConversation(agentId, runOptionsRef.current?.context);
           convId = created.id;
           convIdRef.current = convId;
           setConversationId(convId);
+          setContext(created.context ?? null);
+          setContextRedacted(created.context_redacted ?? null);
         }
 
         for await (const ev of streamMessage(convId, q, runOptionsRef.current, ctrl.signal)) {
@@ -141,6 +168,8 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     abortRef.current?.abort();
     convIdRef.current = null;
     setConversationId(null);
+    setContext(null);
+    setContextRedacted(null);
     setMessages([]);
     setStreaming(false);
     setError(null);
@@ -153,6 +182,8 @@ export function useChat(agentId: string | null, runOptions?: SendOptions): UseCh
     streaming,
     error,
     conversationId,
+    context,
+    contextRedacted,
     send,
     respondInput,
     abort,
