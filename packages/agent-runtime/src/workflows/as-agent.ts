@@ -68,7 +68,13 @@ export type PromoteOptions<TIn, TOut> = {
    * Deps bound at promotion time — `NodeBackedRunner.run()` sets these on the
    * `NodeRunContext` it builds, so every nested leaf in the promoted pipeline
    * reads them with no closures. Per-request deps (a different registry per
-   * chat turn via `RunOptions`) is deliberately deferred (mirrors #97).
+   * chat turn via `RunOptions`) stays deferred at THIS layer (mirrors #97) —
+   * #268 un-defers the capability one level up instead: a registration's
+   * `instantiate(context)` hook rebuilds the promoted instance via
+   * `asAgent(node, { deps })` per conversation (`agent-server/src/config.ts`
+   * `AgentRegistration.instantiate`), so per-conversation scope is available
+   * today without a `RunOptions.deps` channel. See `docs/adr/
+   * 0004-instantiate-as-execution-seam.md`.
    */
   readonly deps?: DepReader;
 } & (TIn extends string

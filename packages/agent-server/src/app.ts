@@ -43,6 +43,10 @@ export function createServer(config: ServerConfig): Hono {
       config.eventBus,
       config.store,
       config.inputRegistry,
+      // #268 — same `evalStore` IS a `RunStore` fallback rule as `runsRoutes`
+      // below: an embedder that only wires `evalStore` still gets run-metadata
+      // stamping on chat turns.
+      config.runStore ?? config.evalStore,
     ),
   );
   app.route("/", adminRoutes(config));

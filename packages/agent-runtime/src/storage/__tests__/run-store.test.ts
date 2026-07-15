@@ -320,6 +320,53 @@ describe("RunStore", () => {
     });
   });
 
+  describe("updateRunMetadata", () => {
+    it("merges into existing metadata, preserving keys the patch doesn't touch", () => {
+      const runId = store.startRun({ metadata: { caseId: "case-1" } });
+      const ok = store.updateRunMetadata(runId, { context: { tenant: "acme" } });
+      expect(ok).toBe(true);
+      expect(store.getRun(runId)?.metadata).toEqual({
+        caseId: "case-1",
+        context: { tenant: "acme" },
+      });
+    });
+
+    it("creates a metadata object when the column is NULL (no metadata at startRun)", () => {
+      const runId = store.startRun();
+      expect(store.getRun(runId)?.metadata).toBeNull();
+      const ok = store.updateRunMetadata(runId, { context: { tenant: "acme" } });
+      expect(ok).toBe(true);
+      expect(store.getRun(runId)?.metadata).toEqual({ context: { tenant: "acme" } });
+    });
+
+    it("returns false for an unknown runId and touches no row", () => {
+      const ok = store.updateRunMetadata("no-such-run", { context: {} });
+      expect(ok).toBe(false);
+    });
+
+    it("does not touch other columns (status/finalAnswer/etc. stay intact)", () => {
+      const runId = store.startRun({ agentName: "agent-a" });
+      store.finishRun(runId, mkOutcome({ finalAnswer: "42", status: "ok" }));
+
+      store.updateRunMetadata(runId, { context: { tenant: "acme" } });
+
+      const row = store.getRun(runId);
+      expect(row?.agentName).toBe("agent-a");
+      expect(row?.finalAnswer).toBe("42");
+      expect(row?.status).toBe("ok");
+      expect(row?.metadata).toEqual({ context: { tenant: "acme" } });
+    });
+
+    it("a second call overwrites overlapping keys but preserves the rest (shallow merge)", () => {
+      const runId = store.startRun({ metadata: { context: { tenant: "acme" }, keep: "me" } });
+      store.updateRunMetadata(runId, { context: { tenant: "globex" } });
+      expect(store.getRun(runId)?.metadata).toEqual({
+        context: { tenant: "globex" },
+        keep: "me",
+      });
+    });
+  });
+
   describe("sweepRunning", () => {
     it("marks stale 'running' rows errored and returns the count; finished rows are untouched", () => {
       const r1 = store.startRun();

@@ -49,6 +49,14 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
         description: a.description ?? "",
         role: roleEntry ? { id: roleEntry.id, name: roleEntry.role.name ?? "role" } : null,
         readiness: { ready: missing.length === 0, missing },
+        // #268 — same sub-shape as the composition/delivered payload
+        // (`routes/composition.ts`'s `instantiation`), so the playground
+        // seeds its context editor from `GET /agents` without an extra
+        // round trip per agent.
+        instantiation: {
+          available: typeof a.instantiate === "function",
+          defaults: a.instantiateDefaults ?? null,
+        },
       };
     });
     return c.json(summaries);

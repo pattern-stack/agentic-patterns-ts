@@ -17,9 +17,11 @@
 import type {
   AgentEvent,
   AgentEventBus,
+  AgentLike,
   BaseEvent,
   ConversationStore,
   PendingInputRegistry,
+  RunStore,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
 import { Conversation, deriveToolboxExecutor } from "@agentic-patterns/runtime";
@@ -32,6 +34,14 @@ import { agentEventToSSE } from "../sse.js";
 export interface ConversationEntry {
   conversation: Conversation;
   agentId: string;
+  /**
+   * The redacted effective context this conversation was bound with (#268) —
+   * `undefined` when the registration has no `instantiate` hook. Immutable
+   * for the conversation's lifetime (Decision 2): scope is fixed at creation.
+   */
+  context?: Record<string, unknown>;
+  /** Top-level `context` keys that were redacted (Decision 3), when any were. */
+  contextRedacted?: readonly string[];
 }
 
 export function conversationRoutes(
@@ -40,18 +50,58 @@ export function conversationRoutes(
   eventBus: AgentEventBus,
   store: ConversationStore | undefined,
   inputRegistry?: PendingInputRegistry,
+  runStore?: RunStore,
 ): Hono {
   const app = new Hono();
 
   // POST /conversations — create a new conversation
   app.post("/conversations", async (c) => {
-    const body = await c.req.json<{ agent_id: string }>();
+    const body = await c.req.json<{ agent_id: string; context?: unknown }>();
     const agentId = body.agent_id;
 
     const reg = agents.find((a) => a.id === agentId);
     if (!reg) {
       return c.json({ error: "Agent not found" }, 404);
     }
+
+    // `context` shape (mirrors composition.ts:733's grammar — an explicit
+    // `null` is rejected same as any other non-object, never silently
+    // coerced to "absent").
+    const rawContext = body.context;
+    if (
+      rawContext !== undefined &&
+      (typeof rawContext !== "object" || rawContext === null || Array.isArray(rawContext))
+    ) {
+      return c.json({ error: "`context` must be a JSON object" }, 400);
+    }
+
+    const hasHook = typeof reg.instantiate === "function";
+    if (rawContext !== undefined && !hasHook) {
+      return c.json({ error: "Agent has no instantiate hook — context is not accepted" }, 400);
+    }
+
+    // Hook-less registrations are byte-identical to before this feature:
+    // `agent` binds as-is, no instantiate call, no `context` in the response.
+    let agentToBind: AgentLike = reg.agent;
+    let effectiveContext: Record<string, unknown> | undefined;
+    if (typeof reg.instantiate === "function") {
+      // No explicit context → compose with the registration's declared
+      // defaults, so the echoed `context` always states what `instantiate`
+      // actually received (mirror composition.ts:744-745).
+      effectiveContext =
+        (rawContext as Record<string, unknown> | undefined) ?? reg.instantiateDefaults;
+      try {
+        agentToBind = await reg.instantiate(effectiveContext);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json({ error: `instantiate failed: ${message}` }, 502);
+      }
+    }
+
+    const { context: redactedContext, redactedKeys } = redactContext(
+      effectiveContext,
+      reg.contextRedactKeys,
+    );
 
     // Wire a ToolExecutor so AgentRunner can actually execute tool calls
     // from the agent's Capability toolboxes (not just format them for the LLM).
@@ -64,15 +114,35 @@ export function conversationRoutes(
     // AgentStep-level `deriveToolboxExecutor(agent)` fallback that arms the
     // nested agent's own tools. Leaving it `undefined` restores that per-agent
     // derivation; real-capability agents still get their executor here.
+    //
+    // Derived from the BOUND (delivered-or-declared) instance, not always
+    // `reg.agent` — a hook-bearing registration's delivered instance is the
+    // one whose tools actually execute (#268).
     const toolExecutor = deriveToolboxExecutor(
-      reg.agent as unknown as Parameters<typeof deriveToolboxExecutor>[0],
+      agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
     );
     // `store` (when configured) makes `Conversation._persistExchange` actually
     // write request/response messages — previously accepted and never used.
-    const conversation = new Conversation(reg.agent, reg.runner, { toolExecutor, store });
-    conversations.set(conversation.id, { conversation, agentId });
+    const conversation = new Conversation(agentToBind, reg.runner, { toolExecutor, store });
+    conversations.set(conversation.id, {
+      conversation,
+      agentId,
+      ...(hasHook ? { context: redactedContext } : {}),
+      ...(redactedKeys ? { contextRedacted: redactedKeys } : {}),
+    });
 
-    return c.json({ id: conversation.id, agent_id: agentId }, 201);
+    if (!hasHook) {
+      return c.json({ id: conversation.id, agent_id: agentId }, 201);
+    }
+    return c.json(
+      {
+        id: conversation.id,
+        agent_id: agentId,
+        context: redactedContext ?? null,
+        ...(redactedKeys ? { context_redacted: redactedKeys } : {}),
+      },
+      201,
+    );
   });
 
   // GET /admin/conversations — ConversationSummary[]
@@ -250,6 +320,24 @@ export function conversationRoutes(
           }
         }
 
+        // Run-metadata stamp (#268) — the redacted effective context this
+        // conversation is bound to, written onto the turn's run row AFTER the
+        // drain loop: by this point `RunStoreExporter` (subscribed on the same
+        // `eventBus`) has necessarily already opened AND finalized the row
+        // (its `agent.message.start`/`.complete` events preceded this line).
+        // Best-effort: a store failure is logged, never surfaced to the
+        // stream — matches the exporter's own failure posture.
+        if (runStore && turnRunId !== undefined && entry.context !== undefined) {
+          try {
+            runStore.updateRunMetadata(turnRunId, {
+              context: entry.context,
+              ...(entry.contextRedacted ? { context_redacted: entry.contextRedacted } : {}),
+            });
+          } catch (err) {
+            console.error(`conversations: updateRunMetadata failed for run ${turnRunId}:`, err);
+          }
+        }
+
         await stream.writeSSE({
           event: "done",
           data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
@@ -330,6 +418,29 @@ function notConfigured(c: Context): Response {
     },
     503,
   );
+}
+
+/**
+ * Redact declared top-level keys in `context`, replacing their values with
+ * `"[redacted]"` and reporting which keys were actually present (#268
+ * Decision 3) — the innate-scratchpad-read posture (`conversation.ts`'s
+ * `preview_redacted`): structure survives, value dropped, never silent.
+ * `undefined` context, no declared keys, or none of them present → passthrough.
+ */
+function redactContext(
+  context: Record<string, unknown> | undefined,
+  keys: readonly string[] | undefined,
+): { context: Record<string, unknown> | undefined; redactedKeys: string[] | undefined } {
+  if (context === undefined || !keys || keys.length === 0) {
+    return { context, redactedKeys: undefined };
+  }
+  const present = keys.filter((k) => k in context);
+  if (present.length === 0) {
+    return { context, redactedKeys: undefined };
+  }
+  const redacted = { ...context };
+  for (const k of present) redacted[k] = "[redacted]";
+  return { context: redacted, redactedKeys: present };
 }
 
 /**

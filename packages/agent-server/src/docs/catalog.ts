@@ -110,6 +110,34 @@ const SendMessageBody = z
   .object({ message: z.string(), stream: z.boolean().optional() })
   .describe("A user turn for the conversation");
 
+const CreateConversationBody = z
+  .object({
+    agent_id: z.string(),
+    /**
+     * Run-scope context (#268) — accepted only for a registration whose
+     * `instantiate` hook is set (400 otherwise). Resolved once at creation
+     * and immutable for the conversation's lifetime; the delivered instance
+     * `instantiate(context)` returns becomes what the conversation runs as.
+     */
+    context: z.record(z.unknown()).optional(),
+  })
+  .describe("Which agent to converse with, and (optionally) its run-scope context");
+
+const ConversationCreatedResponse = z
+  .object({
+    id: z.string(),
+    agent_id: z.string(),
+    /**
+     * The redacted effective context this conversation was bound with.
+     * Present (possibly `null`) only when the registration has an
+     * `instantiate` hook; absent entirely for hook-less registrations.
+     */
+    context: z.record(z.unknown()).nullable().optional(),
+    /** Top-level `context` keys whose values were replaced with "[redacted]". */
+    context_redacted: z.array(z.string()).optional(),
+  })
+  .describe("The created conversation, echoing the effective (redacted) context it is bound to");
+
 const InvokeToolBody = z
   .object({ arguments: z.record(z.unknown()) })
   .describe("Arguments for the tool, validated against its schema before execution");
@@ -131,7 +159,10 @@ export const OVERLAY: Readonly<Record<string, Partial<RouteDoc>>> = {
   // --- Agents / roles -----------------------------------------------------
   "GET /agents": {
     summary: "List registered agents",
-    description: "Every agent registration the server knows, with id/name/description.",
+    description:
+      "Every agent registration the server knows, with id/name/description, readiness, and " +
+      "instantiation availability (`instantiation.available` — whether POST /conversations " +
+      "accepts a `context` for this agent — plus its seed `instantiation.defaults`).",
   },
   "GET /agents/:id/capabilities": { summary: "List an agent's capabilities" },
   "GET /agents/:id/composition": {
@@ -162,7 +193,21 @@ export const OVERLAY: Readonly<Record<string, Partial<RouteDoc>>> = {
   },
 
   // --- Conversations ------------------------------------------------------
-  "POST /conversations": { summary: "Start a conversation", persistenceGated: true },
+  "POST /conversations": {
+    summary: "Start a conversation",
+    description:
+      "Creates a conversation bound to an agent. When the registration has an `instantiate` " +
+      "hook, an optional `context` resolves the delivered instance the conversation runs as " +
+      "(400 without a hook; 502 if the hook rejects) and is echoed back redacted.",
+    request: CreateConversationBody,
+    responses: {
+      201: { description: "Conversation created", schema: ConversationCreatedResponse },
+      400: { description: "`context` is not a JSON object, or the agent has no instantiate hook" },
+      404: { description: "Agent not found" },
+      502: { description: "The registration's `instantiate` hook rejected the given context" },
+    },
+    persistenceGated: true,
+  },
   "GET /conversations/:id": { summary: "Get a conversation", persistenceGated: true },
   "GET /conversations/:id/messages": {
     summary: "List a conversation's messages",

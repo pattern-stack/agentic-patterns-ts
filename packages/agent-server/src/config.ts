@@ -65,19 +65,40 @@ export interface AgentRegistration {
   };
   readonly agent: AgentLike;
   /**
-   * Optional delivered-instance factory. `agent` is the DECLARED instance —
-   * what the registration statically exports; many projects compose the real
-   * one at an assembly site (per-tenant Background fetched live, injected at
-   * run time), which the registry never sees. `instantiate` is that assembly
-   * site surfaced: given a registration-defined context (e.g.
-   * `{ organizationId }`), build the agent AS AN ENTRYPOINT WOULD DELIVER IT.
-   * The composition lens uses it to render the actual Background/prompt
-   * (`POST /agents/:id/composition/delivered`); it is introspection-only and
-   * may hit live sources, so it stays opt-in and can reject.
+   * Delivered-instance factory (#268 — was "introspection-only"). `agent` is
+   * the DECLARED instance — what the registration statically exports; many
+   * projects compose the real one at an assembly site (per-tenant Background
+   * fetched live, injected at run time), which the registry never sees.
+   * `instantiate` is that assembly site surfaced: given a registration-defined
+   * context (e.g. `{ organizationId }`), build the agent AS AN ENTRYPOINT
+   * WOULD DELIVER IT.
+   *
+   * Called once per composition preview (`POST /agents/:id/composition/
+   * delivered`) AND once per conversation creation (`POST /conversations`) —
+   * the conversation binds the returned instance, so context-resolved
+   * closures/deps ARE the run scope the chat executes under. The lens now
+   * previews literally the object a conversation runs.
+   *
+   * Must return an agent runnable by this registration's `runner`: a promoted
+   * registration (`agent` is a `PromotedAgent`) must return a `PromotedAgent`
+   * from `asAgent(node, { deps })` — `NodeBackedRunner` already fails loud
+   * otherwise. May hit live sources. May reject — conversation creation then
+   * fails 502 (`instantiate failed: <message>`), it never falls back to
+   * `agent`, whose scope would be silently wrong. See `docs/adr/
+   * 0004-instantiate-as-execution-seam.md`.
    */
   readonly instantiate?: (context?: Record<string, unknown>) => Promise<AgentLike>;
-  /** Seed context for `instantiate` — prefills the lens's context editor. */
+  /** Seed context for `instantiate` — prefills the lens's context editor and
+   *  is the effective context on `POST /conversations` when none is supplied. */
   readonly instantiateDefaults?: Record<string, unknown>;
+  /**
+   * Top-level `context` keys whose values are replaced with `"[redacted]"`
+   * before the context is echoed (create response), held (`ConversationEntry.
+   * context`), or persisted (run metadata) — #268 Decision 3. Applied before
+   * any write or non-input return; the raw context exists only in-flight,
+   * inside the `instantiate` call. Default (omitted): verbatim.
+   */
+  readonly contextRedactKeys?: readonly string[];
   /**
    * Declared eval↔agent mapping: the eval sets that grade THIS agent (or one
    * of its steps). Surfaced on the composition payload so the Agent lens can
