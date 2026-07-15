@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { streamMessage } from "../api/chat-client";
+import { createConversation, streamMessage } from "../api/chat-client";
 import type { WireFrame } from "../api/sse-events";
 
 /** Build a minimal fetch Response whose body streams the given chunks. */
@@ -147,6 +147,69 @@ describe("streamMessage SSE parser", () => {
     );
 
     await expect(collect(streamMessage("unknown", "hi"))).rejects.toThrow(/404 Not Found/);
+
+    vi.unstubAllGlobals();
+  });
+});
+
+/** Build a minimal `fetch` mock that captures the request body and answers
+ *  with the given JSON payload — the `createConversation` (#268) precedent
+ *  to `mockFetchWithChunks` above, for the non-streaming create route. */
+function mockJsonFetch(body: unknown, opts: { ok?: boolean; status?: number } = {}) {
+  const calls: { url: string; body: unknown }[] = [];
+  const fn = vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : undefined });
+    return {
+      ok: opts.ok ?? true,
+      status: opts.status ?? 201,
+      statusText: opts.ok === false ? "Bad Request" : "Created",
+      json: async () => body,
+    } as unknown as Response;
+  });
+  return { fn: fn as unknown as typeof fetch, calls };
+}
+
+describe("createConversation (#268)", () => {
+  it("posts `context` only when the caller provides one", async () => {
+    const { fn, calls } = mockJsonFetch({ id: "c1", agent_id: "a1" });
+    vi.stubGlobal("fetch", fn);
+
+    await createConversation("a1");
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("/conversations");
+    expect(calls[0]?.body).toEqual({ agent_id: "a1" }); // no `context` key at all
+
+    vi.unstubAllGlobals();
+  });
+
+  it("posts the given `context` object alongside agent_id", async () => {
+    const { fn, calls } = mockJsonFetch({
+      id: "c1",
+      agent_id: "a1",
+      context: { tenant: "acme" },
+    });
+    vi.stubGlobal("fetch", fn);
+
+    const result = await createConversation("a1", { tenant: "acme" });
+
+    expect(calls[0]?.body).toEqual({ agent_id: "a1", context: { tenant: "acme" } });
+    // The RETURN VALUE is the server's echo — this is the chip's source of truth.
+    expect(result.context).toEqual({ tenant: "acme" });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces the server's {error} body on failure instead of a bare status", async () => {
+    const { fn } = mockJsonFetch(
+      { error: "instantiate failed: dead tenant DB" },
+      { ok: false, status: 502 },
+    );
+    vi.stubGlobal("fetch", fn);
+
+    await expect(createConversation("a1", { tenant: "dead" })).rejects.toThrow(
+      /instantiate failed: dead tenant DB/,
+    );
 
     vi.unstubAllGlobals();
   });

@@ -31,6 +31,18 @@ export interface RunMeta {
   request?: string;
   answer?: string;
   systemPrompt?: string;
+  /**
+   * The effective (redacted) context this run executed under (#268) — from
+   * `RunRow.metadata.context`. `undefined` when the row carries no stamp at
+   * all (a hook-less agent, or a hook-bearing run whose server-side stamp was
+   * skipped — see `conversations.ts`'s `entry.context !== undefined` guard);
+   * the Context section renders only when this key is PRESENT, so it never
+   * guesses at a run this dashboard genuinely has no record for. `null` means
+   * the server confirmed "(no scope)", not "unknown".
+   */
+  context?: Record<string, unknown> | null;
+  /** Top-level context keys the server redacted, when any were (#268). */
+  contextRedacted?: string[];
 }
 
 /** Real provenance chip for a slot (from /composition), keyed by node id: the
@@ -202,6 +214,25 @@ function IOTab({
       <Section title="Final answer">
         <MonoBlock value={runMeta?.answer ?? "—"} />
       </Section>
+      {/* #268 — only when the row actually carries a context key (see
+          RunMeta.context's doc comment); a live/demo/no-stamp run shows
+          nothing here rather than fabricating "(no scope)". */}
+      {runMeta?.context !== undefined && (
+        <Section title="Scope context">
+          {runMeta.context === null ? (
+            <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>(no scope)</div>
+          ) : (
+            <>
+              <MonoBlock value={runMeta.context} />
+              {runMeta.contextRedacted && runMeta.contextRedacted.length > 0 && (
+                <div style={{ fontSize: T.fz.micro, color: T.tone.warn.ink }}>
+                  redacted: {runMeta.contextRedacted.join(", ")}
+                </div>
+              )}
+            </>
+          )}
+        </Section>
+      )}
     </>
   );
 }

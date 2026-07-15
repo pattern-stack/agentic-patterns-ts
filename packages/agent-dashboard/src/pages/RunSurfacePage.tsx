@@ -74,6 +74,14 @@ const DEMO_META: RunMeta = {
   systemPrompt: SAMPLE_SYSTEM_PROMPT,
 };
 
+/** The `#268` sub-shape of `RunRow.metadata` — a generic JSON bag on the wire
+ *  (`api/types.ts`), narrowed here at the one read site instead of widening
+ *  the shared type for a single consumer. */
+interface RunContextMetadata {
+  context?: Record<string, unknown> | null;
+  context_redacted?: string[];
+}
+
 /** Honest degradation (port-map §6): neither RunSummary nor RunRow persists
  *  the user's original request text on this runtime version — see
  *  `api/types.ts`'s `RunRow` doc comment. Render this instead of fabricating one. */
@@ -467,6 +475,11 @@ export function RunSurfacePage() {
       .join("");
   }, [liveEvents]);
 
+  // Replay is the only source with a persisted RunRow to read metadata off —
+  // live runs have no row yet (still streaming) and DEMO_META is a fixture,
+  // so `context` stays `undefined` (Context section hidden) for both,
+  // matching RunMeta.context's doc comment rather than fabricating a value.
+  const replayContextMeta = activeReplay?.run.metadata as RunContextMetadata | null | undefined;
   const runMeta: RunMeta = isLive
     ? { request: sentMsg, answer: liveAnswer }
     : activeReplay
@@ -474,6 +487,12 @@ export function RunSurfacePage() {
           request: REQUEST_NOT_PERSISTED,
           answer: activeReplay.run.finalAnswer ?? "",
           systemPrompt: activeReplay.run.systemPrompt ?? undefined,
+          ...(replayContextMeta && "context" in replayContextMeta
+            ? {
+                context: replayContextMeta.context,
+                contextRedacted: replayContextMeta.context_redacted,
+              }
+            : {}),
         }
       : DEMO_META;
   const selectedNode = selectedNodeId

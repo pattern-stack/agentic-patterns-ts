@@ -12,11 +12,29 @@ export interface AgentSummary {
   id: string;
   name: string;
   description: string;
+  /**
+   * Delivered-instance capability (#268) — same sub-shape `GET
+   * /agents/:id/composition` carries (`api/composition.ts`'s
+   * `AgentComposition.instantiation`), mirrored onto the roster summary so the
+   * chat surface can seed a per-conversation context editor without an extra
+   * round trip. Absent on older servers — treat as unavailable.
+   */
+  instantiation?: { available: boolean; defaults: Record<string, unknown> | null };
 }
 
 export interface ConversationCreated {
   id: string;
   agent_id: string;
+  /**
+   * The redacted effective context this conversation was bound with (#268) —
+   * the server's word, never the editor's draft text. Key OMITTED
+   * (`undefined`) for a hook-less registration; `null` for a hook-bearing one
+   * with no explicit context and no declared defaults; otherwise the
+   * (possibly redacted) object `instantiate` actually received.
+   */
+  context?: Record<string, unknown> | null;
+  /** Top-level context keys the server redacted, when any were (#268). */
+  context_redacted?: string[];
 }
 
 /** List the agents registered on the server. */
@@ -99,14 +117,29 @@ export async function sendInputResponse(
   }
 }
 
-/** Create a new conversation with a given agent. */
-export async function createConversation(agentId: string): Promise<ConversationCreated> {
+/**
+ * Create a new conversation with a given agent. `context` is posted only when
+ * provided (#268) — omitting it entirely for a hook-less agent, or when the
+ * caller has no draft, keeps the request byte-identical to pre-#268 behavior.
+ * Surfaces the server's `{error}` body on failure (the `compositionApi
+ * .deliveredComposition` precedent) so a bad context object or a rejecting
+ * `instantiate` hook reads as its actual reason, not just an HTTP status.
+ */
+export async function createConversation(
+  agentId: string,
+  context?: Record<string, unknown>,
+): Promise<ConversationCreated> {
   const res = await fetch("/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ agent_id: agentId }),
+    body: JSON.stringify(
+      context !== undefined ? { agent_id: agentId, context } : { agent_id: agentId },
+    ),
   });
-  if (!res.ok) throw new Error(`POST /conversations failed: ${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `POST /conversations failed: ${res.status} ${res.statusText}`);
+  }
   return res.json() as Promise<ConversationCreated>;
 }
 
