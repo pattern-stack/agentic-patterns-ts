@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.27.0 (2026-07-15)
+
+### Bug Fixes
+
+- **agent-runtime**: MockRunner now builds and passes a `ToolExecutionContext` (`runId`, `traceId`,
+  `parentToolCallId`, `host`) at both tool-dispatch sites, exercising the same #124
+  host-passthrough seam as the live runner — no-LLM tests can now observe `delegateTo` pad sharing
+  (#269).
+
+### Documentation
+
+- **agent-runtime**: Retired the stale "subagent teams do NOT see the pad" claim from
+  `sequentialAgent`'s docs (stale since #124); the actual contract — run-scoped slots shared by
+  reference through the delegation fork, branch-scoped isolated, no join across the seam — is
+  documented and pinned by a regression suite, and ratified as the default in ADR 0003 (#269).
+
 ## core 0.12.0 (2026-07-15)
 
 ### Features
