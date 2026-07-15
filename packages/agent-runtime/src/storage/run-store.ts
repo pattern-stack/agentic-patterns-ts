@@ -127,6 +127,8 @@ export class RunStore extends EventStore {
   private readonly _sweepRunningStmt: Statement;
   private readonly _getRunStmt: Statement;
   private readonly _getRunPrefixStmt: Statement;
+  private readonly _getRunMetadataStmt: Statement;
+  private readonly _updateRunMetadataStmt: Statement;
   private readonly _listRunsStmt: Statement;
   private readonly _runEventsStmt: Statement;
   private readonly _statsStmt: Statement;
@@ -158,6 +160,8 @@ export class RunStore extends EventStore {
 
     this._getRunStmt = this._db.prepare("SELECT * FROM runs WHERE run_id = ?");
     this._getRunPrefixStmt = this._db.prepare("SELECT * FROM runs WHERE run_id LIKE ? LIMIT 2");
+    this._getRunMetadataStmt = this._db.prepare("SELECT metadata FROM runs WHERE run_id = ?");
+    this._updateRunMetadataStmt = this._db.prepare("UPDATE runs SET metadata = ? WHERE run_id = ?");
 
     this._listRunsStmt = this._db.prepare(`
       SELECT
@@ -239,6 +243,26 @@ export class RunStore extends EventStore {
       outcome.stepMetrics !== undefined ? JSON.stringify(outcome.stepMetrics) : null,
       runId,
     );
+  }
+
+  /**
+   * Shallow-merge `patch` into the run's metadata JSON (#268). Full runId only
+   * (no prefix resolution — producers hold the real id). Returns false when no
+   * row exists; never throws for a missing row. Independent of `status` — a
+   * still-`running` row's metadata can be stamped same as a finished one.
+   */
+  updateRunMetadata(runId: string, patch: Record<string, unknown>): boolean {
+    const row = this._getRunMetadataStmt.get(runId) as { metadata: string | null } | undefined;
+    if (!row) return false;
+    // `?? {}` covers both NULL (no metadata at startRun) and a would-be
+    // corrupt/non-object JSON parse — deliberate: this column is written
+    // ONLY by this class (JSON.stringify of a plain object, always), so a
+    // non-object parse can't happen from a row this store produced. Treating
+    // it as "start fresh" rather than throwing keeps the merge total.
+    const existing = parseJsonRecord(row.metadata) ?? {};
+    const merged = { ...existing, ...patch };
+    this._updateRunMetadataStmt.run(JSON.stringify(merged), runId);
+    return true;
   }
 
   /** Mark orphaned 'running' rows as errored (process died mid-run). Returns count. */

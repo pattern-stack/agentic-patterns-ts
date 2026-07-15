@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- **agent-runtime, agent-server**: Conversation-scoped run context (#268, PR-1 of the playground run-scope stack) — `AgentRegistration.instantiate(context)` is promoted from introspection-only to the single delivered-instance factory: `POST /conversations` now accepts an optional `context`, runs the registration's `instantiate` hook (explicit context, else `instantiateDefaults`, else `undefined`), and binds the DELIVERED instance for the whole conversation — both its prompt/closures AND the tool executor derive from it, not the declared `agent`. Context is resolved once at creation and immutable for the conversation's lifetime (a scope change means a new conversation). `contextRedactKeys?: readonly string[]` on a registration redacts declared top-level context keys to `"[redacted]"` (+ a `context_redacted` marker) before the value is echoed on the create response, held on the conversation entry, or persisted — a raw context value never reaches the store. New `RunStore.updateRunMetadata(runId, patch)` shallow-merges into a run's persisted metadata; `POST /conversations/:id/messages` stamps the turn's run row with its (redacted) context from a `finally` wrapping the SSE drain — landing whether the turn completed cleanly, errored mid-run, or the client disconnected — surfaced via the existing `GET /admin/runs/:id`. `GET /agents` summaries gain `instantiation: { available, defaults }`. See `docs/adr/0004-instantiate-as-execution-seam.md`.
+
+### Behavior change
+
+- **agent-server**: Registrations that already declare an `instantiate` hook now have it run on EVERY conversation creation, and the conversation binds whatever it returns instead of the registration's declared `agent`. A hook that rejects now fails conversation creation with a `502` (previously `instantiate` was only reachable via the composition-preview lens and never affected chat). Registrations without an `instantiate` hook are unaffected — byte-identical create-response shape and executor derivation.
+
 ## 0.27.1 (2026-07-15)
 
 ### Bug Fixes
