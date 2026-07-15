@@ -27,6 +27,10 @@ Non-goals (explicitly out): any new `delegateTo`/`SubagentSpec` API surface
 (knobs, prompt decorators), `join()`/merge-back across the seam,
 `MockRunner.runStructured` tool dispatch, `emit` wiring in the mock ctx.
 
+Scope extension (user-requested, 2026-07-15, not in the filed issue): the
+runStructured tier-0 terminal short-circuit — see the
+"Addendum — runStructured tier-0" section at the end of this spec.
+
 ## Current state (verified at ab0369b)
 
 The chain the issue describes is intact, with one test file it didn't know about:
@@ -313,6 +317,77 @@ list (`:197-201`) gets a one-line pointer to the two suites that now exist.
 | `sequential-agents.ts` doc matches behavior; published d.ts no longer denies sharing | File plan + 0.27.0 bump/publish |
 | CHANGELOG names the semantics for downstream | CHANGELOG entry (contract named verbatim) |
 | Opt-in/opt-out question decided + recorded | ADR 0003 (D1: default-on, no knob) |
+
+## Addendum — runStructured tier-0 terminal short-circuit
+
+User-requested scope extension (2026-07-15), same seam family. Motivation
+(dealbrain overnight run 2026-07-15): when a tool-bearing agent's tier-1 loop
+ends via a TERMINAL tool, `runStructured`'s 2-tier path re-converts the
+already-structured terminal result through a second LLM call — wasteful and
+demonstrably lossy (tier-2 on gemini flash-lite stripped `observation:`
+prefixes from citation keys 5/5 runs, immune to in-prompt counter-instruction).
+
+### Design (verified against `agent-runner.ts` at HEAD)
+
+Site: the 2-tier branch ONLY (`agent-runner.ts` `runStructured`, the
+`else` arm — currently tier-1 `this.run(...)` at `:985`, empty-guard at `:998`,
+tier-2 `generateText` at `:1004`). The other two branches have no tier 2 and
+are untouched.
+
+After tier 1 returns and BEFORE the empty-response guard:
+
+1. Eligibility: `tier1.finishReason === "terminal_tool"` exactly
+   (`terminal_tool_error` is NOT eligible — that result is an error string).
+2. Candidate reconstruction: `RunResult` carries only the serialized text; the
+   terminal capture (`agent-runner.ts:611-614`) is
+   `typeof result === "string" ? result : JSON.stringify(result ?? "")` — so
+   the candidate is `JSON.parse(tier1.response)` and, on parse failure, the
+   raw `tier1.response` string. (JSON round-trip is lossless here: a
+   non-string terminal result already crossed the tool boundary as JSON.)
+3. `schema.safeParse(candidate)`:
+   - **success** → `rawObject = candidate`, `finishReason = "terminal_tool"`,
+     SKIP tier 2 entirely — no tier-2 tokens, no `iterations += 1`. The shared
+     validation at `:1023` re-parses (redundantly but harmlessly) and the
+     shared `agent.message.complete` emission is unchanged.
+   - **failure** → fall through to the empty-guard + tier 2 EXACTLY as today
+     (including the guard's throw semantics on empty tier-1 text).
+
+Backward compatible; no API change; no new RunOptions.
+
+### File plan (addendum)
+
+- `packages/agent-runtime/src/runner/agent-runner.ts` — the short-circuit in
+  the 2-tier arm, with a comment naming the contract (terminal result IS the
+  structured output when it validates; tier 2 is the fallback, not a
+  re-normalizer).
+- `packages/agent-runtime/src/runner/__tests__/agent-runner.test.ts` — new
+  cases beside the existing "terminal-tool exit" describe (`:838`) /
+  runStructured coverage, mirroring their fixture patterns.
+- `CHANGELOG.md` — Features bullet under `## 0.27.0`.
+
+### Tests (addendum)
+
+- **T6 — short-circuit**: agent with a terminal tool whose result is a
+  schema-valid object; mock model tool-calls the terminal tool on call 1.
+  Assert: exactly ONE model call (doGenerate counter), `result.object` deep-equals
+  the terminal result, `finishReason === "terminal_tool"`, and token totals
+  equal tier-1's alone (tier-2 tokens = 0).
+- **T7 — invalid terminal result falls back**: terminal result fails the
+  schema; model script provides the tier-2 structured answer. Assert: two
+  model passes, `result.object` comes from tier 2, tokens sum both tiers —
+  byte-identical to today's behavior.
+- **T8 — string terminal result**: terminal tool returns a plain string with
+  `schema = z.string()`-shaped... only if cheap; otherwise cover via T6/T7 and
+  note the parse-or-raw rule in the code comment. (Optional — implementer's
+  call; do not force a contrived schema.)
+
+### Acceptance (addendum)
+
+| User's acceptance | Where satisfied |
+|---|---|
+| Schema-valid terminal result → exactly one LLM pass, output === terminal result | T6 |
+| Invalid terminal result → tier-2 fallback unchanged | T7 |
+| Tier-2 tokens = 0 on the short-circuit | T6 token assertion |
 
 ## Design Addendum
 
