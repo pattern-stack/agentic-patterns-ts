@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.27.1 (2026-07-15)
+
+### Bug Fixes
+
+- **agent-runtime**: `runStructured`'s tier-0 terminal short-circuit now tries two candidates in
+  order: the JSON-parsed value first, then the raw terminal string when the parsed value fails
+  schema validation. JSON-looking strings no longer trigger an unnecessary tier-2 pass (#273).
+
 ## 0.27.0 (2026-07-15)
 
 ### Features

@@ -995,15 +995,20 @@ export class AgentRunner implements RunnerProtocol {
       let acceptedTerminalResult = false;
       if (tier1.finishReason === "terminal_tool") {
         // A schema-valid terminal result IS the structured output; tier 2 is
-        // the fallback, not a re-normalizer. run() JSON-serializes non-string
-        // terminal results, while a plain terminal string stays raw.
+        // the fallback, not a re-normalizer. Try the JSON-parsed candidate
+        // first, then the raw string if parsing succeeded but validation fails.
         let candidate: unknown = tier1.response;
         try {
           candidate = JSON.parse(tier1.response);
         } catch {
           // The terminal result was a plain string; validate it verbatim.
         }
-        if (schema.safeParse(candidate).success) {
+        let candidateResult = schema.safeParse(candidate);
+        if (!candidateResult.success && candidate !== tier1.response) {
+          candidate = tier1.response;
+          candidateResult = schema.safeParse(candidate);
+        }
+        if (candidateResult.success) {
           rawObject = candidate;
           finishReason = "terminal_tool";
           acceptedTerminalResult = true;
