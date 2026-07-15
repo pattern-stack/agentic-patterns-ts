@@ -21,6 +21,15 @@ export { Capability, capability } from "./capability.js";
 export { Playbook } from "./playbook.js";
 export type { PlayDefinition } from "./playbook.js";
 
+export { lintModelFacingSchema } from "./model-facing-schema-lint.js";
+export type {
+  SchemaLintCode,
+  SchemaLintDialect,
+  SchemaLintFinding,
+  SchemaLintOptions,
+  SchemaLintSeverity,
+} from "./model-facing-schema-lint.js";
+
 export {
   WorkflowStepDefinitionSchema,
   RuleDefinitionSchema,

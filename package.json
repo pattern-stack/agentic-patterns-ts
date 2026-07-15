@@ -15,9 +15,12 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "check": "bun run build && bun run typecheck && bun run lint && bun run test"
+    "check:model-facing-schemas": "bun run tools/check-model-facing-schemas.ts",
+    "check": "bun run build && bun run typecheck && bun run lint && bun run test && bun run check:model-facing-schemas"
   },
   "devDependencies": {
+    "@agentic-patterns/core": "workspace:^",
+    "@agentic-patterns/runtime": "workspace:^",
     "@biomejs/biome": "^1.9.0",
     "node-gyp": "^10.2.0",
     "tsx": "^4.21.0",

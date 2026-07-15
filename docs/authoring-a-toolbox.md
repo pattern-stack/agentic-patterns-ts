@@ -92,6 +92,90 @@ What changed:
 5. **`validateReturns: false`** skips parsing entirely: the callback's value is returned verbatim
    (no transforms, no stripping), while compile-time checking and schema introspection remain.
 
+## Lint model-facing schemas in CI
+
+`lintModelFacingSchema` (core 0.12.0, issue #265) is a pure, structural Zod walker that flags
+constructs a given provider's model-facing conversion path can't represent faithfully. It imports
+only the Zod type surface — no vendor SDKs, no runtime code, no network/environment access — and
+never mutates the schema or throws for a finding; it just returns `SchemaLintFinding[]`.
+
+```typescript
+import { lintModelFacingSchema } from "@agentic-patterns/core";
+
+const findings = lintModelFacingSchema(schema, {
+  dialect: "gemini-bifrost", // @default — see the dialect matrix below
+  requireDescribe: false, // @default — opt in for authoring-quality warnings
+});
+```
+
+### Dialect matrix
+
+Dialects are closed, data-driven rule sets — there is no runtime rule registration:
+
+| Dialect | Error rules | Represents |
+|---|---|---|
+| `gemini-bifrost` (default) | `exclusive-numeric-bound`, `recursive-lazy`, `tuple` | The OpenAPI 3 `zod-to-json-schema` conversion path used for tool/return schemas — boolean `exclusiveMinimum`/`exclusiveMaximum` (from `.positive()`/`.gt()`/`.negative()`/`.lt()`), unresolvable `z.lazy()` cycles, and positional `z.tuple(...)` items are all unsupported or unfaithful there. |
+| `openai` | `optional-without-nullable` | OpenAI's structured-output conversion, where an object property that is `.optional()` without also being nullable is rejected. The API has no general "surface" option, so this dialect intentionally covers only that one construct — it does not imply every OpenAI tool-input schema rejects optionals; run it against **structured-output** schemas, not ordinary tool parameters. |
+
+A fifth code, `missing-description`, is dialect-independent: it warns (never errors) when an
+object-property leaf has no `.describe()`, and only runs when `requireDescribe: true` is passed —
+it is an authoring-quality opt-in, not a provider validity rule.
+
+### Traverse tool parameters and returns with `gemini-bifrost`
+
+```typescript
+for (const [name, tool] of Object.entries(toolbox.tools)) {
+  for (const finding of lintModelFacingSchema(tool.parameters)) {
+    console.log(`${name}.parameters: [${finding.code}] ${finding.path} — ${finding.message}`);
+  }
+  if (tool.returns) {
+    for (const finding of lintModelFacingSchema(tool.returns)) {
+      console.log(`${name}.returns: [${finding.code}] ${finding.path} — ${finding.message}`);
+    }
+  }
+}
+```
+
+### Check structured-output schemas with `openai`
+
+```typescript
+const findings = lintModelFacingSchema(structuredOutputSchema, { dialect: "openai" });
+// A required nullable field is clean; `.optional().nullable()` (either order) is clean too —
+// only a bare `.optional()` on an object property is flagged. Prefer a required nullable field
+// over an optional one for structured output.
+```
+
+### Fail CI on errors, opt into description warnings
+
+```typescript
+const findings = lintModelFacingSchema(schema, { requireDescribe: true });
+const errors = findings.filter((f) => f.severity === "error");
+if (errors.length > 0) {
+  throw new Error(errors.map((f) => `[${f.code}] ${f.path}: ${f.message}`).join("\n"));
+}
+// `severity === "warning"` findings (missing-description) are safe to log without failing CI.
+```
+
+This repository wires exactly this pattern into its own required `check` pipeline:
+`tools/check-model-facing-schemas.ts` lints every shipped preset/example tool's `parameters` and
+`returns`, plus playbook plays and core `ManualToolbox`'s built-in tools, under `gemini-bifrost`
+with `requireDescribe: false`, and throws (labeled by agent/capability/tool/schema) on any
+finding — zero findings is an acceptance bar, checked on every `bun run check`.
+
+### Why `defineTool` never auto-lints
+
+`defineTool` does not call the linter, even in development:
+
+- PR-1 (`defineTool`/`toolbox`/`capability`) must not depend on PR-2 (the linter) landing.
+- `defineTool` cannot infer the eventual host/provider dialect — that's a deployment decision, not
+  an authoring-time one.
+- An import-time or construction-time check would create environment-dependent side effects (and
+  isn't portable across Node, browser, and bundler consumers).
+
+The intended integration is explicit consumer smoke/CI code — call `lintModelFacingSchema`
+yourself once you know which dialect(s) your deployment targets, the way this repo's own
+`tools/check-model-facing-schemas.ts` does.
+
 ## Migration notes
 
 - Migrate one tool at a time — `defineTool` returns a plain `ToolDefinition`, so factory-built and
@@ -105,5 +189,4 @@ What changed:
 
 Deliberately out of scope (see issue #264): automatic camel↔snake casing mappers, compression of
 `.describe()` prose, and host-specific filter envelopes. Playbook parity (`definePlay`, a
-`playbook()` literal) is tracked separately in #266; a static model-facing schema linter is
-tracked in #265.
+`playbook()` literal) is tracked separately in #266.
