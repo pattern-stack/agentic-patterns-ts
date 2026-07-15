@@ -105,6 +105,18 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
       process.stderr.write(`${red(`error: instantiate failed: ${message}`)}\n`);
       process.exit(1);
     }
+    // Fail loud on a contract-violating hook (#268 Decision 1: "runnable by
+    // this registration's runner"). The runner above is keyed on the
+    // DECLARED agent, so a kind mismatch is silent-wrong in one direction
+    // (declared-plain → delivered-promoted gets LLM-looped; the pipeline
+    // never executes) even though it throws loud in the other (declared-
+    // promoted → delivered-plain, deep inside NodeBackedRunner). Catch both
+    // at the seam instead.
+    const kindCheck = checkInstantiateKindMatch(reg.agent, agentToBind);
+    if (!kindCheck.ok) {
+      process.stderr.write(`${red(`error: ${kindCheck.error}`)}\n`);
+      process.exit(1);
+    }
     process.stdout.write(`${dim(formatScopeBanner(effectiveContext, reg.contextRedactKeys))}\n`);
   }
 
@@ -166,7 +178,14 @@ export function resolveRunContext(
   env: NodeJS.ProcessEnv = process.env,
 ): RunContextResolution {
   const hasHook = typeof reg.instantiate === "function";
-  const raw = contextFlag ?? env.AP_CONTEXT;
+  // Normalize blank to absent: a present-but-empty/whitespace `AP_CONTEXT`
+  // (e.g. a stray `export AP_CONTEXT=` in a .env) must fall back to
+  // instantiateDefaults/no-context exactly like an UNSET source — `??` alone
+  // would let `""` through to `JSON.parse`, which throws, hard-blocking
+  // every `ap run` (including hook-less agents that never opted into context
+  // at all) on a value nobody meant to set. The `--context` flag path is
+  // already immune (cli.ts only threads it when `values.context` is truthy).
+  const raw = (contextFlag ?? env.AP_CONTEXT)?.trim() || undefined;
 
   if (raw === undefined) {
     // No explicit source — hook-bearing registrations fall back to their
@@ -198,6 +217,30 @@ export function resolveRunContext(
     };
   }
   return { ok: true, hasHook, context: parsed as Record<string, unknown> };
+}
+
+/**
+ * Verify a hook's delivered instance is the same structural KIND (promoted
+ * `asAgent()` pipeline vs. plain core `Agent`) as the registration's declared
+ * `agent` (#268 Decision 1: "must return an agent runnable by this
+ * registration's runner"). `runRunCommand` selects the runner off the
+ * DECLARED instance — so a kind-mismatched hook is silent-wrong in one
+ * direction (declared plain → delivered promoted: LLM-looped, the pipeline
+ * never actually runs) even though the inverse throws loud, but deep inside
+ * `NodeBackedRunner` rather than at this seam. Exported for testing.
+ */
+export function checkInstantiateKindMatch(
+  declared: unknown,
+  delivered: unknown,
+): { readonly ok: true } | { readonly ok: false; readonly error: string } {
+  const declaredPromoted = isPromotedAgent(declared);
+  const deliveredPromoted = isPromotedAgent(delivered);
+  if (declaredPromoted === deliveredPromoted) return { ok: true };
+  const kind = (promoted: boolean) => (promoted ? "promoted" : "plain");
+  return {
+    ok: false,
+    error: `instantiate must return an instance runnable by the registration's runner — declared ${kind(declaredPromoted)}, delivered ${kind(deliveredPromoted)}`,
+  };
 }
 
 /**

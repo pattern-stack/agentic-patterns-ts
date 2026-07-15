@@ -9,7 +9,26 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { formatScopeBanner, redactContextForDisplay, resolveRunContext } from "../run.js";
+import {
+  checkInstantiateKindMatch,
+  formatScopeBanner,
+  redactContextForDisplay,
+  resolveRunContext,
+} from "../run.js";
+
+// Minimal fixtures for `isPromotedAgent`'s structural check (`as-agent.ts`):
+// a promoted instance needs `__promotedNode.run` + `coerceIn`/`renderOut`/
+// `getModel`/`renderInitialPrompt` as functions; a plain agent satisfies
+// none of that.
+const plainAgent = { role: { name: "Plain" } };
+const promotedAgent = {
+  role: { name: "Promoted" },
+  __promotedNode: { run: async () => ({}) },
+  coerceIn: (x: unknown) => x,
+  renderOut: (x: unknown) => x,
+  getModel: () => "sonnet",
+  renderInitialPrompt: () => "",
+};
 
 describe("resolveRunContext — precedence: flag > AP_CONTEXT env > instantiateDefaults", () => {
   const noHook = {};
@@ -113,6 +132,34 @@ describe("resolveRunContext — precedence: flag > AP_CONTEXT env > instantiateD
     if (result.ok) throw new Error("unreachable");
     expect(result.error).toMatch(/not valid JSON/);
   });
+
+  // Gate 2.5 should-fix: a present-but-blank AP_CONTEXT (e.g. a stray
+  // `export AP_CONTEXT=` in a .env) must behave like an ABSENT source, not
+  // like a malformed one — `??` alone lets `""` through to JSON.parse, which
+  // throws, hard-blocking every `ap run` including hook-less agents that
+  // never opted into context at all.
+  it("blank AP_CONTEXT falls back to instantiateDefaults on a hook-bearing agent, same as unset", () => {
+    const result = resolveRunContext(withHookAndDefaults, undefined, { AP_CONTEXT: "" });
+    expect(result).toEqual({
+      ok: true,
+      hasHook: true,
+      context: { tenant: "default-tenant" },
+    });
+  });
+
+  it("whitespace-only AP_CONTEXT falls back the same way", () => {
+    const result = resolveRunContext(withHookAndDefaults, undefined, { AP_CONTEXT: "   " });
+    expect(result).toEqual({
+      ok: true,
+      hasHook: true,
+      context: { tenant: "default-tenant" },
+    });
+  });
+
+  it("blank AP_CONTEXT on a hook-less agent runs normally — never trips the JSON or hook-presence check", () => {
+    const result = resolveRunContext(noHook, undefined, { AP_CONTEXT: "" });
+    expect(result).toEqual({ ok: true, hasHook: false, context: undefined });
+  });
 });
 
 describe("redactContextForDisplay", () => {
@@ -143,6 +190,34 @@ describe("redactContextForDisplay", () => {
     const context = { tenant: "t1", secret: "shh" };
     redactContextForDisplay(context, ["secret"]);
     expect(context.secret).toBe("shh");
+  });
+});
+
+describe("checkInstantiateKindMatch — #268 hardening: instantiate's kind contract", () => {
+  it("ok when declared and delivered are both plain", () => {
+    expect(checkInstantiateKindMatch(plainAgent, plainAgent)).toEqual({ ok: true });
+  });
+
+  it("ok when declared and delivered are both promoted", () => {
+    expect(checkInstantiateKindMatch(promotedAgent, promotedAgent)).toEqual({ ok: true });
+  });
+
+  it("errors when a plain-declared registration's hook delivers a promoted instance (the silent-wrong direction — would otherwise get LLM-looped, never running the pipeline)", () => {
+    const result = checkInstantiateKindMatch(plainAgent, promotedAgent);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toBe(
+      "instantiate must return an instance runnable by the registration's runner — declared plain, delivered promoted",
+    );
+  });
+
+  it("errors when a promoted-declared registration's hook delivers a plain instance (the loud-but-late direction — caught here instead of deep inside NodeBackedRunner)", () => {
+    const result = checkInstantiateKindMatch(promotedAgent, plainAgent);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toBe(
+      "instantiate must return an instance runnable by the registration's runner — declared promoted, delivered plain",
+    );
   });
 });
 
