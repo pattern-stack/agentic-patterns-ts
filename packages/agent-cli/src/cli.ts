@@ -34,6 +34,8 @@ Usage:
 Commands:
   agents                          list discovered agents
   run <agent> [message]           chat in terminal — interactive or one-shot
+                                    (--context/AP_CONTEXT seed a hook-bearing
+                                    agent's run-scope, #268)
   tools list <agent>              list every tool exposed by an agent
   tools call <agent> <tool> ...   invoke a tool directly (no LLM in the loop)
   playground [<dir>]              launch UI environment (server + dashboard);
@@ -57,6 +59,11 @@ Options:
   --agents <glob>                 override agent discovery glob
   --agents-dir <dir>              discover agents recursively under <dir>
                                     (same as the playground positional)
+  --context <json>                (run) context for the agent's instantiate
+                                    hook — precedence: flag > AP_CONTEXT env
+                                    > the registration's instantiateDefaults;
+                                    errors pre-run on invalid JSON or on a
+                                    hook-less agent
   --with-plugin                   (init) drop the Claude Code plugin too
   --provider <p>                  (init) anthropic | openai | ollama
   --link                          (init) use file: deps against the local
@@ -99,6 +106,7 @@ async function main(): Promise<void> {
       "no-open": { type: "boolean" },
       agents: { type: "string" },
       "agents-dir": { type: "string" },
+      context: { type: "string" },
       "with-plugin": { type: "boolean" },
       provider: { type: "string" },
       link: { type: "boolean" },
@@ -208,7 +216,8 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       const message = positionals.slice(2).join(" ") || undefined;
-      await runRunCommand({ agents, agentId, message, configRoot: config.root });
+      const context = values.context ? String(values.context) : undefined;
+      await runRunCommand({ agents, agentId, message, configRoot: config.root, context });
       return;
     }
 

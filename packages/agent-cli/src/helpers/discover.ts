@@ -66,6 +66,13 @@ export interface DiscoveredAgent {
   /** Seed context for `instantiate` (prefills the lens's context editor). */
   readonly instantiateDefaults?: Record<string, unknown>;
   /**
+   * Top-level `instantiate` context keys whose values should be displayed as
+   * `"[redacted]"` (#268 Decision 3) — taken verbatim from the registration
+   * wrapper and threaded into the server's `AgentRegistration` (the playground)
+   * / applied directly by `ap run` (the CLI's own conversation, #268 PR-3).
+   */
+  readonly contextRedactKeys?: readonly string[];
+  /**
    * Declared eval↔agent mapping from the registration wrapper: the eval sets
    * that grade this agent (or one of its steps). Passed through to the
    * server's AgentRegistration; the Agent lens renders history + launch.
@@ -85,6 +92,7 @@ interface RegistrationWrapper {
   agent?: unknown;
   instantiate?: unknown;
   instantiateDefaults?: unknown;
+  contextRedactKeys?: unknown;
   evals?: unknown;
 }
 
@@ -196,11 +204,30 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
       !Array.isArray(wrapper.instantiateDefaults)
         ? (wrapper.instantiateDefaults as Record<string, unknown>)
         : undefined;
+    // Same defensive style as `instantiateDefaults`: the whole value must
+    // type-check (an array of strings) or it's dropped entirely — no partial
+    // salvage of a malformed declaration.
+    const contextRedactKeys =
+      wrapper &&
+      Array.isArray(wrapper.contextRedactKeys) &&
+      wrapper.contextRedactKeys.every((k) => typeof k === "string")
+        ? (wrapper.contextRedactKeys as string[])
+        : undefined;
     const evals = wrapper ? normalizeEvalRefs(wrapper.evals) : undefined;
 
     if (seenIds.has(id)) continue; // e.g. a default + named export of the same agent
     seenIds.add(id);
-    found.push({ id, name, description, agent, file, instantiate, instantiateDefaults, evals });
+    found.push({
+      id,
+      name,
+      description,
+      agent,
+      file,
+      instantiate,
+      instantiateDefaults,
+      contextRedactKeys,
+      evals,
+    });
   }
 
   if (found.length === 0) {
