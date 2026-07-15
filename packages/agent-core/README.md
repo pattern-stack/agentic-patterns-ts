@@ -80,20 +80,30 @@ Composable building blocks that combine atoms into functional units.
 
 ```typescript
 import { z } from "zod";
-import { ToolSchema, Toolbox, Manual, Capability } from "@agentic-patterns/core";
+import { capability, defineTool, TextManual, toolbox } from "@agentic-patterns/core";
 
-const searchTool = ToolSchema.fromZod(
-  "search_docs",
-  "Search documentation",
-  z.object({ query: z.string(), limit: z.number().optional() }),
-);
+const docsToolbox = toolbox("docs", "Documentation tools", {
+  search_docs: defineTool({
+    description: "Search documentation",
+    parameters: z.object({ query: z.string(), limit: z.number().nullable() }),
+    returns: z.array(z.string()),
+    execute: async ({ query, limit }) => searchDocs(query, limit ?? 10),
+  }),
+});
 
-const toolbox = new Toolbox("docs", [searchTool]);
-const manual = new Manual("docs-manual", [
-  { title: "Search", content: "Use search_docs to find relevant documentation." },
-]);
-const capability = new Capability("documentation", toolbox, manual);
+const documentation = capability({
+  name: "documentation",
+  description: "Documentation search",
+  toolbox: docsToolbox,
+  manual: new TextManual("docs-manual", "Use search_docs to find relevant documentation."),
+});
 ```
+
+`defineTool` infers `execute`'s argument types from `parameters`, compile-checks the return value
+against `returns`, and validates output at runtime by default (violations throw a tool-named
+error). Subclassing `Toolbox` and calling the positional `Capability` constructor both still work —
+the factories are sugar over the same classes. See
+[docs/authoring-a-toolbox.md](../../docs/authoring-a-toolbox.md) for the full guide.
 
 #### Playbook
 
