@@ -154,3 +154,25 @@ describe("loadAgentsFromFile — registration `evals` declaration", () => {
     expect(a?.evals).toBeUndefined();
   });
 });
+
+describe("loadAgentsFromFile — registration `contextRedactKeys` declaration (#268 PR-3)", () => {
+  it("passes a well-formed array of strings through verbatim", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "scoped/agent.mjs"), FX);
+    expect(a?.id).toBe("scoped");
+    expect(a?.contextRedactKeys).toEqual(["userId", "secret"]);
+  });
+
+  it("drops a malformed declaration entirely (non-string entry) rather than salvaging a subset", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "scoped-bad/agent.mjs"), FX);
+    expect(a?.id).toBe("scoped-bad");
+    expect(a?.contextRedactKeys).toBeUndefined();
+  });
+
+  it("leaves contextRedactKeys undefined on registrations that declare none", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "todo/agent.mjs"), FX);
+    expect(a?.contextRedactKeys).toBeUndefined();
+  });
+});

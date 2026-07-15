@@ -155,6 +155,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     provenance: reg.provenance,
     instantiate: reg.instantiate,
     instantiateDefaults: reg.instantiateDefaults,
+    contextRedactKeys: reg.contextRedactKeys,
     evals: reg.evals,
     // Thread the shared bus so a promoted agent's `stream()` lifecycle
     // (message.start/.complete) is bus-visible too — otherwise RunStoreExporter
