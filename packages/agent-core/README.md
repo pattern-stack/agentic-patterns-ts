@@ -126,8 +126,13 @@ class AnalysisPlaybook extends Playbook {
 }
 
 // Integrate into a Capability
-const capability = new Capability("analysis", toolbox, manual, new AnalysisPlaybook());
-capability.getTools(); // includes both toolbox tools and playbook play schemas
+const analysis = capability({
+  name: "analysis",
+  description: "Data analysis",
+  toolbox: docsToolbox,
+  playbook: new AnalysisPlaybook(),
+});
+analysis.getTools(); // includes both toolbox tools and playbook play schemas
 ```
 
 Definitions module provides Zod schemas for workflow configuration: `WorkflowStep`, `RuleDefinition`, `TemplateDefinition`, `EscalationTrigger`, `StateDefinition`, `PriorityDefinition`, `IssueTypeDefinition`, `HealthSignal`.

@@ -727,3 +727,25 @@ Behavioral checklist (all confirmed against the diff):
 - [`packages/agent-core/src/molecules/toolbox.ts:145`] Comment reads `// parseAsync so async refinements/transforms in returns are supported.` but the code uses `safeParseAsync`. Functionally equivalent (and the safe form is arguably cleaner here since it avoids a try/catch to attach the marker), but the comment names a different method than the call.
 
 **Reviewed by:** reviewer agent · 2026-07-15T02:47:30Z
+## Diff Review — Quality
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff main...HEAD -- packages/ docs/ CHANGELOG.md` (branch `feat/tool-authoring-sugar`, HEAD `cd2bb45`, PR #267)
+**Against:** quality-checks canvas (`sdlc/0.2.19/canvases/quality-checks/categories.yaml`) — spec-blind
+**Verdict:** PASS_WITH_NOTES
+
+Well-built. `defineTool` / `toolbox()` / `capability()` are thin, honest sugar over the existing classes: the factories add no new state, preserve `instanceof`, keep `Capability` frozen, and retain the tool record by reference (documented, matches the `TextManual`-for-`Manual` precedent). No convention_workaround: `LiteralToolbox` is the intended concrete subclass, and the `Symbol.for` returns-violation tag is a deliberate cross-realm design (two-copies-of-core), not an `instanceof` workaround. No convenient_fallback: the validation path rethrows, never swallows, and preserves the `ZodError` as `cause`. No magic_constants across ≥3 files. The non-generic boundary (returned type is plain `ToolDefinition`) genuinely keeps Zod types out of consumer `.d.ts`. Verified locally: 365/365 core tests pass; `tsc --noEmit` is green and `tsconfig.include: ["src"]` covers the test file, so the `@ts-expect-error` / `expectTypeOf` type assertions are enforced (not dead). Docs imports (`TextManual`, `defineTool`, `toolbox`, `capability`) are all reachable from the package root; the README "Before" that mis-called the `Capability` constructor was correctly removed.
+
+**Blockers (0):**
+- _None._
+
+**Notes (2):**
+- [`packages/agent-core/src/molecules/toolbox.ts:95-100, 209-217`] Returns-violation tag is not scoped to the tool that raised it. If a `defineTool` tool's `execute` directly awaits another `defineTool` tool's `.execute()` (bypassing `Toolbox.execute`), the inner tool's tagged violation propagates unchanged and is renamed with the OUTER tool's name at the outer boundary — misattributing the failure and mislabeling it as the outer tool's "output". The recommended path (`toolbox.execute(name, …)`) strips the tag when it re-wraps, so the common case is safe; the edge is direct raw-`execute` composition, which the public `ToolDefinition.execute` surface permits. _(category: convenient_fallback-adjacent / error-attribution)_
+- [`packages/agent-core/src/molecules/toolbox.ts:146` vs `:206`] Async-parse asymmetry: `defineTool` validates output with `safeParseAsync` (async refinements supported, and the diff advertises this), but `Toolbox.execute` still parses `parameters` with synchronous `.parse()`, so an async refinement in a `parameters` schema throws Zod's sync-parse error. Parameter parsing predates this PR, but the new async-returns support makes the split surprising — worth documenting or aligning.
+
+**Nits (3):**
+- [`packages/agent-core/src/molecules/toolbox.ts:149, :212`] The message fragment `"output violated its returns schema"` is duplicated across the inner wrapper and the toolbox boundary; the inner variant only surfaces on a direct `def.execute()` call, and the two wordings can drift. A shared constant/helper would keep them in lockstep.
+- [`CHANGELOG.md:3`] Heading style inconsistency — `## core 0.11.0 (…)` carries a package prefix while the prior entry `## 0.6.2 (…)` is bare; the file also jumps from 0.11.0 straight to 0.6.2 (a pre-existing gap, noted only for awareness). _(category: magic_constants-adjacent / convention drift)_
+- [`packages/agent-core/src/molecules/toolbox.ts:126`] `defineTool`'s `returns` is mandatory (unlike the optional `ToolDefinition.returns`), so using the factory purely for parameter-typing sugar forces a throwaway `returns: z.unknown()`. Defensible given the factory exists to validate output, but a minor ergonomic edge.
+
+**Reviewed by:** reviewer agent · 2026-07-15T02:55:24Z

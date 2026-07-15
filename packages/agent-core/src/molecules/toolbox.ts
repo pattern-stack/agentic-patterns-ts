@@ -142,7 +142,7 @@ export function defineTool<P extends ZodTypeAny, R extends ZodTypeAny>(spec: {
       if (!validateReturns) {
         return raw;
       }
-      // parseAsync so async refinements/transforms in `returns` are supported.
+      // safeParseAsync so async refinements/transforms in `returns` are supported.
       const result = await spec.returns.safeParseAsync(raw);
       if (!result.success) {
         const violation = new Error(
