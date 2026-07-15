@@ -3,7 +3,7 @@
 export { ToolSchema } from "./tool-schema.js";
 export type { OpenAIFunctionDef, ClaudeFunctionDef, VercelAIToolDef } from "./tool-schema.js";
 
-export { Toolbox } from "./toolbox.js";
+export { Toolbox, defineTool, toolbox } from "./toolbox.js";
 export type { ToolDefinition, ToolEvent, ToolExecutionContext } from "./toolbox.js";
 
 export {
@@ -16,7 +16,7 @@ export {
 } from "./manual.js";
 export type { ManualItem } from "./manual.js";
 
-export { Capability } from "./capability.js";
+export { Capability, capability } from "./capability.js";
 
 export { Playbook } from "./playbook.js";
 export type { PlayDefinition } from "./playbook.js";

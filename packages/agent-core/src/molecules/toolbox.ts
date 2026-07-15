@@ -6,7 +6,7 @@
  * introspection), aligning with Vercel AI SDK's tool() API.
  */
 
-import type { ZodTypeAny } from "zod";
+import type { ZodTypeAny, z } from "zod";
 import { ToolSchema } from "./tool-schema.js";
 
 /**
@@ -58,8 +58,10 @@ export interface ToolDefinition {
    * Optional output schema — what `execute` resolves to. Symmetric with
    * `parameters`. A tool's TS return type is erased at runtime, so it can't be
    * introspected; declare `returns` to make the output shape visible to
-   * consumers (e.g. a tool workbench rendering a `Returns` block) and to enable
-   * future output validation. Omit it and consumers simply get no return shape.
+   * consumers (e.g. a tool workbench rendering a `Returns` block). On a plain
+   * object definition this is metadata only — output is never validated.
+   * Tools built with `defineTool` opt into runtime output validation against
+   * this schema. Omit it and consumers simply get no return shape.
    */
   returns?: ZodTypeAny;
   /**
@@ -79,6 +81,84 @@ export interface ToolDefinition {
    * ignore it remain valid (assignment-compatible trailing optional param).
    */
   execute: (args: Record<string, unknown>, ctx?: ToolExecutionContext) => Promise<unknown>;
+}
+
+/**
+ * Marks a return-schema validation failure raised inside a `defineTool`
+ * wrapper. A globally registered symbol rather than an error subclass:
+ * deployments are known to carry two copies of core across a package
+ * boundary, where an `instanceof` check would spuriously fail.
+ */
+const RETURNS_VIOLATION = Symbol.for("agentic-patterns.core.returns-violation");
+
+/** Structural check for the marker — never `instanceof`. */
+function isReturnsViolation(err: unknown): err is Error & { cause: unknown } {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as Record<PropertyKey, unknown>)[RETURNS_VIOLATION] === true
+  );
+}
+
+/**
+ * Define a schema-typed tool while returning the framework's stable,
+ * non-generic `ToolDefinition` surface.
+ *
+ * Arguments arrive contextually typed from `parameters` (`z.infer<P>`) — the
+ * host boundary (`Toolbox.execute`) already parses them, so this is
+ * type-level only. The callback's raw result is compile-checked against
+ * `z.input<R>`. Unless disabled via `validateReturns: false`, the result is
+ * parsed through `returns`, so the parsed `z.output<R>` value is what the
+ * host receives — Zod defaults, transforms, and unknown-key stripping apply.
+ *
+ * Deliberately non-generic at the boundary: the returned value's inferred
+ * declaration type is plain `ToolDefinition`, so no concrete Zod types leak
+ * into a consumer's published `.d.ts`.
+ *
+ * Validation failures are tagged and renamed by `Toolbox.execute(name, ...)`
+ * ("tool 'x' output violated its returns schema: ..."): a `ToolDefinition`
+ * has no intrinsic name — the record key is the name — so the fully named
+ * guarantee lives at the toolbox boundary.
+ */
+export function defineTool<P extends ZodTypeAny, R extends ZodTypeAny>(spec: {
+  description: string;
+  parameters: P;
+  returns: R;
+  terminal?: boolean;
+  /**
+   * Parse output through `returns` before returning it.
+   * @default true
+   */
+  validateReturns?: boolean;
+  execute: (args: z.infer<P>, ctx?: ToolExecutionContext) => Promise<z.input<R>>;
+}): ToolDefinition {
+  const validateReturns = spec.validateReturns ?? true;
+  const definition: ToolDefinition = {
+    description: spec.description,
+    parameters: spec.parameters,
+    returns: spec.returns,
+    execute: async (args, ctx) => {
+      const raw = await spec.execute(args as z.infer<P>, ctx);
+      if (!validateReturns) {
+        return raw;
+      }
+      // safeParseAsync so async refinements/transforms in `returns` are supported.
+      const result = await spec.returns.safeParseAsync(raw);
+      if (!result.success) {
+        const violation = new Error(
+          `tool output violated its returns schema: ${result.error.message}`,
+          { cause: result.error },
+        );
+        (violation as unknown as Record<PropertyKey, unknown>)[RETURNS_VIOLATION] = true;
+        throw violation;
+      }
+      return result.data;
+    },
+  };
+  if (spec.terminal !== undefined) {
+    definition.terminal = spec.terminal;
+  }
+  return definition;
 }
 
 /**
@@ -110,7 +190,13 @@ export abstract class Toolbox {
    * `ctx` is an optional execution context (event sink + correlation ids)
    * forwarded verbatim to the tool's `execute`; never validated or inspected.
    *
-   * @throws Error if the tool name is unknown.
+   * This boundary owns the tool's name (the record key), so it is also where
+   * `defineTool` return-schema violations gain their uniform, tool-named
+   * message. Ordinary execution errors pass through untouched.
+   *
+   * @throws Error if the tool name is unknown, args fail parameter
+   * validation, or a `defineTool`-built tool's output violates its `returns`
+   * schema.
    */
   async execute(name: string, args: unknown, ctx?: ToolExecutionContext): Promise<unknown> {
     const tool = this.tools[name];
@@ -118,6 +204,46 @@ export abstract class Toolbox {
       throw new Error(`Unknown tool: ${name}`);
     }
     const parsed = tool.parameters.parse(args) as Record<string, unknown>;
-    return tool.execute(parsed, ctx);
+    try {
+      return await tool.execute(parsed, ctx);
+    } catch (err) {
+      if (isReturnsViolation(err)) {
+        const detail = err.cause instanceof Error ? err.cause.message : err.message;
+        throw new Error(`tool '${name}' output violated its returns schema: ${detail}`, {
+          cause: err.cause,
+        });
+      }
+      throw err;
+    }
   }
+}
+
+/** Concrete Toolbox over a static tool record — see `toolbox()`. */
+class LiteralToolbox extends Toolbox {
+  readonly name: string;
+  readonly description: string;
+  readonly tools: Record<string, ToolDefinition>;
+
+  constructor(name: string, description: string, tools: Record<string, ToolDefinition>) {
+    super();
+    this.name = name;
+    this.description = description;
+    this.tools = tools;
+  }
+}
+
+/**
+ * Create a concrete Toolbox from a static tool record — the literal
+ * counterpart to subclassing, as `TextManual`/`SimpleManual` are for
+ * `Manual`. The record is retained by reference (not cloned or frozen —
+ * decorators and composition code rely on record identity); inherited
+ * schema, name-listing, and execution behavior are unchanged, and the
+ * result satisfies `instanceof Toolbox`.
+ */
+export function toolbox(
+  name: string,
+  description: string,
+  tools: Record<string, ToolDefinition>,
+): Toolbox {
+  return new LiteralToolbox(name, description, tools);
 }

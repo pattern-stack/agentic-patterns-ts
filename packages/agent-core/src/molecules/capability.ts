@@ -72,3 +72,18 @@ export class Capability {
     return parts.join("\n\n");
   }
 }
+
+/**
+ * Create a Capability from a named object literal instead of the positional
+ * constructor. A pure adapter: constructor freezing and all methods are
+ * preserved, and the result satisfies `instanceof Capability`.
+ */
+export function capability(spec: {
+  name: string;
+  description: string;
+  toolbox: Toolbox;
+  manual?: Manual;
+  playbook?: Playbook;
+}): Capability {
+  return new Capability(spec.name, spec.description, spec.toolbox, spec.manual, spec.playbook);
+}
