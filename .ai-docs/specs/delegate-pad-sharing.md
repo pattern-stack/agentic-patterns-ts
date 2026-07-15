@@ -466,8 +466,65 @@ stock `delegateTo`, reframed to tool-side) is a genuinely good catch.
 
 ## Diff Review — Adherence
 
-_(Gate 2.5 — reviewer A appends here.)_
+**Verdict: PASS** (Gate 2.5 — reviewer A, lens=adherence; runtime suite green: 1069 pass / 2 skip, incl. all 3 target files). Every item in the File-by-file plan, File plan (addendum), and Test plan landed as specified; nothing is beyond scope except repo-standard lockfile drift (nit).
+
+### File plan — all present and faithful
+- **mock-runner.ts** `run()`/`stream()` thread `{runId, traceId, parentToolCallId, host}` per D2 — `run()` mints `traceId = options.traceId ?? generateId()`, fresh `runId`, `parentToolCallId: generateId()` per call (`:129-135`); `stream()` reuses `toolCallId` as `parentToolCallId`; header note added. ✅
+- **sequential-agents.ts** `:22-28` — byte-identical to the spec's replacement text. ✅
+- **node-context.md** — shipped reword ("Since #124 this is ambient…") + two-suite "Tests to add" pointer, two sentences, no structural edit. ✅
+- **ADR 0003** — Context/Decision/Consequences/Alternatives all match D1 as amended: no `sharePad`/`padSharing` knob, slot-scope-is-the-control, the "stage-shared but delegation-isolated" middle ground named + deferred, construction-time-scratchpad rejected (pinned by host-propagation Test 5). ✅
+- **CHANGELOG** — Features (short-circuit) + Bug Fixes (MockRunner ctx) + Documentation bullets verbatim; lockstep `0.27.0`, core NOT bumped (agent-core package.json empty diff; `## core 0.12.0` pre-exists on main). ✅
+
+### Tier-0 short-circuit — matches the addendum exactly
+`agent-runner.ts` 2-tier arm: eligibility `finishReason === "terminal_tool"` only (`terminal_tool_error` excluded); candidate = `JSON.parse(tier1.response)` with raw-string fallback; `schema.safeParse().success` gate → `rawObject = candidate`, `finishReason = "terminal_tool"`, no `iterations` bump, tier 2 skipped. Failure path (empty-guard + tier 2) is byte-identical modulo indentation, now wrapped in `if (!acceptedTerminalResult)`; shared validation preserved. Contract comment present. ✅
+
+### Tests — T1–T7 present, asserting what the spec says
+T1–T4 in `delegate-pad-sharing.test.ts` (observed `requireBackpack` via the index barrel per D3; `finishTool` terminal-flagged; `backpack.notes` key correct; T4 = 2-call live script). T5's four cases + the arity fix in `mock-runner.test.ts`. T6/T7 in `agent-runner.test.ts` (token/iteration assertions exact). T8 omitted — consistent with its "optional; do not force a contrived schema" wording; the parse-or-raw rule lives in the code comment as directed. ✅
+
+### Note
+- **bun.lock** carries transitive drift beyond the version bump (`@scalar/*` patch bumps, `electron-to-chromium`, `js-base64`, `set-cookie-parser` drop, MCP-sdk `zod` pin) — a byproduct of the repo-mandated `rm bun.lock && bun install` regen (publish gate), not a source change. Worth a glance to confirm none are unwanted; no action required for adherence. (nit)
 
 ## Diff Review — Quality
 
-_(Gate 2.5 — reviewer B appends here.)_
+**Verdict: PASS_WITH_NOTES** (lens=quality, spec-blind; against quality-checks canvas v1)
+
+Well-built for this codebase. The `runStructured` short-circuit is correct and cleanly
+gated on `finishReason === "terminal_tool"`; both the accept path (T6: 1 llm call,
+`iterations:1`, no tier-2 tokens) and the invalid-result fallback (T7) are pinned with
+token/iteration assertions. The MockRunner context threading is minimal, backward-compatible
+(no-executor path pinned unchanged), and matches the live seam. The `delegate-pad-sharing`
+suite is behavior-focused and well-isolated — `seenByChild` is a per-`createDelegateFlow()`
+closure (not module-level shared state), and each test mints a fresh flow, so there is no
+cross-test bleed. The silent `catch {}` in `runStructured` is a *counter-example* to
+`convenient_fallback`, not an instance: it is a controlled JSON-parse-or-raw passthrough,
+accurately commented against `run()`'s own serialization (`agent-runner.ts:611-614`), with the
+schema validation + tier-2 fallback as the real guard. Stream executor errors are surfaced on
+the tool-end event, not swallowed. No new public surface / d.ts leakage; no repeated production
+magic constants (repeated string literals live only in test fixtures — canvas counter-example).
+
+### Blockers
+_None._
+
+### Notes
+_None._
+
+### Nits
+- **JSON-parse ambiguity** (`agent-runner.ts:1000-1005`, category `convenient_fallback` —
+  counter-example, nit only): a *terminal string* that is itself valid JSON (`"42"`, `"true"`,
+  `'{"a":"b"}'`) is reinterpreted by `JSON.parse` and may then fail schema, triggering an
+  unnecessary tier-2 LLM pass. Never a correctness bug (fallback covers it); the round-trip is
+  exact for the common serialized-object case. Worth a one-line acknowledgement of the string-
+  looks-like-JSON case in the existing comment.
+- **Test coupling to internal shapes** (`delegate-pad-sharing.test.ts:586`, `:691`): the child
+  toolbox reaches the branch slot through `ctx?.host as { scratchpad?: Scratchpad }` (untyped
+  cast into host internals) while reading the backpack via the typed `requireBackpack(ctx, …)`
+  helper; and T3 asserts the literal fork key `"backpack.notes"`. Both pin real contract but
+  would break on a host-shape / key-format rename. Acceptable for a seam regression test.
+- **Misleading empty-output message** (`agent-runner.ts:1017-1020`): the "tool loop likely hit
+  maxIterations" guard is now also reachable on an empty `terminal_tool` result. It prints the
+  actual `finishReason` so it is self-correcting, and it is not a regression (the guard was
+  equally reachable pre-diff), but the prose no longer strictly matches the terminal-empty path.
+- **Non-deterministic mock ids** (`mock-runner.ts:126-131`): `runId`/`parentToolCallId` via
+  `generateId()`. Tests correctly assert relationships (shared runId, distinct parents) and
+  `/.+/`, not fixed values, so no flakiness; matches the live runner. A counter-based id would
+  be marginally more mock-idiomatic.
