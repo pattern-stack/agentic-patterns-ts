@@ -749,3 +749,35 @@ Well-built. `defineTool` / `toolbox()` / `capability()` are thin, honest sugar o
 - [`packages/agent-core/src/molecules/toolbox.ts:126`] `defineTool`'s `returns` is mandatory (unlike the optional `ToolDefinition.returns`), so using the factory purely for parameter-typing sugar forces a throwaway `returns: z.unknown()`. Defensible given the factory exists to validate output, but a minor ergonomic edge.
 
 **Reviewed by:** reviewer agent · 2026-07-15T02:55:24Z
+
+## Diff Review — Adherence
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff main...HEAD` (branch `feat/model-facing-schema-lint`, PR #270, head `3d1a3a5`) — issue #265
+**Against:** `.ai-docs/specs/tool-authoring-sugar.md` (**PR-2 scope only** — § Design decisions #4, § API design § Schema linter, § File-by-file § PR-2, § Test plan § PR-2, § Documentation plan item 4, § Acceptance-mapping linter rows)
+**Verdict:** PASS_WITH_NOTES
+
+PR-2 is built as specified. `lintModelFacingSchema` is a pure, dialect-driven structural Zod walker with the exact public API from the spec, all PR-2 files land in the right place, the version bump is core-only `0.11.0`→`0.12.0` with no lockstep bump, and — critically — PR-1's `defineTool`/`toolbox`/`capability` sources are untouched (`toolbox.ts` / `capability.ts` are absent from the diff), so PR-2 depends on nothing from PR-1's code. Verified locally: `tsc --noEmit` clean, 26/26 linter tests pass, and the acceptance sweep runs clean ("0 findings across calculator/todo/writing-coach/toolsmith/ManualToolbox"). Zero blockers; one benign plan-vs-actual delta and one nit below.
+
+Adherence checklist (all confirmed against the diff + a live build/test/sweep run):
+- **API surface matches verbatim** (§ API design § Schema linter): `SchemaLintDialect`, `SchemaLintSeverity`, the five `SchemaLintCode`s, `SchemaLintFinding` (all-readonly), `SchemaLintOptions`, and `lintModelFacingSchema(schema, opts?): SchemaLintFinding[]` are identical to the spec block. ✓
+- **Pure & vendor-neutral** (§ Design #4; acceptance "Core stays vendor-independent"): sole import is `import type { ZodTypeAny } from "zod"` — no vendor SDK, no runtime, no env/network, no mutation, never throws for a finding. ✓
+- **Private closed dialect registry** matching the spec's dialect table exactly: `gemini-bifrost → [exclusive-numeric-bound, recursive-lazy, tuple]`, `openai → [optional-without-nullable]`; no runtime rule registration. ✓
+- **Defaults** `dialect: "gemini-bifrost"`, `requireDescribe: false`; `requireDescribe` emits `warning` severity only. ✓
+- **Walker semantics** (§ API design walker list): Zod 3 `_def.typeName` + Zod 4 `_zod.def.type` normalization; exclusive min/max through transparent wrappers; DFS active-ancestor cycle detection (non-recursive lazy stays clean); tuple flagged at its own path then descent stopped for dialect errors (still inspected for description warnings); `optional-without-nullable` scoped to object properties only; leaf = property not leading to further object structure (arrays of primitives use property path, arrays of objects recurse with `[]`); description on any transparent wrapper satisfies `requireDescribe`, parent's description never satisfies children; deterministic DFS order + `(code,path)` dedup via `seen` set; fresh mutable finding objects. ✓
+- **No automatic linting in `defineTool`** (§ Design #4 sub-section): `defineTool` source unchanged; docs add a "Why `defineTool` never auto-lints" section covering all four spec reasons. ✓
+- **File-by-file § PR-2** — every itemized file present and correct: `model-facing-schema-lint.ts` (new), `index.ts` value+type exports (verbatim match), `__tests__/model-facing-schema-lint.test.ts` (new), `tools/check-model-facing-schemas.ts` (new; sweeps calculator/todo/writing-coach/toolsmith tools+returns+plays and core `ManualToolbox`, `gemini-bifrost`, `requireDescribe:false`, throws with agent/capability/tool/schema labels), root `package.json` `check:model-facing-schemas` appended to `check` after build/typecheck/lint/test, docs "Lint model-facing schemas in CI" section, CHANGELOG bullet, core→`0.12.0`. ✓
+- **Test plan § PR-2** — the four killer-construct tests are named verbatim per spec and carry the required assertions (lower+upper bound paths & inclusive-bounds-clean; recursive `$.children[]` + non-recursive-lazy-clean; root+nested tuple; root+nested optional-without-nullable, required-nullable clean, nullable-optional not flagged). Supporting tests present: default dialect, dialect isolation, `requireDescribe` off-by-default, warnings-never-errors, wrapper-description recognition, parent-doesn't-satisfy-child, path correctness through default/readonly/effects/pipe/branded/union/intersection/nested-arrays, reused node at both paths, recursion termination, DFS order + dedup, tuple stop-descend-but-describe. The four killer tests are mirrored against `zod/v4`. ✓
+- **Zero-false-positive sweep** (§ Test plan): sweep executed clean over every required target incl. toolsmith's `slug_and_span` playbook play (verified the play + `capability.playbook.plays` branch is real, not vacuously skipped). ✓
+- **No runtime/server/CLI/dashboard change**; no lockstep bump: only core `package.json` version changes; `bun.lock` edit is surgical (core `0.12.0` + two new root workspace devDeps) — no stray transitive drift (unlike the PR-1 lockfile note). ✓
+
+**Blockers (0):**
+- _None._
+
+**Notes (1):**
+- [`package.json` / `bun.lock`] Root `package.json` gains two workspace devDeps (`@agentic-patterns/core`, `@agentic-patterns/runtime` at `workspace:^`) that the § File-by-file § PR-2 "Root `package.json`" line did not itemize (it named only the `check:model-facing-schemas` script). This is a necessary and correct consequence of siting the sweep at the repo root and importing the built public surfaces (exactly as the spec's sweep description directs — "it imports the public surface of `@agentic-patterns/core` and `@agentic-patterns/runtime`, not source files"), so it is faithful to intent; recorded only as a plan-vs-actual delta. No action required.
+
+**Nits (1):**
+- [`CHANGELOG.md:11`] The changelog adds a second bullet (`repo`: the `tools/check-model-facing-schemas.ts` sweep + `check` wiring) beyond the single linter bullet the § File-by-file § PR-2 CHANGELOG line itemized. Beneficial and consistent with the spec's "keep the pieces independently discoverable" philosophy — noted only for completeness, not as a defect.
+
+**Reviewed by:** reviewer agent · 2026-07-15T13:47:53Z
