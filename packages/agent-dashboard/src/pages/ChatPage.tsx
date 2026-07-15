@@ -10,10 +10,11 @@
  *      parts and maps them onto the chat organism's `Part` union
  *      (`chat/stored-parts.ts`), rendered read-only through the SAME
  *      `ChatPanel` (`onSend` omitted). "New Chat" returns to live.
- *   3. Trace rail — the collapsible side panel gains a second tab alongside
- *      the existing `AgentUniverse` ("what it can do"): `Trace` ("what just
- *      happened"), rendered via `components/TraceRail.tsx` off either the
- *      live turn's event stream or the viewed session's linked run.
+ *   3. Trace rail — the collapsible side panel (`components/ConsoleRail.tsx`)
+ *      carries tabs alongside the `Tools` tab (`components/ToolsRail.tsx`,
+ *      "what it can do"): `Trace` ("what just happened"), rendered via
+ *      `components/TraceRail.tsx` off either the live turn's event stream or
+ *      the viewed session's linked run.
  *
  * DO-NOT-REGRESS (hard line): live streaming (`agent_step` nesting via
  * `chat/model.ts`'s `applyParts`, untouched here), `CaptureCasePanel` (stays
@@ -41,7 +42,8 @@ import type { ChatMessage } from "../chat/model";
 import { storedMessagesToChat } from "../chat/stored-parts";
 import "./chat-route.css";
 import { type RailSeekRequest, ScratchpadRail } from "../chat/ScratchpadRail";
-import { AgentUniverse } from "../components/AgentUniverse";
+import { ConsoleRail } from "../components/ConsoleRail";
+import { ToolsRail } from "../components/ToolsRail";
 import { TraceRail, type TraceRailSource } from "../components/TraceRail";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
@@ -56,9 +58,9 @@ import { relTime, shortId, statusTone } from "../lib/format";
 import { sessionsForAgent } from "../lib/sessions";
 import { T } from "../ui/tokens";
 
-type RailTab = "universe" | "trace" | "scratchpad";
+type RailTab = "tools" | "trace" | "scratchpad";
 const RAIL_TAB_OPTIONS: { value: RailTab; label: string; title?: string }[] = [
-  { value: "universe", label: "Universe" },
+  { value: "tools", label: "Tools", title: "Capabilities & tools this agent can use" },
   { value: "trace", label: "Trace" },
   {
     value: "scratchpad",
@@ -114,7 +116,7 @@ export function ChatPage() {
   // types. Reseeded to `null` on agent switch / New Chat (see `newChat`).
   const [contextText, setContextText] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
-  const [railTab, setRailTab] = useState<RailTab>("universe");
+  const [railTab, setRailTab] = useState<RailTab>("tools");
   const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
 
   // #226: a [#N] cite seek with density Off would scroll to a hidden frame —
@@ -399,54 +401,26 @@ export function ChatPage() {
               }
             />
           </div>
-          <div style={{ display: "flex", alignItems: "stretch", flex: "none" }}>
-            <button
-              type="button"
-              onClick={() => setRailOpen((v) => !v)}
-              title={railOpen ? "Collapse panel" : "Show panel"}
-              aria-label={railOpen ? "Collapse panel" : "Show panel"}
-              style={{
-                flex: "none",
-                width: 20,
-                border: "1px solid var(--line)",
-                borderRight: railOpen ? "none" : "1px solid var(--line)",
-                borderRadius: railOpen ? "8px 0 0 8px" : 8,
-                background: "var(--paper)",
-                color: "var(--mute)",
-                cursor: "pointer",
-                fontSize: T.fz.small,
-                lineHeight: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {railOpen ? "›" : "‹"}
-            </button>
-            {railOpen && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <Segmented
-                  options={RAIL_TAB_OPTIONS}
-                  value={railTab}
-                  onChange={setRailTab}
-                  size="sm"
-                  aria-label="Side panel"
-                />
-                {railTab === "universe" ? (
-                  <AgentUniverse agentId={selectedId} />
-                ) : railTab === "trace" ? (
-                  <TraceRail source={traceSource} />
-                ) : (
-                  <ScratchpadRail
-                    source={traceSource}
-                    chatRoot={chatColRef}
-                    seekKey={railSeek}
-                    onSeekConsumed={clearRailSeek}
-                  />
-                )}
-              </div>
+          <ConsoleRail
+            open={railOpen}
+            onToggle={() => setRailOpen((v) => !v)}
+            tab={railTab}
+            onTab={setRailTab}
+            tabs={RAIL_TAB_OPTIONS}
+          >
+            {railTab === "tools" ? (
+              <ToolsRail agentId={selectedId} />
+            ) : railTab === "trace" ? (
+              <TraceRail source={traceSource} />
+            ) : (
+              <ScratchpadRail
+                source={traceSource}
+                chatRoot={chatColRef}
+                seekKey={railSeek}
+                onSeekConsumed={clearRailSeek}
+              />
             )}
-          </div>
+          </ConsoleRail>
         </div>
       </div>
     </div>

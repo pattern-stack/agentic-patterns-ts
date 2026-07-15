@@ -5,15 +5,13 @@
    (which uses these same global tokens). Everything rendered is a pure fold
    over events[0..cursor]; only disclosure state is rail-local. */
 
+/* Borderless fill — the ConsoleRail shell owns the outer border/width/radius;
+   this just fills the body slot and scrolls internally. */
 .scratchpad-rail {
-  width: 320px;
-  flex: none;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  height: 100%;
   overflow: hidden;
   font-size: var(--fz-small);
 }
