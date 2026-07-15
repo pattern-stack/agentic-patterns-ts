@@ -206,21 +206,37 @@ export function ChatPage() {
 
   // Scope context (#268) — `instantiation.available` gates whether the editor
   // + chip exist for this agent at all; `defaultsText` reseeds the editor
-  // whenever `contextText` is untouched (`null`). `contextParse` re-derives
-  // on every keystroke so Send can block on invalid JSON (never silently
-  // drop a draft the operator can see, per `parseContextJson`'s doc).
+  // (DISPLAY only) whenever `contextText` is untouched (`null`).
   const contextAvailable = selected?.instantiation?.available === true;
   const defaultsText = useMemo(
     () => JSON.stringify(selected?.instantiation?.defaults ?? {}, null, 2),
     [selected],
   );
   const contextEditorText = contextText ?? defaultsText;
-  const contextParse = useMemo(() => parseContextJson(contextEditorText), [contextEditorText]);
+  // `contextEditorParse` drives the VISIBLE error under the textarea and
+  // Send-blocking — it re-derives on every keystroke.
+  const contextEditorParse = useMemo(
+    () => parseContextJson(contextEditorText),
+    [contextEditorText],
+  );
+  // What actually gets POSTed differs: an untouched editor (`contextText ===
+  // null`) is still just DISPLAYING the seeded defaults, not an operator
+  // decision — posting it as an explicit `context` would pin a client-side
+  // snapshot instead of letting the server resolve its own current
+  // `instantiateDefaults` at bind time (the server distinguishes "no context
+  // key" from "explicit context", Gate 2.5 review note 4). Only a genuine
+  // edit (including a deliberate clear, which also parses to `undefined` —
+  // same wire behavior, different reason) is ever sent.
+  const contextToSend = contextText === null ? {} : contextEditorParse;
 
-  const chat = useChat(selectedId, { maxIterations, context: contextParse.value });
-  // Immutable once the conversation exists (Decision 2, spec §Design decisions) —
-  // the editor locks and the panel falls back to the bound (echoed) context.
-  const contextLocked = chat.conversationId != null;
+  const chat = useChat(selectedId, { maxIterations, context: contextToSend.value });
+  // Locks the moment a create is IN FLIGHT, not just once the id lands
+  // (`streaming` flips true synchronously at the top of `send()`, before the
+  // `createConversation` await) — otherwise the editor visibly stays
+  // "editable" during that gap while any edits are actually silently ignored
+  // (the context was already captured at the `send()` call, Gate 2.5 review
+  // note 8). Immutable once bound either way (Decision 2).
+  const contextLocked = chat.conversationId != null || chat.streaming;
   const exchangeCount = useMemo(
     () => chat.messages.filter((m) => m.role === "user").length,
     [chat.messages],
@@ -334,9 +350,10 @@ export function ChatPage() {
         contextAvailable={contextAvailable}
         contextEditorText={contextEditorText}
         onContextEditorText={setContextText}
-        contextError={contextParse.error}
+        contextError={contextEditorParse.error}
         contextLocked={contextLocked}
         boundContext={chat.context}
+        boundContextRedacted={chat.contextRedacted}
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
@@ -365,9 +382,9 @@ export function ChatPage() {
               onRespondInput={viewing ? undefined : chat.respondInput}
               // Block Send while the scope-context draft doesn't parse — a
               // silently dropped edit would misreport what scope the run
-              // actually got (#268; harmless once locked, `contextParse`
-              // stops mattering the instant `chat.conversationId` is set).
-              disabled={!selected || (!contextLocked && contextParse.error != null)}
+              // actually got (#268; harmless once locked, `contextEditorParse`
+              // stops mattering the instant `contextLocked` flips true).
+              disabled={!selected || (!contextLocked && contextEditorParse.error != null)}
               emptyLabel={
                 viewing
                   ? viewingMessages === null
@@ -469,6 +486,10 @@ interface HeaderProps {
    *  `null` until bound, or "(no scope)" once bound with none. Never the
    *  editor's draft text (that would defeat the chip's honesty rule). */
   boundContext: Record<string, unknown> | null;
+  /** Top-level keys the server redacted out of `boundContext`, when any were
+   *  (`useChat.contextRedacted`) — surfaced next to `boundContext` wherever it
+   *  renders, matching `NodeInspector`'s "redacted: …" line for the same run. */
+  boundContextRedacted: string[] | null;
 }
 
 function Header({
@@ -498,6 +519,7 @@ function Header({
   contextError,
   contextLocked,
   boundContext,
+  boundContextRedacted,
 }: HeaderProps) {
   const selected = agents.find((a) => a.id === selectedId);
   return (
@@ -592,7 +614,9 @@ function Header({
             answer. Shown only once the live conversation is bound — before
             that there is nothing server-confirmed to show yet, not even
             "(no scope)". */}
-        {contextAvailable && !viewing && conversationId && <ScopeChip context={boundContext} />}
+        {contextAvailable && !viewing && conversationId && (
+          <ScopeChip context={boundContext} redacted={boundContextRedacted} />
+        )}
         {exchangeCount > 0 && (
           <Badge tone="mute" variant="outline">
             {exchangeCount} {exchangeCount === 1 ? "exchange" : "exchanges"}
@@ -642,6 +666,7 @@ function Header({
             error={contextError}
             locked={contextLocked}
             boundContext={boundContext}
+            boundContextRedacted={boundContextRedacted}
           />
         )}
       </div>
@@ -665,19 +690,31 @@ function ScopeContextPanel({
   error,
   locked,
   boundContext,
+  boundContextRedacted,
 }: {
   editorText: string;
   onEditorText: (text: string) => void;
   error?: string;
   locked: boolean;
   boundContext: Record<string, unknown> | null;
+  boundContextRedacted: string[] | null;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Send is already blocked on this (ChatPage's `disabled` prop) — the
+  // collapsed button needs its OWN visible cause, or a greyed-out Send with
+  // no explanation is the only signal the operator ever sees (Gate 2.5
+  // review note 3).
+  const showsInvalid = !locked && error != null;
 
   if (!expanded) {
     return (
-      <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}>
-        Scope context{locked ? " · locked" : ""}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setExpanded(true)}
+        style={showsInvalid ? { color: "var(--err)" } : undefined}
+      >
+        Scope context{locked ? " · locked" : showsInvalid ? " · invalid" : ""}
       </Button>
     );
   }
@@ -710,7 +747,14 @@ function ScopeContextPanel({
           {boundContext === null ? (
             <div style={{ fontSize: 12, color: "var(--ink-3)" }}>(no scope)</div>
           ) : (
-            <JsonBlock value={boundContext} maxHeight={200} />
+            <>
+              <JsonBlock value={boundContext} maxHeight={200} />
+              {boundContextRedacted && boundContextRedacted.length > 0 && (
+                <div style={{ fontSize: T.fz.micro, color: T.tone.warn.ink }}>
+                  redacted: {boundContextRedacted.join(", ")}
+                </div>
+              )}
+            </>
           )}
         </>
       ) : (
@@ -731,40 +775,79 @@ function ScopeContextPanel({
           />
         </Field>
       )}
-      {!locked && error && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
+      {showsInvalid && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
     </div>
   );
 }
 
+/** Cap a chip-preview value so one long token/URL can't distort the header's
+ *  wrapping row (Gate 2.5 review note 2) — the full value is always still one
+ *  click away in the popover. */
+const CHIP_VALUE_MAX = 24;
+function truncateChipValue(v: unknown): string {
+  const s = String(v);
+  return s.length > CHIP_VALUE_MAX ? `${s.slice(0, CHIP_VALUE_MAX)}…` : s;
+}
+
+/** Shared chip-pill visual (both the interactive and the non-interactive
+ *  "(no scope)" cases render this same shape — see `ScopeChip` below). */
+const CHIP_STYLE = {
+  fontFamily: T.font.mono,
+  fontSize: T.fz.tiny,
+  padding: "2px 8px",
+  borderRadius: T.radius.pill,
+  border: "1px solid var(--line)",
+  background: "var(--fill)",
+  color: "var(--ink-2)",
+  maxWidth: 260,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+} as const;
+
 /**
  * ScopeChip — header chip next to the agent badge (#268): the first 1-2
- * scalar top-level context entries, full JSON on click (a `DropdownMenu`
- * popover, the `RunPickerMenu`/`SessionsMenu` precedent). `context` is always
- * the CREATE RESPONSE's echo — never the editor's draft — so the chip can
- * never describe a guess. `null` renders the honest "(no scope)" (a
- * hook-bearing agent whose effective context resolved to nothing), distinct
- * from this component simply not being rendered at all (hook-less agent, or
- * viewing a replayed session — see the call site).
+ * scalar top-level context entries (each value capped, see
+ * `truncateChipValue`), a "+N" tail when more keys exist than shown, full
+ * JSON on click (a `DropdownMenu` popover, the `RunPickerMenu`/`SessionsMenu`
+ * precedent). `context` is always the CREATE RESPONSE's echo — never the
+ * editor's draft — so the chip can never describe a guess. `null` renders the
+ * honest "(no scope)" (a hook-bearing agent whose effective context resolved
+ * to nothing) as a plain, NON-interactive pill — there is no JSON behind it
+ * worth a popover — distinct from this component simply not being rendered
+ * at all (hook-less agent, or viewing a replayed session — see the call
+ * site).
  */
-function ScopeChip({ context }: { context: Record<string, unknown> | null }) {
-  const scalarEntries =
-    context != null
-      ? Object.entries(context).filter(
-          ([, v]) => v === null || (typeof v !== "object" && typeof v !== "function"),
-        )
-      : [];
-  const keyCount = context != null ? Object.keys(context).length : 0;
-  const summary =
-    context == null
-      ? "(no scope)"
-      : scalarEntries.length > 0
-        ? scalarEntries
-            .slice(0, 2)
-            .map(([k, v]) => `${k}: ${String(v)}`)
-            .join(", ")
-        : keyCount > 0
-          ? `${keyCount} key${keyCount === 1 ? "" : "s"}` // all-nested-object context — no scalar to preview
-          : "(no scope)";
+function ScopeChip({
+  context,
+  redacted,
+}: {
+  context: Record<string, unknown> | null;
+  redacted: string[] | null;
+}) {
+  if (context == null) {
+    return (
+      <span style={CHIP_STYLE} title="This agent's effective context resolved to nothing">
+        scope: (no scope)
+      </span>
+    );
+  }
+
+  const scalarEntries = Object.entries(context).filter(
+    ([, v]) => v === null || (typeof v !== "object" && typeof v !== "function"),
+  );
+  const keyCount = Object.keys(context).length;
+  const shown = scalarEntries.slice(0, 2);
+  const shownText =
+    shown.length > 0
+      ? shown.map(([k, v]) => `${k}: ${truncateChipValue(v)}`).join(", ")
+      : keyCount > 0
+        ? `${keyCount} key${keyCount === 1 ? "" : "s"}` // all-nested-object context — no scalar to preview
+        : "(no scope)"; // context is a non-null but empty object
+  // Only the scalar-preview branch can under-report — the "N keys" fallback
+  // already counts every key, so it never needs a tail.
+  const remaining = shown.length > 0 ? keyCount - shown.length : 0;
+  const summary = remaining > 0 ? `${shownText} +${remaining}` : shownText;
 
   return (
     <DropdownMenu
@@ -775,23 +858,19 @@ function ScopeChip({ context }: { context: Record<string, unknown> | null }) {
           type="button"
           onClick={toggle}
           title="Scope this conversation executes under — click for full JSON"
-          style={{
-            fontFamily: T.font.mono,
-            fontSize: T.fz.tiny,
-            padding: "2px 8px",
-            borderRadius: T.radius.pill,
-            border: "1px solid var(--line)",
-            background: "var(--fill)",
-            color: "var(--ink-2)",
-            cursor: "pointer",
-          }}
+          style={{ ...CHIP_STYLE, cursor: "pointer" }}
         >
           scope: {summary}
         </button>
       )}
     >
       <div style={{ padding: 10 }}>
-        <JsonBlock value={context ?? {}} maxHeight={240} />
+        <JsonBlock value={context} maxHeight={240} />
+        {redacted && redacted.length > 0 && (
+          <div style={{ fontSize: T.fz.micro, color: T.tone.warn.ink, marginTop: 6 }}>
+            redacted: {redacted.join(", ")}
+          </div>
+        )}
       </div>
     </DropdownMenu>
   );

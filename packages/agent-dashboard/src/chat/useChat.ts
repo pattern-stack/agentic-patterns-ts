@@ -15,6 +15,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 import {
+  type ConversationCreated,
   type SendOptions,
   createConversation,
   sendInputResponse,
@@ -82,6 +83,14 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
   const [traceEvents, setTraceEvents] = useState<EventLike[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const convIdRef = useRef<string | null>(null);
+  // Two `send()` calls landing in the same synchronous frame (a double-click,
+  // Enter+click racing) both read `convIdRef.current === null` and would
+  // otherwise each fire their own `createConversation` — two real server-side
+  // `instantiate` side effects for one conversation (Gate 2.5 review note 6).
+  // Set SYNCHRONOUSLY (a plain assignment, not a state update) before the
+  // first `await`, so a same-frame second caller sees it immediately and
+  // awaits the SAME in-flight promise instead of starting a new create.
+  const creatingRef = useRef<Promise<ConversationCreated> | null>(null);
   // keep run options current without re-creating `send` each render.
   const runOptionsRef = useRef<UseChatOptions | undefined>(runOptions);
   runOptionsRef.current = runOptions;
@@ -121,12 +130,20 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
         // on later renders/sends).
         let convId = convIdRef.current;
         if (!convId) {
-          const created = await createConversation(agentId, runOptionsRef.current?.context);
-          convId = created.id;
-          convIdRef.current = convId;
-          setConversationId(convId);
-          setContext(created.context ?? null);
-          setContextRedacted(created.context_redacted ?? null);
+          // `creatingRef` may already hold a same-frame sibling's in-flight
+          // promise (see its doc comment) — join it instead of firing a
+          // second `createConversation`.
+          creatingRef.current ??= createConversation(agentId, runOptionsRef.current?.context);
+          try {
+            const created = await creatingRef.current;
+            convId = created.id;
+            convIdRef.current = convId;
+            setConversationId(convId);
+            setContext(created.context ?? null);
+            setContextRedacted(created.context_redacted ?? null);
+          } finally {
+            creatingRef.current = null;
+          }
         }
 
         for await (const ev of streamMessage(convId, q, runOptionsRef.current, ctrl.signal)) {
@@ -167,6 +184,7 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
   const reset = useCallback(() => {
     abortRef.current?.abort();
     convIdRef.current = null;
+    creatingRef.current = null;
     setConversationId(null);
     setContext(null);
     setContextRedacted(null);

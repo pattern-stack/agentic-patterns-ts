@@ -35,10 +35,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-/** Routes the handful of endpoints ChatPage's mount + one send touch. */
+/** Routes the handful of endpoints ChatPage's mount + one send touch.
+ *  `onCreateBody` (optional) captures the parsed `POST /conversations` body,
+ *  when a test needs to assert on the REQUEST rather than just the response. */
 function buildFetchRouter(opts: {
   agents: MockAgent[];
   createResponse: Record<string, unknown>;
+  onCreateBody?: (body: unknown) => void;
 }): typeof fetch {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -47,6 +50,7 @@ function buildFetchRouter(opts: {
     if (url === "/agents" && method === "GET") return jsonResponse(opts.agents);
     if (url.startsWith("/admin/conversations")) return jsonResponse([]);
     if (url === "/conversations" && method === "POST") {
+      opts.onCreateBody?.(init?.body ? JSON.parse(init.body as string) : undefined);
       return jsonResponse(opts.createResponse, 201);
     }
     if (/^\/conversations\/[^/]+\/messages$/.test(url) && method === "POST") {
@@ -109,7 +113,7 @@ describe("ChatPage scope chip (#268)", () => {
     expect(pre?.textContent).toContain('"region": "us"');
   });
 
-  it('renders "(no scope)" for a hook-bearing agent whose effective context is null', async () => {
+  it('renders "(no scope)" for a hook-bearing agent whose effective context is null, as a non-interactive pill (no popover to suppress)', async () => {
     vi.stubGlobal(
       "fetch",
       buildFetchRouter({
@@ -125,15 +129,178 @@ describe("ChatPage scope chip (#268)", () => {
       }),
     );
 
-    const { getByPlaceholderText, getByRole, findByRole } = render(<ChatPage />);
+    const { getByPlaceholderText, getByRole, findByText } = render(<ChatPage />);
     const textarea = await waitFor(() =>
       getByPlaceholderText((text) => text.startsWith("Message Agent One")),
     );
     fireEvent.change(textarea, { target: { value: "hello" } });
     fireEvent.click(getByRole("button", { name: "Send" }));
 
-    const chip = await findByRole("button", { name: "scope: (no scope)" });
+    const chip = await findByText("scope: (no scope)");
     expect(chip).not.toBeNull();
+    // A `null` context has no JSON worth a popover — this is a plain pill,
+    // not a button (clicking it must not open an empty-object JsonBlock).
+    expect(chip.closest("button")).toBeNull();
+  });
+
+  it("caps a long value and adds a +N tail when more than 2 scalar keys are present", async () => {
+    const longToken = "a".repeat(60);
+    vi.stubGlobal(
+      "fetch",
+      buildFetchRouter({
+        agents: [
+          {
+            id: "a1",
+            name: "Agent One",
+            description: "",
+            instantiation: { available: true, defaults: {} },
+          },
+        ],
+        createResponse: {
+          id: "c1",
+          agent_id: "a1",
+          context: { tenant: "acme", token: longToken, region: "us", tier: "gold", extra: "x" },
+        },
+      }),
+    );
+
+    const { getByPlaceholderText, getByRole, findByRole, container } = render(<ChatPage />);
+    const textarea = await waitFor(() =>
+      getByPlaceholderText((text) => text.startsWith("Message Agent One")),
+    );
+    fireEvent.change(textarea, { target: { value: "hello" } });
+    fireEvent.click(getByRole("button", { name: "Send" }));
+
+    // Only the first 2 scalar entries preview, the long value is truncated,
+    // and a "+3" tail accounts for the 3 keys not shown (token/region/tier/
+    // extra minus the 1 of those 4 folded into the shown pair... concretely:
+    // 5 keys total, 2 shown → +3).
+    const chip = await findByRole("button", { name: /^scope: tenant: acme, token: a{24}…\s\+3$/ });
+    expect(chip).not.toBeNull();
+    expect(chip.textContent?.length).toBeLessThan(60);
+
+    // Full (untruncated) value is still one click away.
+    fireEvent.click(chip);
+    const pre = container.querySelector("pre");
+    expect(pre?.textContent).toContain(`"token": "${longToken}"`);
+  });
+
+  it("shows the redaction line in the chip's popover when the server redacted a key", async () => {
+    vi.stubGlobal(
+      "fetch",
+      buildFetchRouter({
+        agents: [
+          {
+            id: "a1",
+            name: "Agent One",
+            description: "",
+            instantiation: { available: true, defaults: {} },
+          },
+        ],
+        createResponse: {
+          id: "c1",
+          agent_id: "a1",
+          context: { tenant: "acme", userId: "[redacted]" },
+          context_redacted: ["userId"],
+        },
+      }),
+    );
+
+    const { getByPlaceholderText, getByRole, findByRole, findByText } = render(<ChatPage />);
+    const textarea = await waitFor(() =>
+      getByPlaceholderText((text) => text.startsWith("Message Agent One")),
+    );
+    fireEvent.change(textarea, { target: { value: "hello" } });
+    fireEvent.click(getByRole("button", { name: "Send" }));
+
+    const chip = await findByRole("button", {
+      name: /^scope: tenant: acme, userId: \[redacted\]$/,
+    });
+    fireEvent.click(chip);
+    expect(await findByText("redacted: userId")).not.toBeNull();
+  });
+
+  it("locks the scope editor after the first message, then New Chat unlocks it and re-seeds the defaults (not the prior edit)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      buildFetchRouter({
+        agents: [
+          {
+            id: "a1",
+            name: "Agent One",
+            description: "",
+            instantiation: { available: true, defaults: { tenant: "acme" } },
+          },
+        ],
+        createResponse: { id: "c1", agent_id: "a1", context: { tenant: "other" } },
+      }),
+    );
+
+    const { getByPlaceholderText, getByRole, findByText } = render(<ChatPage />);
+    const textarea = await waitFor(() =>
+      getByPlaceholderText((text) => text.startsWith("Message Agent One")),
+    );
+
+    // Expand the editor and make a genuine edit before the conversation exists.
+    fireEvent.click(getByRole("button", { name: "Scope context" }));
+    const editor = getByRole("textbox", { name: "Scope context" }) as HTMLTextAreaElement;
+    expect(editor.value).toBe(JSON.stringify({ tenant: "acme" }, null, 2)); // seeded from defaults
+    fireEvent.change(editor, { target: { value: '{"tenant":"other"}' } });
+
+    fireEvent.change(textarea, { target: { value: "hello" } });
+    fireEvent.click(getByRole("button", { name: "Send" }));
+
+    // Locked: the panel (still expanded from the click above — its `expanded`
+    // state persists across the re-render) swaps the textarea for the
+    // read-only bound (server-echoed) context and the lock hint.
+    await findByText(/Locked for this conversation/);
+    expect(() => getByRole("textbox", { name: "Scope context" })).toThrow();
+
+    // Collapse it — the collapsed affordance itself carries the "· locked" tell.
+    fireEvent.click(getByRole("button", { name: "Close" }));
+    getByRole("button", { name: "Scope context · locked" });
+
+    // New Chat unlocks it — and re-seeds from defaults, NOT the prior "other" edit.
+    fireEvent.click(getByRole("button", { name: "New Chat" }));
+    fireEvent.click(getByRole("button", { name: "Scope context" }));
+    const reseeded = (await waitFor(() =>
+      getByRole("textbox", { name: "Scope context" }),
+    )) as HTMLTextAreaElement;
+    expect(reseeded.value).toBe(JSON.stringify({ tenant: "acme" }, null, 2));
+  });
+
+  it("omits `context` from the create request when the editor was never touched — the server resolves its own current defaults", async () => {
+    let capturedBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      buildFetchRouter({
+        agents: [
+          {
+            id: "a1",
+            name: "Agent One",
+            description: "",
+            instantiation: { available: true, defaults: { tenant: "acme" } },
+          },
+        ],
+        // Deliberately NOT `{ tenant: "acme" }` — the server, not this
+        // client-side snapshot, resolved the effective context.
+        createResponse: { id: "c1", agent_id: "a1", context: { tenant: "current-on-server" } },
+        onCreateBody: (body) => {
+          capturedBody = body;
+        },
+      }),
+    );
+
+    const { getByPlaceholderText, getByRole } = render(<ChatPage />);
+    const textarea = await waitFor(() =>
+      getByPlaceholderText((text) => text.startsWith("Message Agent One")),
+    );
+    // Never expand or touch the scope editor — send with it untouched.
+    fireEvent.change(textarea, { target: { value: "hello" } });
+    fireEvent.click(getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody).toEqual({ agent_id: "a1" }); // no `context` key at all
   });
 
   it("never renders for a hook-less agent (no instantiation.available), even after sending", async () => {
