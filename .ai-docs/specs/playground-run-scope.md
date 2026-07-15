@@ -332,3 +332,90 @@ Well-built. The redaction/context-echo/executor-derivation logic is straightforw
 - [`packages/agent-server/src/routes/conversations.ts`, `redactContext`] The shallow copy leaves nested object/array values under non-redacted keys shared by reference with what the hook received. Left as-is (the context contract is scalar identifiers at the top level, per Decision 3) and documented explicitly rather than silently relied upon.
 
 **Reviewed by:** reviewer agent (paired lens=quality) · 2026-07-15
+
+## Diff Review — Adherence (PR-2, dashboard)
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff feat/268-playground-run-scope...HEAD` (branch `feat/268-run-scope-dashboard`, PR #278, head `b1cc4ad`) — PR-2 scope, issue #268
+**Against:** this spec (§ Dashboard, PR-2 file-by-file, PR-2 test plan)
+**Verdict:** PASS_WITH_NOTES
+
+PR-2 is built as specified. All § Dashboard items — the scope chip, the composer-side context editor, the run-inspector context block, and the API-client/type additions — are present and verified against the spec's description. Two rulings, both non-blocking: (1) the § File-by-file plan named `api/types.ts` as the home for `AgentSummary`/`ConversationCreated`, but both actually live in `api/chat-client.ts` — ruled a spec placement error, not a builder deviation; the builder's actual placement is correct and consistent with the rest of that file. (2) The spec's "context resolved at first send" phrasing was checked against the implementation and found equal to conversation-creation time (conversation creation is lazy — deferred to the first send, not eager at chat-open) — Decision 2 (context fixed at creation, immutable per conversation) is honored end-to-end; no scope-drift path exists between "first send" and "creation." One gap found at initial review: several spec-named test assertions (the editor lock/reseed cycle across "New Chat," and the inspector's context-block render) were missing — added in the fix round (`a643721`).
+
+**Blockers (0):**
+- _None._
+
+**Notes (2):**
+- [`packages/agent-dashboard/src/api/types.ts` vs `chat-client.ts`] Spec file-plan error, not an implementation defect — `AgentSummary.instantiation` / `ConversationCreated.context` are correctly co-located with the rest of the create-conversation surface in `chat-client.ts`. No action; spec plan was wrong, code is right.
+- ["context resolved at first send" wording] Verified faithful to Decision 2 rather than a looser/laxer read — conversation creation (and therefore `instantiate` binding) is lazy, happening exactly once at the first send, not re-resolved per message. Recorded as a validated interpretation, not a deviation.
+
+**Nits (1):**
+- Spec-named test coverage (editor lock/reseed cycle around "New Chat"; run-inspector context-block render) was incomplete at first review pass — closed in the fix round (`a643721`) rather than left outstanding.
+
+**Reviewed by:** reviewer agent (paired lens=adherence) · 2026-07-15
+
+## Diff Review — Quality (PR-2, dashboard)
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff feat/268-playground-run-scope...HEAD` — PR #278, branch `feat/268-run-scope-dashboard`, code commit `b1cc4ad`
+**Against:** quality canvas (`.claude/canvases/quality-checks/categories.yaml`) — spec-blind
+**Verdict:** PASS_WITH_NOTES
+
+Zero blockers; three should-fix notes and three nits, all closed in the immediate follow-up commit (`a643721`).
+
+**Blockers (0):**
+- _None._
+
+**Notes (3) — all fixed in `a643721`:**
+1. The redaction indicator was inspector-only — a redacted context value was invisible while actively chatting and only surfaced after opening the run inspector. _Fix:_ the indicator now also renders on the live chat surface (the scope chip itself), not just the post-hoc inspector view.
+2. An untouched (never-edited) context editor sent whatever `instantiateDefaults` snapshot it fetched at mount time, risking a stale-defaults pin if the registration's defaults changed between mount and first send. _Fix:_ an untouched editor now OMITS the `context` key from the create request entirely — the server resolves current defaults itself, so there is no client-held snapshot to go stale.
+3. A same-frame double-create race: two rapid message sends could each independently trigger their own `POST /conversations` before the first had resolved — landing two conversations instead of one, and (now that create always runs `instantiate`) running the registration's hook twice for one user action. _Fix:_ a synchronous `creatingRef` closes the race — a second send joins the first's in-flight create instead of starting its own; the editor also locks the instant a create goes in flight (same fix, UI side).
+
+**Nits (3) — all fixed in `a643721`:**
+1. No truncation/overflow guard on the scope chip — a long context value could blow out the chat header's layout. _Fix:_ chip truncation + overflow guard added.
+2. The chip silently truncated past 2 context keys with no indication more existed. _Fix:_ a "+N" indicator now renders once the context has more than 2 keys.
+3. The collapsed context-editor panel gave no feedback on invalid JSON while collapsed, and the "(no scope)" chip state was interactive with nothing to expand into. _Fix:_ collapsed-panel invalid-JSON affordance added; the "(no scope)" chip is now non-interactive.
+
+**Reviewed by:** reviewer agent (paired lens=quality) · 2026-07-15
+
+## Diff Review — Adherence (PR-3, CLI)
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff feat/268-playground-run-scope...HEAD` (branch `feat/268-run-scope-cli`, PR #277, head `2cbb8d6`) — PR-3 scope, issue #268
+**Against:** this spec (§ CLI (`ap run`), PR-3 file-by-file, PR-3 test plan)
+**Verdict:** PASS (clean)
+
+PR-3 is built as specified, with no notes. Precedence resolution is exact — flag (`--context`) beats `AP_CONTEXT` env beats `instantiateDefaults`, with no partial merge across sources (the first source that resolves wins outright, never blended with a lower-priority one). Invalid JSON in the flag or env fails loud, structurally BEFORE the execution service is constructed — a malformed `--context`/`AP_CONTEXT` never reaches a partially-built runner. The declared-vs-delivered agent runner-selection path, and the delivered-instance binding it feeds, were verified faithful to Decision 1 (the delivered instance is the scope carrier; the runner is selected once and bound to whatever `instantiate` returns). `redactContextForDisplay` is a line-for-line mirror of the server's `redactContext` (same declared-keys-only, same `"[redacted]"` substitution, same structure-survives/value-dropped posture) — no drift between the two redaction implementations. `contextRedactKeys` parsing off the discovery wrapper is all-or-nothing (a malformed entry invalidates the whole list rather than partially applying it), with a negative fixture covering the reject path.
+
+**Blockers (0):**
+- _None._
+
+**Notes (0):**
+- _None._
+
+**Nits (2):**
+- `cli.ts`'s `--context` argument plumbing was implied by the spec's description but not itemized in the § File-by-file plan's line list. Faithful to intent; recorded as a plan-vs-actual delta only.
+- The spec's redaction description centers on the inline `[redacted]` substitution as the terminal, user-facing form; the underlying key-list (`contextRedactKeys`) is correctly treated as a programmatic/config concern rather than something CLI output needs to surface directly. Recorded as a clarifying nit, not a gap.
+
+**Reviewed by:** reviewer agent (paired lens=adherence) · 2026-07-15
+
+## Diff Review — Quality (PR-3, CLI)
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff feat/268-playground-run-scope...HEAD` — PR #277, branch `feat/268-run-scope-cli`, code commit `2cbb8d6`
+**Against:** quality canvas (`.claude/canvases/quality-checks/categories.yaml`) — spec-blind
+**Verdict:** PASS_WITH_NOTES
+
+Zero blockers. Confirmed clean on two fronts worth recording explicitly: no redacted-value leak path to stdout exists even on malformed input (verified live under both node 25 and bun 1.3.9), and the server-side PR-1 defaults-mutation bug (Gate 2.5 note 2 on PR-1) is NOT repeated here — the CLI does not hand a hook a live reference to shared defaults. One should-fix and one additional guard, both closed in the immediate follow-up commit (`2e81c9a`).
+
+**Blockers (0):**
+- _None._
+
+**Notes (2) — both fixed in `2e81c9a`:**
+1. A present-but-empty `AP_CONTEXT=""` hard-blocked every `ap run` for a hook-bearing registration (empty string is not valid JSON, so it failed the same loud pre-run validation as genuinely malformed input) — but an empty env var is operationally indistinguishable from "unset" in most shell/CI contexts, making this a footgun rather than a real validation catch. _Fix:_ a blank `AP_CONTEXT` is now normalized to absent before validation; demonstrated red-then-green with 3 dedicated seam tests.
+2. No structural guard existed for a contract-violating `instantiate` hook that returns a different structural kind than the registration declares (e.g. a promoted registration's hook returning a plain, non-`PromotedAgent` instance) — the failure mode was whatever incidental error the runner happened to throw downstream, not a clear diagnosis. _Fix:_ new `checkInstantiateKindMatch` fail-loud guard catches the mismatch at the seam and reports it directly (4 tests).
+
+**Nits (0):**
+- _None._
+
+**Reviewed by:** reviewer agent (paired lens=quality) · 2026-07-15
