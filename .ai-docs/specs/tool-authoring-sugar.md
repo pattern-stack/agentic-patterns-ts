@@ -690,3 +690,40 @@ Add three distinct CHANGELOG bullets—one each for `defineTool`, literal factor
 | PR-1 closes #43; PR-2 separable | PR slicing and linked child tracker defined above. |
 | No runtime/server/CLI implementation changes | Verified structural consumers; only core production code, docs, changelog, and root acceptance harness change. |
 | Non-goals remain out | No casing mapper, prose compression, or host-specific filter envelope work. |
+
+---
+
+## Diff Review — Adherence
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff main...HEAD` (branch `feat/tool-authoring-sugar`, PR #267, head `175f59a`)
+**Against:** `.ai-docs/specs/tool-authoring-sugar.md` (PR-1 scope)
+**Verdict:** PASS_WITH_NOTES
+
+PR-1 is built as specified. `defineTool`, `toolbox`, and `capability` match their API-design signatures verbatim, every named behavioral requirement is satisfied, all ~17 named test cases are present and green (365/365 core tests pass; `tsc --noEmit` is clean, so the `@ts-expect-error` and `expectTypeOf` acceptance criteria hold), the version bump is core-only 0.10.0→0.11.0 with no lockstep bump, and PR-2 items (linter, `tools/check-model-facing-schemas.ts`, linter docs) are correctly absent. Two documentation/hygiene notes, no blockers.
+
+Behavioral checklist (all confirmed against the diff):
+- No parameter re-parse (`toolbox.ts:141` forwards already-parsed `args`; test "does not reparse parameters" asserts count == 1). ✓
+- `ctx` forwarded by identity (`toolbox.ts:141`, `toolbox.ts:207`; test "forwards ToolExecutionContext by identity"). ✓
+- `terminal` passthrough with omission preserved (`toolbox.ts:158-160`; test asserts `"terminal" in plain === false`). ✓
+- No freeze of definition/toolbox record (`defineTool` returns a bare object; `toolbox()` retains the record by reference — `LiteralToolbox` copies the reference, no clone/freeze). ✓
+- `validateReturns` not exposed on `ToolDefinition` (test "returns a plain ToolDefinition" asserts exact key set). ✓
+- Async parse path (`safeParseAsync`, `toolbox.ts:146`; test "supports async return refinements"). ✓
+- Parsed `z.output` returned by default; verbatim under `validateReturns:false` (`toolbox.ts:142-155`; two dedicated tests). ✓
+- `Symbol.for` marker + tool-named rethrow with `ZodError` cause at `Toolbox.execute` (`toolbox.ts:92,205-214`; test asserts prefix + `cause instanceof z.ZodError`). ✓
+- `LiteralToolbox` private (not exported); `capability()` is a pure positional adapter matching the 5-arg constructor (`capability.ts:81-89` vs `capability.ts:27-40`). ✓
+- Barrel exports added (`index.ts`: `defineTool, toolbox`, `capability`). ✓
+- CHANGELOG: separate bullets for `defineTool`, `toolbox`, `capability`, docs. ✓
+- Authoring guide covers before/after/execution-contract/migration/non-goals; linting section correctly deferred to PR-2. ✓
+
+**Blockers (0):**
+- _None._
+
+**Notes (2):**
+- [`packages/agent-core/README.md:129`] The Playbook subsection still ships an invalid Capability constructor call — `new Capability("analysis", toolbox, manual, new AnalysisPlaybook())` passes a Toolbox where the 2nd arg is `description: string` and shifts every subsequent arg by one slot. The File-by-file plan (§ File-by-file change plan → `packages/agent-core/README.md`) and Correction #5 explicitly required "Correct the nearby Playbook/Capability constructor example while touching this section." The molecule example above it was fixed; this adjacent one re-ships the exact known-broken positional-shape pattern the spec set out to eliminate. Non-blocking (docs, not runtime), but an unfulfilled explicit file-plan line item. _Fix:_ update the snippet to `new Capability("analysis", "Analysis capability", toolbox, manual, new AnalysisPlaybook())` (or the `capability({...})` form).
+- [`bun.lock`] The lockfile refresh includes an unrelated `electron-to-chromium 1.5.389 → 1.5.391` transitive bump, beyond the spec's instruction to "Refresh only the core workspace version metadata in the lockfile" (§ File-by-file change plan → `package.json` and `bun.lock`). Harmless (browserslist data devDep transitive, not in core's published tree) but indicates the lockfile was regenerated rather than surgically edited. _Fix (optional):_ restore the single-package version delta if a clean lockfile is desired; otherwise accept as incidental drift.
+
+**Nits (1):**
+- [`packages/agent-core/src/molecules/toolbox.ts:145`] Comment reads `// parseAsync so async refinements/transforms in returns are supported.` but the code uses `safeParseAsync`. Functionally equivalent (and the safe form is arguably cleaner here since it avoids a try/catch to attach the marker), but the comment names a different method than the call.
+
+**Reviewed by:** reviewer agent · 2026-07-15T02:47:30Z
