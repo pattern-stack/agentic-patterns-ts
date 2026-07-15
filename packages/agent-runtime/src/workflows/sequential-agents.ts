@@ -19,8 +19,11 @@
  *    view instead (large payloads should live in slots its `onEmit` writes).
  *  - Because slots are run-scoped, the same sharing holds across `Loop`
  *    iterations for free: `Loop({ body: sequentialAgent([...]) })` re-enters
- *    with the pad intact. (Subagent teams — `delegateTo` — do NOT see the pad
- *    yet; opt-in sharing there is a declared follow-up.)
+ *    with the pad intact. Subagent teams — `delegateTo` — share the pad the
+ *    same way (#124, ratified in #269 / ADR 0003): each delegated call runs on
+ *    a FORK of the live caller's pad, so run-scoped slots are shared by
+ *    reference across the delegation while branch-scoped slots stay isolated
+ *    per call. join()/merge-back does not cross the seam (v2).
  *  - `output` (zod) per stage is OPTIONAL: structured stages emit through
  *    `runStructured`, bare stages take the raw-text path. Per-agent
  *    InputShape/OutputShape mapping across the sequence is a declared

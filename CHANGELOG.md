@@ -10,6 +10,37 @@
 
 - **agent-server**: Registrations that already declare an `instantiate` hook now have it run on EVERY conversation creation, and the conversation binds whatever it returns instead of the registration's declared `agent`. A hook that rejects now fails conversation creation with a `502` (previously `instantiate` was only reachable via the composition-preview lens and never affected chat). Registrations without an `instantiate` hook are unaffected — byte-identical create-response shape and executor derivation.
 
+## 0.27.1 (2026-07-15)
+
+### Bug Fixes
+
+- **agent-runtime**: `runStructured`'s tier-0 terminal short-circuit now tries two candidates in
+  order: the JSON-parsed value first, then the raw terminal string when the parsed value fails
+  schema validation. JSON-looking strings no longer trigger an unnecessary tier-2 pass (#273).
+
+## 0.27.0 (2026-07-15)
+
+### Features
+
+- **agent-runtime**: `runStructured` now short-circuits its 2-tier path when a terminal tool result
+  validates against the requested schema, using that result directly with no tier-2 model pass;
+  invalid terminal results retain the existing tier-2 fallback. This avoids lossy tier-2
+  re-conversion of already-structured downstream results (#269 addendum).
+
+### Bug Fixes
+
+- **agent-runtime**: MockRunner now builds and passes a `ToolExecutionContext` (`runId`, `traceId`,
+  `parentToolCallId`, `host`) at both tool-dispatch sites, exercising the same #124
+  host-passthrough seam as the live runner — no-LLM tests can now observe `delegateTo` pad sharing
+  (#269).
+
+### Documentation
+
+- **agent-runtime**: Retired the stale "subagent teams do NOT see the pad" claim from
+  `sequentialAgent`'s docs (stale since #124); the actual contract — run-scoped slots shared by
+  reference through the delegation fork, branch-scoped isolated, no join across the seam — is
+  documented and pinned by a regression suite, and ratified as the default in ADR 0003 (#269).
+
 ## core 0.12.0 (2026-07-15)
 
 ### Features

@@ -190,10 +190,14 @@ const coordinator = delegateTo(runner, [dataAgent, dealResolver, answerAgent]); 
 await coordinator.run(input, { runner, scratchpad });   // ← scratchpad now reaches every subagent
 ```
 
-Today that requires threading `scratchpad` into `delegateTo(…, { scratchpad })` by hand (and even
-then it's captured, not inherited). #99 makes it ambient.
+Since #124 this is ambient: run the top node with a scratchpad and it flows to every subagent with
+no hand-threading. The #269 `delegateTo` regression suite pins that behavior on both the MockRunner
+and live AgentRunner rails.
 
 ### Tests to add
+
+Implemented in `packages/agent-runtime/src/workflows/__tests__/host-propagation.test.ts` (#124) and
+`packages/agent-runtime/src/workflows/__tests__/delegate-pad-sharing.test.ts` (#269):
 
 - Coordinator writes a run-scoped slot, delegates to a subagent that reads it → subagent sees the
   value.

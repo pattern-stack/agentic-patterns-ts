@@ -992,31 +992,56 @@ export class AgentRunner implements RunnerProtocol {
       toolCallsCount = tier1.toolCallsCount;
       iterations = tier1.iterations;
 
-      // Guard: if tier 1 produced no text (e.g. its tool loop hit maxIterations),
-      // the structured finish would get an empty body and throw an opaque schema
-      // error. Surface the real cause instead.
-      if (!tier1.response || tier1.response.trim() === "") {
-        throw new Error(
-          `runStructured: 2-tier fallback got empty tier-1 output (finishReason="${tier1.finishReason}") — the tool loop likely hit maxIterations before producing an answer. Raise maxIterations or simplify the step.`,
-        );
+      let acceptedTerminalResult = false;
+      if (tier1.finishReason === "terminal_tool") {
+        // A schema-valid terminal result IS the structured output; tier 2 is
+        // the fallback, not a re-normalizer. Try the JSON-parsed candidate
+        // first, then the raw string if parsing succeeded but validation fails.
+        let candidate: unknown = tier1.response;
+        try {
+          candidate = JSON.parse(tier1.response);
+        } catch {
+          // The terminal result was a plain string; validate it verbatim.
+        }
+        let candidateResult = schema.safeParse(candidate);
+        if (!candidateResult.success && candidate !== tier1.response) {
+          candidate = tier1.response;
+          candidateResult = schema.safeParse(candidate);
+        }
+        if (candidateResult.success) {
+          rawObject = candidate;
+          finishReason = "terminal_tool";
+          acceptedTerminalResult = true;
+        }
       }
 
-      const tier2 = await generateText({
-        model,
-        system,
-        messages: [
-          {
-            role: "user" as const,
-            content: `From the following, produce the structured object.\n\n${tier1.response}`,
-          },
-        ],
-        experimental_output: Output.object({ schema }),
-      });
-      totalInputTokens += tier2.usage?.inputTokens ?? 0;
-      totalOutputTokens += tier2.usage?.outputTokens ?? 0;
-      iterations += 1;
-      finishReason = tier2.finishReason ?? "stop";
-      rawObject = tier2.experimental_output;
+      if (!acceptedTerminalResult) {
+        // Guard: if tier 1 produced no text (e.g. its tool loop hit maxIterations),
+        // the structured finish would get an empty body and throw an opaque schema
+        // error. Surface the real cause instead.
+        if (!tier1.response || tier1.response.trim() === "") {
+          throw new Error(
+            `runStructured: 2-tier fallback got empty tier-1 output (finishReason="${tier1.finishReason}") — the tool loop likely hit maxIterations before producing an answer. Raise maxIterations or simplify the step.`,
+          );
+        }
+
+        const tier2 = await generateText({
+          model,
+          system,
+          messages: [
+            {
+              role: "user" as const,
+              content: `From the following, produce the structured object.\n\n${tier1.response}`,
+            },
+          ],
+          experimental_output: Output.object({ schema }),
+        });
+        totalInputTokens += tier2.usage?.inputTokens ?? 0;
+        totalOutputTokens += tier2.usage?.outputTokens ?? 0;
+        iterations += 1;
+        finishReason = tier2.finishReason ?? "stop";
+        rawObject = tier2.experimental_output;
+      }
     }
 
     // Validate against the caller's schema — never trust the model's shape.

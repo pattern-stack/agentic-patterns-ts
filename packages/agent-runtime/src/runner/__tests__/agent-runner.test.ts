@@ -884,6 +884,127 @@ describe("AgentRunner", () => {
       expect(result.response).toBe(JSON.stringify({ facets: 3, gaps: 0 }));
     });
 
+    it("T6 — runStructured uses a schema-valid terminal result without a tier-2 pass", async () => {
+      const terminalResult = {
+        summary: "covered 3 facets",
+        citationKeys: ["observation:5"],
+      };
+      const outputSchema = z.object({
+        summary: z.string(),
+        citationKeys: z.array(z.string()),
+      });
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          return toolCallResult(
+            { toolCallId: "tc-t6", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          );
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => terminalResult);
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "Gather", outputSchema, {
+        toolExecutor: executor,
+      });
+
+      expect(llmCalls).toBe(1);
+      expect(result.object).toEqual(terminalResult);
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.inputTokens).toBe(20);
+      expect(result.outputTokens).toBe(10);
+      expect(result.iterations).toBe(1);
+    });
+
+    it("T7 — runStructured falls back to tier 2 when the terminal result is invalid", async () => {
+      const tier2Result = { summary: "normalized by tier 2" };
+      const outputSchema = z.object({ summary: z.string() });
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          if (llmCalls === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-t7", toolName: "finish", input: { summary: "done" } },
+              20,
+              10,
+            );
+          }
+          return textResult(JSON.stringify(tier2Result), 30, 15);
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => ({ summary: 42 }));
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "Gather", outputSchema, {
+        toolExecutor: executor,
+      });
+
+      expect(llmCalls).toBe(2);
+      expect(result.object).toEqual(tier2Result);
+      expect(result.inputTokens).toBe(50);
+      expect(result.outputTokens).toBe(25);
+      expect(result.iterations).toBe(2);
+    });
+
+    it("T8a — accepts a JSON-looking terminal string as the raw candidate", async () => {
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          return toolCallResult(
+            { toolCallId: "tc-t8a", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          );
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => "42");
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "Gather", z.string(), {
+        toolExecutor: executor,
+      });
+
+      expect(llmCalls).toBe(1);
+      expect(result.object).toBe("42");
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.inputTokens).toBe(20);
+      expect(result.outputTokens).toBe(10);
+    });
+
+    it("T8b — accepts a stringified object through the parsed candidate", async () => {
+      const terminalResult = { summary: "done" };
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          return toolCallResult(
+            { toolCallId: "tc-t8b", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          );
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => JSON.stringify(terminalResult));
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "Gather", finishSchema, {
+        toolExecutor: executor,
+      });
+
+      expect(llmCalls).toBe(1);
+      expect(result.object).toEqual(terminalResult);
+      expect(result.finishReason).toBe("terminal_tool");
+    });
+
     it("does NOT terminate on an errored terminal call — the model sees the error and corrects", async () => {
       let llmCalls = 0;
       const model = new MockLanguageModelV2({
