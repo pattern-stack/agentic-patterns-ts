@@ -148,6 +148,60 @@ function whoAmIStreamingRunner(): AgentRegistration["runner"] {
   };
 }
 
+/**
+ * A streaming runner that fails mid-run — reproduces the exact shape
+ * `Conversation.stream()` produces for a genuine runner/tool error: publish
+ * `message.start`, publish a non-recoverable `agent.error` (so
+ * `RunStoreExporter` finalizes the row as `status: 'error'`), THEN throw.
+ * `Conversation.stream()` catches that throw, yields `agent.conversation.end`,
+ * and re-throws — so the ROUTE's `for await` loop also throws, after the row
+ * is already finalized. This is the repro for Gate 2.5 quality note 1.
+ *
+ * The error path never reaches the route's `done` SSE frame (that write sits
+ * after the loop, which threw) — so the client-visible stream carries no
+ * `run_id`. `capture`, when passed, receives the minted runId directly so a
+ * test can look up the finalized row without depending on that frame.
+ */
+function erroringStreamingRunner(capture?: { runId?: string }): AgentRegistration["runner"] {
+  return {
+    async run(): Promise<RunResult> {
+      throw new Error("unused — Conversation.stream() drives .stream(), never .run()");
+    },
+    async *stream(
+      agent: AgentLike,
+      _message: string,
+      opts?: RunOptions,
+    ): AsyncGenerator<AgentEvent> {
+      const traceId = opts?.traceId ?? `trace-${Math.random().toString(36).slice(2)}`;
+      const runId = opts?.runId ?? `run-${Math.random().toString(36).slice(2)}`;
+      if (capture) capture.runId = runId;
+      const bus = opts?.eventBus;
+
+      const startEvent = createEvent("agent.message.start", {
+        traceId,
+        runId,
+        agentName: agent.role.name,
+      });
+      if (bus) await bus.publish(startEvent);
+      yield startEvent;
+
+      const errorMessage = "boom — tool exploded mid-run";
+      const errorEvent = createEvent("agent.error", {
+        traceId,
+        runId,
+        errorType: "Error",
+        message: errorMessage,
+        recoverable: false,
+        context: {},
+      });
+      if (bus) await bus.publish(errorEvent);
+      yield errorEvent;
+
+      throw new Error(errorMessage);
+    },
+  };
+}
+
 function stubAdminService(): ServerConfig["adminService"] {
   return {
     async getDashboardStats() {
@@ -364,6 +418,49 @@ describe("create response echoes the effective context (test 3)", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as { context: unknown };
     expect(body.context).toBeNull();
+  });
+
+  it("a hook that mutates its received context does not corrupt instantiateDefaults for later conversations (Gate 2.5 note 2)", async () => {
+    // A hook receiving `reg.instantiateDefaults` BY REFERENCE could mutate the
+    // shared object; the route must hand it a defensive shallow copy instead.
+    // Record what each invocation OBSERVED (before it mutates) — the
+    // discriminating signal: pre-fix, call 2 would observe call 1's
+    // mutation ("MUTATED") because both calls shared one object; post-fix,
+    // every call observes the pristine default.
+    const observedTenants: unknown[] = [];
+    const mutatingRegistration: AgentRegistration = {
+      id: "mutating",
+      name: "Mutating",
+      agent: agentForTenant("declared"),
+      instantiate: async (ctx) => {
+        observedTenants.push(ctx?.tenant);
+        if (ctx) {
+          (ctx as Record<string, unknown>).tenant = "MUTATED";
+        }
+        return agentForTenant((ctx?.tenant as string) ?? "default");
+      },
+      instantiateDefaults: { tenant: "default-tenant" },
+      runner: new MockRunner(),
+    };
+    const app = createServer(makeConfig([mutatingRegistration]));
+
+    const first = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "mutating" }),
+    });
+    expect(first.status).toBe(201);
+
+    const second = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "mutating" }),
+    });
+    expect(second.status).toBe(201);
+
+    expect(observedTenants).toEqual(["default-tenant", "default-tenant"]);
+    // The shared registration object itself is never touched.
+    expect(mutatingRegistration.instantiateDefaults).toEqual({ tenant: "default-tenant" });
   });
 });
 
@@ -589,6 +686,67 @@ describe("run metadata is stamped post-drain (test 7)", () => {
       run: { metadata: Record<string, unknown> | null };
     };
     expect(run2.metadata?.context).toEqual({ tenant: "acme" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gate 2.5 quality note 1 — errored/disconnected runs still get stamped
+// ---------------------------------------------------------------------------
+
+describe("run metadata is stamped even when the turn errors mid-run (Gate 2.5 note 1)", () => {
+  let store: RunStore;
+
+  afterEach(() => {
+    store?.close();
+  });
+
+  it("a throwing runner still leaves an error-status run row with metadata.context stamped", async () => {
+    store = new RunStore({ path: ":memory:", Database });
+    const eventBus = new AgentEventBus();
+    new RunStoreExporter({ store }).attach(eventBus);
+
+    const capture: { runId?: string } = {};
+    const registration: AgentRegistration = {
+      id: "erroring-agent",
+      name: "Erroring Agent",
+      agent: agentForTenant("declared-should-never-run"),
+      instantiate: async (ctx) => agentForTenant((ctx?.tenant as string) ?? "default"),
+      runner: erroringStreamingRunner(capture),
+    };
+    const app = createServer(makeConfig([registration], { eventBus, runStore: store }));
+
+    const createRes = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "erroring-agent", context: { tenant: "acme" } }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as { id: string; context: Record<string, unknown> };
+    expect(created.context).toEqual({ tenant: "acme" });
+
+    // Headers commit as soon as streamSSE starts (200), even though the
+    // callback throws partway through — draining the (short) body is what
+    // lets the route's `finally` actually run and complete before we assert.
+    const msgRes = await app.request(`/conversations/${created.id}/messages`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ content: "who are you?" }),
+    });
+    expect(msgRes.status).toBe(200);
+    await msgRes.text();
+
+    const runId = capture.runId;
+    expect(runId).toBeDefined();
+
+    const runRes = await app.request(`/admin/runs/${runId}`);
+    expect(runRes.status).toBe(200);
+    const { run } = (await runRes.json()) as {
+      run: { status: string; metadata: Record<string, unknown> | null };
+    };
+    // The row is finalized as errored (RunStoreExporter._onError) …
+    expect(run.status).toBe("error");
+    // … AND still carries the context stamp — the actual gap Fix 1 closes.
+    expect(run.metadata?.context).toEqual({ tenant: "acme" });
   });
 });
 

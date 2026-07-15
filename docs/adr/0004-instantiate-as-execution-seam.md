@@ -97,11 +97,19 @@ constructed CLI-side — the conversation's context is server-side route state
 the event never carries. Rather than growing the event vocabulary (and the
 SSE wire) to thread context through, `POST /conversations/:id/messages`
 stamps it directly via a new narrow `RunStore.updateRunMetadata(runId, patch)`
-(shallow JSON merge, `UPDATE runs SET metadata = ?`), called **after** the SSE
-drain loop completes — by that point `RunStoreExporter` (subscribed on the
-same event bus) has necessarily already opened and finalized the row, so the
-stamp can never race row creation. Best-effort: a store failure is logged,
-never surfaced to the stream.
+(shallow JSON merge, `UPDATE runs SET metadata = ?`), called from a `finally`
+wrapping the SSE drain loop — **for both a successful turn and an errored or
+disconnected one**. It is not merely a post-success step: when a turn errors
+mid-run, `Conversation.stream` yields `agent.conversation.end` and then
+RE-THROWS, so a stamp placed only after the drain loop (inside `try`) would
+never run for exactly the runs an operator most needs to inspect — same for a
+client disconnect (`stream.writeSSE` rejecting mid-loop). By the time
+`finally` runs, `RunStoreExporter` (subscribed on the same event bus) has
+necessarily already opened, and — for a clean or errored finish — finalized
+the row; `updateRunMetadata` is status-independent (it stamps a still-running
+row identically to a finalized one), so the stamp can never race row creation
+and always lands, whatever the turn's outcome. Best-effort: a store failure is
+logged, never allowed to shadow the stream/generator's own outcome.
 
 ### Rejected alternatives
 

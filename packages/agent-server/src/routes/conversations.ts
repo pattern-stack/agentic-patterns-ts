@@ -88,8 +88,17 @@ export function conversationRoutes(
       // No explicit context → compose with the registration's declared
       // defaults, so the echoed `context` always states what `instantiate`
       // actually received (mirror composition.ts:744-745).
+      //
+      // Shallow-copy the defaults before handing them to the hook —
+      // `reg.instantiateDefaults` is ONE shared object across every
+      // conversation this registration ever creates; a hook that mutates its
+      // `context` argument (even just top-level keys) would otherwise
+      // corrupt defaults for every later conversation. `undefined` (no
+      // defaults declared) is preserved as-is so the hook-contract
+      // distinction between "no defaults" and "empty object" survives.
       effectiveContext =
-        (rawContext as Record<string, unknown> | undefined) ?? reg.instantiateDefaults;
+        (rawContext as Record<string, unknown> | undefined) ??
+        (reg.instantiateDefaults ? { ...reg.instantiateDefaults } : undefined);
       try {
         agentToBind = await reg.instantiate(effectiveContext);
       } catch (err) {
@@ -320,13 +329,26 @@ export function conversationRoutes(
           }
         }
 
+        await stream.writeSSE({
+          event: "done",
+          data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
+        });
+      } finally {
         // Run-metadata stamp (#268) — the redacted effective context this
-        // conversation is bound to, written onto the turn's run row AFTER the
-        // drain loop: by this point `RunStoreExporter` (subscribed on the same
-        // `eventBus`) has necessarily already opened AND finalized the row
-        // (its `agent.message.start`/`.complete` events preceded this line).
-        // Best-effort: a store failure is logged, never surfaced to the
-        // stream — matches the exporter's own failure posture.
+        // conversation is bound to, written onto the turn's run row. Lives in
+        // `finally`, NOT after the drain loop inside `try`: when a turn
+        // errors mid-run, `Conversation.stream` yields `conversation.end`
+        // then RE-THROWS, so the `for await` above throws too and a
+        // try-scoped stamp would never run — exactly the runs an operator
+        // most needs to inspect. Same for a client disconnect
+        // (`stream.writeSSE` rejects mid-loop). `updateRunMetadata` is a
+        // local DB write independent of the broken stream/generator and
+        // status-independent (it stamps a still-`running` row the same as a
+        // finalized one, see its doc comment) — it lands on whatever the row
+        // ended up as, success or error, as long as `agent.message.start`
+        // was ever observed (`turnRunId` set). Best-effort: a store failure
+        // is logged, never allowed to shadow whatever this `finally` is
+        // unwinding from — matches the exporter's own failure posture.
         if (runStore && turnRunId !== undefined && entry.context !== undefined) {
           try {
             runStore.updateRunMetadata(turnRunId, {
@@ -338,11 +360,6 @@ export function conversationRoutes(
           }
         }
 
-        await stream.writeSSE({
-          event: "done",
-          data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
-        });
-      } finally {
         eventBus.unsubscribe("agent.input.request", onInputRequest);
         // Fail closed: if the client disconnects mid-approval, deny any of THIS
         // turn's still-pending requests so the blocked gate resolves (deny)
@@ -426,6 +443,13 @@ function notConfigured(c: Context): Response {
  * Decision 3) — the innate-scratchpad-read posture (`conversation.ts`'s
  * `preview_redacted`): structure survives, value dropped, never silent.
  * `undefined` context, no declared keys, or none of them present → passthrough.
+ *
+ * Shallow only: the copy is top-level, so a nested object/array VALUE under a
+ * non-redacted key is still shared by reference with whatever the hook
+ * received. Deliberate, not an oversight — the context contract (Decision 3
+ * "context carries identifiers, not credentials") is scalar identifiers at
+ * the top level; nested structures are outside that contract's redaction
+ * guarantee.
  */
 function redactContext(
   context: Record<string, unknown> | undefined,

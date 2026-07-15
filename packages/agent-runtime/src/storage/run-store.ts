@@ -254,6 +254,11 @@ export class RunStore extends EventStore {
   updateRunMetadata(runId: string, patch: Record<string, unknown>): boolean {
     const row = this._getRunMetadataStmt.get(runId) as { metadata: string | null } | undefined;
     if (!row) return false;
+    // `?? {}` covers both NULL (no metadata at startRun) and a would-be
+    // corrupt/non-object JSON parse — deliberate: this column is written
+    // ONLY by this class (JSON.stringify of a plain object, always), so a
+    // non-object parse can't happen from a row this store produced. Treating
+    // it as "start fresh" rather than throwing keeps the merge total.
     const existing = parseJsonRecord(row.metadata) ?? {};
     const merged = { ...existing, ...patch };
     this._updateRunMetadataStmt.run(JSON.stringify(merged), runId);
