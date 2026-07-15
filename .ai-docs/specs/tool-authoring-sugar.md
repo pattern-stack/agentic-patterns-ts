@@ -781,3 +781,25 @@ Adherence checklist (all confirmed against the diff + a live build/test/sweep ru
 - [`CHANGELOG.md:11`] The changelog adds a second bullet (`repo`: the `tools/check-model-facing-schemas.ts` sweep + `check` wiring) beyond the single linter bullet the § File-by-file § PR-2 CHANGELOG line itemized. Beneficial and consistent with the spec's "keep the pieces independently discoverable" philosophy — noted only for completeness, not as a defect.
 
 **Reviewed by:** reviewer agent · 2026-07-15T13:47:53Z
+
+## Diff Review — Quality
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff main...HEAD` — PR #270, branch `feat/model-facing-schema-lint` (code commit `3d1a3a5`; worktree HEAD `a5797cf` adds only the adherence phase-log and touches none of the reviewed source)
+**Against:** quality canvas (`.claude/canvases/quality-checks/categories.yaml`)
+**Verdict:** PASS_WITH_NOTES
+
+Spec-blind quality pass over the six PR-2 source/doc files. The linter is a pure, well-factored structural walker: no vendor/runtime imports, no mutation, never throws for a finding, version-tolerant across Zod 3/4, and covered by 26 passing unit tests (killer constructs, cycle termination, dedup, DFS ordering, reused nodes, wrapper/union/intersection paths, plus a `zod/v4` mirror). Verified against the actual code: the `check:model-facing-schemas` script **is** wired into the root `check` pipeline (`package.json`), the cited `schema-guard.ts` mirror exists, and every symbol the sweep imports resolves through the core/runtime barrels. No blockers.
+
+**Blockers (0):**
+- _None._
+
+**Notes (2):**
+- [`packages/agent-core/src/molecules/model-facing-schema-lint.ts:431`] _(category: convenient_fallback)_ The `lazy` branch's `} catch { return; }` silently swallows an un-inspectable getter and adds no finding, so a `z.lazy()` whose getter throws passes the linter as **clean** — for a CI gate, a false negative that "looks like success." Frequency is low (a no-arg lazy getter rarely throws), but the swallow is invisible to the operator. _Fix:_ emit a `warning`-severity finding (e.g. an `unresolvable-lazy` code, or reuse `recursive-lazy` messaging) for a getter that throws, rather than skipping silently — so the un-inspected node surfaces instead of being reported as passing.
+- [`packages/agent-core/src/molecules/model-facing-schema-lint.ts:83` ↔ `packages/agent-runtime/src/runner/schema-guard.ts:30`] The version-tolerant Zod def-access helpers (`getDef`, `kindOf`, the `slice(3).toLowerCase()` typeName normalization) are duplicated near-verbatim across core and runtime; the file header acknowledges the mirror but nothing keeps the two in sync as Zod evolves (a Zod 5 `_def` change would need fixing in two places). This is **not** a `convention_workaround` — core cannot import runtime, so the layering is respected — but the dependency direction permits the DRY fix: hoist these primitives into a shared core util and have runtime's `schema-guard.ts` import them (runtime→core is allowed). _Follow-up, not gate-blocking._
+
+**Nits (2):**
+- [`packages/agent-core/src/molecules/model-facing-schema-lint.ts:174`] The wrapper-unwrap loop bound `2000` is a bare literal (with an explanatory comment); a named `const MAX_WRAPPER_DEPTH = 2000` would self-document the intent and be greppable. Single occurrence, so not a canvas `magic_constants` violation — taste-level only.
+- [`packages/agent-core/src/molecules/model-facing-schema-lint.ts:329`] `handleObjectProperty` computes `unwrap(propSchema)` and then calls `walkNode(propSchema, …)`, which re-`unwrap`s the same node — a redundant unwrap on every object property. Cheap (the unwrap is a short bounded loop), but threading the already-computed `Unwrapped` into `walkNode` would avoid the double pass.
+
+**Reviewed by:** reviewer agent · 2026-07-15T13:54:49Z
