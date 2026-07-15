@@ -952,6 +952,59 @@ describe("AgentRunner", () => {
       expect(result.iterations).toBe(2);
     });
 
+    it("T8a — accepts a JSON-looking terminal string as the raw candidate", async () => {
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          return toolCallResult(
+            { toolCallId: "tc-t8a", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          );
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => "42");
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "Gather", z.string(), {
+        toolExecutor: executor,
+      });
+
+      expect(llmCalls).toBe(1);
+      expect(result.object).toBe("42");
+      expect(result.finishReason).toBe("terminal_tool");
+      expect(result.inputTokens).toBe(20);
+      expect(result.outputTokens).toBe(10);
+    });
+
+    it("T8b — accepts a stringified object through the parsed candidate", async () => {
+      const terminalResult = { summary: "done" };
+      let llmCalls = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          llmCalls++;
+          return toolCallResult(
+            { toolCallId: "tc-t8b", toolName: "finish", input: { summary: "done" } },
+            20,
+            10,
+          );
+        },
+      });
+      const agent = makeAgent({ getTools: () => [finishTool] });
+      const executor = makeToolExecutor(async () => JSON.stringify(terminalResult));
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "Gather", finishSchema, {
+        toolExecutor: executor,
+      });
+
+      expect(llmCalls).toBe(1);
+      expect(result.object).toEqual(terminalResult);
+      expect(result.finishReason).toBe("terminal_tool");
+    });
+
     it("does NOT terminate on an errored terminal call — the model sees the error and corrects", async () => {
       let llmCalls = 0;
       const model = new MockLanguageModelV2({
