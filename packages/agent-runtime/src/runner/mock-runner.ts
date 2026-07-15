@@ -3,6 +3,7 @@
  *
  * Pattern-based response routing with tool call simulation and event emission.
  * Implements RunnerProtocol for drop-in testing.
+ * Tool dispatch threads the same ToolExecutionContext seam as the live runner (#269).
  */
 
 import { generateId } from "ai";
@@ -124,8 +125,15 @@ export class MockRunner implements RunnerProtocol {
     let toolCallsCount = 0;
     if (matched.toolCalls) {
       if (options?.toolExecutor) {
+        const traceId = options.traceId ?? generateId();
+        const runId = generateId();
         for (const tc of matched.toolCalls) {
-          await options.toolExecutor.execute(tc.name, tc.arguments);
+          await options.toolExecutor.execute(tc.name, tc.arguments, {
+            runId,
+            traceId,
+            parentToolCallId: generateId(),
+            host: options.host,
+          });
           toolCallsCount++;
         }
       } else {
@@ -258,7 +266,12 @@ export class MockRunner implements RunnerProtocol {
         let error: string | undefined;
         if (options?.toolExecutor) {
           try {
-            result = await options.toolExecutor.execute(tc.name, tc.arguments);
+            result = await options.toolExecutor.execute(tc.name, tc.arguments, {
+              runId,
+              traceId,
+              parentToolCallId: toolCallId,
+              host: options.host,
+            });
           } catch (e) {
             error = e instanceof Error ? e.message : String(e);
           }

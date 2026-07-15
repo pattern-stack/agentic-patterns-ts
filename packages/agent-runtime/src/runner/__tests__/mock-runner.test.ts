@@ -1,5 +1,6 @@
+import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentEvent } from "../../events/types.js";
+import type { AgentEvent, ToolCallEndEvent, ToolCallStartEvent } from "../../events/types.js";
 import { MockRunner } from "../mock-runner.js";
 import type { ToolExecutor } from "../types.js";
 
@@ -154,8 +155,8 @@ describe("MockRunner", () => {
 
     expect(result.toolCallsCount).toBe(2);
     expect(executor.execute).toHaveBeenCalledTimes(2);
-    expect(executor.execute).toHaveBeenCalledWith("search", { query: "test" });
-    expect(executor.execute).toHaveBeenCalledWith("save", { data: "x" });
+    expect(executor.execute).toHaveBeenCalledWith("search", { query: "test" }, expect.anything());
+    expect(executor.execute).toHaveBeenCalledWith("save", { data: "x" }, expect.anything());
   });
 
   it("should count tool calls without toolExecutor", async () => {
@@ -176,6 +177,127 @@ describe("MockRunner", () => {
     const result = await runner.run(makeAgent(), "test");
     expect(result.iterations).toBe(1);
     expect(result.finishReason).toBe("stop");
+  });
+
+  describe("ToolExecutionContext threading (#269)", () => {
+    it("run() relays host and traceId while sharing runId across distinct tool-call parents", async () => {
+      const contexts: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: vi.fn(async (_name, _args, ctx) => {
+          contexts.push(ctx!);
+          return "ok";
+        }),
+      };
+      const host = { marker: "host" };
+      const runner = new MockRunner().addResponse("*", {
+        content: "done",
+        toolCalls: [
+          { name: "first", arguments: {} },
+          { name: "second", arguments: {} },
+        ],
+      });
+
+      await runner.run(makeAgent(), "test", {
+        toolExecutor: executor,
+        host,
+        traceId: "caller-trace",
+      });
+
+      expect(contexts).toHaveLength(2);
+      const first = contexts[0]!;
+      const second = contexts[1]!;
+      expect(first.host).toBe(host);
+      expect(second.host).toBe(host);
+      expect(first.traceId).toBe("caller-trace");
+      expect(second.traceId).toBe("caller-trace");
+      expect(first.runId).toEqual(expect.stringMatching(/.+/));
+      expect(second.runId).toBe(first.runId);
+      expect(first.parentToolCallId).toEqual(expect.stringMatching(/.+/));
+      expect(second.parentToolCallId).toEqual(expect.stringMatching(/.+/));
+      expect(second.parentToolCallId).not.toBe(first.parentToolCallId);
+    });
+
+    it("run() passes a context with an undefined host when no host was supplied", async () => {
+      let captured: ToolExecutionContext | undefined;
+      const executor: ToolExecutor = {
+        execute: vi.fn(async (_name, _args, ctx) => {
+          captured = ctx;
+          return "ok";
+        }),
+      };
+      const runner = new MockRunner().addResponse("*", {
+        content: "done",
+        toolCalls: [{ name: "probe", arguments: {} }],
+      });
+
+      await runner.run(makeAgent(), "test", { toolExecutor: executor });
+
+      expect(captured).toBeDefined();
+      expect(captured?.host).toBeUndefined();
+      expect(captured?.runId).toEqual(expect.stringMatching(/.+/));
+      expect(captured?.traceId).toEqual(expect.stringMatching(/.+/));
+      expect(captured?.parentToolCallId).toEqual(expect.stringMatching(/.+/));
+    });
+
+    it("stream() uses the yielded toolCallId as parentToolCallId and relays host", async () => {
+      let captured: ToolExecutionContext | undefined;
+      const executor: ToolExecutor = {
+        execute: vi.fn(async (_name, _args, ctx) => {
+          captured = ctx;
+          return "ok";
+        }),
+      };
+      const host = { marker: "stream-host" };
+      const runner = new MockRunner().addResponse("*", {
+        content: "done",
+        toolCalls: [{ name: "probe", arguments: {} }],
+      });
+
+      const events = await collectEvents(
+        runner.stream(makeAgent(), "test", { toolExecutor: executor, host }),
+      );
+      const start = events.find((event) => event.type === "agent.tool.start") as
+        | ToolCallStartEvent
+        | undefined;
+
+      expect(start).toBeDefined();
+      expect(captured?.parentToolCallId).toBe(start?.toolCallId);
+      expect(captured?.host).toBe(host);
+    });
+
+    it("keeps the no-executor run path unchanged", async () => {
+      const runner = new MockRunner().addResponse("*", {
+        content: "done",
+        toolCalls: [
+          { name: "first", arguments: {} },
+          { name: "second", arguments: {} },
+        ],
+      });
+
+      const result = await runner.run(makeAgent(), "test");
+
+      expect(result.toolCallsCount).toBe(2);
+    });
+
+    it("keeps stream() executor errors captured on the tool-end event", async () => {
+      const executor: ToolExecutor = {
+        execute: vi.fn().mockRejectedValue(new Error("tool failed")),
+      };
+      const runner = new MockRunner().addResponse("*", {
+        content: "done",
+        toolCalls: [{ name: "probe", arguments: {} }],
+      });
+
+      const events = await collectEvents(
+        runner.stream(makeAgent(), "test", { toolExecutor: executor }),
+      );
+      const end = events.find((event) => event.type === "agent.tool.end") as
+        | ToolCallEndEvent
+        | undefined;
+
+      expect(end?.error).toBe("tool failed");
+      expect(events.some((event) => event.type === "agent.message.complete")).toBe(true);
+    });
   });
 
   // -------------------------------------------------------------------------
