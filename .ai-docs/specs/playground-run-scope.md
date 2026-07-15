@@ -136,7 +136,8 @@ POST /conversations
   → 400  context present but registration has no instantiate hook
   → 404  agent not found (unchanged)
   → 502  instantiate rejected ("instantiate failed: <msg>" grammar)
-  → 201  { id, agent_id, context: <redacted effective context> | null }
+  → 201  hook-less registration: { id, agent_id } — byte-identical to before this feature, `context` key OMITTED entirely
+  → 201  hook-bearing registration: { id, agent_id, context: <redacted effective context> | null, context_redacted?: string[] }
 ```
 
 Behavior: `effectiveContext = context ?? reg.instantiateDefaults` (mirror [composition.ts:744](/Users/dug/Projects/dug/agentic-patterns-ts/packages/agent-server/src/routes/composition.ts:744)); if `reg.instantiate` exists, `agentToBind = await reg.instantiate(effectiveContext)`, else `agentToBind = reg.agent`. `deriveToolboxExecutor(agentToBind)` — the delivered instance's tools, not the declared one's ([conversations.ts:67](/Users/dug/Projects/dug/agentic-patterns-ts/packages/agent-server/src/routes/conversations.ts:67) moves to the bound agent). `ConversationEntry` gains `context?: Record<string, unknown>` (the redacted effective form; `undefined` when no hook).
@@ -288,3 +289,46 @@ Each PR: `bun run check` plus the touched package's `bun run --filter=<pkg> test
 | Editing context + new conversation demonstrably changes tool behavior | Per-conversation `instantiate` binding + executor from delivered instance (PR-1, tests 1–2); editor + New Chat flow (PR-2). |
 | Run detail (API + inspector) shows the redacted context the run executed under | `updateRunMetadata` stamp post-drain → `RunRow.metadata.context` on `/admin/runs/:id` (PR-1, tests 7–8); inspector block (PR-2). |
 | Agents without `instantiate` unaffected; existing conversations unaffected | Hook-less path byte-identical (test 4); in-flight conversations predate the field and simply have no `context`. |
+
+## Diff Review — Adherence
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff main...HEAD` (branch `feat/268-playground-run-scope`, PR #276, head `ee8fb94`) — PR-1 scope, issue #268
+**Against:** this spec (PR-1: § Design decisions, § API design, § File-by-file change plan § PR-1, § Test plan § PR-1)
+**Verdict:** PASS_WITH_NOTES
+
+PR-1 is built as specified. `instantiate(context)`'s promotion from introspection-only to delivered-instance factory, the per-conversation binding + executor derivation from the bound (not declared) agent, the 400/502 grammar, `contextRedactKeys` + the three-surface redaction (create response, `ConversationEntry`, run metadata), `RunStore.updateRunMetadata`, the post-drain stamping seam, and the `GET /agents` `instantiation` field all match their spec sections. Every PR-1 file-plan line item is present; no PR-2 (dashboard) or PR-3 (CLI) files are touched. All ten named PR-1 server-integration test-plan items are implemented as their own test(s), plus the `updateRunMetadata` runtime test-plan bullet. Two interpretation calls in the spec's own prose were validated against the test plan and found faithful, not deviations: (1) the create-response shape for a hook-less registration reads as byte-identical to today (`{ id, agent_id }`, no `context` key) per test-plan item 4's explicit wording, even though the API-design one-liner previously stated `context: ... | null` unconditionally; (2) `context_redacted` belongs on the create response as well as run metadata, per test-plan item 8, even though the API-design response line didn't spell out that field. Both are now reflected in the spec's own response-shape line (tidied in this commit) so the API-design section and test plan no longer disagree.
+
+**Blockers (0):**
+- _None._
+
+**Notes (0):**
+- _None — the two interpretation calls above are recorded as validated-faithful, not outstanding items._
+
+**Nits (1):**
+- The API-design § Server routes response line for `POST /conversations` stated a single unconditional `201` shape; it undersold the hook-less/hook-bearing split the test plan (item 4) already specified. Tidied directly in the spec (this commit) rather than left as a standing discrepancy between two spec sections.
+
+**Reviewed by:** reviewer agent (paired lens=adherence) · 2026-07-15
+
+## Diff Review — Quality
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff main...HEAD` — PR #276, branch `feat/268-playground-run-scope`, code commit `ee8fb94`
+**Against:** quality canvas (`.claude/canvases/quality-checks/categories.yaml`) — spec-blind
+**Verdict:** PASS_WITH_NOTES
+
+Well-built. The redaction/context-echo/executor-derivation logic is straightforward and honest — no convenient_fallback (a rejecting hook never falls back to the declared agent), no silent coercion (non-object/`null` context is a `400`, not a best-effort parse), no magic_constants. Zero blockers; three should-fix notes and two nits, all addressed in the immediate follow-up commit (`64a5b4d`, this stack):
+
+**Blockers (0):**
+- _None._
+
+**Notes (3) — all fixed in `64a5b4d`:**
+1. [`packages/agent-server/src/routes/conversations.ts`, run-metadata stamp] The stamp sat after the SSE drain loop inside `try`. On a turn error, `Conversation.stream` yields `conversation.end` then re-throws, so the loop throws and the stamp was skipped — errored runs, the ones an operator most needs to inspect, never got `metadata.context`. Same gap for a client disconnect (`stream.writeSSE` rejecting). _Fix:_ moved the stamp into `finally` (guard unchanged); new test asserts a throwing-runner turn leaves `status: 'error'` AND `metadata.context` stamped — verified to fail pre-fix, pass post-fix.
+2. [`packages/agent-server/src/routes/conversations.ts`, context resolution] When the caller omits `context`, the hook received `reg.instantiateDefaults` BY REFERENCE; a hook that mutates its argument would corrupt defaults for every later conversation on that registration. _Fix:_ hand the hook a shallow copy (`undefined` preserved when there are no defaults declared); new test proves a mutating hook's second conversation still observes the pristine default.
+3. [`docs/adr/0004-instantiate-as-execution-seam.md`, `CHANGELOG.md`] Doc honesty follows note 1 — both claimed the stamp landed unconditionally "after the SSE drain completes," true only for successful turns pre-fix. _Fix:_ both now state the stamp lands for successful AND errored/disconnected turns (finally-scoped), matching the code.
+
+**Nits (2) — documented in `64a5b4d`:**
+- [`packages/agent-runtime/src/storage/run-store.ts`, `updateRunMetadata`] `parseJsonRecord(row.metadata) ?? {}` silently discards existing metadata on a corrupt/non-object JSON parse. Documented as deliberate: the column is written only by this class (always valid object JSON), so the fallback path is unreachable from a row this store produced, not a real data-loss risk.
+- [`packages/agent-server/src/routes/conversations.ts`, `redactContext`] The shallow copy leaves nested object/array values under non-redacted keys shared by reference with what the hook received. Left as-is (the context contract is scalar identifiers at the top level, per Decision 3) and documented explicitly rather than silently relied upon.
+
+**Reviewed by:** reviewer agent (paired lens=quality) · 2026-07-15
