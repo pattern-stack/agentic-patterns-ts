@@ -1,5 +1,12 @@
 # Changelog
 
+## core 0.12.0 (2026-07-15)
+
+### Features
+
+- **agent-core**: `lintModelFacingSchema` (#265, PR-2 of #264) — a pure, structural Zod schema linter for constructs unsupported by a model-facing conversion path. Imports only the Zod type surface (no vendor SDK/runtime imports, no env/network) and walks Zod 3 `_def`/Zod 4 `_zod.def` trees version-tolerantly; never throws for a finding and never mutates the schema. Ships two initial dialects as closed, data-driven rule sets (`dialect: "gemini-bifrost"` by default): `gemini-bifrost` catches exclusive numeric bounds (`.positive()`/`.gt()`/`.negative()`/`.lt()`, both directions), unresolvable `z.lazy()` recursion (detected via a DFS active-ancestor set — a non-recursive lazy wrapper stays clean), and `z.tuple(...)`; `openai` catches structured-output object properties that are `.optional()` without a nullable value form (a required-nullable field is clean, and `.optional().nullable()` in either order is intentionally not flagged). An opt-in `requireDescribe` option adds `missing-description` warnings (never errors) for undescribed object-property leaves, recognizing `.describe()` on any transparent wrapper and never letting a parent object's description satisfy its children. `defineTool` does not auto-run this linter (see `docs/authoring-a-toolbox.md` for why) — the intended integration is explicit consumer smoke/CI code.
+- **repo**: `tools/check-model-facing-schemas.ts` + `bun run check:model-facing-schemas`, appended to the root `check` pipeline — lints every shipped preset/example tool's `parameters`/`returns`, playbook plays, and core `ManualToolbox`'s built-in tools under `gemini-bifrost`, throwing (labeled by agent/capability/tool/schema) on any finding. Zero findings on the current shipped agents.
+
 ## core 0.11.0 (2026-07-14)
 
 ### Features
