@@ -590,7 +590,20 @@ function Header({
             aria-label="Scratchpad frame density"
           />
         </div>
-        <div style={{ flex: 1 }} />
+      </div>
+      {/* Run metadata on its OWN always-present row (reserved min-height), so the
+          chips that appear when a conversation binds — scope, exchanges, id —
+          fill it in place instead of wrapping/growing the controls row and
+          shifting the whole layout (chat column + rail) down on submit. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+          minHeight: 26,
+        }}
+      >
         {selected && (
           <Badge tone="ok" variant="outline">
             agent: {selected.name}
