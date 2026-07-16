@@ -38,6 +38,7 @@ import type {
 } from "../api/types";
 import { ChatPanel, useChat } from "../chat";
 import { CaptureCasePanel } from "../chat/CaptureCasePanel";
+import { type ChatExportFormat, exportChat } from "../chat/export-chat";
 import type { ChatMessage } from "../chat/model";
 import { storedMessagesToChat } from "../chat/stored-parts";
 import "./chat-route.css";
@@ -334,6 +335,8 @@ export function ChatPage() {
         onNewChat={newChat}
         conversationId={chat.conversationId}
         messages={chat.messages}
+        displayMessages={displayMessages}
+        assistantName={selected?.name}
         exchangeCount={exchangeCount}
         streaming={chat.streaming}
         loadError={loadError}
@@ -448,6 +451,12 @@ interface HeaderProps {
   onNewChat: () => void;
   conversationId: string | null;
   messages: ChatMessage[];
+  /** The messages currently ON SCREEN (live OR a replayed session) — what the
+   *  Copy action serializes, distinct from `messages` (always the live turn,
+   *  which CaptureCasePanel needs). */
+  displayMessages: ChatMessage[];
+  /** The selected agent's display name — the transcript's assistant label. */
+  assistantName?: string;
   exchangeCount: number;
   streaming: boolean;
   loadError: string | null;
@@ -487,6 +496,8 @@ function Header({
   onNewChat,
   conversationId,
   messages,
+  displayMessages,
+  assistantName,
   exchangeCount,
   streaming,
   loadError,
@@ -594,6 +605,11 @@ function Header({
         >
           {description}
         </div>
+        <CopyChatMenu
+          messages={displayMessages}
+          agentName={assistantName}
+          conversationId={conversationId}
+        />
         <CaptureCasePanel
           conversationId={conversationId}
           messages={messages}
@@ -620,6 +636,139 @@ function Header({
         <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>Stream error: {chatError}</div>
       )}
     </div>
+  );
+}
+
+/**
+ * CopyChatMenu — copy the whole (live or replayed) conversation to the
+ * clipboard in a chosen format: readable markdown with tools collapsed, the
+ * same with each tool call's I/O, or the full structured JSON. Self-contained
+ * popover (not the shared DropdownMenu) so it can close on selection and flip
+ * the trigger to a transient "Copied ✓".
+ */
+function CopyChatMenu({
+  messages,
+  agentName,
+  conversationId,
+}: {
+  messages: ChatMessage[];
+  agentName?: string;
+  conversationId: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const empty = messages.length === 0;
+
+  const copy = async (format: ChatExportFormat) => {
+    setOpen(false);
+    const text = exportChat(messages, format, { agentName, conversationId });
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        disabled={empty}
+        title={empty ? "Nothing to copy yet" : "Copy the conversation"}
+      >
+        {copied ? "Copied ✓" : "Copy ▾"}
+      </Button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "transparent",
+              border: "none",
+              cursor: "default",
+              zIndex: 25,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "calc(100% + 6px)",
+              width: 236,
+              zIndex: 30,
+              background: "var(--paper)",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: T.shadow.s3,
+              padding: 4,
+            }}
+          >
+            <CopyChatItem
+              label="Markdown · tools collapsed"
+              hint="Readable transcript; tool calls as one line"
+              onClick={() => copy("markdown")}
+            />
+            <CopyChatItem
+              label="Markdown · with tool I/O"
+              hint="Each tool call's input + output"
+              onClick={() => copy("markdown-io")}
+            />
+            <CopyChatItem
+              label="JSON · full"
+              hint="The complete structured thread"
+              onClick={() => copy("json")}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CopyChatItem({
+  label,
+  hint,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "hsl(var(--hover-bg))";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "7px 9px",
+        border: "none",
+        borderRadius: "var(--radius-sm)",
+        background: "transparent",
+        cursor: "pointer",
+        color: "var(--ink)",
+      }}
+    >
+      <div style={{ fontSize: T.fz.small, fontWeight: 500 }}>{label}</div>
+      <div style={{ fontSize: T.fz.micro, color: "var(--mute)", marginTop: 1 }}>{hint}</div>
+    </button>
   );
 }
 
