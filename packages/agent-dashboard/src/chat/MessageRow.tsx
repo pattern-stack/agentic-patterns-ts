@@ -61,7 +61,7 @@ export function MessageRow({
         )}
         {parts.map((part, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only and stable by position.
-          <PartView key={i} part={part} role={role} streaming={streaming && i === lastTextIdx} />
+          <PartView key={i} part={part} role={role} />
         ))}
         {onlyToolsOrEmpty && (
           <WaitingIndicator

@@ -144,22 +144,6 @@
   position: static;
 }
 
-/* ── streaming cursor ──────────────────────────────────────────────────────*/
-.chat-cursor {
-  display: inline-block;
-  width: 7px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: var(--accent-ink);
-  animation: chat-blink 1s steps(2, start) infinite;
-}
-@keyframes chat-blink {
-  to {
-    visibility: hidden;
-  }
-}
-
 /* ── waiting dots ──────────────────────────────────────────────────────────*/
 .chat-waiting {
   display: inline-flex;

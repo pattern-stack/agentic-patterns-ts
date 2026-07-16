@@ -19,11 +19,6 @@ export function Avatar({ role }: { role: Role }) {
   );
 }
 
-/* ── Streaming cursor ───────────────────────────────────────────────────────*/
-export function Cursor() {
-  return <span className="chat-cursor" aria-hidden />;
-}
-
 /* ── Bouncing dots (waiting) ────────────────────────────────────────────────*/
 export function Dots() {
   return (

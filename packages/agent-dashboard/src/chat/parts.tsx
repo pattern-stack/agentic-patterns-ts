@@ -3,7 +3,7 @@
  * new part kind = add a case here; nothing else changes.
  */
 import { Fragment, useEffect, useRef, useState } from "react";
-import { CodeBlock, Cursor, Markdown } from "./atoms";
+import { CodeBlock, Markdown } from "./atoms";
 import { type InputAnswer, useInputResponder } from "./input-responder";
 import type { Part } from "./model";
 import type { StateDeltaPart as StateDelta } from "./state-accessors";
@@ -132,7 +132,7 @@ function ensureCiteTitle(chip: HTMLElement): void {
 }
 
 /* ── text ───────────────────────────────────────────────────────────────────*/
-function AssistantText({ content, streaming }: { content: string; streaming?: boolean }) {
+function AssistantText({ content }: { content: string }) {
   const ref = useRef<HTMLDivElement>(null);
   // Cite chips live inside dangerouslySetInnerHTML — native delegation on the
   // bubble (not JSX handlers) so the buttons stay plain markup.
@@ -161,26 +161,20 @@ function AssistantText({ content, streaming }: { content: string; streaming?: bo
   return (
     <div ref={ref} className="chat-bubble assistant" style={{ position: "relative" }}>
       <Markdown content={content} className="chat-bubble assistant" postprocess={linkifyCites} />
-      {streaming && <Cursor />}
     </div>
   );
 }
 
-function TextPart({
-  content,
-  role,
-  streaming,
-}: { content: string; role: "user" | "assistant"; streaming?: boolean }) {
+function TextPart({ content, role }: { content: string; role: "user" | "assistant" }) {
   // User text is plain (no markdown surprises); assistant text is markdown.
   if (role === "user") {
     return (
       <div className={`chat-bubble ${role}`}>
         <span style={{ whiteSpace: "pre-wrap" }}>{content}</span>
-        {streaming && <Cursor />}
       </div>
     );
   }
-  return <AssistantText content={content} streaming={streaming} />;
+  return <AssistantText content={content} />;
 }
 
 /* ── thinking ───────────────────────────────────────────────────────────────*/
@@ -254,11 +248,9 @@ function ToolCallPart({ part }: { part: Extract<Part, { kind: "tool_call" }> }) 
 function AgentStepPart({
   part,
   role,
-  streaming,
 }: {
   part: Extract<Part, { kind: "agent_step" }>;
   role: "user" | "assistant";
-  streaming?: boolean;
 }) {
   const running = part.result === undefined && !part.error;
   const status = part.error ? "err" : running ? "running" : "ok";
@@ -298,12 +290,7 @@ function AgentStepPart({
           <div className="step-children">
             <div className="io-label">tools called</div>
             {part.children.map((child, i) => (
-              <PartView
-                key={child.kind === "tool_call" ? child.id : i}
-                part={child}
-                role={role}
-                streaming={streaming}
-              />
+              <PartView key={child.kind === "tool_call" ? child.id : i} part={child} role={role} />
             ))}
           </div>
         )}
@@ -914,21 +901,19 @@ function ErrorPart({ errorType, message }: { errorType: string; message: string 
 export function PartView({
   part,
   role,
-  streaming,
 }: {
   part: Part;
   role: "user" | "assistant";
-  streaming?: boolean;
 }) {
   switch (part.kind) {
     case "text":
-      return <TextPart content={part.content} role={role} streaming={streaming} />;
+      return <TextPart content={part.content} role={role} />;
     case "thinking":
       return <ThinkingPart content={part.content} complete={part.complete} />;
     case "tool_call":
       return <ToolCallPart part={part} />;
     case "agent_step":
-      return <AgentStepPart part={part} role={role} streaming={streaming} />;
+      return <AgentStepPart part={part} role={role} />;
     case "input_request":
       return <InputRequestPart part={part} />;
     case "state_delta":
