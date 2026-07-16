@@ -16,12 +16,25 @@ import { buildRoleEntries, displayRoleOf } from "./composition.js";
 interface ToolDefLike {
   description?: string;
 }
+/** A toolbox's per-tool JSON-schema view — the same `getToolSchemas()` accessor
+ *  `routes/composition.ts` reads, so the chat rail's inline params render from
+ *  the identical zod→json-schema conversion as the full Capabilities page. */
+interface ToolSchemaLike {
+  name?: string;
+  description?: string;
+  parameters?: Record<string, unknown>;
+}
 interface CapabilityLike {
   name?: string;
   /** The capability's own one-line "what this is" summary (Capability ctor arg
    *  2) — the overarching context the chat Tools rail shows above its tools. */
   description?: string;
-  toolbox?: { name?: string; description?: string; tools?: Record<string, ToolDefLike> };
+  toolbox?: {
+    name?: string;
+    description?: string;
+    tools?: Record<string, ToolDefLike>;
+    getToolSchemas?: () => ToolSchemaLike[];
+  };
   playbook?: { plays?: Record<string, unknown> };
 }
 interface AgentIntrospect {
@@ -75,18 +88,33 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
     const a = reg.agent as unknown as AgentIntrospect;
     // Display read — a promoted pipeline's capabilities live on `displayRole`
     // (its registered `role` is narrow by design; see `displayRoleOf`).
-    const capabilities = (displayRoleOf(a)?.capabilities ?? []).map((cap) => ({
-      name: cap.name ?? "capability",
-      // The capability's own summary, falling back to the toolbox's — the
-      // overarching "what this capability is" line the Tools rail shows.
-      description: cap.description ?? cap.toolbox?.description ?? "",
-      toolbox: cap.toolbox?.name,
-      tools: Object.entries(cap.toolbox?.tools ?? {}).map(([name, def]) => ({
-        name,
-        description: def?.description ?? "",
-      })),
-      plays: Object.keys(cap.playbook?.plays ?? {}),
-    }));
+    const capabilities = (displayRoleOf(a)?.capabilities ?? []).map((cap) => {
+      const toolbox = cap.toolbox;
+      // Prefer the real schema accessor (carries JSON-schema params); fall back
+      // to the bare tools record (description only) for duck-typed toolboxes.
+      const schemas =
+        typeof toolbox?.getToolSchemas === "function" ? toolbox.getToolSchemas() : null;
+      const tools = schemas
+        ? schemas.map((t) => ({
+            name: t.name ?? "",
+            description: t.description ?? "",
+            parameters: t.parameters ?? {},
+          }))
+        : Object.entries(toolbox?.tools ?? {}).map(([name, def]) => ({
+            name,
+            description: def?.description ?? "",
+            parameters: {},
+          }));
+      return {
+        name: cap.name ?? "capability",
+        // The capability's own summary, falling back to the toolbox's — the
+        // overarching "what this capability is" line the Tools rail shows.
+        description: cap.description ?? toolbox?.description ?? "",
+        toolbox: toolbox?.name,
+        tools,
+        plays: Object.keys(cap.playbook?.plays ?? {}),
+      };
+    });
 
     return c.json({
       id: reg.id,

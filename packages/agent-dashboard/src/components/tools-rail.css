@@ -238,18 +238,68 @@
   transform: rotate(90deg);
 }
 
+/* Description is always shown inline under the tool name — no click needed. */
+.tool__desc {
+  padding: 0 10px 5px 21px;
+  font-size: var(--fz-micro);
+  color: var(--mute);
+  line-height: 1.4;
+}
+.tool__pcount {
+  flex: none;
+  font-size: var(--fz-micro);
+  font-family: var(--font-mono);
+  color: var(--ink-3);
+}
+.tool.open {
+  background: var(--fill);
+  border-radius: var(--radius-sm);
+}
+
+/* Expanded detail: inline input params + toolbox + a link to the full page. */
 .tool__detail {
   padding: 2px 10px 9px 21px;
 }
-.tool__desc {
-  font-size: var(--fz-small);
-  color: var(--ink-2);
-  line-height: 1.5;
-  margin: 3px 0 8px;
+.tool__params {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 8px;
 }
-.tool__desc.mute {
+.tool__param {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.tool__param-sig {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fz-tiny);
+}
+.tool__param-name {
+  color: var(--ink);
+}
+.tool__param-type {
+  color: var(--accent-ink);
+}
+.tool__param-opt {
+  color: var(--mute);
+  font-size: var(--fz-micro);
+}
+.tool__param-desc {
+  margin: 0;
+  font-size: var(--fz-micro);
+  color: var(--ink-2);
+  line-height: 1.4;
+}
+.tool__noparams {
+  font-size: var(--fz-micro);
   color: var(--mute);
   font-style: italic;
+  margin: 2px 0 8px;
 }
 .tool__meta {
   display: flex;

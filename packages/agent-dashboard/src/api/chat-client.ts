@@ -47,6 +47,9 @@ export async function listAgents(): Promise<AgentSummary[]> {
 export interface CapabilityTool {
   name: string;
   description: string;
+  /** JSON-schema of the tool's input params (the same shape the Capabilities
+   *  page folds) — rendered inline in the Tools rail. Absent on older servers. */
+  parameters?: Record<string, unknown>;
 }
 export interface AgentCapability {
   name: string;

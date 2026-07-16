@@ -10,13 +10,14 @@
  * just fills the body slot and scrolls internally.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   type AgentCapability,
   type AgentComposition,
   fetchAgentCapabilities,
 } from "../api/chat-client";
+import { foldToolParams } from "../lib/toolParams";
 import "./tools-rail.css";
 
 /**
@@ -152,6 +153,7 @@ function CapabilityGroup({
             key={key}
             name={t.name}
             description={t.description}
+            parameters={t.parameters}
             capability={cap.name}
             toolbox={cap.toolbox}
             open={openTool === key}
@@ -166,6 +168,7 @@ function CapabilityGroup({
 function ToolItem({
   name,
   description,
+  parameters,
   capability,
   toolbox,
   open,
@@ -173,31 +176,51 @@ function ToolItem({
 }: {
   name: string;
   description: string;
+  parameters?: Record<string, unknown>;
   capability: string;
   toolbox?: string;
   open: boolean;
   onToggle: () => void;
 }) {
+  const params = useMemo(() => foldToolParams(parameters), [parameters]);
+
   return (
-    <div className="tool">
-      <button
-        type="button"
-        className="tool__row"
-        aria-expanded={open}
-        onClick={onToggle}
-        title={description || undefined}
-      >
+    <div className={`tool${open ? " open" : ""}`}>
+      <button type="button" className="tool__row" aria-expanded={open} onClick={onToggle}>
         <span className="tool__dot" aria-hidden />
         <span className="tool__name">{name}</span>
+        {params.length > 0 && (
+          <span
+            className="tool__pcount"
+            title={`${params.length} input parameter${params.length === 1 ? "" : "s"}`}
+          >
+            {params.length}p
+          </span>
+        )}
         <span className="tool__chev" aria-hidden>
           ▸
         </span>
       </button>
+      {/* Description is always inline under the name — no click needed. */}
+      {description && <div className="tool__desc">{description}</div>}
       {open && (
         <div className="tool__detail">
-          <div className={`tool__desc${description ? "" : " mute"}`}>
-            {description || "No description provided."}
-          </div>
+          {params.length > 0 ? (
+            <dl className="tool__params">
+              {params.map((p) => (
+                <div className="tool__param" key={p.name}>
+                  <dt className="tool__param-sig">
+                    <span className="tool__param-name">{p.name}</span>
+                    <span className="tool__param-type">{p.type}</span>
+                    {!p.required && <span className="tool__param-opt">optional</span>}
+                  </dt>
+                  {p.description && <dd className="tool__param-desc">{p.description}</dd>}
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <div className="tool__noparams">No input parameters.</div>
+          )}
           <div className="tool__meta">
             {toolbox && (
               <span>
