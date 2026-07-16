@@ -51,7 +51,6 @@ import { Spinner } from "../components/atoms/Spinner";
 import { DropdownMenu } from "../components/kit/DropdownMenu";
 import { Field, inputStyle } from "../components/kit/Field";
 import { JsonBlock } from "../components/kit/JsonBlock";
-import { Markdown } from "../components/kit/Markdown";
 import { Segmented } from "../components/kit/Segmented";
 import { useAdminData } from "../hooks/useAdminData";
 import { relTime, shortId, statusTone } from "../lib/format";
@@ -510,18 +509,20 @@ function Header({
   boundContext,
   boundContextRedacted,
 }: HeaderProps) {
-  const selected = agents.find((a) => a.id === selectedId);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Row 1 — one compact toolbar. Occasional controls live behind the ⚙ menu
+          and the redundant agent badge is gone, so the row stays short enough to
+          hold the bind-time chips (scope / exchanges) without wrapping — no shift. */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 10,
           flexWrap: "wrap",
         }}
       >
-        <h1 style={{ fontSize: T.fz.xxl, fontWeight: 600, margin: 0 }}>Chat</h1>
+        <h1 style={{ fontSize: T.fz.xl, fontWeight: 600, margin: 0 }}>Chat</h1>
         <select
           value={selectedId ?? ""}
           onChange={(e) => onSelect(e.target.value)}
@@ -549,73 +550,10 @@ function Header({
         >
           New Chat
         </Button>
-        <label
-          title="Cap the agent's tool-loop iterations for each message (the runner stops after this many)."
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: T.fz.small,
-            color: "var(--ink-2)",
-          }}
-        >
-          max tool calls
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={maxIterations}
-            onChange={(e) =>
-              onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))
-            }
-            style={{ ...inputStyle, width: 56, padding: "6px 8px" }}
-          />
-        </label>
-        <div
-          title="How many Backpack/Scratchpad state frames render in the timeline. The run's scratchpad — what it carries between stages — not user memory."
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: T.fz.small,
-            color: "var(--ink-2)",
-          }}
-        >
-          scratchpad
-          <Segmented
-            options={DENSITY_OPTIONS}
-            value={density}
-            onChange={onDensity}
-            size="sm"
-            aria-label="Scratchpad frame density"
-          />
-        </div>
-      </div>
-      {/* Run metadata on its OWN always-present row (reserved min-height), so the
-          chips that appear when a conversation binds — scope, exchanges, id —
-          fill it in place instead of wrapping/growing the controls row and
-          shifting the whole layout (chat column + rail) down on submit. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          flexWrap: "wrap",
-          minHeight: 26,
-        }}
-      >
-        {selected && (
-          <Badge tone="ok" variant="outline">
-            agent: {selected.name}
-          </Badge>
-        )}
-        {/* Scope chip (#268) — hidden entirely for hook-less agents; hidden
-            while VIEWING a past session too, since replayed sessions carry no
-            context (honest degradation, spec §Dashboard) and the live
-            conversation's scope behind it would be the WRONG conversation's
-            answer. Shown only once the live conversation is bound — before
-            that there is nothing server-confirmed to show yet, not even
-            "(no scope)". */}
+        <div style={{ flex: 1 }} />
+        {/* Scope chip (#268) — hidden for hook-less agents and while VIEWING a
+            replayed session (its scope would be the wrong conversation's).
+            Shown only once the live conversation is bound. */}
         {contextAvailable && !viewing && conversationId && (
           <ScopeChip context={boundContext} redacted={boundContextRedacted} />
         )}
@@ -629,32 +567,33 @@ function Header({
             <Spinner size={9} /> streaming
           </Badge>
         )}
-        {conversationId && (
-          <span
-            style={{
-              fontFamily: T.font.mono,
-              fontSize: T.fz.tiny,
-              color: "var(--ink-3)",
-            }}
-          >
-            {conversationId.slice(0, 8)}
-          </span>
-        )}
+        <RunSettingsMenu
+          maxIterations={maxIterations}
+          onMaxIterations={onMaxIterations}
+          density={density}
+          onDensity={onDensity}
+          conversationId={conversationId}
+        />
       </div>
-      {description && (
-        <div style={{ fontSize: T.fz.small, color: "var(--ink-2)" }}>
-          <Markdown content={description} gate />
+      {/* Row 2 — the agent's one-line description shares a row with the
+          occasional actions (Capture / Scope editor), so neither costs its own
+          row. The description truncates; hover for the full text. */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div
+          title={description || undefined}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            paddingTop: 5,
+          }}
+        >
+          {description}
         </div>
-      )}
-      {loadError && (
-        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>
-          Failed to load agents: {loadError}
-        </div>
-      )}
-      {chatError && (
-        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>Stream error: {chatError}</div>
-      )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <CaptureCasePanel
           conversationId={conversationId}
           messages={messages}
@@ -672,7 +611,103 @@ function Header({
           />
         )}
       </div>
+      {loadError && (
+        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>
+          Failed to load agents: {loadError}
+        </div>
+      )}
+      {chatError && (
+        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>Stream error: {chatError}</div>
+      )}
     </div>
+  );
+}
+
+/**
+ * RunSettingsMenu — tucks the occasional run/view controls (tool-call cap,
+ * scratchpad frame density) behind one ⚙ trigger with the live conversation id,
+ * so the toolbar stays compact and doesn't reflow when a conversation binds.
+ */
+function RunSettingsMenu({
+  maxIterations,
+  onMaxIterations,
+  density,
+  onDensity,
+  conversationId,
+}: {
+  maxIterations: number;
+  onMaxIterations: (n: number) => void;
+  density: ScratchpadDensity;
+  onDensity: (d: ScratchpadDensity) => void;
+  conversationId: string | null;
+}) {
+  return (
+    <DropdownMenu
+      align="right"
+      width={240}
+      trigger={({ toggle }) => (
+        <Button variant="ghost" size="sm" onClick={toggle} title="Run & view settings">
+          ⚙ Settings
+        </Button>
+      )}
+    >
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+          }}
+        >
+          <span title="Cap the agent's tool-loop iterations per message.">max tool calls</span>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={maxIterations}
+            onChange={(e) =>
+              onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))
+            }
+            style={{ ...inputStyle, width: 84, padding: "6px 8px" }}
+          />
+        </label>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+          }}
+        >
+          <span title="How many scratchpad state frames render in the timeline — what the run carries between stages, not user memory.">
+            scratchpad frames
+          </span>
+          <Segmented
+            options={DENSITY_OPTIONS}
+            value={density}
+            onChange={onDensity}
+            size="sm"
+            aria-label="Scratchpad frame density"
+          />
+        </div>
+        {conversationId && (
+          <div
+            style={{
+              fontSize: T.fz.micro,
+              fontFamily: T.font.mono,
+              color: "var(--ink-3)",
+              borderTop: "1px solid var(--line)",
+              paddingTop: 9,
+            }}
+          >
+            conversation {conversationId.slice(0, 8)}
+          </div>
+        )}
+      </div>
+    </DropdownMenu>
   );
 }
 
