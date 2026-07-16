@@ -56,6 +56,12 @@
   border-radius: var(--radius-md);
   background: var(--fill);
 }
+/* Quieter chrome for the "nothing to show" states (unscoped agent / replay),
+   so "no deps" doesn't read as visually loud as a populated scope. */
+.scope--muted {
+  border-style: dashed;
+  background: transparent;
+}
 .scope__head {
   display: flex;
   align-items: baseline;

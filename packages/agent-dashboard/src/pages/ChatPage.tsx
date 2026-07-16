@@ -413,10 +413,14 @@ export function ChatPage() {
                 agentId={selectedId}
                 scope={{
                   available: contextAvailable,
+                  // A live conversation exists → the scope is BOUND (even if it
+                  // bound to nothing); before that it's still the declared default.
+                  committed: !viewing && chat.conversationId != null,
+                  // A replayed session's own run scope wasn't captured — the rail
+                  // shows an explicit "not recorded" state rather than guessing it
+                  // from the declared defaults (which the chip/panel also hide).
+                  viewing,
                   defaults: selected?.instantiation?.defaults ?? null,
-                  // A replayed session carries no context of its own; showing the
-                  // live conversation's would be the wrong answer (#268), so fall
-                  // back to the declared default scope while viewing.
                   bound: viewing ? null : chat.context,
                   redacted: viewing ? null : chat.contextRedacted,
                 }}

@@ -21,13 +21,23 @@ import "./tools-rail.css";
 
 /**
  * The run scope ("deps") this agent/conversation carries — who it acts on
- * behalf of. `bound` is the live conversation's server-echoed context (once
- * sent); `defaults` is the agent's declared seed scope (shown before send);
- * `available` gates whether this agent can be scoped at all (has an
- * `instantiate` hook). All absent → the agent runs unscoped.
+ * behalf of.
+ *
+ * - `available` — the agent can be scoped at all (has an `instantiate` hook).
+ * - `committed` — a live conversation exists, so the scope is BOUND (even if it
+ *   bound to nothing). Distinct from `bound != null`: a hook-bearing agent can
+ *   bind to an empty/"(no scope)" context, where `bound` is null but the scope
+ *   is still committed, not pending.
+ * - `bound` — the server-echoed context of the live conversation (`null` once
+ *   bound-but-empty, or before any send).
+ * - `defaults` — the agent's declared seed scope, shown before the first send.
+ * - `viewing` — a past session is being replayed; its run scope was not
+ *   captured, so we must NOT guess it from the declared defaults.
  */
 export interface ToolsScope {
   available: boolean;
+  committed: boolean;
+  viewing: boolean;
   defaults: Record<string, unknown> | null;
   bound: Record<string, unknown> | null;
   redacted: string[] | null;
@@ -216,15 +226,26 @@ function ToolItem({
  * dependency-injection scope surfaced where the old cockpit showed it.
  */
 function ScopeSection({ scope }: { scope: ToolsScope }) {
-  const bound = scope.bound;
-  const usingBound = bound != null;
-  const source = usingBound ? bound : scope.available ? scope.defaults : null;
-  const entries = source ? Object.entries(source) : [];
-
-  // No instantiate hook and nothing bound → this agent runs globally.
-  if (!scope.available && !usingBound) {
+  // Replaying a past session: its run scope wasn't captured, so never guess it
+  // from the declared defaults (that would assert an operator identity the
+  // session may not have had). The header chip + panel both hide here, so this
+  // is the only honest signal left in the rail.
+  if (scope.viewing) {
     return (
-      <div className="scope">
+      <div className="scope scope--muted">
+        <div className="scope__head">
+          <span className="scope__title">Scope</span>
+          <span className="scope__tag">not recorded for replays</span>
+        </div>
+        <div className="scope__none">This session's run scope wasn't captured for replay.</div>
+      </div>
+    );
+  }
+
+  // No instantiate hook and no live conversation → this agent runs globally.
+  if (!scope.available && !scope.committed) {
+    return (
+      <div className="scope scope--muted">
         <div className="scope__head">
           <span className="scope__title">Scope</span>
           <span className="scope__tag">unscoped</span>
@@ -236,16 +257,24 @@ function ScopeSection({ scope }: { scope: ToolsScope }) {
     );
   }
 
+  // Bound (a live conversation exists) shows the server's echo — even if that
+  // echo was empty ("(no scope)"). Otherwise show the declared defaults, which
+  // will bind on the first send.
+  const source = scope.committed ? scope.bound : scope.defaults;
+  const entries = source ? Object.entries(source) : [];
+
   return (
     <div className="scope">
       <div className="scope__head">
         <span className="scope__title">Scope</span>
         <span className="scope__tag">
-          {usingBound ? "this conversation" : "default · binds on send"}
+          {scope.committed ? "this conversation" : "default · binds on send"}
         </span>
       </div>
       {entries.length === 0 ? (
-        <div className="scope__none">(no scope)</div>
+        <div className="scope__none">
+          {scope.committed ? "(no scope — bound to nothing)" : "(no default scope)"}
+        </div>
       ) : (
         <>
           <div className="scope__sub">acting on behalf of</div>
@@ -260,7 +289,7 @@ function ScopeSection({ scope }: { scope: ToolsScope }) {
                   <dt className="scope__k">{k}</dt>
                   <dd
                     className={`scope__v${isRedacted ? " scope__v--redacted" : ""}`}
-                    title={isRedacted ? "redacted by the server" : fmtScopeVal(v)}
+                    title={isRedacted ? "redacted by the server" : fmtScopeTitle(v)}
                   >
                     {fmtScopeVal(v)}
                   </dd>
@@ -280,4 +309,18 @@ function fmtScopeVal(v: unknown): string {
     return Array.isArray(v) ? `[${(v as unknown[]).length} items]` : "{…}";
   }
   return String(v);
+}
+
+/** Hover title — for objects/arrays, a truncated JSON dump so the compact
+ *  `{…}`/`[N items]` cell still reveals its contents on hover. */
+function fmtScopeTitle(v: unknown): string {
+  if (v !== null && typeof v === "object") {
+    try {
+      const json = JSON.stringify(v);
+      return json.length > 200 ? `${json.slice(0, 200)}…` : json;
+    } catch {
+      return fmtScopeVal(v);
+    }
+  }
+  return fmtScopeVal(v);
 }
