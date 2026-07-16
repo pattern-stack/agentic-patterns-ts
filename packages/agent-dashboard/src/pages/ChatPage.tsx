@@ -106,7 +106,20 @@ const DENSITY_OPTIONS: { value: ScratchpadDensity; label: string; title: string 
   { value: "off", label: "Off", title: "Hide state frames (the escape hatch)" },
 ];
 
-export function ChatPage() {
+export function ChatPage({
+  routeAgentId,
+  onSelectAgent,
+}: {
+  /** The agent id from the URL (`/chat/:agentId`) when mounted via ChatRoute.
+   *  Absent (bare `<ChatPage />` in tests) → falls back to local selection. */
+  routeAgentId?: string | null;
+  /** Navigate to another agent's chat URL. Presence = "routed" mode; absent →
+   *  legacy local-state selection (keeps the tests router-free). */
+  onSelectAgent?: (id: string, opts?: { replace?: boolean }) => void;
+} = {}) {
+  // Routed mode: the URL owns the selection. Legacy mode (no `onSelectAgent`):
+  // selection is local state, auto-picking the first agent.
+  const routed = onSelectAgent != null;
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -187,7 +200,9 @@ export function ChatPage() {
       .then((list) => {
         if (cancelled) return;
         setAgents(list);
-        setSelectedId((cur) => cur ?? list[0]?.id ?? null);
+        // Legacy mode auto-picks the first agent; routed mode lets the URL-sync
+        // effect below own the selection (from `routeAgentId`).
+        if (!routed) setSelectedId((cur) => cur ?? list[0]?.id ?? null);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load agents");
@@ -195,7 +210,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [routed]);
 
   const selected = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
@@ -301,6 +316,32 @@ export function ChatPage() {
     chat.reset();
   }, [chat]);
 
+  // Routed mode: the URL (`routeAgentId`) is the source of truth for which agent
+  // is selected. Sync it into `selectedId`; a bare/unknown `/chat` redirects to
+  // the first agent (replace, so Back doesn't bounce).
+  useEffect(() => {
+    if (!routed || agents.length === 0) return;
+    if (routeAgentId && agents.some((a) => a.id === routeAgentId)) {
+      setSelectedId(routeAgentId);
+    } else {
+      onSelectAgent?.(agents[0]?.id ?? "", { replace: true });
+    }
+  }, [routed, routeAgentId, agents, onSelectAgent]);
+
+  // Switching agents must reset the thread (useChat does NOT auto-reset on
+  // agentId change — a stale conversationId would otherwise be reused for the
+  // new agent). In routed mode the switch arrives via `selectedId` changing.
+  // The ref-guard makes reset fire exactly on a real agent switch, so `newChat`
+  // churning identity each render is harmless (the effect runs but no-ops).
+  const prevSelectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!routed) return;
+    if (prevSelectedRef.current !== null && prevSelectedRef.current !== selectedId) {
+      newChat();
+    }
+    prevSelectedRef.current = selectedId;
+  }, [routed, selectedId, newChat]);
+
   const viewing = viewingId != null;
   const displayMessages = viewing ? (viewingMessages ?? []) : chat.messages;
   const traceSource: TraceRailSource = viewing
@@ -329,8 +370,14 @@ export function ChatPage() {
         agents={agents}
         selectedId={selectedId}
         onSelect={(id) => {
-          setSelectedId(id);
-          newChat();
+          if (routed) {
+            // Navigate; the URL-sync effect selects it and the reset effect
+            // clears the thread.
+            onSelectAgent?.(id);
+          } else {
+            setSelectedId(id);
+            newChat();
+          }
         }}
         onNewChat={newChat}
         conversationId={chat.conversationId}

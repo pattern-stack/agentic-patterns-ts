@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { useCallback } from "react";
+import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { AppShell } from "./components/templates/AppShell";
 import { ChatPage } from "./pages/ChatPage";
 import { ClaudeCodePage } from "./pages/ClaudeCodePage";
@@ -34,7 +35,10 @@ export function App() {
           <Route path="/capabilities/:id" element={<CapabilitiesPage />} />
           {/* RUN — runtime observability */}
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/chat" element={<ChatPage />} />
+          {/* Agent lives in the path so a chat is deep-linkable per agent.
+              `/chat` (no agent) redirects to the first agent inside ChatPage. */}
+          <Route path="/chat" element={<ChatRoute />} />
+          <Route path="/chat/:agentId" element={<ChatRoute />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/live" element={<LivePage />} />
@@ -55,4 +59,20 @@ export function App() {
       </AppShell>
     </BrowserRouter>
   );
+}
+
+/**
+ * ChatRoute — threads the URL's `:agentId` into ChatPage and turns agent
+ * selection into navigation, so each agent's chat is a deep-linkable URL
+ * (`/chat/<agentId>`). Keeps the router hooks OUT of ChatPage itself.
+ */
+function ChatRoute() {
+  const { agentId } = useParams();
+  const navigate = useNavigate();
+  const selectAgent = useCallback(
+    (id: string, opts?: { replace?: boolean }) =>
+      navigate(`/chat/${encodeURIComponent(id)}`, opts?.replace ? { replace: true } : undefined),
+    [navigate],
+  );
+  return <ChatPage routeAgentId={agentId ?? null} onSelectAgent={selectAgent} />;
 }
