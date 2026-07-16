@@ -186,8 +186,8 @@
 .tool__row {
   width: 100%;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
   padding: 5px 8px;
   border: none;
   background: transparent;
@@ -207,6 +207,12 @@
 .tool__row[aria-expanded="true"] {
   background: hsl(var(--hover-bg));
   color: var(--ink);
+}
+.tool__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 .tool__dot {
   width: 5px;
@@ -238,12 +244,14 @@
   transform: rotate(90deg);
 }
 
-/* Description is always shown inline under the tool name — no click needed. */
+/* Description is always shown inline under the tool name — no click needed.
+   It sits INSIDE .tool__row so name + description hover/click as one unit. */
 .tool__desc {
-  padding: 0 10px 5px 21px;
+  padding: 1px 2px 0 13px;
   font-size: var(--fz-micro);
   color: var(--mute);
   line-height: 1.4;
+  text-align: left;
 }
 .tool__pcount {
   flex: none;

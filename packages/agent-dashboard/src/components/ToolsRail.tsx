@@ -187,22 +187,25 @@ function ToolItem({
   return (
     <div className={`tool${open ? " open" : ""}`}>
       <button type="button" className="tool__row" aria-expanded={open} onClick={onToggle}>
-        <span className="tool__dot" aria-hidden />
-        <span className="tool__name">{name}</span>
-        {params.length > 0 && (
-          <span
-            className="tool__pcount"
-            title={`${params.length} input parameter${params.length === 1 ? "" : "s"}`}
-          >
-            {params.length}p
+        <span className="tool__head">
+          <span className="tool__dot" aria-hidden />
+          <span className="tool__name">{name}</span>
+          {params.length > 0 && (
+            <span
+              className="tool__pcount"
+              title={`${params.length} input parameter${params.length === 1 ? "" : "s"}`}
+            >
+              {params.length}p
+            </span>
+          )}
+          <span className="tool__chev" aria-hidden>
+            ▸
           </span>
-        )}
-        <span className="tool__chev" aria-hidden>
-          ▸
         </span>
+        {/* Description lives inside the button so name + description hover and
+            click as one unit — no click needed to read it. */}
+        {description && <span className="tool__desc">{description}</span>}
       </button>
-      {/* Description is always inline under the name — no click needed. */}
-      {description && <div className="tool__desc">{description}</div>}
       {open && (
         <div className="tool__detail">
           {params.length > 0 ? (
