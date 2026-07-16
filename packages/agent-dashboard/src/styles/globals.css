@@ -57,18 +57,6 @@ tr[tabindex]:focus-visible {
   outline-offset: -2px;
 }
 
-/* Cursor used in ChatPanel while a response is streaming. */
-@keyframes apdash-blink {
-  0%,
-  50% {
-    opacity: 1;
-  }
-  51%,
-  100% {
-    opacity: 0;
-  }
-}
-
 /* Spinner atom — used for streaming / loading indicators. */
 @keyframes apdash-spin {
   to {

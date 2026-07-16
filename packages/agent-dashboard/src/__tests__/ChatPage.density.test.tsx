@@ -42,7 +42,9 @@ describe("ChatPage scratchpad density (#226)", () => {
     expect(layout).not.toBeNull();
     expect(layout?.getAttribute("data-density")).toBe("writes"); // the #226 default
 
-    // flip to Off via the header toggle
+    // The density control now lives in the header's ⚙ Settings menu — open it,
+    // then flip to Off via the toggle.
+    fireEvent.click(getByRole("button", { name: /Settings/ }));
     const toggle = getByRole("tablist", { name: "Scratchpad frame density" });
     fireEvent.click(within(toggle).getByRole("tab", { name: "Off" }));
     expect(layout?.getAttribute("data-density")).toBe("off");
@@ -61,6 +63,7 @@ describe("ChatPage scratchpad density (#226)", () => {
     const { container, getByRole } = render(<ChatPage />);
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     const layout = container.querySelector<HTMLElement>("[data-density]");
+    fireEvent.click(getByRole("button", { name: /Settings/ }));
     const toggle = getByRole("tablist", { name: "Scratchpad frame density" });
     fireEvent.click(within(toggle).getByRole("tab", { name: "All" }));
     expect(layout?.getAttribute("data-density")).toBe("all");

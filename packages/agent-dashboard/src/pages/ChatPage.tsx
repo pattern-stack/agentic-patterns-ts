@@ -10,10 +10,11 @@
  *      parts and maps them onto the chat organism's `Part` union
  *      (`chat/stored-parts.ts`), rendered read-only through the SAME
  *      `ChatPanel` (`onSend` omitted). "New Chat" returns to live.
- *   3. Trace rail — the collapsible side panel gains a second tab alongside
- *      the existing `AgentUniverse` ("what it can do"): `Trace` ("what just
- *      happened"), rendered via `components/TraceRail.tsx` off either the
- *      live turn's event stream or the viewed session's linked run.
+ *   3. Trace rail — the collapsible side panel (`components/ConsoleRail.tsx`)
+ *      carries tabs alongside the `Tools` tab (`components/ToolsRail.tsx`,
+ *      "what it can do"): `Trace` ("what just happened"), rendered via
+ *      `components/TraceRail.tsx` off either the live turn's event stream or
+ *      the viewed session's linked run.
  *
  * DO-NOT-REGRESS (hard line): live streaming (`agent_step` nesting via
  * `chat/model.ts`'s `applyParts`, untouched here), `CaptureCasePanel` (stays
@@ -26,7 +27,7 @@
  * pages/chat-route.css) without a second global stylesheet.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { type AgentSummary, listAgents } from "../api/chat-client";
 import { fetchJSON } from "../api/client";
@@ -37,11 +38,13 @@ import type {
 } from "../api/types";
 import { ChatPanel, useChat } from "../chat";
 import { CaptureCasePanel } from "../chat/CaptureCasePanel";
+import { type ChatExportFormat, exportChat } from "../chat/export-chat";
 import type { ChatMessage } from "../chat/model";
 import { storedMessagesToChat } from "../chat/stored-parts";
 import "./chat-route.css";
 import { type RailSeekRequest, ScratchpadRail } from "../chat/ScratchpadRail";
-import { AgentUniverse } from "../components/AgentUniverse";
+import { ConsoleRail } from "../components/ConsoleRail";
+import { ToolsRail } from "../components/ToolsRail";
 import { TraceRail, type TraceRailSource } from "../components/TraceRail";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
@@ -49,16 +52,15 @@ import { Spinner } from "../components/atoms/Spinner";
 import { DropdownMenu } from "../components/kit/DropdownMenu";
 import { Field, inputStyle } from "../components/kit/Field";
 import { JsonBlock } from "../components/kit/JsonBlock";
-import { Markdown } from "../components/kit/Markdown";
 import { Segmented } from "../components/kit/Segmented";
 import { useAdminData } from "../hooks/useAdminData";
 import { relTime, shortId, statusTone } from "../lib/format";
 import { sessionsForAgent } from "../lib/sessions";
 import { T } from "../ui/tokens";
 
-type RailTab = "universe" | "trace" | "scratchpad";
+type RailTab = "tools" | "trace" | "scratchpad";
 const RAIL_TAB_OPTIONS: { value: RailTab; label: string; title?: string }[] = [
-  { value: "universe", label: "Universe" },
+  { value: "tools", label: "Tools", title: "Capabilities & tools this agent can use" },
   { value: "trace", label: "Trace" },
   {
     value: "scratchpad",
@@ -104,7 +106,20 @@ const DENSITY_OPTIONS: { value: ScratchpadDensity; label: string; title: string 
   { value: "off", label: "Off", title: "Hide state frames (the escape hatch)" },
 ];
 
-export function ChatPage() {
+export function ChatPage({
+  routeAgentId,
+  onSelectAgent,
+}: {
+  /** The agent id from the URL (`/chat/:agentId`) when mounted via ChatRoute.
+   *  Absent (bare `<ChatPage />` in tests) → falls back to local selection. */
+  routeAgentId?: string | null;
+  /** Navigate to another agent's chat URL. Presence = "routed" mode; absent →
+   *  legacy local-state selection (keeps the tests router-free). */
+  onSelectAgent?: (id: string, opts?: { replace?: boolean }) => void;
+} = {}) {
+  // Routed mode: the URL owns the selection. Legacy mode (no `onSelectAgent`):
+  // selection is local state, auto-picking the first agent.
+  const routed = onSelectAgent != null;
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -114,7 +129,7 @@ export function ChatPage() {
   // types. Reseeded to `null` on agent switch / New Chat (see `newChat`).
   const [contextText, setContextText] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(true);
-  const [railTab, setRailTab] = useState<RailTab>("universe");
+  const [railTab, setRailTab] = useState<RailTab>("tools");
   const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
 
   // #226: a [#N] cite seek with density Off would scroll to a hidden frame —
@@ -185,7 +200,9 @@ export function ChatPage() {
       .then((list) => {
         if (cancelled) return;
         setAgents(list);
-        setSelectedId((cur) => cur ?? list[0]?.id ?? null);
+        // Legacy mode auto-picks the first agent; routed mode lets the URL-sync
+        // effect below own the selection (from `routeAgentId`).
+        if (!routed) setSelectedId((cur) => cur ?? list[0]?.id ?? null);
       })
       .catch((err) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : "Failed to load agents");
@@ -193,7 +210,7 @@ export function ChatPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [routed]);
 
   const selected = useMemo(
     () => agents.find((a) => a.id === selectedId) ?? null,
@@ -299,6 +316,35 @@ export function ChatPage() {
     chat.reset();
   }, [chat]);
 
+  // Routed mode: the URL (`routeAgentId`) is the source of truth for which agent
+  // is selected. Sync it into `selectedId`; a bare/unknown `/chat` redirects to
+  // the first agent (replace, so Back doesn't bounce).
+  useEffect(() => {
+    if (!routed || agents.length === 0) return;
+    if (routeAgentId && agents.some((a) => a.id === routeAgentId)) {
+      setSelectedId(routeAgentId);
+    } else {
+      onSelectAgent?.(agents[0]?.id ?? "", { replace: true });
+    }
+  }, [routed, routeAgentId, agents, onSelectAgent]);
+
+  // Switching agents must reset the thread (useChat does NOT auto-reset on
+  // agentId change — a stale conversationId would otherwise be reused for the
+  // new agent). In routed mode the switch arrives via `selectedId` changing.
+  // The ref-guard makes reset fire exactly on a real agent switch, so `newChat`
+  // churning identity each render is harmless (the effect runs but no-ops).
+  // useLayoutEffect (not useEffect) so the reset lands BEFORE paint — otherwise
+  // the new agent's header renders for one frame over the old agent's thread
+  // (useChat doesn't clear messages on agentId change).
+  const prevSelectedRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!routed) return;
+    if (prevSelectedRef.current !== null && prevSelectedRef.current !== selectedId) {
+      newChat();
+    }
+    prevSelectedRef.current = selectedId;
+  }, [routed, selectedId, newChat]);
+
   const viewing = viewingId != null;
   const displayMessages = viewing ? (viewingMessages ?? []) : chat.messages;
   const traceSource: TraceRailSource = viewing
@@ -327,12 +373,20 @@ export function ChatPage() {
         agents={agents}
         selectedId={selectedId}
         onSelect={(id) => {
-          setSelectedId(id);
-          newChat();
+          if (routed) {
+            // Navigate; the URL-sync effect selects it and the reset effect
+            // clears the thread.
+            onSelectAgent?.(id);
+          } else {
+            setSelectedId(id);
+            newChat();
+          }
         }}
         onNewChat={newChat}
         conversationId={chat.conversationId}
         messages={chat.messages}
+        displayMessages={displayMessages}
+        assistantName={selected?.name}
         exchangeCount={exchangeCount}
         streaming={chat.streaming}
         loadError={loadError}
@@ -399,54 +453,41 @@ export function ChatPage() {
               }
             />
           </div>
-          <div style={{ display: "flex", alignItems: "stretch", flex: "none" }}>
-            <button
-              type="button"
-              onClick={() => setRailOpen((v) => !v)}
-              title={railOpen ? "Collapse panel" : "Show panel"}
-              aria-label={railOpen ? "Collapse panel" : "Show panel"}
-              style={{
-                flex: "none",
-                width: 20,
-                border: "1px solid var(--line)",
-                borderRight: railOpen ? "none" : "1px solid var(--line)",
-                borderRadius: railOpen ? "8px 0 0 8px" : 8,
-                background: "var(--paper)",
-                color: "var(--mute)",
-                cursor: "pointer",
-                fontSize: T.fz.small,
-                lineHeight: 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              {railOpen ? "›" : "‹"}
-            </button>
-            {railOpen && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <Segmented
-                  options={RAIL_TAB_OPTIONS}
-                  value={railTab}
-                  onChange={setRailTab}
-                  size="sm"
-                  aria-label="Side panel"
-                />
-                {railTab === "universe" ? (
-                  <AgentUniverse agentId={selectedId} />
-                ) : railTab === "trace" ? (
-                  <TraceRail source={traceSource} />
-                ) : (
-                  <ScratchpadRail
-                    source={traceSource}
-                    chatRoot={chatColRef}
-                    seekKey={railSeek}
-                    onSeekConsumed={clearRailSeek}
-                  />
-                )}
-              </div>
+          <ConsoleRail
+            open={railOpen}
+            onToggle={() => setRailOpen((v) => !v)}
+            tab={railTab}
+            onTab={setRailTab}
+            tabs={RAIL_TAB_OPTIONS}
+          >
+            {railTab === "tools" ? (
+              <ToolsRail
+                agentId={selectedId}
+                scope={{
+                  available: contextAvailable,
+                  // A live conversation exists → the scope is BOUND (even if it
+                  // bound to nothing); before that it's still the declared default.
+                  committed: !viewing && chat.conversationId != null,
+                  // A replayed session's own run scope wasn't captured — the rail
+                  // shows an explicit "not recorded" state rather than guessing it
+                  // from the declared defaults (which the chip/panel also hide).
+                  viewing,
+                  defaults: selected?.instantiation?.defaults ?? null,
+                  bound: viewing ? null : chat.context,
+                  redacted: viewing ? null : chat.contextRedacted,
+                }}
+              />
+            ) : railTab === "trace" ? (
+              <TraceRail source={traceSource} />
+            ) : (
+              <ScratchpadRail
+                source={traceSource}
+                chatRoot={chatColRef}
+                seekKey={railSeek}
+                onSeekConsumed={clearRailSeek}
+              />
             )}
-          </div>
+          </ConsoleRail>
         </div>
       </div>
     </div>
@@ -460,6 +501,12 @@ interface HeaderProps {
   onNewChat: () => void;
   conversationId: string | null;
   messages: ChatMessage[];
+  /** The messages currently ON SCREEN (live OR a replayed session) — what the
+   *  Copy action serializes, distinct from `messages` (always the live turn,
+   *  which CaptureCasePanel needs). */
+  displayMessages: ChatMessage[];
+  /** The selected agent's display name — the transcript's assistant label. */
+  assistantName?: string;
   exchangeCount: number;
   streaming: boolean;
   loadError: string | null;
@@ -499,6 +546,8 @@ function Header({
   onNewChat,
   conversationId,
   messages,
+  displayMessages,
+  assistantName,
   exchangeCount,
   streaming,
   loadError,
@@ -521,18 +570,20 @@ function Header({
   boundContext,
   boundContextRedacted,
 }: HeaderProps) {
-  const selected = agents.find((a) => a.id === selectedId);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Row 1 — one compact toolbar. Occasional controls live behind the ⚙ menu
+          and the redundant agent badge is gone, so the row stays short enough to
+          hold the bind-time chips (scope / exchanges) without wrapping — no shift. */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 10,
           flexWrap: "wrap",
         }}
       >
-        <h1 style={{ fontSize: T.fz.xxl, fontWeight: 600, margin: 0 }}>Chat</h1>
+        <h1 style={{ fontSize: T.fz.xl, fontWeight: 600, margin: 0 }}>Chat</h1>
         <select
           value={selectedId ?? ""}
           onChange={(e) => onSelect(e.target.value)}
@@ -560,60 +611,10 @@ function Header({
         >
           New Chat
         </Button>
-        <label
-          title="Cap the agent's tool-loop iterations for each message (the runner stops after this many)."
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: T.fz.small,
-            color: "var(--ink-2)",
-          }}
-        >
-          max tool calls
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={maxIterations}
-            onChange={(e) =>
-              onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))
-            }
-            style={{ ...inputStyle, width: 56, padding: "6px 8px" }}
-          />
-        </label>
-        <div
-          title="How many Backpack/Scratchpad state frames render in the timeline. The run's scratchpad — what it carries between stages — not user memory."
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: T.fz.small,
-            color: "var(--ink-2)",
-          }}
-        >
-          scratchpad
-          <Segmented
-            options={DENSITY_OPTIONS}
-            value={density}
-            onChange={onDensity}
-            size="sm"
-            aria-label="Scratchpad frame density"
-          />
-        </div>
         <div style={{ flex: 1 }} />
-        {selected && (
-          <Badge tone="ok" variant="outline">
-            agent: {selected.name}
-          </Badge>
-        )}
-        {/* Scope chip (#268) — hidden entirely for hook-less agents; hidden
-            while VIEWING a past session too, since replayed sessions carry no
-            context (honest degradation, spec §Dashboard) and the live
-            conversation's scope behind it would be the WRONG conversation's
-            answer. Shown only once the live conversation is bound — before
-            that there is nothing server-confirmed to show yet, not even
-            "(no scope)". */}
+        {/* Scope chip (#268) — hidden for hook-less agents and while VIEWING a
+            replayed session (its scope would be the wrong conversation's).
+            Shown only once the live conversation is bound. */}
         {contextAvailable && !viewing && conversationId && (
           <ScopeChip context={boundContext} redacted={boundContextRedacted} />
         )}
@@ -627,32 +628,38 @@ function Header({
             <Spinner size={9} /> streaming
           </Badge>
         )}
-        {conversationId && (
-          <span
-            style={{
-              fontFamily: T.font.mono,
-              fontSize: T.fz.tiny,
-              color: "var(--ink-3)",
-            }}
-          >
-            {conversationId.slice(0, 8)}
-          </span>
-        )}
+        <RunSettingsMenu
+          maxIterations={maxIterations}
+          onMaxIterations={onMaxIterations}
+          density={density}
+          onDensity={onDensity}
+          conversationId={conversationId}
+        />
       </div>
-      {description && (
-        <div style={{ fontSize: T.fz.small, color: "var(--ink-2)" }}>
-          <Markdown content={description} gate />
+      {/* Row 2 — the agent's one-line description shares a row with the
+          occasional actions (Capture / Scope editor), so neither costs its own
+          row. The description truncates; hover for the full text. */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div
+          title={description || undefined}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            paddingTop: 5,
+          }}
+        >
+          {description}
         </div>
-      )}
-      {loadError && (
-        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>
-          Failed to load agents: {loadError}
-        </div>
-      )}
-      {chatError && (
-        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>Stream error: {chatError}</div>
-      )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <CopyChatMenu
+          messages={displayMessages}
+          agentName={assistantName}
+          conversationId={conversationId}
+        />
         <CaptureCasePanel
           conversationId={conversationId}
           messages={messages}
@@ -670,7 +677,249 @@ function Header({
           />
         )}
       </div>
+      {loadError && (
+        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>
+          Failed to load agents: {loadError}
+        </div>
+      )}
+      {chatError && (
+        <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>Stream error: {chatError}</div>
+      )}
     </div>
+  );
+}
+
+/**
+ * CopyChatMenu — copy the whole (live or replayed) conversation to the
+ * clipboard in a chosen format: readable markdown with tools collapsed, the
+ * same with each tool call's I/O, or the full structured JSON. Self-contained
+ * popover (not the shared DropdownMenu) so it can close on selection and flip
+ * the trigger to a transient "Copied ✓".
+ */
+function CopyChatMenu({
+  messages,
+  agentName,
+  conversationId,
+}: {
+  messages: ChatMessage[];
+  agentName?: string;
+  conversationId: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const empty = messages.length === 0;
+
+  // Clear the "Copied ✓" timer on unmount (the Header remounts on agent switch)
+  // so it never fires setState on an unmounted component.
+  useEffect(
+    () => () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    },
+    [],
+  );
+
+  const copy = async (format: ChatExportFormat) => {
+    setOpen(false);
+    const text = exportChat(messages, format, { agentName, conversationId });
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div style={{ position: "relative", display: "inline-block" }}>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen((v) => !v)}
+        disabled={empty}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={empty ? "Nothing to copy yet" : "Copy the conversation"}
+      >
+        {copied ? "Copied ✓" : "Copy ▾"}
+      </Button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "transparent",
+              border: "none",
+              cursor: "default",
+              zIndex: 25,
+            }}
+          />
+          <div
+            role="menu"
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "calc(100% + 6px)",
+              width: 236,
+              zIndex: 30,
+              background: "var(--paper)",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: T.shadow.s3,
+              padding: 4,
+            }}
+          >
+            <CopyChatItem
+              label="Markdown · tools collapsed"
+              hint="Readable transcript; tool calls as one line"
+              onClick={() => copy("markdown")}
+            />
+            <CopyChatItem
+              label="Markdown · with tool I/O"
+              hint="Each tool call's input + output"
+              onClick={() => copy("markdown-io")}
+            />
+            <CopyChatItem
+              label="JSON · full"
+              hint="The complete structured thread"
+              onClick={() => copy("json")}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CopyChatItem({
+  label,
+  hint,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "hsl(var(--hover-bg))";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "7px 9px",
+        border: "none",
+        borderRadius: "var(--radius-sm)",
+        background: "transparent",
+        cursor: "pointer",
+        color: "var(--ink)",
+      }}
+    >
+      <div style={{ fontSize: T.fz.small, fontWeight: 500 }}>{label}</div>
+      <div style={{ fontSize: T.fz.micro, color: "var(--mute)", marginTop: 1 }}>{hint}</div>
+    </button>
+  );
+}
+
+/**
+ * RunSettingsMenu — tucks the occasional run/view controls (tool-call cap,
+ * scratchpad frame density) behind one ⚙ trigger with the live conversation id,
+ * so the toolbar stays compact and doesn't reflow when a conversation binds.
+ */
+function RunSettingsMenu({
+  maxIterations,
+  onMaxIterations,
+  density,
+  onDensity,
+  conversationId,
+}: {
+  maxIterations: number;
+  onMaxIterations: (n: number) => void;
+  density: ScratchpadDensity;
+  onDensity: (d: ScratchpadDensity) => void;
+  conversationId: string | null;
+}) {
+  return (
+    <DropdownMenu
+      align="right"
+      width={240}
+      trigger={({ toggle }) => (
+        <Button variant="ghost" size="sm" onClick={toggle} title="Run & view settings">
+          ⚙ Settings
+        </Button>
+      )}
+    >
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 14 }}>
+        <label
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+          }}
+        >
+          <span title="Cap the agent's tool-loop iterations per message.">max tool calls</span>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={maxIterations}
+            onChange={(e) =>
+              onMaxIterations(Math.min(50, Math.max(1, Math.trunc(Number(e.target.value)) || 1)))
+            }
+            style={{ ...inputStyle, width: 84, padding: "6px 8px" }}
+          />
+        </label>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 5,
+            fontSize: T.fz.small,
+            color: "var(--ink-2)",
+          }}
+        >
+          <span title="How many scratchpad state frames render in the timeline — what the run carries between stages, not user memory.">
+            scratchpad frames
+          </span>
+          <Segmented
+            options={DENSITY_OPTIONS}
+            value={density}
+            onChange={onDensity}
+            size="sm"
+            aria-label="Scratchpad frame density"
+          />
+        </div>
+        {conversationId && (
+          <div
+            style={{
+              fontSize: T.fz.micro,
+              fontFamily: T.font.mono,
+              color: "var(--ink-3)",
+              borderTop: "1px solid var(--line)",
+              paddingTop: 9,
+            }}
+          >
+            conversation {conversationId.slice(0, 8)}
+          </div>
+        )}
+      </div>
+    </DropdownMenu>
   );
 }
 

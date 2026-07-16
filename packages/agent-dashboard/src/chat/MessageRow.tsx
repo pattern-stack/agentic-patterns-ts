@@ -1,8 +1,8 @@
 /**
  * MessageRow — one message: avatar + attribution + the dispatched parts + an
- * optional model/token footer. Streaming-first: the live cursor rides the last
- * text part, and an empty still-streaming assistant message shows the waiting
- * indicator instead of an empty bubble.
+ * optional model/token footer. Streaming-first: an empty still-streaming
+ * assistant message (no renderable text yet) shows the waiting indicator
+ * instead of an empty bubble.
  */
 import { Avatar, Dots, RelativeTime } from "./atoms";
 import { type ChatMessage, coalesceStateParts } from "./model";
@@ -40,7 +40,8 @@ export function MessageRow({
   // one `state_group` summary card (load-bearing for Loop / parallel-drop
   // runs). Pure function of the parts; the message itself is untouched.
   const parts = coalesceStateParts(message.parts);
-  // index of the last text part — the only one that carries the live cursor.
+  // index of the last text part — used to decide the waiting affordance below
+  // (an assistant turn streaming with no text part yet).
   const lastTextIdx = (() => {
     for (let i = parts.length - 1; i >= 0; i--) if (parts[i]?.kind === "text") return i;
     return -1;
@@ -61,7 +62,7 @@ export function MessageRow({
         )}
         {parts.map((part, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: parts are append-only and stable by position.
-          <PartView key={i} part={part} role={role} streaming={streaming && i === lastTextIdx} />
+          <PartView key={i} part={part} role={role} />
         ))}
         {onlyToolsOrEmpty && (
           <WaitingIndicator

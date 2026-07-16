@@ -1,6 +1,6 @@
 /**
  * ChatPage Scratchpad rail tab (#226) — the side panel gains a third
- * Segmented tab (Universe | Trace | Scratchpad), and the `chat:seek-rail`
+ * Segmented tab (Tools | Trace | Scratchpad), and the `chat:seek-rail`
  * bridge (a Δ frame's `.d-key` click) flips the panel to the Scratchpad tab
  * synchronously — inside flushSync, so the rail is mounted before the
  * dispatching click handler returns and the row seek never lands on a
@@ -31,7 +31,7 @@ describe("ChatPage Scratchpad tab (#226)", () => {
     vi.restoreAllMocks();
   });
 
-  it("offers Universe | Trace | Scratchpad; picking Scratchpad renders the teaching rail", async () => {
+  it("offers Tools | Trace | Scratchpad; picking Scratchpad renders the teaching rail", async () => {
     const { container, getByRole } = render(<ChatPage />);
     await waitFor(() => expect(fetch).toHaveBeenCalled());
 
@@ -40,7 +40,7 @@ describe("ChatPage Scratchpad tab (#226)", () => {
       within(tabs)
         .getAllByRole("tab")
         .map((t) => t.textContent),
-    ).toEqual(["Universe", "Trace", "Scratchpad"]);
+    ).toEqual(["Tools", "Trace", "Scratchpad"]);
 
     fireEvent.click(within(tabs).getByRole("tab", { name: "Scratchpad" }));
     const rail = container.querySelector(".scratchpad-rail");
@@ -56,7 +56,7 @@ describe("ChatPage Scratchpad tab (#226)", () => {
     const { container, getByRole } = render(<ChatPage />);
     await waitFor(() => expect(fetch).toHaveBeenCalled());
 
-    expect(container.querySelector(".scratchpad-rail")).toBeNull(); // Universe tab
+    expect(container.querySelector(".scratchpad-rail")).toBeNull(); // Tools tab
     const layout = container.querySelector<HTMLElement>("[data-density]");
     expect(layout).not.toBeNull();
 

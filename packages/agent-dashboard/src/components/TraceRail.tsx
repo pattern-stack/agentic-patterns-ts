@@ -14,9 +14,9 @@
  *     `runId: null` means the viewed exchange has no linked run (honest note,
  *     never a fabricated trace).
  *
- * Self-contained `<aside>` — same outer chrome as the existing `AgentUniverse`
- * rail — so `ChatPage` can swap between the two via a small tab strip that
- * sits above both, without either needing to know about the other.
+ * Borderless fill — the surrounding `ConsoleRail` owns the panel chrome and
+ * the tab strip; this just fills the shell's body slot and scrolls internally
+ * (its own lens toolbar stays pinned above the scroll region).
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -114,17 +114,12 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
   const fullTraceRunId = (source.kind === "live" ? (source.runId ?? null) : source.runId) || null;
 
   return (
-    <aside
+    <div
       style={{
-        width: 320,
-        flex: "none",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
-        background: "var(--paper)",
-        border: "1px solid var(--line)",
-        borderRadius: "var(--radius-lg)",
-        overflow: "hidden",
+        height: "100%",
       }}
     >
       <div
@@ -197,6 +192,6 @@ export function TraceRail({ source }: { source: TraceRailSource }) {
             <TraceLog key={replayRunId ?? "live"} steps={steps} />
           ))}
       </div>
-    </aside>
+    </div>
   );
 }

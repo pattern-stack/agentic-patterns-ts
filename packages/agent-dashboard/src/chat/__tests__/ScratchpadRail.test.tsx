@@ -184,9 +184,10 @@ describe("rail states", () => {
     const { container } = render(<Harness events={[]} />);
     const r = rail(container);
     expect(r.querySelector(".rail-head .t")?.textContent).toBe("Scratchpad");
-    expect(r.querySelector(".rail-head .sub")?.textContent).toBe(
-      "· what this run carries between stages",
-    );
+    // The redundant, truncating ".sub" caption was removed — the ConsoleRail tab
+    // strip already labels "Scratchpad" and the teaching line below + the header
+    // `title` tooltip carry the full "what this run carries between stages" copy.
+    expect(r.querySelector(".rail-head .sub")).toBeNull();
     expect(r.querySelector(".rail-head")?.getAttribute("title")).toContain(
       "Not user memory: it lives and dies with the run.",
     );

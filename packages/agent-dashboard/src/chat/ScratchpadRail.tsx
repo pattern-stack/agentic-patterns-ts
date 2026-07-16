@@ -347,7 +347,6 @@ export function ScratchpadRail({
     <aside className={`scratchpad-rail${scrubbed ? " scrubbed" : ""}`} ref={railRef}>
       <div className="rail-head" title={HEADER_TITLE}>
         <span className="t">Scratchpad</span>
-        <span className="sub">· what this run carries between stages</span>
         {scrubbed ? (
           <span className="asof">
             as of step {effCursor}/{events.length}
