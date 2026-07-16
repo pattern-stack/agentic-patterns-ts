@@ -27,7 +27,7 @@
  * pages/chat-route.css) without a second global stylesheet.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { type AgentSummary, listAgents } from "../api/chat-client";
 import { fetchJSON } from "../api/client";
@@ -333,8 +333,11 @@ export function ChatPage({
   // new agent). In routed mode the switch arrives via `selectedId` changing.
   // The ref-guard makes reset fire exactly on a real agent switch, so `newChat`
   // churning identity each render is harmless (the effect runs but no-ops).
+  // useLayoutEffect (not useEffect) so the reset lands BEFORE paint — otherwise
+  // the new agent's header renders for one frame over the old agent's thread
+  // (useChat doesn't clear messages on agentId change).
   const prevSelectedRef = useRef<string | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!routed) return;
     if (prevSelectedRef.current !== null && prevSelectedRef.current !== selectedId) {
       newChat();
@@ -707,6 +710,15 @@ function CopyChatMenu({
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const empty = messages.length === 0;
 
+  // Clear the "Copied ✓" timer on unmount (the Header remounts on agent switch)
+  // so it never fires setState on an unmounted component.
+  useEffect(
+    () => () => {
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    },
+    [],
+  );
+
   const copy = async (format: ChatExportFormat) => {
     setOpen(false);
     const text = exportChat(messages, format, { agentName, conversationId });
@@ -727,6 +739,8 @@ function CopyChatMenu({
         size="sm"
         onClick={() => setOpen((v) => !v)}
         disabled={empty}
+        aria-haspopup="menu"
+        aria-expanded={open}
         title={empty ? "Nothing to copy yet" : "Copy the conversation"}
       >
         {copied ? "Copied ✓" : "Copy ▾"}
@@ -747,6 +761,7 @@ function CopyChatMenu({
             }}
           />
           <div
+            role="menu"
             style={{
               position: "absolute",
               right: 0,
@@ -794,6 +809,7 @@ function CopyChatItem({
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = "hsl(var(--hover-bg))";

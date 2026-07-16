@@ -106,7 +106,7 @@
 }
 .scope__k {
   flex: none;
-  color: var(--ink-3);
+  color: var(--ink-2);
 }
 .scope__v {
   flex: 1;
@@ -249,7 +249,7 @@
   flex: none;
   font-size: var(--fz-micro);
   font-family: var(--font-mono);
-  color: var(--ink-3);
+  color: var(--mute);
 }
 .tool.open {
   background: var(--fill);

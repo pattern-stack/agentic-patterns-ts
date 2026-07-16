@@ -265,8 +265,11 @@ function ScopeSection({ scope }: { scope: ToolsScope }) {
     );
   }
 
-  // No instantiate hook and no live conversation → this agent runs globally.
-  if (!scope.available && !scope.committed) {
+  // No instantiate hook → this agent is ALWAYS unscoped: it can never bind a
+  // per-user scope, whether or not a conversation exists. (Guarding on
+  // `committed` too would flip this to a misleading "bound to nothing" after the
+  // first send.)
+  if (!scope.available) {
     return (
       <div className="scope scope--muted">
         <div className="scope__head">

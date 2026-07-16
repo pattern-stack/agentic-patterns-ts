@@ -150,8 +150,14 @@ const ambientManual = new SimpleManual(
       { name: "thread", description: "An email conversation, newest message first" },
     ]),
     new ManualSection("Rules", "Hard constraints.", [
-      { name: "read-only", description: "These tools never write — never claim you sent or changed anything" },
-      { name: "scoped", description: "All results are for the bound operator only, never another user" },
+      {
+        name: "read-only",
+        description: "These tools never write — never claim you sent or changed anything",
+      },
+      {
+        name: "scoped",
+        description: "All results are for the bound operator only, never another user",
+      },
     ]),
   ],
 );
@@ -203,7 +209,10 @@ function buildWorkspaceAgent(scope: WorkspaceScope) {
 
   const mission = new Mission({
     objective: "Help the scoped operator navigate their workspace and deals",
-    success_criteria: ["Every answer is scoped to the bound operator", "Fuzzy refs are resolved, not guessed"],
+    success_criteria: [
+      "Every answer is scoped to the bound operator",
+      "Fuzzy refs are resolved, not guessed",
+    ],
   });
 
   return new AgentBuilder(role).withMission(mission).build();
@@ -217,7 +226,8 @@ function buildWorkspaceAgent(scope: WorkspaceScope) {
 export default {
   id: "workspace",
   name: "Workspace",
-  description: "Sales-workspace copilot — reads ambient context and resolves deals, scoped per operator.",
+  description:
+    "Sales-workspace copilot — reads ambient context and resolves deals, scoped per operator.",
   agent: buildWorkspaceAgent(DEFAULT_SCOPE),
   instantiate: async (context?: Record<string, unknown>) =>
     buildWorkspaceAgent({ ...DEFAULT_SCOPE, ...(context ?? {}) } as WorkspaceScope),
