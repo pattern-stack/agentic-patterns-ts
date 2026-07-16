@@ -412,7 +412,7 @@ export function ChatPage({
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
-          <div style={{ fontSize: T.fz.tiny, fontFamily: T.font.mono, color: "var(--mute)" }}>
+          <div style={{ fontSize: T.fz.tiny, color: "var(--mute)" }}>
             Viewing session <b style={{ color: "var(--ink-2)" }}>{shortId(viewingId)}</b> —
             read-only. "New Chat" returns to live.
           </div>
@@ -972,7 +972,6 @@ function RunSettingsMenu({
           <div
             style={{
               fontSize: T.fz.micro,
-              fontFamily: T.font.mono,
               color: "var(--ink-3)",
               borderTop: "1px solid var(--line)",
               paddingTop: 9,
@@ -1098,7 +1097,6 @@ function truncateChipValue(v: unknown): string {
 /** Shared chip-pill visual (both the interactive and the non-interactive
  *  "(no scope)" cases render this same shape — see `ScopeChip` below). */
 const CHIP_STYLE = {
-  fontFamily: T.font.mono,
   fontSize: T.fz.tiny,
   padding: "2px 8px",
   borderRadius: T.radius.pill,
@@ -1242,13 +1240,12 @@ function SessionsMenu({
               display: "flex",
               alignItems: "center",
               gap: 8,
-              fontFamily: T.font.mono,
               fontSize: T.fz.small,
               color: "var(--ink-2)",
             }}
           >
             {shortId(s.conversationId)}
-            <Badge tone="mute" mono>
+            <Badge tone="mute">
               {s.messageCount} msg{s.messageCount === 1 ? "" : "s"}
             </Badge>
             <Badge tone={statusTone(s.status)}>{s.status}</Badge>

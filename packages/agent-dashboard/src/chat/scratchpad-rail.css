@@ -30,7 +30,7 @@
   color: var(--ink);
 }
 .scratchpad-rail .rail-head .sub {
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
   min-width: 0;
   overflow: hidden;
@@ -42,7 +42,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--ok-ink);
   flex: none;
 }
@@ -54,7 +54,7 @@
 }
 .scratchpad-rail .asof {
   margin-left: auto;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--violet-ink);
   background: var(--violet-soft);
   border-radius: var(--radius-pill);
@@ -72,8 +72,7 @@
   gap: 22px;
 }
 
-/* writer attribution — the ↳ provenance glyph is the timeline's own mark;
-   sans words say what things MEAN, mono tokens stay what the runtime CALLS them */
+/* writer attribution — the ↳ provenance glyph is the timeline's own mark */
 .scratchpad-rail .rail-cap {
   font: 700 var(--fz-micro) var(--font-sans);
   text-transform: uppercase;
@@ -86,7 +85,7 @@
 }
 .scratchpad-rail .rail-cap .attr {
   margin-left: auto;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   text-transform: none;
   letter-spacing: 0;
   color: var(--mute);
@@ -94,7 +93,7 @@
 
 /* teaching empty state — the lesson IS the structure */
 .scratchpad-rail .rail-teach {
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
   line-height: 1.6;
 }
@@ -159,7 +158,7 @@
 }
 .scratchpad-rail .hero-key .k {
   display: block;
-  font: 600 var(--fz-tiny) var(--font-mono);
+  font: 600 var(--fz-tiny) var(--font-sans);
   color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
@@ -172,12 +171,12 @@
 .scratchpad-rail .hero-key .s {
   display: block;
   margin-top: 1px;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
 }
 .scratchpad-rail .hero-n {
   margin-left: auto;
-  font: 700 var(--fz-lg) var(--font-mono);
+  font: 700 var(--fz-lg) var(--font-sans);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -233,7 +232,7 @@
   gap: 6px;
   align-items: baseline;
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--ink-2);
   padding: 2px 4px 2px 6px;
   border-radius: var(--radius-sm);
@@ -285,7 +284,7 @@
   top: 100%;
   margin-top: 2px;
   z-index: 3;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--accent-ink);
   background: var(--accent-soft);
   border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--line));
@@ -341,7 +340,7 @@
   background: var(--err);
 }
 .scratchpad-rail .frac {
-  font: 700 var(--fz-md) var(--font-mono);
+  font: 700 var(--fz-md) var(--font-sans);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
@@ -372,7 +371,7 @@
   background: none;
   padding: 2px 4px;
   border-radius: var(--radius-sm);
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--ink-2);
   cursor: pointer;
 }
@@ -410,7 +409,7 @@
   background: none;
   padding: 3px 6px;
   border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   cursor: pointer;
   min-height: 22px;
   border-left: 3px solid transparent;
@@ -420,12 +419,12 @@
   background: var(--fill-2);
 }
 .scratchpad-rail .slot-row .k {
-  font: 500 var(--fz-tiny) var(--font-mono);
+  font: 500 var(--fz-tiny) var(--font-sans);
   color: var(--ink);
 }
 .scratchpad-rail .slot-row .v {
   margin-left: auto;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
   max-width: 40%;
   overflow: hidden;
@@ -437,7 +436,7 @@
 .scratchpad-rail .rail-foot {
   padding: 8px 12px 9px;
   border-top: 1px solid var(--line);
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
   flex: none;
   background: var(--paper);
@@ -459,7 +458,7 @@
    rows. One component, two placements: .pop floats under the row (hover,
    transient); .pinned sits in-flow after the row (click, dismissable). */
 .scratchpad-rail .prov {
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--ink-2);
   background: var(--paper);
   border: 1px solid color-mix(in oklch, var(--violet) 35%, var(--line));
