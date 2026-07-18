@@ -384,6 +384,70 @@ describe("Agent", () => {
         expect(section.text).not.toBe("");
       }
     });
+
+    it("join invariant holds with a ctx: renderSections(ctx) mirrors renderInitialPrompt(ctx)", () => {
+      const awareness = Awareness.fromScope(
+        { parse: (input: unknown) => input as { workspace: string } },
+        (s) => `Acting in workspace ${s.workspace}.`,
+      );
+      const agent = new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness,
+        mission: makeMission(),
+      });
+      const ctx = { scope: { workspace: "acme" } };
+
+      const joined = agent
+        .renderSections(ctx)
+        .map((s) => s.text)
+        .join("\n\n");
+      expect(joined).toBe(agent.renderInitialPrompt(ctx));
+      expect(joined).toContain("Acting in workspace acme.");
+    });
+  });
+
+  describe("scope-aware rendering (RenderContext)", () => {
+    function makeScopedAgent() {
+      const awareness = Awareness.fromScope(
+        { parse: (input: unknown) => input as { workspace: string } },
+        (s) => `Acting in workspace ${s.workspace}.`,
+      );
+      return new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness,
+        mission: makeMission(),
+      });
+    }
+
+    it("renders differently per scope, then restores byte-identical nullary output, on the SAME instance", () => {
+      const agent = makeScopedAgent();
+      const nullaryBefore = agent.renderInitialPrompt();
+
+      const promptA = agent.renderInitialPrompt({ scope: { workspace: "acme" } });
+      const promptB = agent.renderInitialPrompt({ scope: { workspace: "globex" } });
+
+      expect(promptA).toContain("Acting in workspace acme.");
+      expect(promptB).toContain("Acting in workspace globex.");
+      expect(promptA).not.toBe(promptB);
+
+      const nullaryAfter = agent.renderInitialPrompt();
+      expect(nullaryAfter).toBe(nullaryBefore);
+      expect(nullaryAfter).not.toContain("Acting in workspace");
+    });
+
+    it("an agent whose awareness has no scopeRender ignores ctx entirely", () => {
+      const agent = new Agent({
+        role: makeRole(),
+        background: makeBackground(),
+        awareness: makeAwareness(),
+        mission: makeMission(),
+      });
+      const withCtx = agent.renderInitialPrompt({ scope: { anything: "goes" } });
+      const without = agent.renderInitialPrompt();
+      expect(withCtx).toBe(without);
+    });
   });
 
   describe("renderContinuationPrompt (delta rendering)", () => {

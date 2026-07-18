@@ -10,7 +10,7 @@ import { z } from "zod";
 
 import { Awareness, type AwarenessDomainData, AwarenessSchema } from "../atoms/awareness.js";
 import { Background, BackgroundSchema } from "../atoms/background.js";
-import { AgenticModel } from "../atoms/base.js";
+import { AgenticModel, type RenderContext } from "../atoms/base.js";
 import { type Mission, MissionSchema } from "../atoms/mission.js";
 import type { State } from "../atoms/state.js";
 import type { ToolSchema } from "../molecules/tool-schema.js";
@@ -112,9 +112,13 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
    * Render full system prompt for turn 1 via PromptRenderer.
    *
    * Includes all sections. Use when agent has no conversation history.
+   *
+   * @param ctx - Optional render context (e.g. session scope), forwarded
+   *   verbatim to {@link renderSections}. Omitting it renders byte-identical
+   *   to the pre-scope behavior.
    */
-  renderInitialPrompt(): string {
-    return this.renderSections()
+  renderInitialPrompt(ctx?: RenderContext): string {
+    return this.renderSections(ctx)
       .map((section) => section.text)
       .join("\n\n");
   }
@@ -123,13 +127,19 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
    * Render the initial prompt as attributed sections instead of a joined
    * string. Mirrors the exact section set, order, and empty-filtering of
    * {@link renderInitialPrompt} (which delegates here), so the invariant
-   * `renderSections().map(s => s.text).join("\n\n") === renderInitialPrompt()`
-   * holds by construction. Section `source` marks role- vs instance-derived
-   * content for the Playground lens.
+   * `renderSections(ctx).map(s => s.text).join("\n\n") === renderInitialPrompt(ctx)`
+   * holds by construction for any `ctx`, including the nullary/undefined
+   * case. Section `source` marks role- vs instance-derived content for the
+   * Playground lens. `ctx` is passed to every section's `render(ctx)`, but
+   * only `ContextSection` (the "instance"-sourced Context section) actually
+   * consumes it — forwarding to `Awareness.toPrompt(ctx)`; every other
+   * section ignores the argument.
    */
-  renderSections(): AgentPromptSectionData[] {
+  renderSections(ctx?: RenderContext): AgentPromptSectionData[] {
     const renderer = this._buildRenderer();
-    const sections: Array<[{ name: string; render(): string }, "role" | "instance"]> = [
+    const sections: Array<
+      [{ name: string; render(ctx?: RenderContext): string }, "role" | "instance"]
+    > = [
       [renderer.identity, "role"],
       [renderer.boundaries, "role"],
       [renderer.capabilities, "role"],
@@ -138,7 +148,7 @@ export class Agent extends AgenticModel<typeof AgentSchema.shape> {
       [renderer.methodology, "role"],
     ];
     return sections
-      .map(([section, source]) => ({ name: section.name, source, text: section.render() }))
+      .map(([section, source]) => ({ name: section.name, source, text: section.render(ctx) }))
       .filter((section) => section.text !== "");
   }
 

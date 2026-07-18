@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent } from "../../events/types.js";
+import { buildScopeHost } from "../../workflows/scope-host.js";
 import { AgentRunner } from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 
@@ -446,6 +447,47 @@ describe("AgentRunner.stream()", () => {
 
     expect(capturedCtx).toHaveLength(1);
     expect(capturedCtx[0]?.host).toBe(sentinelHost);
+  });
+
+  // ---------------------------------------------------------------------------
+  // #308 PR-3 — the render seam: stream() narrows RunOptions.host.scope into a
+  // RenderContext for renderInitialPrompt(), the 3rd of 3 call sites.
+  // ---------------------------------------------------------------------------
+  it("delivers {scope} to renderInitialPrompt when RunOptions.host carries one (#308)", async () => {
+    const model = new MockLanguageModelV2({
+      doStream: streamFrom([...textParts("Hello"), finishPart("stop", 10, 5)]),
+    });
+    const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+    const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+    const runner = new AgentRunner(model);
+    const agent = makeAgent({
+      renderInitialPrompt: (ctx) => {
+        capturedCtx.push(ctx);
+        return "system prompt";
+      },
+    });
+
+    await collectStream(runner.stream(agent, "Hi", { host: buildScopeHost(parsedScope) }));
+
+    expect(capturedCtx).toEqual([{ scope: parsedScope }]);
+  });
+
+  it("delivers undefined to renderInitialPrompt when RunOptions.host carries no scope (#308)", async () => {
+    const model = new MockLanguageModelV2({
+      doStream: streamFrom([...textParts("Hello"), finishPart("stop", 10, 5)]),
+    });
+    const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+    const runner = new AgentRunner(model);
+    const agent = makeAgent({
+      renderInitialPrompt: (ctx) => {
+        capturedCtx.push(ctx);
+        return "system prompt";
+      },
+    });
+
+    await collectStream(runner.stream(agent, "Hi"));
+
+    expect(capturedCtx).toEqual([undefined]);
   });
 
   // Terminal-tool exit — parity with run(): a successful terminal call ends

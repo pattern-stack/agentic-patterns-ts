@@ -9,7 +9,7 @@
  * `mcp__{server}__{tool}`.
  */
 
-import type { Capability, ToolSchema, Toolbox } from "@agentic-patterns/core";
+import type { Capability, RenderContext, ToolSchema, Toolbox } from "@agentic-patterns/core";
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
 import type { ZodObject, ZodRawShape } from "zod";
 
@@ -108,7 +108,7 @@ export interface AgentLikeForBridge {
   };
   getModel(): string | undefined;
   getTools(): ToolSchema[];
-  renderInitialPrompt(): string;
+  renderInitialPrompt(ctx?: RenderContext): string;
 }
 
 export function buildAgentServers(agent: AgentLikeForBridge) {

@@ -206,6 +206,36 @@ describe("ContextSection", () => {
     const section = new ContextSection(bg);
     expect(section.render()).toBe("");
   });
+
+  it("forwards ctx to awareness.toPrompt(ctx) only (not to background.toPrompt())", () => {
+    const awareness = Awareness.fromScope(
+      { parse: (input: unknown) => input as { user: string } },
+      (s) => `User: ${s.user}`,
+    );
+    const section = new ContextSection(undefined, awareness);
+    const result = section.render({ scope: { user: "u1" } });
+    expect(result).toContain("User: u1");
+  });
+
+  it("renders byte-identically with and without an explicit undefined ctx", () => {
+    const awareness = Awareness.fromScope(
+      { parse: (input: unknown) => input as { user: string } },
+      (s) => `User: ${s.user}`,
+    );
+    const section = new ContextSection(undefined, awareness);
+    expect(section.render(undefined)).toBe(section.render());
+    expect(section.render()).not.toContain("User:");
+  });
+
+  it("does not append when the scope-render fn returns an empty string", () => {
+    const awareness = Awareness.fromScope(
+      { parse: (input: unknown) => input as Record<string, unknown> },
+      () => "",
+    );
+    const section = new ContextSection(undefined, awareness);
+    const result = section.render({ scope: { anything: true } });
+    expect(result).toBe(section.render());
+  });
 });
 
 describe("MissionSection", () => {

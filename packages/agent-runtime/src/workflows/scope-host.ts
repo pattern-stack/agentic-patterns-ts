@@ -33,7 +33,11 @@ function hostOf(ctx: { host?: unknown } | undefined): ScopeHost | undefined {
 export function buildScopeHost(parsed: Record<string, unknown>): {
   scope: Record<string, unknown>;
 } {
-  return { scope: parsed };
+  // Freeze (shallow) at the injection seam: this ONE bag is shared by every
+  // later render (`Awareness.fromScope` fns) and every tool read for the
+  // conversation's lifetime — a consumer that writes to it would silently
+  // corrupt scope for everything downstream. Frozen, that write throws loud.
+  return { scope: Object.freeze({ ...parsed }) };
 }
 
 /**

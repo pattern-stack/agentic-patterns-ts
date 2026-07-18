@@ -3,6 +3,7 @@
 export { PromptRenderer } from "./renderer.js";
 export {
   type PromptSection,
+  type RenderContext,
   IdentitySection,
   BoundariesSection,
   CapabilitiesSection,

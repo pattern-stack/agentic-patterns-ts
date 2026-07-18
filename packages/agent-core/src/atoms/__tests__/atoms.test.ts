@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { z } from "zod";
 import { Awareness, AwarenessDomain } from "../awareness.js";
@@ -275,6 +275,19 @@ describe("Background", () => {
   });
 });
 
+// A minimal SessionScope-shaped stand-in: `{ parse(input): T }`. Awareness
+// (atoms, layer 0) can never import the real SessionScope (molecules, layer
+// 2) — this mirrors what a real SessionScope instance looks like structurally,
+// per R2's "typing anchor only" contract.
+const workspaceScopeSchema = z.object({
+  userId: z.string(),
+  workspace: z.string(),
+  region: z.string().default("us-east-1"),
+});
+const workspaceScope = {
+  parse: (input: unknown) => workspaceScopeSchema.parse(input),
+};
+
 describe("Awareness", () => {
   it("renders empty awareness", () => {
     const a = new Awareness({});
@@ -329,6 +342,142 @@ describe("Awareness", () => {
       .withCapabilities(["search"]);
     expect(a.data.domains).toHaveLength(2);
     expect(a.data.explorationCapabilities).toEqual(["search"]);
+  });
+});
+
+describe("Awareness.fromScope", () => {
+  it("builds an Awareness with no domains by default", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    expect(awareness.data.domains).toEqual([]);
+  });
+
+  it("layers scope-derived text onto a base awareness's domains", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`, {
+      domains: [{ name: "GitHub", description: "Repos", accessMethod: "API" }],
+    });
+    expect(awareness.domainNames).toEqual(["GitHub"]);
+  });
+
+  it("types fn's scope param from scopeLike.parse's return type", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => {
+      expectTypeOf(s).toEqualTypeOf<z.infer<typeof workspaceScopeSchema>>();
+      return `Workspace: ${s.workspace}`;
+    });
+    // Actually invoke the hook (via toPrompt) so the assertion above runs.
+    const prompt = awareness.toPrompt({
+      scope: { userId: "u1", workspace: "acme", region: "us-east-1" },
+    });
+    expect(prompt).toContain("Workspace: acme");
+  });
+
+  it("never calls scopeLike.parse — a typing anchor only, not re-validated at render time", () => {
+    let parseCalls = 0;
+    const spyScope = {
+      parse: (input: unknown) => {
+        parseCalls++;
+        return workspaceScopeSchema.parse(input);
+      },
+    };
+    const awareness = Awareness.fromScope(spyScope, (s) => s.workspace);
+    awareness.toPrompt({ scope: { userId: "u1", workspace: "acme", region: "us-east-1" } });
+    expect(parseCalls).toBe(0);
+  });
+});
+
+describe("Awareness.toPrompt(ctx) append semantics", () => {
+  it("is byte-identical to a scopeRender-less Awareness when ctx is omitted", () => {
+    const withHook = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    const without = new Awareness({});
+    expect(withHook.toPrompt()).toBe(without.toPrompt());
+  });
+
+  it("is byte-identical to nullary rendering when ctx.scope is undefined", () => {
+    const withHook = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    expect(withHook.toPrompt({})).toBe(withHook.toPrompt());
+  });
+
+  it("appends after the no-domains fallback line, never replacing it", () => {
+    const awareness = Awareness.fromScope(
+      workspaceScope,
+      (s) => `Acting on behalf of ${s.userId} in workspace ${s.workspace}.`,
+    );
+    const prompt = awareness.toPrompt({
+      scope: { userId: "u1", workspace: "acme", region: "us-east-1" },
+    });
+    expect(prompt).toBe(
+      "You have no external information sources available.\n\n" +
+        "Acting on behalf of u1 in workspace acme.",
+    );
+  });
+
+  it("appends after a populated info-sources block, never reordering it", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`, {
+      domains: [{ name: "GitHub", description: "Repos", accessMethod: "API" }],
+    });
+    const nullary = awareness.toPrompt();
+    const scoped = awareness.toPrompt({
+      scope: { userId: "u1", workspace: "acme", region: "us-east-1" },
+    });
+    expect(scoped.startsWith(nullary)).toBe(true);
+    expect(scoped).toBe(`${nullary}\n\nWorkspace: acme`);
+  });
+
+  it("skips appending when scopeRender returns an empty string", () => {
+    const awareness = Awareness.fromScope(workspaceScope, () => "");
+    const scoped = awareness.toPrompt({
+      scope: { userId: "u1", workspace: "acme", region: "us-east-1" },
+    });
+    expect(scoped).toBe(awareness.toPrompt());
+  });
+
+  it("ignores ctx.scope entirely when the instance has no scopeRender", () => {
+    const awareness = new Awareness({});
+    const scoped = awareness.toPrompt({ scope: { anything: "goes" } });
+    expect(scoped).toBe("You have no external information sources available.");
+  });
+});
+
+describe("Awareness.replace() scopeRender survival (R3)", () => {
+  it("survives a direct replace() call", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    const replaced = awareness.replace({ explorationCapabilities: ["search"] });
+    expect(replaced.scopeRender).toBe(awareness.scopeRender);
+    expect(
+      replaced.toPrompt({ scope: { userId: "u1", workspace: "acme", region: "x" } }),
+    ).toContain("Workspace: acme");
+  });
+
+  it("survives withDomain()", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    const next = awareness.withDomain({
+      name: "GitHub",
+      description: "Repos",
+      accessMethod: "API",
+    });
+    expect(next.scopeRender).toBe(awareness.scopeRender);
+    expect(next.toPrompt({ scope: { userId: "u1", workspace: "acme", region: "x" } })).toContain(
+      "Workspace: acme",
+    );
+  });
+
+  it("survives withDomains()", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    const next = awareness.withDomains([
+      { name: "GitHub", description: "Repos", accessMethod: "API" },
+    ]);
+    expect(next.scopeRender).toBe(awareness.scopeRender);
+  });
+
+  it("survives withCapabilities()", () => {
+    const awareness = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);
+    const next = awareness.withCapabilities(["grep"]);
+    expect(next.scopeRender).toBe(awareness.scopeRender);
+  });
+
+  it("a plain (non-fromScope) Awareness still has no scopeRender after replace()", () => {
+    const awareness = new Awareness({});
+    const replaced = awareness.replace({ explorationCapabilities: ["search"] });
+    expect(replaced.scopeRender).toBeUndefined();
   });
 });
 
