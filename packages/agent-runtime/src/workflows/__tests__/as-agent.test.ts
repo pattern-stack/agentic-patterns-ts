@@ -18,11 +18,13 @@ import type { AgentLike } from "../../runner/agent-runner.js";
 import { AgentRunner } from "../../runner/agent-runner.js";
 import { MockRunner } from "../../runner/mock-runner.js";
 import { deriveToolboxExecutor } from "../../runner/toolbox-executor.js";
+import type { RunOptions, RunnerProtocol } from "../../runner/types.js";
 import { AgentStep } from "../agent-step.js";
 import { NodeBackedRunner, asAgent, isPromotedAgent } from "../as-agent.js";
 import { FunctionStep } from "../function-step.js";
 import type { Node, NodeRunContext } from "../node.js";
 import { ObservedScratchpad } from "../observed-scratchpad.js";
+import { buildScopeHost, readScope } from "../scope-host.js";
 import { Sequential } from "../sequential.js";
 import { DefaultScratchpad, slot } from "../slot.js";
 
@@ -607,5 +609,102 @@ describe("NodeBackedRunner — observed scratchpad + runId threading (#226)", ()
     // The relayed write is the SAME run, not a re-minted identity.
     const write = events.find((e) => e.type === "agent.scratchpad.write");
     expect(write).toMatchObject({ key: "probe.note", runId: ctx.runId, traceId: ctx.traceId });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SessionScope crosses the promoted-agent seam (#308 D1). `NodeBackedRunner`
+// otherwise IGNORES `options.host` entirely — this is the edit that lets a
+// promoted (`asAgent`) pipeline see a Conversation-level scope at all.
+// ---------------------------------------------------------------------------
+
+describe("NodeBackedRunner — options.host.scope -> NodeRunContext.scope (#308)", () => {
+  /** A node that captures its ctx for post-run assertions. */
+  function makeScopeProbe(): { node: Node<string, string>; ctx: () => NodeRunContext } {
+    let captured: NodeRunContext | undefined;
+    const node: Node<string, string> = {
+      name: "scope-probe",
+      async run(input: string, ctx: NodeRunContext) {
+        captured = ctx;
+        return { output: input, succeeded: true, totalInputTokens: 0, totalOutputTokens: 0 };
+      },
+    };
+    return {
+      node,
+      ctx: () => {
+        if (!captured) throw new Error("probe never ran");
+        return captured;
+      },
+    };
+  }
+
+  it("run() narrows options.host.scope (via buildScopeHost) onto ctx.scope", async () => {
+    const probe = makeScopeProbe();
+    const promoted = asAgent(probe.node, { role: { name: "ScopeProbe" } });
+    const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+
+    await new NodeBackedRunner(new MockRunner()).run(promoted, "hi", {
+      host: buildScopeHost(parsedScope),
+    });
+
+    expect(probe.ctx().scope).toEqual(parsedScope);
+  });
+
+  it("omitting options.host leaves ctx.scope undefined (no accidental default)", async () => {
+    const probe = makeScopeProbe();
+    const promoted = asAgent(probe.node, { role: { name: "ScopeProbeNone" } });
+
+    await new NodeBackedRunner(new MockRunner()).run(promoted, "hi");
+
+    expect(probe.ctx().scope).toBeUndefined();
+  });
+
+  it("stream() forwards options.host.scope into the inner run()'s ctx.scope (via the { ...options } spread)", async () => {
+    const probe = makeScopeProbe();
+    const promoted = asAgent(probe.node, { role: { name: "ScopeProbeStream" } });
+    const parsedScope = { workspace: "acme" };
+    const runner = new NodeBackedRunner(new MockRunner());
+
+    for await (const _e of runner.stream(promoted, "yo", { host: buildScopeHost(parsedScope) })) {
+      // drain
+    }
+
+    expect(probe.ctx().scope).toEqual(parsedScope);
+  });
+
+  it("promoted-path full rail: ctx.scope threads through the wrapped AgentStep's RunOptions.host.scope, readable via readScope", async () => {
+    // A recording inner runner (mirrors host-propagation.test.ts's
+    // recordingRunner) — proves AgentStep.run (agent-step.ts:137) packs
+    // ctx.scope onto ITS OWN RunOptions.host.scope, so a real AgentRunner's
+    // eventual tool-call ctx would see it via readScope() exactly as
+    // scope-host.ts documents.
+    const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+    const captured: RunOptions[] = [];
+    const recordingInner: RunnerProtocol = {
+      async run(_agent, _message, options) {
+        if (options) captured.push(options);
+        return {
+          response: "leaf done",
+          inputTokens: 0,
+          outputTokens: 0,
+          toolCallsCount: 0,
+          iterations: 1,
+          finishReason: "stop",
+        };
+      },
+    };
+
+    const pipeline = new AgentStep<string, string>({
+      name: "leaf",
+      agent: makeAgent("leaf-agent"),
+      prompt: (input) => input,
+    });
+    const promoted = asAgent(pipeline, { role: { name: "ScopePipe" } });
+    const runner = new NodeBackedRunner(recordingInner);
+
+    await runner.run(promoted, "go", { host: buildScopeHost(parsedScope) });
+
+    expect(captured).toHaveLength(1);
+    expect(readScope(captured[0])).toEqual(parsedScope);
   });
 });

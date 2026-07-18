@@ -75,6 +75,20 @@ export interface NodeRunContext {
    * back-compat hinge: existing callers that pass `{ runner }` never touch it.
    */
   readonly eventBus?: AgentEventBus;
+  /**
+   * A server-parsed `SessionScope` value (tenant/user/region-style
+   * conversation-lifetime config), when this run's host carries one. Rides
+   * as a SIBLING key on `RunOptions.host` (`host.scope`) — NOT inside
+   * `host.deps`, which is a `DepReader` a plain scope object would crash
+   * (`ctx.deps.get()`). OPTIONAL: absent → today's behavior. Node code reads
+   * it directly (`ctx.scope`) or via `readScope`/`requireScope`
+   * (`scope-host.ts`), which accept both this context and a tool's
+   * `ToolExecutionContext`. Injected by `agent-step.ts` (from `ctx.scope`)
+   * and `as-agent.ts`'s `NodeBackedRunner` (from `options.host.scope`);
+   * forwarded across the agent-as-tool seam by `node-tool.ts` so scope
+   * survives nested `AgentStep`s / delegated subagents.
+   */
+  readonly scope?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------

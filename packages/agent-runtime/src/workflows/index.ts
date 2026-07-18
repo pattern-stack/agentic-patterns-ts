@@ -43,6 +43,14 @@ export {
   provideDeps,
 } from "./deps.js";
 
+export {
+  buildScopeHost,
+  readScope,
+  requireScope,
+  readScopeAs,
+  ScopeUnavailableError,
+} from "./scope-host.js";
+
 export type { Consolidate } from "./consolidate.js";
 
 export {

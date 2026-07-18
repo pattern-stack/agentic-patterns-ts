@@ -543,3 +543,137 @@ describe("host propagation — event bus crosses the seam", () => {
     expect(toolStarts).toContain("getBalance");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test 7 — SessionScope crosses the seam (#308 D1): scope rides as a SIBLING
+// `host.scope` key (never inside `host.deps`, which is a DepReader). Mirrors
+// Test 3's (root deps) and Test 1's (full rail) shapes.
+// ---------------------------------------------------------------------------
+
+describe("host propagation — scope crosses the seam (#308)", () => {
+  it("a delegated FunctionStep reads ctx.scope via nodeTool's host.scope forward (direct-execute)", async () => {
+    const rootScratchpad = createScratchpad();
+    const runner = new MockRunner();
+    const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+
+    const reader = new FunctionStep<Record<string, never>, Record<string, unknown> | undefined>({
+      name: "reader",
+      fn: (_input, _scratchpad, ctx) => ctx.scope,
+    });
+
+    const tool = nodeTool(
+      { description: "reader", parameters: z.object({}), node: reader },
+      runner,
+    );
+
+    const out = await tool.execute(
+      {},
+      { host: { scratchpad: rootScratchpad, scope: parsedScope } },
+    );
+    expect(out).toEqual(parsedScope);
+  });
+
+  it("no host.scope → ctx.scope stays undefined (no accidental default)", async () => {
+    const rootScratchpad = createScratchpad();
+    const runner = new MockRunner();
+
+    const reader = new FunctionStep<Record<string, never>, Record<string, unknown> | undefined>({
+      fn: (_input, _scratchpad, ctx) => ctx.scope,
+    });
+    const tool = nodeTool(
+      { description: "reader", parameters: z.object({}), node: reader },
+      runner,
+    );
+
+    const out = await tool.execute({}, { host: { scratchpad: rootScratchpad } });
+    expect(out).toBeUndefined();
+  });
+
+  it("full rail: a scope set on the ROOT ctx survives CoordinatorStep -> AgentRunner -> nodeTool into a nested delegated node", async () => {
+    const rootScratchpad = createScratchpad();
+    const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+
+    const capturedScopes: (Record<string, unknown> | undefined)[] = [];
+    const childRunner = new MockRunner();
+    const childNode = new FunctionStep<{ task: string }, string>({
+      name: "child",
+      fn: (_input, _scratchpad, ctx) => {
+        capturedScopes.push(ctx.scope);
+        return "child done";
+      },
+    });
+    const team = new NodeToolbox({
+      name: "team",
+      description: "team",
+      runner: childRunner,
+      tools: {
+        child: {
+          description: "invoke the child sub-agent",
+          parameters: z.object({ task: z.string() }),
+          node: childNode,
+        },
+      },
+    });
+
+    // Same 3-call outer script as Test 1: delegate to "child", answer, then
+    // tier 2's structured finish.
+    let outerCalls = 0;
+    const outerModel = new MockLanguageModelV2({
+      doGenerate: async () => {
+        outerCalls++;
+        if (outerCalls === 1) {
+          return {
+            content: [
+              {
+                type: "tool-call" as const,
+                toolCallId: "outer-tc-scope-1",
+                toolName: "child",
+                input: JSON.stringify({ task: "go" }),
+              },
+            ],
+            finishReason: "tool-calls" as const,
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            warnings: [],
+          };
+        }
+        if (outerCalls === 2) {
+          return {
+            content: [{ type: "text" as const, text: "outer done" }],
+            finishReason: "stop" as const,
+            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ title: "ok" }) }],
+          finishReason: "stop" as const,
+          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          warnings: [],
+        };
+      },
+    });
+
+    const sharedRunner = new AgentRunner(outerModel, new AgentEventBus());
+
+    const Template = z.object({ title: z.string() });
+    const author = new CoordinatorStep<{ instruction: string }, z.infer<typeof Template>>({
+      name: "CanvasAuthor",
+      agent: coordinatorAgent(),
+      team,
+      output: Template,
+      prompt: (input) => input.instruction,
+    });
+
+    const result = await author.run(
+      { instruction: "please delegate" },
+      { runner: sharedRunner, scratchpad: rootScratchpad, scope: parsedScope },
+    );
+
+    expect(result.succeeded).toBe(true);
+    expect(result.output).toEqual({ title: "ok" });
+    // The child saw the root's scope — proof of the full rail:
+    // CoordinatorStep -> AgentStep.run -> RunOptions.host.scope -> buildToolCtx
+    // -> ToolExecutionContext.host.scope -> nodeTool -> the delegated node's ctx.scope.
+    expect(capturedScopes).toEqual([parsedScope]);
+  });
+});

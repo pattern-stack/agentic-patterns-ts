@@ -223,6 +223,18 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     return !blocked;
   }
 
+  // TODO(#308): `options.host` (and therefore `host.scope`, see
+  // `workflows/scope-host.ts`) is NOT relayed to tool execution on this
+  // runner — Claude Code manages its own tool loop via SDK MCP servers
+  // (`sdk-bridge.ts`'s `buildAgentServers`/`toolsFromToolbox`), which call
+  // `toolbox.execute(name, args)` with NO `ToolExecutionContext` at all, and
+  // `Playbook.execute(name, args)` (core `molecules/playbook.ts`) has no
+  // `ctx` parameter to carry one through even if the toolbox leg were wired.
+  // Threading scope through only the toolbox half would silently leave
+  // playbook-backed CC tools scope-less with no signal, which is worse than
+  // the current uniform absence — so this was left undone rather than forced
+  // (decisions.md D13). Scope is silently absent on ClaudeCodeRunner /
+  // ClaudeCodeAPIRunner-backed registrations until this is revisited.
   async run(agent: AgentLikeForBridge, message: string, options?: RunOptions): Promise<RunResult> {
     if (options?.eventBus) {
       this._eventBus = options.eventBus;

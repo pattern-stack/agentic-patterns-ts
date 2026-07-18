@@ -56,7 +56,12 @@ export function nodeTool<TIn>(
       // share through the fork; branch-scoped slots stay isolated per (possibly
       // parallel) tool call. join()/merge-back is OFF for v1.
       const host = ctx?.host as
-        | { scratchpad?: Scratchpad; deps?: DepReader; eventBus?: AgentEventBus }
+        | {
+            scratchpad?: Scratchpad;
+            deps?: DepReader;
+            eventBus?: AgentEventBus;
+            scope?: Record<string, unknown>;
+          }
         | undefined;
       const result = await spec.node.run(input, {
         runner,
@@ -66,6 +71,9 @@ export function nodeTool<TIn>(
         // construction-time runner publishes agent.* events to that runner's
         // constructor-bound (or global-default) bus, invisible to the session.
         eventBus: host?.eventBus,
+        // Scope crosses the seam too (#308 D1) — without this, a nested
+        // AgentStep/agent-as-tool sub-run loses the parent's session scope.
+        scope: host?.scope,
         // #102: join the parent trace and nest under the invoking call's span
         // so this sub-workflow's tool activity is attributable, not orphaned.
         traceId: ctx?.traceId,
