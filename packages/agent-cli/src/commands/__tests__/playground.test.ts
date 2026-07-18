@@ -13,8 +13,99 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { AgentRegistration } from "@agentic-patterns/server";
 import { describe, expect, it } from "vitest";
-import { isApiPath, isHtmlNavigation, withHtmlNavigationShim } from "../playground.js";
+import type { DiscoveredAgent } from "../../helpers/discover.js";
+import {
+  isApiPath,
+  isHtmlNavigation,
+  toAgentRegistration,
+  withHtmlNavigationShim,
+} from "../playground.js";
+
+describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map (#308 gapcheck G7)", () => {
+  // A minimal fake runner: `AgentRegistration.runner` only requires `run`
+  // (`stream` stays optional, mirroring `RunnerProtocol`) — no real LLM call
+  // needed to exercise the field map itself.
+  const fakeRunner: AgentRegistration["runner"] = {
+    run: async () => ({
+      response: "",
+      inputTokens: 0,
+      outputTokens: 0,
+      toolCallsCount: 0,
+      iterations: 1,
+      finishReason: "stop",
+    }),
+  };
+
+  // A duck-typed fake SessionScope (no `@agentic-patterns/core` import,
+  // same posture as the discovery fixtures) — its identity is what this
+  // test proves survives the map, not its behavior.
+  const fakeScope: NonNullable<DiscoveredAgent["scope"]> = {
+    schema: { type: "object" },
+    redactKeys: ["secret"],
+    defaults: { tenant: "acme" },
+    parse: (value) => value as Record<string, unknown>,
+    toJsonSchema: () => ({}),
+  };
+
+  // Every optional `DiscoveredAgent` field populated — this is the fixture a
+  // future field silently failing to reach `AgentRegistration` must show up
+  // against.
+  const fullReg: DiscoveredAgent = {
+    id: "full",
+    name: "Full Agent",
+    description: "exercises every field",
+    // biome-ignore lint/suspicious/noExplicitAny: fake agent shape, kept loose to match DiscoveredAgent.agent
+    agent: { role: { name: "Full" } } as any,
+    file: "/agents/full/agent.ts",
+    provenance: { file: "/agents/full/agent.ts", slots: [] },
+    instantiate: async () => ({ role: { name: "Full" } }) as never,
+    scope: fakeScope,
+    instantiateDefaults: { tenant: "default-tenant" },
+    contextRedactKeys: ["secret"],
+    evals: [{ setId: "xd-interpret" }],
+  };
+
+  it("threads every DiscoveredAgent field into AgentRegistration, scope by identity", () => {
+    const result = toAgentRegistration(fullReg, fakeRunner);
+    expect(result).toEqual({
+      id: "full",
+      name: "Full Agent",
+      description: "exercises every field",
+      agent: fullReg.agent,
+      file: "/agents/full/agent.ts",
+      provenance: { file: "/agents/full/agent.ts", slots: [] },
+      instantiate: fullReg.instantiate,
+      scope: fakeScope,
+      instantiateDefaults: { tenant: "default-tenant" },
+      contextRedactKeys: ["secret"],
+      evals: [{ setId: "xd-interpret" }],
+      runner: fakeRunner,
+    });
+    // Not a copy — the exact scope instance must survive (the point of
+    // duck-typed pass-through: no `.parse` re-implementation en route).
+    expect(result.scope).toBe(fakeScope);
+  });
+
+  it("a registration declaring none of the optional fields maps to all-undefined, not dropped keys", () => {
+    const bareReg: DiscoveredAgent = {
+      id: "bare",
+      name: "Bare Agent",
+      // biome-ignore lint/suspicious/noExplicitAny: fake agent shape
+      agent: { role: { name: "Bare" } } as any,
+      file: "/agents/bare/agent.ts",
+    };
+    const result = toAgentRegistration(bareReg, fakeRunner);
+    expect(result.scope).toBeUndefined();
+    expect(result.instantiate).toBeUndefined();
+    expect(result.instantiateDefaults).toBeUndefined();
+    expect(result.contextRedactKeys).toBeUndefined();
+    expect(result.evals).toBeUndefined();
+    expect(result.provenance).toBeUndefined();
+    expect(result.runner).toBe(fakeRunner);
+  });
+});
 
 describe("isApiPath", () => {
   it("classifies /eval and its subpaths as API — would have failed before this change", () => {

@@ -15,11 +15,19 @@
  * `POST /conversations` (`agent-server/src/routes/conversations.ts`), so a
  * chat started from the CLI scopes identically to one started from the
  * dashboard. See `resolveRunContext` below.
+ *
+ * SessionScope (#308, decisions.md D12) widens the same machinery: a
+ * declared `scope` subsumes `instantiateDefaults` for the defaults fallback,
+ * is validated (`scope.parse`) BEFORE `instantiate` runs, and — regardless
+ * of whether the registration even HAS an `instantiate` hook — its parsed
+ * value is threaded onto the conversation's `host.scope` (`buildScopeHost`)
+ * so tools can read it via `readScope`/`requireScope`.
  */
 
 import {
   Conversation,
   NodeBackedRunner,
+  buildScopeHost,
   deriveToolboxExecutor,
   getAgentEventBus,
   isPromotedAgent,
@@ -44,9 +52,11 @@ export interface RunOptions {
   configRoot?: string;
   /**
    * Raw JSON string from `--context '<json>'` (#268 PR-3). Highest-precedence
-   * source for the `instantiate` hook's context — beats `AP_CONTEXT` env and
-   * the registration's `instantiateDefaults`. Ignored (and rejected, see
-   * {@link resolveRunContext}) when the agent has no `instantiate` hook.
+   * source for the `instantiate` hook's / declared `scope`'s effective value
+   * (#308) — beats `AP_CONTEXT` env and the registration's `scope.defaults`/
+   * `instantiateDefaults`. Ignored (and rejected, see {@link
+   * resolveRunContext}) when the agent has neither an `instantiate` hook nor
+   * a declared `scope`.
    */
   context?: string;
 }
@@ -67,16 +77,43 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
 
   // Resolve run-scope context BEFORE any runner/model work (#268 PR-3) — a
   // malformed `--context`/`AP_CONTEXT`, or context supplied to a hook-less
-  // agent, fails loud right here, never reaching credential preflight or a
-  // model call. Precedence: flag > `AP_CONTEXT` env > `instantiateDefaults`,
-  // mirroring `POST /conversations`' `effectiveContext` (`agent-server/src/
-  // routes/conversations.ts`).
+  // AND scope-less agent, fails loud right here, never reaching credential
+  // preflight or a model call. Precedence: flag > `AP_CONTEXT` env >
+  // `scope.defaults` > `instantiateDefaults` (#308), mirroring
+  // `POST /conversations`' `effectiveContext` (`agent-server/src/routes/
+  // conversations.ts`).
   const contextResolution = resolveRunContext(reg, opts.context);
   if (!contextResolution.ok) {
     process.stderr.write(`${red(`error: ${contextResolution.error}`)}\n`);
     process.exit(1);
   }
-  const { context: effectiveContext } = contextResolution;
+  let effectiveContext = contextResolution.context;
+
+  // Scope validation (#308, decisions.md D12) — the registration's declared
+  // shape wins over ad hoc context, parsed BEFORE `instantiate` so a
+  // malformed scope fails loud pre-run (same posture as the JSON/hook checks
+  // above, never touching a runner/credential/model call). The PARSED value
+  // (zod defaults/coercions applied) replaces `effectiveContext` for every
+  // downstream consumer: `instantiate`, the banner, and `buildScopeHost`.
+  // Runs even for a scope-only registration with NO `instantiate` hook — the
+  // scope's job is to arm `host.scope` for tool reads, independent of
+  // whether the agent itself gets re-delivered.
+  if (reg.scope) {
+    try {
+      effectiveContext = reg.scope.parse(effectiveContext ?? {});
+    } catch (err) {
+      process.stderr.write(`${red(`error: ${formatScopeValidationError(err)}`)}\n`);
+      process.exit(1);
+    }
+    if (typeof effectiveContext !== "object" || effectiveContext === null) {
+      // Only a malformed hand-rolled scope can produce this (a real
+      // SessionScope's z.object always parses to an object).
+      process.stderr.write(
+        `${red("error: scope.parse returned a non-object — malformed scope")}\n`,
+      );
+      process.exit(1);
+    }
+  }
 
   const eventBus = getAgentEventBus();
   const svc = new ExecutionService({ configRoot: opts.configRoot ?? process.cwd() });
@@ -117,7 +154,17 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
       process.stderr.write(`${red(`error: ${kindCheck.error}`)}\n`);
       process.exit(1);
     }
-    process.stdout.write(`${dim(formatScopeBanner(effectiveContext, reg.contextRedactKeys))}\n`);
+  }
+
+  // Scope/context banner — widened (#308) to a scope-only registration too
+  // (`reg.scope`, no `instantiate` hook): there's nothing to "instantiate",
+  // but the operator still deserves to see what the run resolved. Redact
+  // keys are the union of the scope's declared redactions and the
+  // deprecated `contextRedactKeys` (mirrors `routes/conversations.ts`'s
+  // union) — a hook-only registration's redaction keeps working unchanged.
+  if (typeof reg.instantiate === "function" || reg.scope) {
+    const redactKeys = unionRedactKeys(reg.scope?.redactKeys, reg.contextRedactKeys);
+    process.stdout.write(`${dim(formatScopeBanner(effectiveContext, redactKeys))}\n`);
   }
 
   // DERIVE, don't force-create: a PromotedAgent (asAgent()) has no role
@@ -130,8 +177,16 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
   // Derived from the BOUND (delivered-or-declared) instance, not always
   // `reg.agent` — a hook-bearing registration's delivered instance is the one
   // whose tools actually execute (#268, mirrors `conversations.ts`).
+  // `host.scope` (#308) — carries the PARSED scope value across every run
+  // this conversation makes, so tools can read it via `readScope`/
+  // `requireScope` (`@agentic-patterns/runtime`, `workflows/scope-host.js`).
+  // Only scope-declaring registrations get a host — hook-only (no scope)
+  // registrations keep today's hostless behavior (mirrors
+  // `routes/conversations.ts`).
+  const host = reg.scope ? buildScopeHost(effectiveContext ?? {}) : undefined;
   const conversation = new Conversation(agentToBind, runner, {
     toolExecutor: deriveToolboxExecutor(agentToBind),
+    ...(host ? { host } : {}),
   });
 
   if (opts.message !== undefined) {
@@ -157,30 +212,39 @@ export type RunContextResolution =
   | { readonly ok: false; readonly error: string };
 
 /**
- * Resolve the context `ap run` hands to `reg.instantiate`, precedence
- * `--context` flag > `AP_CONTEXT` env (both raw JSON strings) >
- * `reg.instantiateDefaults` — mirroring `POST /conversations`'
- * `effectiveContext` (`agent-server/src/routes/conversations.ts`), so a chat
- * started from the CLI scopes identically to one started from the dashboard.
+ * Resolve the context `ap run` hands to `reg.instantiate`/`host.scope`,
+ * precedence `--context` flag > `AP_CONTEXT` env (both raw JSON strings) >
+ * `reg.scope.defaults` > `reg.instantiateDefaults` — mirroring
+ * `POST /conversations`' `effectiveContext` (`agent-server/src/routes/
+ * conversations.ts`'s `declaredDefaults = reg.scope?.defaults ??
+ * reg.instantiateDefaults`, #308), so a chat started from the CLI scopes
+ * identically to one started from the dashboard.
  *
  * Pure and synchronous by design: `runRunCommand` calls this BEFORE any
  * runner/model work, so a malformed flag/env value, or a context supplied to
- * a hook-less agent, fails loud pre-run rather than after paying for
- * credential preflight or a model call.
+ * a hook-less AND scope-less agent, fails loud pre-run rather than after
+ * paying for credential preflight or a model call. Deliberately does NOT run
+ * `reg.scope.parse` — that happens separately, in `runRunCommand`, right
+ * after this resolves (decisions.md D12: scope validated before
+ * `instantiate`).
  *
  * Validation order mirrors the server's `POST /conversations` grammar:
- * JSON-parse → object-shape → hook-presence — same two 400s, translated to a
- * CLI `ok: false`.
+ * JSON-parse → object-shape → hook/scope-presence — same two 400s,
+ * translated to a CLI `ok: false`.
  */
 export function resolveRunContext(
-  reg: Pick<DiscoveredAgent, "instantiate" | "instantiateDefaults">,
+  reg: Pick<DiscoveredAgent, "instantiate" | "instantiateDefaults" | "scope">,
   contextFlag: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): RunContextResolution {
   const hasHook = typeof reg.instantiate === "function";
+  const hasScope = reg.scope !== undefined;
+  // scope.defaults subsumes instantiateDefaults (#308) — same precedence as
+  // the server's `declaredDefaults`.
+  const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
   // Normalize blank to absent: a present-but-empty/whitespace `AP_CONTEXT`
   // (e.g. a stray `export AP_CONTEXT=` in a .env) must fall back to
-  // instantiateDefaults/no-context exactly like an UNSET source — `??` alone
+  // declaredDefaults/no-context exactly like an UNSET source — `??` alone
   // would let `""` through to `JSON.parse`, which throws, hard-blocking
   // every `ap run` (including hook-less agents that never opted into context
   // at all) on a value nobody meant to set. The `--context` flag path is
@@ -188,15 +252,16 @@ export function resolveRunContext(
   const raw = (contextFlag ?? env.AP_CONTEXT)?.trim() || undefined;
 
   if (raw === undefined) {
-    // No explicit source — hook-bearing registrations fall back to their
-    // declared defaults (shallow-copied: `reg.instantiateDefaults` is ONE
-    // shared object across every `ap run` invocation against this
-    // registration; a hook that mutates its argument must not corrupt it for
-    // the next run, mirror of the server-side fix in conversations.ts).
+    // No explicit source — hook- or scope-bearing registrations fall back to
+    // their declared defaults (shallow-copied: `declaredDefaults` may be ONE
+    // shared object — either `reg.scope.defaults` or `reg.instantiateDefaults`
+    // — across every `ap run` invocation against this registration; a hook
+    // that mutates its argument must not corrupt it for the next run, mirror
+    // of the server-side fix in conversations.ts).
     return {
       ok: true,
       hasHook,
-      context: hasHook && reg.instantiateDefaults ? { ...reg.instantiateDefaults } : undefined,
+      context: (hasHook || hasScope) && declaredDefaults ? { ...declaredDefaults } : undefined,
     };
   }
 
@@ -210,13 +275,51 @@ export function resolveRunContext(
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return { ok: false, error: "--context (or AP_CONTEXT) must be a JSON object" };
   }
-  if (!hasHook) {
+  if (!hasHook && !hasScope) {
     return {
       ok: false,
-      error: "agent has no instantiate hook — --context/AP_CONTEXT is not accepted",
+      error: "agent has no instantiate hook or scope — --context/AP_CONTEXT is not accepted",
     };
   }
   return { ok: true, hasHook, context: parsed as Record<string, unknown> };
+}
+
+/**
+ * Render a `scope.parse` failure for the terminal — duck-typed `err.issues`
+ * detection (decisions.md D3): the throwing zod may be a DIFFERENT module
+ * instance than the CLI's own (agent files often resolve
+ * `@agentic-patterns/core` through a built `dist/`), so this NEVER checks
+ * `instanceof ZodError` / calls `.flatten()` (v3-only shape) across that
+ * boundary. A non-zod throw degrades to its bare message. Exported for
+ * testing.
+ */
+export function formatScopeValidationError(err: unknown): string {
+  if (err && Array.isArray((err as { issues?: unknown }).issues)) {
+    const issues = (err as { issues: Array<{ path?: unknown; message?: string }> }).issues;
+    const details = issues
+      .map((issue) => {
+        const path =
+          Array.isArray(issue.path) && issue.path.length > 0 ? issue.path.join(".") : "(root)";
+        return `${path}: ${issue.message ?? "invalid"}`;
+      })
+      .join("; ");
+    return `scope validation failed: ${details}`;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return `scope validation failed: ${message}`;
+}
+
+/**
+ * Union of a scope's declared redaction keys and the deprecated
+ * `contextRedactKeys` (#308) — mirrors `routes/conversations.ts`'s union so
+ * a hook-only registration's redaction keeps working unchanged when it later
+ * adds a `scope`. Exported for testing.
+ */
+export function unionRedactKeys(
+  scopeRedactKeys: readonly string[] | undefined,
+  contextRedactKeys: readonly string[] | undefined,
+): string[] {
+  return Array.from(new Set([...(scopeRedactKeys ?? []), ...(contextRedactKeys ?? [])]));
 }
 
 /**
@@ -263,7 +366,9 @@ export function redactContextForDisplay(
 
 /**
  * The one-line `scope: <compact json>` banner printed when the registration
- * has an `instantiate` hook — redacted per `contextRedactKeys`. Plain text;
+ * has an `instantiate` hook and/or a declared `scope` (#308) — redacted per
+ * the caller-supplied key list (union of `scope.redactKeys` and the
+ * deprecated `contextRedactKeys`, see {@link unionRedactKeys}). Plain text;
  * the caller applies ANSI dimming.
  */
 export function formatScopeBanner(
