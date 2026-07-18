@@ -16,6 +16,8 @@
 import { useCallback, useRef, useState } from "react";
 import {
   type ConversationCreated,
+  ScopeValidationError,
+  type ScopeValidationIssue,
   type SendOptions,
   createConversation,
   sendInputResponse,
@@ -51,6 +53,15 @@ export interface UseChatResult {
   context: Record<string, unknown> | null;
   /** Top-level context keys the server redacted, when any were (#268). */
   contextRedacted: string[] | null;
+  /**
+   * The per-field zod issues from the most recent `createConversation` 400
+   * (#308's `scope.parse` rejection) — reset at the start of every `send()`
+   * so a stale rejection never lingers past a corrected retry. `null` when
+   * the create hasn't failed with `issues` (either it hasn't run yet, it
+   * succeeded, or it failed some OTHER way — that case still lands in
+   * `error` above as a flat string).
+   */
+  scopeIssues: ScopeValidationIssue[] | null;
   send: (content: string) => Promise<void>;
   /** Answer an inline `input_request` (approval gate / tool ask) for this thread. */
   respondInput: (correlationId: string, answer: InputAnswer) => Promise<void>;
@@ -80,6 +91,7 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [context, setContext] = useState<Record<string, unknown> | null>(null);
   const [contextRedacted, setContextRedacted] = useState<string[] | null>(null);
+  const [scopeIssues, setScopeIssues] = useState<ScopeValidationIssue[] | null>(null);
   const [traceEvents, setTraceEvents] = useState<EventLike[]>([]);
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const convIdRef = useRef<string | null>(null);
@@ -109,6 +121,7 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
       const q = content.trim();
       if (!q || streaming || !agentId) return;
       setError(null);
+      setScopeIssues(null);
       const at = Date.now();
       const assistantId = nextId();
       setMessages((prev) => [
@@ -162,6 +175,11 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
         // AbortError (user pressed Stop) is expected — mark aborted, not errored.
         const aborted = e instanceof DOMException && e.name === "AbortError";
         patch(assistantId, (m) => ({ ...m, streaming: false, aborted }));
+        // A scope-validation 400 (#308) carries per-field `issues` in
+        // addition to the flat message — expose both so a caller with a
+        // typed form can map issues onto rows, while `error` still reads
+        // sanely for anyone only rendering the flat string.
+        if (e instanceof ScopeValidationError) setScopeIssues(e.issues);
         if (!aborted) setError(e instanceof Error ? e.message : "stream dropped");
       } finally {
         setStreaming(false);
@@ -188,6 +206,7 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
     setConversationId(null);
     setContext(null);
     setContextRedacted(null);
+    setScopeIssues(null);
     setMessages([]);
     setStreaming(false);
     setError(null);
@@ -202,6 +221,7 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
     conversationId,
     context,
     contextRedacted,
+    scopeIssues,
     send,
     respondInput,
     abort,

@@ -218,7 +218,7 @@ function IOTab({
           RunMeta.context's doc comment); a live/demo/no-stamp run shows
           nothing here rather than fabricating "(no scope)". */}
       {runMeta?.context !== undefined && (
-        <Section title="Scope context">
+        <Section title="Scope">
           {runMeta.context === null ? (
             <div style={{ fontSize: T.fz.small, color: "var(--mute)" }}>(no scope)</div>
           ) : (

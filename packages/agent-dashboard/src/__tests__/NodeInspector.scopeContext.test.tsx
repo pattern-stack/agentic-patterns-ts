@@ -34,7 +34,7 @@ describe("NodeInspector Scope context section (#268)", () => {
       />,
     );
 
-    expect(getByText("Scope context")).toBeTruthy();
+    expect(getByText("Scope")).toBeTruthy();
     expect(container.textContent).toContain('"tenant": "acme"');
     expect(container.textContent).toContain('"userId": "[redacted]"');
     expect(getByText("redacted: userId")).toBeTruthy();
@@ -45,7 +45,7 @@ describe("NodeInspector Scope context section (#268)", () => {
       <NodeInspector node={AGENT_NODE} steps={[]} runMeta={{ context: null }} onClose={() => {}} />,
     );
 
-    expect(getByText("Scope context")).toBeTruthy();
+    expect(getByText("Scope")).toBeTruthy();
     expect(getByText("(no scope)")).toBeTruthy();
     expect(queryByText(/redacted:/)).toBeNull();
   });
@@ -60,6 +60,6 @@ describe("NodeInspector Scope context section (#268)", () => {
       />,
     );
 
-    expect(queryByText("Scope context")).toBeNull();
+    expect(queryByText("Scope")).toBeNull();
   });
 });

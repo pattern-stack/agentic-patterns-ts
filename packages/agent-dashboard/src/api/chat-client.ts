@@ -13,13 +13,32 @@ export interface AgentSummary {
   name: string;
   description: string;
   /**
-   * Delivered-instance capability (#268) — same sub-shape `GET
+   * Delivered-instance capability (#268, widened #308) — same sub-shape `GET
    * /agents/:id/composition` carries (`api/composition.ts`'s
    * `AgentComposition.instantiation`), mirrored onto the roster summary so the
-   * chat surface can seed a per-conversation context editor without an extra
+   * chat surface can seed a per-conversation scope editor without an extra
    * round trip. Absent on older servers — treat as unavailable.
+   *
+   * `schema`/`presets` (#308) are OPTIONAL and additive: an older server that
+   * only ever spoke #268 sends `available`/`defaults` alone, and the chat
+   * surface falls back to the raw JSON textarea editor exactly as before —
+   * including posting under the same `context` wire key that editor always
+   * used (see `createConversation`), so the fallback really is byte-identical
+   * against a pre-#308 server, not just visually.
    */
-  instantiation?: { available: boolean; defaults: Record<string, unknown> | null };
+  instantiation?: {
+    available: boolean;
+    defaults: Record<string, unknown> | null;
+    /** JSON-schema of the declared scope, when the registration has one
+     *  (`SessionScope.toJsonSchema()`) — folds into the typed scope form
+     *  (`lib/toolParams.ts` `foldToolParams`). `null`/absent → no typed form,
+     *  the JSON textarea is the only editor. */
+    schema?: Record<string, unknown> | null;
+    /** Named preset value objects declared on the scope, when any exist —
+     *  picking one seeds every row of the typed form (materialized
+     *  CLIENT-side; the preset name itself is never sent to the server). */
+    presets?: Record<string, Record<string, unknown>> | null;
+  };
 }
 
 export interface ConversationCreated {
@@ -123,27 +142,66 @@ export async function sendInputResponse(
   }
 }
 
+/** One zod issue from a failed `scope.parse` (#308) — duck-typed the same
+ *  way the server detects them (decisions.md D3): `path`/`message` are the
+ *  only fields the typed scope form reads (`path[0]` matches a row name). */
+export interface ScopeValidationIssue {
+  path: Array<string | number>;
+  message: string;
+}
+
 /**
- * Create a new conversation with a given agent. `context` is posted only when
+ * Thrown by `createConversation` when the server's 400 body carries
+ * `issues` (`{error: "scope validation failed", issues: [...]}, D3) instead
+ * of a bare `{error}` string — lets callers (the typed scope form) map each
+ * issue back onto the row that produced it, rather than only showing a flat
+ * error string.
+ */
+export class ScopeValidationError extends Error {
+  readonly issues: ScopeValidationIssue[];
+  constructor(message: string, issues: ScopeValidationIssue[]) {
+    super(message);
+    this.name = "ScopeValidationError";
+    this.issues = issues;
+  }
+}
+
+/**
+ * Create a new conversation with a given agent. `scope` is posted only when
  * provided (#268) — omitting it entirely for a hook-less agent, or when the
  * caller has no draft, keeps the request byte-identical to pre-#268 behavior.
- * Surfaces the server's `{error}` body on failure (the `compositionApi
- * .deliveredComposition` precedent) so a bad context object or a rejecting
- * `instantiate` hook reads as its actual reason, not just an HTTP status.
+ * Posted under the `context` body key. The #308 server also accepts a
+ * `scope` key (aliased to `context`, decisions.md D5/D10), but a dashboard
+ * build is deployed independently of the server it talks to — a published
+ * pre-#308 server reads ONLY `context` and would silently ignore an unknown
+ * `scope` key (201, no error, operator's edit discarded). Sending `context`
+ * keeps every server generation, old and new, actually bound to the value
+ * the operator typed. Surfaces the server's `{error}` body on failure (the
+ * `compositionApi.deliveredComposition` precedent) so a bad scope object or a
+ * rejecting `instantiate` hook reads as its actual reason, not just an HTTP
+ * status; a `scope.parse` 400 (carrying `issues`) throws a
+ * `ScopeValidationError` instead of the plain `Error` so per-field mapping is
+ * possible upstream.
  */
 export async function createConversation(
   agentId: string,
-  context?: Record<string, unknown>,
+  scope?: Record<string, unknown>,
 ): Promise<ConversationCreated> {
   const res = await fetch("/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(
-      context !== undefined ? { agent_id: agentId, context } : { agent_id: agentId },
+      scope !== undefined ? { agent_id: agentId, context: scope } : { agent_id: agentId },
     ),
   });
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    const body = (await res.json().catch(() => null)) as {
+      error?: string;
+      issues?: ScopeValidationIssue[];
+    } | null;
+    if (body && Array.isArray(body.issues)) {
+      throw new ScopeValidationError(body.error ?? "scope validation failed", body.issues);
+    }
     throw new Error(body?.error ?? `POST /conversations failed: ${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<ConversationCreated>;
