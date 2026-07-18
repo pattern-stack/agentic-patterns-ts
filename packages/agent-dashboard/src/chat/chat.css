@@ -212,7 +212,7 @@
   color: var(--ink-2);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 .chat-thinking .glyph {
   color: var(--accent-ink);
@@ -248,7 +248,7 @@
   display: none;
 }
 .chat-tool .tool-name {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-weight: 600;
   color: var(--accent-ink);
 }
@@ -256,7 +256,7 @@
   margin-left: auto;
   color: var(--mute);
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 .chat-tool .tool-io {
   padding: 0 11px 10px;
@@ -280,7 +280,7 @@
   border-left-width: 4px;
 }
 .chat-step > summary .step-kind {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-micro);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -389,7 +389,7 @@
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font: 700 10px var(--font-mono);
+  font: 700 10px var(--font-sans);
   background: var(--violet-soft);
   color: var(--violet-ink);
 }
@@ -403,7 +403,7 @@
   color: var(--err-ink);
 }
 .d-key {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-tiny);
   font-weight: 600;
   color: var(--ink);
@@ -430,7 +430,7 @@ button.d-key:focus-visible {
   color: var(--ink-2);
 }
 .pill {
-  font: 600 var(--fz-micro) var(--font-mono);
+  font: 600 var(--fz-micro) var(--font-sans);
   border-radius: var(--radius-pill);
   padding: 0 6px;
   line-height: 15px;
@@ -452,16 +452,16 @@ button.d-key:focus-visible {
   background: var(--fill);
 }
 .d-size {
-  font: 500 var(--fz-tiny) var(--font-mono);
+  font: 500 var(--fz-tiny) var(--font-sans);
   color: var(--ink-2);
 }
 .d-prov {
   margin-left: auto;
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
 }
 .innate-chip {
-  font: 700 9px var(--font-mono);
+  font: 700 9px var(--font-sans);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--mute);
@@ -498,7 +498,7 @@ button.d-key:focus-visible {
   flex: none;
   width: 24px;
   text-align: center;
-  font: 700 var(--fz-small) var(--font-mono);
+  font: 700 var(--fz-small) var(--font-sans);
 }
 .d-row.add {
   background: color-mix(in oklch, var(--ok) 8%, var(--paper));
@@ -520,7 +520,7 @@ button.d-key:focus-visible {
   color: var(--mute);
 }
 .hnd {
-  font: 600 var(--fz-micro) var(--font-mono);
+  font: 600 var(--fz-micro) var(--font-sans);
   color: var(--violet-ink);
   background: var(--violet-soft);
   border-radius: var(--radius-sm);
@@ -535,7 +535,7 @@ button.d-key:focus-visible {
 .d-row .micro {
   font-size: var(--fz-micro);
   color: var(--mute);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
 }
 .d-foot {
   display: flex;
@@ -544,7 +544,7 @@ button.d-key:focus-visible {
   flex-wrap: wrap;
 }
 .tag-chip {
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--ink-2);
   background: var(--fill);
   border: 1px solid var(--line);
@@ -584,13 +584,13 @@ button.d-key:focus-visible {
   font-size: var(--fz-lg);
 }
 .t-title {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-weight: 600;
   font-size: var(--fz-tiny);
 }
 .t-sub {
   color: var(--mute);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-micro);
 }
 .m-strip {
@@ -622,7 +622,7 @@ button.d-key:focus-visible {
   padding: 0 9px;
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm);
-  font: 500 var(--fz-micro) var(--font-mono);
+  font: 500 var(--fz-micro) var(--font-sans);
   color: var(--mute);
   background: transparent;
 }
@@ -637,7 +637,7 @@ button.d-key:focus-visible {
 
 /* [#N] citation chips in assistant prose */
 .cite {
-  font: 600 var(--fz-micro) var(--font-mono);
+  font: 600 var(--fz-micro) var(--font-sans);
   color: var(--accent-ink);
   background: var(--accent-soft);
   border-radius: var(--radius-sm);
@@ -722,7 +722,7 @@ button.d-key:focus-visible {
 
 /* ── message footer (model · tokens) ───────────────────────────────────────*/
 .chat-footer {
-  font: 500 var(--fz-micro) / 1.3 var(--font-mono);
+  font: 500 var(--fz-micro) / 1.3 var(--font-sans);
   color: var(--mute);
   display: flex;
   gap: 8px;
@@ -852,7 +852,7 @@ button.d-key:focus-visible {
   font-weight: 600;
 }
 .chat-approval .approval-tool {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-tiny);
   color: var(--accent-ink);
   background: var(--paper);

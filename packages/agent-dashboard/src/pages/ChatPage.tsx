@@ -27,6 +27,7 @@
  * pages/chat-route.css) without a second global stylesheet.
  */
 
+import { Check, ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { type AgentSummary, listAgents } from "../api/chat-client";
@@ -411,7 +412,7 @@ export function ChatPage({
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
-          <div style={{ fontSize: T.fz.tiny, fontFamily: T.font.mono, color: "var(--mute)" }}>
+          <div style={{ fontSize: T.fz.tiny, color: "var(--mute)" }}>
             Viewing session <b style={{ color: "var(--ink-2)" }}>{shortId(viewingId)}</b> —
             read-only. "New Chat" returns to live.
           </div>
@@ -584,19 +585,7 @@ function Header({
         }}
       >
         <h1 style={{ fontSize: T.fz.xl, fontWeight: 600, margin: 0 }}>Chat</h1>
-        <select
-          value={selectedId ?? ""}
-          onChange={(e) => onSelect(e.target.value)}
-          disabled={!agents.length}
-          style={{ ...inputStyle, minWidth: 200 }}
-        >
-          {agents.length === 0 && <option value="">No agents registered</option>}
-          {agents.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </select>
+        <AgentPickerMenu agents={agents} selectedId={selectedId} onSelect={onSelect} />
         <SessionsMenu
           sessions={sessions}
           error={sessionsError}
@@ -690,11 +679,110 @@ function Header({
 }
 
 /**
+ * AgentPickerMenu — replaces the native `<select>` agent picker (LD4): the
+ * chat surface's one holdout from the kit `DropdownMenu` chrome. Trigger
+ * mirrors `ThemeToggle`'s bordered "value ▾" idiom (a picker reads as a
+ * select-alike, not a ghost action button) so it still looks like the
+ * primary control it is.
+ */
+function AgentPickerMenu({
+  agents,
+  selectedId,
+  onSelect,
+}: {
+  agents: AgentSummary[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const selected = agents.find((a) => a.id === selectedId) ?? null;
+
+  return (
+    <DropdownMenu
+      align="left"
+      width={240}
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={!agents.length}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            minWidth: 200,
+            padding: "7px 9px",
+            fontFamily: "inherit",
+            fontSize: T.fz.md,
+            color: "var(--ink)",
+            background: "var(--fill)",
+            border: "1px solid var(--line)",
+            borderRadius: T.radius.sm,
+            cursor: agents.length ? "pointer" : "not-allowed",
+            opacity: agents.length ? 1 : 0.6,
+          }}
+        >
+          <span style={{ flex: 1, textAlign: "left" }}>
+            {selected ? selected.name : agents.length ? "Select agent" : "No agents registered"}
+          </span>
+          <ChevronDown size={12} />
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <>
+          {agents.length === 0 && (
+            <div style={{ padding: "10px 12px", fontSize: T.fz.small, color: "var(--mute)" }}>
+              No agents registered
+            </div>
+          )}
+          {agents.map((a) => {
+            const active = a.id === selectedId;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                onClick={() => {
+                  onSelect(a.id);
+                  close();
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  width: "100%",
+                  padding: "8px 12px",
+                  fontFamily: "inherit",
+                  fontSize: T.fz.small,
+                  border: "none",
+                  background: active ? "var(--accent-soft)" : "transparent",
+                  color: active ? "var(--accent-ink)" : "var(--ink)",
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                {a.name}
+                {active && <Check size={12} />}
+              </button>
+            );
+          })}
+        </>
+      )}
+    </DropdownMenu>
+  );
+}
+
+/**
  * CopyChatMenu — copy the whole (live or replayed) conversation to the
  * clipboard in a chosen format: readable markdown with tools collapsed, the
- * same with each tool call's I/O, or the full structured JSON. Self-contained
- * popover (not the shared DropdownMenu) so it can close on selection and flip
- * the trigger to a transient "Copied ✓".
+ * same with each tool call's I/O, or the full structured JSON. Built on the
+ * kit `DropdownMenu` (folded back in now that it has a `close` handle — this
+ * used to be a hand-rolled popover for exactly that reason, see LD1) so it
+ * shares chrome with every other menu and still closes itself on selection.
  */
 function CopyChatMenu({
   messages,
@@ -705,7 +793,6 @@ function CopyChatMenu({
   agentName?: string;
   conversationId: string | null;
 }) {
-  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const empty = messages.length === 0;
@@ -719,8 +806,8 @@ function CopyChatMenu({
     [],
   );
 
-  const copy = async (format: ChatExportFormat) => {
-    setOpen(false);
+  const copy = async (format: ChatExportFormat, close: () => void) => {
+    close();
     const text = exportChat(messages, format, { agentName, conversationId });
     try {
       await navigator.clipboard.writeText(text);
@@ -733,67 +820,43 @@ function CopyChatMenu({
   };
 
   return (
-    <div style={{ position: "relative", display: "inline-block" }}>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen((v) => !v)}
-        disabled={empty}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={empty ? "Nothing to copy yet" : "Copy the conversation"}
-      >
-        {copied ? "Copied ✓" : "Copy ▾"}
-      </Button>
-      {open && (
-        <>
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={() => setOpen(false)}
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "transparent",
-              border: "none",
-              cursor: "default",
-              zIndex: 25,
-            }}
-          />
-          <div
-            role="menu"
-            style={{
-              position: "absolute",
-              right: 0,
-              top: "calc(100% + 6px)",
-              width: 236,
-              zIndex: 30,
-              background: "var(--paper)",
-              border: "1px solid var(--line)",
-              borderRadius: "var(--radius-md)",
-              boxShadow: T.shadow.s3,
-              padding: 4,
-            }}
-          >
-            <CopyChatItem
-              label="Markdown · tools collapsed"
-              hint="Readable transcript; tool calls as one line"
-              onClick={() => copy("markdown")}
-            />
-            <CopyChatItem
-              label="Markdown · with tool I/O"
-              hint="Each tool call's input + output"
-              onClick={() => copy("markdown-io")}
-            />
-            <CopyChatItem
-              label="JSON · full"
-              hint="The complete structured thread"
-              onClick={() => copy("json")}
-            />
-          </div>
-        </>
+    <DropdownMenu
+      align="right"
+      width={236}
+      trigger={({ toggle, open }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggle}
+          disabled={empty}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title={empty ? "Nothing to copy yet" : "Copy the conversation"}
+        >
+          {copied ? "Copied ✓" : "Copy ▾"}
+        </Button>
       )}
-    </div>
+    >
+      {({ close }) => (
+        <div role="menu" style={{ padding: 4 }}>
+          <CopyChatItem
+            label="Markdown · tools collapsed"
+            hint="Readable transcript; tool calls as one line"
+            onClick={() => copy("markdown", close)}
+          />
+          <CopyChatItem
+            label="Markdown · with tool I/O"
+            hint="Each tool call's input + output"
+            onClick={() => copy("markdown-io", close)}
+          />
+          <CopyChatItem
+            label="JSON · full"
+            hint="The complete structured thread"
+            onClick={() => copy("json", close)}
+          />
+        </div>
+      )}
+    </DropdownMenu>
   );
 }
 
@@ -909,7 +972,6 @@ function RunSettingsMenu({
           <div
             style={{
               fontSize: T.fz.micro,
-              fontFamily: T.font.mono,
               color: "var(--ink-3)",
               borderTop: "1px solid var(--line)",
               paddingTop: 9,
@@ -926,12 +988,13 @@ function RunSettingsMenu({
 /**
  * ScopeContextPanel — the per-conversation context editor (#268), following
  * `AgentLensPage`'s delivered-instance JSON textarea pattern
- * (`pages/build/AgentLensPage.tsx:329`) and `CaptureCasePanel`'s
- * collapsed-button → bordered-panel shape (this file has two "advanced"
- * panels now; they share the same chrome on purpose). Editable until the
- * conversation exists; once `locked`, shows the ACTUAL bound context (the
- * server's echo) instead of the (possibly stale) draft — the same
- * server-is-truth rule the chip follows.
+ * (`pages/build/AgentLensPage.tsx:329`). playground-menus round 1 (LD2):
+ * used to be an inline expand — a collapsed button that swapped into a
+ * bordered `div` in the header flow, pushing siblings. Now a kit
+ * `DropdownMenu` popover, so opening it never reflows the page. Editable
+ * until the conversation exists; once `locked`, shows the ACTUAL bound
+ * context (the server's echo) instead of the (possibly stale) draft — the
+ * same server-is-truth rule the chip follows.
  */
 function ScopeContextPanel({
   editorText,
@@ -948,84 +1011,84 @@ function ScopeContextPanel({
   boundContext: Record<string, unknown> | null;
   boundContextRedacted: string[] | null;
 }) {
-  const [expanded, setExpanded] = useState(false);
   // Send is already blocked on this (ChatPage's `disabled` prop) — the
-  // collapsed button needs its OWN visible cause, or a greyed-out Send with
-  // no explanation is the only signal the operator ever sees (Gate 2.5
-  // review note 3).
+  // trigger needs its OWN visible cause, or a greyed-out Send with no
+  // explanation is the only signal the operator ever sees (Gate 2.5 review
+  // note 3).
   const showsInvalid = !locked && error != null;
 
-  if (!expanded) {
-    return (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setExpanded(true)}
-        style={showsInvalid ? { color: "var(--err)" } : undefined}
-      >
-        Scope context{locked ? " · locked" : showsInvalid ? " · invalid" : ""}
-      </Button>
-    );
-  }
-
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        padding: 10,
-        border: "1px solid var(--line)",
-        borderRadius: "var(--radius-lg)",
-        background: "var(--paper)",
-        maxWidth: 420,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Scope context</div>
-        <Button variant="ghost" size="sm" onClick={() => setExpanded(false)}>
-          Close
+    <DropdownMenu
+      align="right"
+      width={380}
+      maxHeight={420}
+      trigger={({ toggle, open }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggle}
+          aria-expanded={open}
+          style={showsInvalid ? { color: "var(--err)" } : undefined}
+        >
+          Scope context{locked ? " · locked" : showsInvalid ? " · invalid" : ""}
         </Button>
-      </div>
-
-      {locked ? (
-        <>
-          <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
-            Locked for this conversation — <b>New Chat</b> to change scope.
+      )}
+    >
+      {({ close }) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Scope context</div>
+            <Button variant="ghost" size="sm" onClick={close}>
+              Close
+            </Button>
           </div>
-          {boundContext === null ? (
-            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>(no scope)</div>
-          ) : (
+          {locked ? (
             <>
-              <JsonBlock value={boundContext} maxHeight={200} />
-              {boundContextRedacted && boundContextRedacted.length > 0 && (
-                <div style={{ fontSize: T.fz.micro, color: T.tone.warn.ink }}>
-                  redacted: {boundContextRedacted.join(", ")}
-                </div>
+              <div style={{ fontSize: 12, color: "var(--ink-2)" }}>
+                Locked for this conversation — <b>New Chat</b> to change scope.
+              </div>
+              {boundContext === null ? (
+                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>(no scope)</div>
+              ) : (
+                <>
+                  <JsonBlock value={boundContext} maxHeight={200} />
+                  {boundContextRedacted && boundContextRedacted.length > 0 && (
+                    <div style={{ fontSize: T.fz.micro, color: T.tone.warn.ink }}>
+                      redacted: {boundContextRedacted.join(", ")}
+                    </div>
+                  )}
+                </>
               )}
             </>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.45 }}>
+                Who this conversation acts on behalf of — edit the JSON, then send. The scope binds
+                on the first message; <b>New Chat</b> to run as someone else.
+              </div>
+              <Field label="Context (JSON)">
+                <textarea
+                  aria-label="Scope context"
+                  value={editorText}
+                  onChange={(e) => onEditorText(e.target.value)}
+                  spellCheck={false}
+                  rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
+                  style={{
+                    ...inputStyle,
+                    background: "var(--paper)",
+                    fontFamily: T.font.mono,
+                    fontSize: T.fz.tiny,
+                    lineHeight: 1.5,
+                    resize: "vertical",
+                  }}
+                />
+              </Field>
+            </>
           )}
-        </>
-      ) : (
-        <Field label="Context (JSON)">
-          <textarea
-            aria-label="Scope context"
-            value={editorText}
-            onChange={(e) => onEditorText(e.target.value)}
-            spellCheck={false}
-            rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
-            style={{
-              ...inputStyle,
-              fontFamily: T.font.mono,
-              fontSize: T.fz.tiny,
-              lineHeight: 1.5,
-              resize: "vertical",
-            }}
-          />
-        </Field>
+          {showsInvalid && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
+        </div>
       )}
-      {showsInvalid && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
-    </div>
+    </DropdownMenu>
   );
 }
 
@@ -1041,7 +1104,6 @@ function truncateChipValue(v: unknown): string {
 /** Shared chip-pill visual (both the interactive and the non-interactive
  *  "(no scope)" cases render this same shape — see `ScopeChip` below). */
 const CHIP_STYLE = {
-  fontFamily: T.font.mono,
   fontSize: T.fz.tiny,
   padding: "2px 8px",
   borderRadius: T.radius.pill,
@@ -1185,13 +1247,12 @@ function SessionsMenu({
               display: "flex",
               alignItems: "center",
               gap: 8,
-              fontFamily: T.font.mono,
               fontSize: T.fz.small,
               color: "var(--ink-2)",
             }}
           >
             {shortId(s.conversationId)}
-            <Badge tone="mute" mono>
+            <Badge tone="mute">
               {s.messageCount} msg{s.messageCount === 1 ? "" : "s"}
             </Badge>
             <Badge tone={statusTone(s.status)}>{s.status}</Badge>

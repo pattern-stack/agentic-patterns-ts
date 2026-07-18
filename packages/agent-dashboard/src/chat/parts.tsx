@@ -890,7 +890,7 @@ function ErrorPart({ errorType, message }: { errorType: string; message: string 
     <div className="chat-error">
       <span aria-hidden>⚠</span>
       <span>
-        <strong style={{ fontFamily: "var(--font-mono)" }}>{errorType}</strong>
+        <strong>{errorType}</strong>
         {message ? ` — ${message}` : ""}
       </span>
     </div>

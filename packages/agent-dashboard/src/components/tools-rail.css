@@ -22,7 +22,7 @@
   padding: 8px 12px;
   border-bottom: 1px solid var(--line);
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--mute);
 }
 .tools-rail__bar b {
@@ -78,7 +78,7 @@
 .scope__tag {
   margin-left: auto;
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--mute);
 }
 .scope__sub {
@@ -101,7 +101,7 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-tiny);
 }
 .scope__k {
@@ -151,7 +151,7 @@
 }
 .cap__toolbox {
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--mute);
   background: var(--fill);
   border: 1px solid var(--line);
@@ -163,7 +163,7 @@
   margin-left: auto;
   flex: none;
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--mute);
 }
 .cap__plays {
@@ -174,7 +174,7 @@
 }
 .cap__play {
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--accent-ink);
   background: var(--accent-soft);
   border-radius: var(--radius-sm);
@@ -186,8 +186,8 @@
 .tool__row {
   width: 100%;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
   padding: 5px 8px;
   border: none;
   background: transparent;
@@ -208,6 +208,12 @@
   background: hsl(var(--hover-bg));
   color: var(--ink);
 }
+.tool__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .tool__dot {
   width: 5px;
   height: 5px;
@@ -219,7 +225,7 @@
   background: var(--accent-ink);
 }
 .tool__name {
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-small);
   flex: 1;
   min-width: 0;
@@ -238,17 +244,19 @@
   transform: rotate(90deg);
 }
 
-/* Description is always shown inline under the tool name — no click needed. */
+/* Description is always shown inline under the tool name — no click needed.
+   It sits INSIDE .tool__row so name + description hover/click as one unit. */
 .tool__desc {
-  padding: 0 10px 5px 21px;
+  padding: 1px 2px 0 13px;
   font-size: var(--fz-micro);
   color: var(--mute);
   line-height: 1.4;
+  text-align: left;
 }
 .tool__pcount {
   flex: none;
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--mute);
 }
 .tool.open {
@@ -276,7 +284,7 @@
   align-items: baseline;
   flex-wrap: wrap;
   gap: 6px;
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   font-size: var(--fz-tiny);
 }
 .tool__param-name {
@@ -307,7 +315,7 @@
   align-items: center;
   gap: 5px 10px;
   font-size: var(--fz-micro);
-  font-family: var(--font-mono);
+  font-family: var(--font-sans);
   color: var(--mute);
 }
 .tool__meta .k {
