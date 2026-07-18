@@ -142,8 +142,10 @@ export interface RunOptions {
   /**
    * Opaque host payload copied verbatim onto every `ToolExecutionContext`
    * this run's tool dispatches build (`buildToolCtx`). The runner never
-   * reads it. The workflow layer uses it to carry `{ scratchpad, deps }`
-   * across the agent-as-tool seam (#124).
+   * reads it. The workflow layer uses it to carry `{ scratchpad, deps,
+   * eventBus, scope }` across the agent-as-tool seam (#124). `scope` is a
+   * server-parsed `SessionScope` value — read it via
+   * `readScope`/`requireScope` (`workflows/scope-host.ts`).
    */
   host?: unknown;
 }

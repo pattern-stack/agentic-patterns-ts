@@ -444,6 +444,104 @@ describe("Conversation", () => {
     expect(conv.history).toHaveLength(1);
     expect(conv.lastExchange?.user).toBe("hi");
   });
+
+  // ---------------------------------------------------------------------------
+  // Constructor `host` -> send()/stream()/fork() run options (#308). `host`
+  // carries a server-parsed SessionScope value (`host.scope`) for the
+  // lifetime of the conversation — fixed at construction, not per-message.
+  // ---------------------------------------------------------------------------
+  describe("constructor host -> send()/stream()/fork() run options (#308)", () => {
+    function capturingRunner(): RunnerProtocol & {
+      runCalls: (RunOptions | undefined)[];
+      streamCalls: (RunOptions | undefined)[];
+    } {
+      const runner = {
+        runCalls: [] as (RunOptions | undefined)[],
+        streamCalls: [] as (RunOptions | undefined)[],
+        run: async (
+          _agent: unknown,
+          _message: string,
+          options?: RunOptions,
+        ): Promise<RunResult> => {
+          runner.runCalls.push(options);
+          return {
+            response: "ok",
+            inputTokens: 1,
+            outputTokens: 1,
+            toolCallsCount: 0,
+            iterations: 1,
+            finishReason: "stop",
+          };
+        },
+        async *stream(
+          _agent: unknown,
+          _message: string,
+          options?: RunOptions,
+        ): AsyncGenerator<AgentEvent> {
+          runner.streamCalls.push(options);
+          yield createEvent("agent.message.complete", {
+            traceId: "t",
+            runId: "r",
+            content: "ok",
+            inputTokens: 1,
+            outputTokens: 1,
+            model: "m",
+          });
+        },
+      };
+      return runner;
+    }
+
+    it("send() forwards the constructor host into RunOptions.host", async () => {
+      const sentinelHost = { scope: { workspace: "acme" } };
+      const runner = capturingRunner();
+      const conv = new Conversation(makeAgent(), runner, { host: sentinelHost });
+
+      await conv.send("hi");
+
+      expect(runner.runCalls).toHaveLength(1);
+      expect(runner.runCalls[0]?.host).toBe(sentinelHost);
+    });
+
+    it("stream() forwards the constructor host into RunOptions.host", async () => {
+      const sentinelHost = { scope: { workspace: "acme" } };
+      const runner = capturingRunner();
+      const conv = new Conversation(makeAgent(), runner, { host: sentinelHost });
+
+      for await (const _e of conv.stream("hi")) {
+        // drain
+      }
+
+      expect(runner.streamCalls).toHaveLength(1);
+      expect(runner.streamCalls[0]?.host).toBe(sentinelHost);
+    });
+
+    it("omitting host yields RunOptions.host === undefined on both send() and stream() (no accidental default)", async () => {
+      const runner = capturingRunner();
+      const conv = new Conversation(makeAgent(), runner);
+
+      await conv.send("hi");
+      for await (const _e of conv.stream("hi")) {
+        // drain
+      }
+
+      expect(runner.runCalls[0]?.host).toBeUndefined();
+      expect(runner.streamCalls[0]?.host).toBeUndefined();
+    });
+
+    it("fork() carries the host forward onto the forked conversation", async () => {
+      const sentinelHost = { scope: { workspace: "acme" } };
+      const runner = capturingRunner();
+      const conv = new Conversation(makeAgent(), runner, { host: sentinelHost });
+      await conv.send("one");
+
+      const forked = await conv.fork();
+      await forked.send("two");
+
+      expect(runner.runCalls).toHaveLength(2);
+      expect(runner.runCalls[1]?.host).toBe(sentinelHost);
+    });
+  });
 });
 
 describe("exchangeTotalTokens", () => {

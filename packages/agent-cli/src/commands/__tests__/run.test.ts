@@ -9,12 +9,29 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { DiscoveredAgent } from "../../helpers/discover.js";
 import {
   checkInstantiateKindMatch,
   formatScopeBanner,
+  formatScopeValidationError,
   redactContextForDisplay,
   resolveRunContext,
+  unionRedactKeys,
 } from "../run.js";
+
+// A duck-typed fake SessionScope (#308) — no `@agentic-patterns/core` import,
+// same posture as the discovery fixtures.
+function fakeScope(
+  overrides: Partial<NonNullable<DiscoveredAgent["scope"]>> = {},
+): NonNullable<DiscoveredAgent["scope"]> {
+  return {
+    schema: { type: "object" },
+    redactKeys: [],
+    parse: (value) => value as Record<string, unknown>,
+    toJsonSchema: () => ({}),
+    ...overrides,
+  };
+}
 
 // Minimal fixtures for `isPromotedAgent`'s structural check (`as-agent.ts`):
 // a promoted instance needs `__promotedNode.run` + `coerceIn`/`renderOut`/
@@ -159,6 +176,106 @@ describe("resolveRunContext — precedence: flag > AP_CONTEXT env > instantiateD
   it("blank AP_CONTEXT on a hook-less agent runs normally — never trips the JSON or hook-presence check", () => {
     const result = resolveRunContext(noHook, undefined, { AP_CONTEXT: "" });
     expect(result).toEqual({ ok: true, hasHook: false, context: undefined });
+  });
+});
+
+describe("resolveRunContext — scope subsumption (#308, decisions.md D12)", () => {
+  const scopeOnly = { scope: fakeScope() };
+  const scopeWithDefaults = { scope: fakeScope({ defaults: { tenant: "scope-tenant" } }) };
+  const hookAndScopeWithDefaults = {
+    instantiate: async (ctx?: Record<string, unknown>) => ({ ctx }),
+    instantiateDefaults: { tenant: "instantiate-tenant" },
+    scope: fakeScope({ defaults: { tenant: "scope-tenant" } }),
+  };
+
+  it("scope.defaults wins over instantiateDefaults when both are declared", () => {
+    const result = resolveRunContext(hookAndScopeWithDefaults, undefined, {});
+    expect(result).toEqual({ ok: true, hasHook: true, context: { tenant: "scope-tenant" } });
+  });
+
+  it("a scope-only registration (no instantiate hook) falls back to scope.defaults", () => {
+    const result = resolveRunContext(scopeWithDefaults, undefined, {});
+    expect(result).toEqual({ ok: true, hasHook: false, context: { tenant: "scope-tenant" } });
+  });
+
+  it("a scope-only registration with no defaults resolves to undefined context, same as hook-less/scope-less", () => {
+    const result = resolveRunContext(scopeOnly, undefined, {});
+    expect(result).toEqual({ ok: true, hasHook: false, context: undefined });
+  });
+
+  it("a scope-only registration ACCEPTS --context — the no-instantiate-hook rejection widens to hasScope", () => {
+    const result = resolveRunContext(scopeOnly, '{"tenant":"flag-tenant"}', {});
+    expect(result).toEqual({ ok: true, hasHook: false, context: { tenant: "flag-tenant" } });
+  });
+
+  it("a scope-only registration ACCEPTS AP_CONTEXT the same way", () => {
+    const result = resolveRunContext(scopeOnly, undefined, { AP_CONTEXT: '{"tenant":"x"}' });
+    expect(result).toEqual({ ok: true, hasHook: false, context: { tenant: "x" } });
+  });
+
+  it("a genuinely hook-less, scope-less agent still rejects --context (no regression)", () => {
+    const result = resolveRunContext({}, '{"tenant":"x"}', {});
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("unreachable");
+    expect(result.error).toMatch(/no instantiate hook/);
+  });
+
+  it("scope.defaults is shallow-copied per call — a mutation never corrupts the registration's shared defaults", () => {
+    const result = resolveRunContext(scopeWithDefaults, undefined, {});
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    (result.context as Record<string, unknown>).tenant = "mutated";
+    expect(scopeWithDefaults.scope.defaults).toEqual({ tenant: "scope-tenant" });
+  });
+});
+
+describe("formatScopeValidationError (#308 decisions.md D3 — duck-typed err.issues)", () => {
+  it("formats a zod-shaped issues array into a readable summary", () => {
+    const err = {
+      issues: [
+        { path: ["tenant"], message: "Required" },
+        { path: ["region"], message: "Invalid enum value" },
+      ],
+    };
+    expect(formatScopeValidationError(err)).toBe(
+      "scope validation failed: tenant: Required; region: Invalid enum value",
+    );
+  });
+
+  it("falls back to '(root)' when an issue has no path", () => {
+    const err = { issues: [{ message: "Expected object, received string" }] };
+    expect(formatScopeValidationError(err)).toBe(
+      "scope validation failed: (root): Expected object, received string",
+    );
+  });
+
+  it("falls back to a plain Error's message when there is no issues array", () => {
+    expect(formatScopeValidationError(new Error("boom"))).toBe("scope validation failed: boom");
+  });
+
+  it("falls back to String() for a non-Error, non-issues throw", () => {
+    expect(formatScopeValidationError("plain string throw")).toBe(
+      "scope validation failed: plain string throw",
+    );
+  });
+});
+
+describe("unionRedactKeys (#308 — mirrors routes/conversations.ts's union)", () => {
+  it("unions scope and deprecated contextRedactKeys, deduped", () => {
+    expect(unionRedactKeys(["secret", "userId"], ["userId", "token"])).toEqual([
+      "secret",
+      "userId",
+      "token",
+    ]);
+  });
+
+  it("handles both sides absent", () => {
+    expect(unionRedactKeys(undefined, undefined)).toEqual([]);
+  });
+
+  it("handles one side absent", () => {
+    expect(unionRedactKeys(["secret"], undefined)).toEqual(["secret"]);
+    expect(unionRedactKeys(undefined, ["token"])).toEqual(["token"]);
   });
 });
 

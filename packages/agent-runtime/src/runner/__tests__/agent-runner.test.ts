@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent } from "../../events/types.js";
+import { buildScopeHost, readScope } from "../../workflows/scope-host.js";
 import { AgentRunner, ToolCallBlocked } from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 import type { ToolExecutor } from "../types.js";
@@ -757,6 +758,45 @@ describe("AgentRunner", () => {
 
       expect(capturedCtx).toHaveLength(1);
       expect(capturedCtx[0]?.host).toBeUndefined();
+    });
+
+    it("run(): readScope(ctx) reads a session scope value relayed via RunOptions.host.scope (#308)", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-host-scope-1", toolName: "get_weather", input: { city: "NYC" } },
+              10,
+              5,
+            );
+          }
+          return textResult("sunny", 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { weather: "sunny" };
+        },
+      };
+
+      const runner = new AgentRunner(model);
+      await runner.run(agent, "weather?", {
+        toolExecutor: executor,
+        host: buildScopeHost(parsedScope),
+      });
+
+      expect(capturedCtx).toHaveLength(1);
+      expect(readScope(capturedCtx[0])).toEqual(parsedScope);
     });
 
     it("runStructured() (capable model → convertExecutableTools): ctx.host === options.host on the dispatched tool call", async () => {

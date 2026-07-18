@@ -258,6 +258,12 @@ export class NodeBackedRunner implements RunnerProtocol {
       scratchpad = createScratchpad();
     }
 
+    // Scope rides RunOptions.host as a sibling key (decisions.md D1) — narrow
+    // it exactly as `nodeTool` does (`node-tool.ts:58`). `run()` otherwise
+    // ignores `options.host` entirely, so without this a promoted-agent
+    // (`asAgent`) conversation never sees a Conversation-level scope.
+    const hostScope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
+
     const ctx: NodeRunContext = {
       runner: this.inner,
       toolExecutor: options?.toolExecutor,
@@ -271,6 +277,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       // direct `run()` forwards the caller's bus, or none). OPTIONAL → absent
       // when no bus is provided, preserving today's no-emit behavior.
       ...(bus ? { eventBus: bus } : {}),
+      ...(hostScope ? { scope: hostScope } : {}),
     };
 
     const input = agent.coerceIn(message);

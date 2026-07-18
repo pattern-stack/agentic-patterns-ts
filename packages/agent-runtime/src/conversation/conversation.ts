@@ -85,6 +85,13 @@ export class Conversation {
   private _state: Record<string, unknown>;
   private _history: Exchange[] = [];
   private _exchangeCount = 0;
+  /**
+   * Opaque `RunOptions.host` payload, fixed at construction (conversation
+   * lifetime, not per-message) and forwarded verbatim into every `send()`/
+   * `stream()` run's options. Carries a server-parsed `SessionScope` value
+   * (`host.scope`, #308) across every run this conversation makes.
+   */
+  private _host: unknown;
 
   constructor(
     agent: AgentLike,
@@ -95,6 +102,7 @@ export class Conversation {
       toolExecutor?: ToolExecutor;
       state?: Record<string, unknown>;
       history?: Exchange[];
+      host?: unknown;
     },
   ) {
     this.agent = agent;
@@ -103,6 +111,7 @@ export class Conversation {
     this._store = options?.store;
     this._toolExecutor = options?.toolExecutor;
     this._state = options?.state ?? {};
+    this._host = options?.host;
     if (options?.history) {
       this._history = [...options.history];
       this._exchangeCount = this._history.length;
@@ -170,6 +179,7 @@ export class Conversation {
     const result: RunResult = await this.runner.run(this.agent, message, {
       messageHistory,
       toolExecutor: this._toolExecutor,
+      host: this._host,
     });
 
     const exchange: Exchange = {
@@ -245,6 +255,7 @@ export class Conversation {
       for await (const event of this.runner.stream(this.agent, message, {
         messageHistory,
         toolExecutor: this._toolExecutor,
+        host: this._host,
         eventBus: options?.eventBus,
         // traceId fix: without this, the runner falls back to `effectiveTraceId
         // = options?.traceId ?? runId` and stamps every run event with ITS OWN
@@ -322,6 +333,7 @@ export class Conversation {
       store: this._store,
       toolExecutor: this._toolExecutor,
       state: { ...this._state },
+      host: this._host,
     });
 
     forked._history = this._history.filter((e) => e.number <= branchPoint);

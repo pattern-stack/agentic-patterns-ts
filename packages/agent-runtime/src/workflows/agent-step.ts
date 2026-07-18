@@ -134,7 +134,15 @@ export class AgentStep<TIn, TOut = string> implements Node<TIn, TOut> {
       // so `nodeTool` can re-root it into a delegated sub-run — otherwise a
       // subagent on a private runner emits into a bus nobody watches.
       eventBus: ctx.eventBus,
-      host: { scratchpad: ctx.scratchpad, deps: ctx.deps, eventBus: ctx.eventBus }, // #124
+      // #124; scope rides as a sibling host key (decisions.md D1) so a
+      // Conversation-level scope survives into this nested AgentStep's own
+      // run options instead of being dropped by this host rebuild.
+      host: {
+        scratchpad: ctx.scratchpad,
+        deps: ctx.deps,
+        eventBus: ctx.eventBus,
+        scope: ctx.scope,
+      },
     };
 
     try {

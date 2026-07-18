@@ -21,6 +21,9 @@ export { Capability, capability } from "./capability.js";
 export { Playbook } from "./playbook.js";
 export type { PlayDefinition } from "./playbook.js";
 
+export { ScopeItem, SessionScope, scopeItem, sessionScope } from "./session-scope.js";
+export type { ScopeItemOptions, SessionScopeOptions, ScopeValue } from "./session-scope.js";
+
 export { lintModelFacingSchema } from "./model-facing-schema-lint.js";
 export type {
   SchemaLintCode,

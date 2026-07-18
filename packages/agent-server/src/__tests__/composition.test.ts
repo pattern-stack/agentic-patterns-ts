@@ -22,6 +22,8 @@ import {
   TextManual,
   type ToolDefinition,
   Toolbox,
+  scopeItem,
+  sessionScope,
 } from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -691,12 +693,20 @@ describe("POST /agents/:id/composition/delivered", () => {
     expect(hookBody.instantiation).toEqual({
       available: true,
       defaults: { organizationId: "org-default" },
+      // #308: no `scope` declared by this registration, so both are null.
+      schema: null,
+      presets: null,
     });
 
     const without = await makeApp().request("/agents/alpha/composition");
     // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
     const plainBody = (await without.json()) as any;
-    expect(plainBody.instantiation).toEqual({ available: false, defaults: null });
+    expect(plainBody.instantiation).toEqual({
+      available: false,
+      defaults: null,
+      schema: null,
+      presets: null,
+    });
   });
 
   it("returns 404 for unknown agent and 501 without a hook", async () => {
@@ -773,6 +783,88 @@ describe("POST /agents/:id/composition/delivered", () => {
     // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
     const body = (await res.json()) as any;
     expect(body.error).toContain("tenant DB unreachable");
+  });
+
+  // decisions.md D10: the delivered route gets the SAME scope.parse treatment
+  // as POST /conversations (not optional) — the lens must preview exactly
+  // what a real conversation would run under.
+  describe("scope parity with POST /conversations (#308, D10)", () => {
+    const orgScope = sessionScope({
+      organizationId: scopeItem(z.string().min(1), { description: "Tenant org" }),
+    });
+
+    it("rejects an invalid scope with 400 and duck-typed issues", async () => {
+      const { reg } = instantiableReg({ scope: orgScope, instantiateDefaults: undefined });
+      const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ context: { organizationId: "" } }),
+      });
+      expect(res.status).toBe(400);
+      // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+      const body = (await res.json()) as any;
+      expect(body.error).toBe("scope validation failed");
+      expect(Array.isArray(body.issues)).toBe(true);
+    });
+
+    it("redacts the delivered echo with the same union as the create response", async () => {
+      const scoped = sessionScope({
+        organizationId: scopeItem(z.string().min(1)),
+        apiKey: scopeItem(z.string(), { description: "Secret", redact: true }),
+      });
+      const { reg, received } = instantiableReg({ scope: scoped });
+      const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ context: { organizationId: "org-42", apiKey: "s3cret" } }),
+      });
+      expect(res.status).toBe(200);
+      // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+      const body = (await res.json()) as any;
+      // The hook received the RAW value; only the echo is redacted.
+      expect(received).toEqual([{ context: { organizationId: "org-42", apiKey: "s3cret" } }]);
+      expect(body.context).toEqual({ organizationId: "org-42", apiKey: "[redacted]" });
+      expect(body.context_redacted).toEqual(["apiKey"]);
+    });
+
+    it("falls back to scope.defaults (over the deprecated instantiateDefaults) when no context is posted", async () => {
+      const scoped = sessionScope(
+        { organizationId: scopeItem(z.string().min(1)) },
+        { defaults: { organizationId: "org-from-scope" } },
+      );
+      const { reg, received } = instantiableReg({ scope: scoped });
+      const res = await makeApp([reg]).request("/agents/alpha/composition/delivered", {
+        method: "POST",
+        body: "{}",
+      });
+      expect(res.status).toBe(200);
+      // biome-ignore lint/suspicious/noExplicitAny: test payload assertion
+      const body = (await res.json()) as any;
+      expect(received).toEqual([{ context: { organizationId: "org-from-scope" } }]);
+      expect(body.context).toEqual({ organizationId: "org-from-scope" });
+    });
+
+    it("does not corrupt scope.defaults across repeated calls (the missing shallow-copy fix)", async () => {
+      const scoped = sessionScope(
+        { organizationId: scopeItem(z.string().min(1)) },
+        { defaults: { organizationId: "org-from-scope" } },
+      );
+      const observed: unknown[] = [];
+      const { reg } = instantiableReg({
+        scope: scoped,
+        instantiateDefaults: undefined,
+        instantiate: async (context) => {
+          observed.push(context?.organizationId);
+          if (context) (context as Record<string, unknown>).organizationId = "MUTATED";
+          return deliveredAgentFor(context);
+        },
+      });
+      const app = makeApp([reg]);
+      await app.request("/agents/alpha/composition/delivered", { method: "POST", body: "{}" });
+      await app.request("/agents/alpha/composition/delivered", { method: "POST", body: "{}" });
+      expect(observed).toEqual(["org-from-scope", "org-from-scope"]);
+      expect(scoped.defaults).toEqual({ organizationId: "org-from-scope" });
+    });
   });
 });
 

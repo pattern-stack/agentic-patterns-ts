@@ -5,18 +5,19 @@
  *
  *   - Tools rail: two capabilities, each with its own overarching description
  *     and a small toolbox of pure tools — grouped, hover/click-inspectable.
- *   - Scope ("deps") readout: this agent exports an `instantiate(context)`
- *     hook + `instantiateDefaults`, so the chat binds a per-user scope
- *     ({ workspace, user, region }) and the rail can show who the run acts on
- *     behalf of. `fetchTips`-style, the tools CLOSE OVER that scope, so the
- *     canned data they return is visibly scoped to the bound user.
+ *   - Scope readout: this agent declares a `SessionScope`
+ *     ({ workspace, user, region }, validated + defaulted + presets) plus an
+ *     `instantiate(context)` hook, so the chat binds a per-user scope and the
+ *     rail can show who the run acts on behalf of. `fetchTips`-style, the
+ *     tools CLOSE OVER that scope, so the canned data they return is visibly
+ *     scoped to the bound user.
  *
  * Everything is pure/offline (no network, no clock, no randomness), so it runs
  * key-free for introspection; chatting routes through the shared LLM runner
  * like any hand-built agent.
  *
  * Discovery: `ap playground examples` picks this up via the wrapper default
- * export ({ id, name, agent, instantiate, instantiateDefaults }).
+ * export ({ id, name, agent, scope, instantiate }).
  */
 
 import {
@@ -28,9 +29,12 @@ import {
   Persona,
   Responsibility,
   RoleBuilder,
+  type ScopeValue,
+  SessionScope,
   SimpleManual,
   type ToolDefinition,
   Toolbox,
+  scopeItem,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 
@@ -38,17 +42,28 @@ import { z } from "zod";
 // Run scope (deps) — who the agent acts on behalf of
 // ---------------------------------------------------------------------------
 
-interface WorkspaceScope {
-  workspace: string;
-  user: string;
-  region: string;
-}
-
-const DEFAULT_SCOPE: WorkspaceScope = {
+const DEFAULT_SCOPE = {
   workspace: "acme-sales",
   user: "sam@acme.dev",
   region: "us-east",
 };
+
+const workspaceScope = new SessionScope(
+  {
+    workspace: scopeItem(z.string().min(1), { description: "Tenant workspace" }),
+    user: scopeItem(z.string().email(), { description: "Acting user" }),
+    region: scopeItem(z.string().min(1), { description: "Data region" }),
+  },
+  {
+    defaults: DEFAULT_SCOPE,
+    presets: {
+      "sam @ acme": DEFAULT_SCOPE,
+      "li @ globex": { workspace: "globex-ops", user: "li@globex.dev", region: "eu-west" },
+    },
+  },
+);
+
+type WorkspaceScope = ScopeValue<typeof workspaceScope>;
 
 // ---------------------------------------------------------------------------
 // Toolbox 1 — ambient workspace context (read-only), scoped to `scope.user`
@@ -229,7 +244,7 @@ export default {
   description:
     "Sales-workspace copilot — reads ambient context and resolves deals, scoped per operator.",
   agent: buildWorkspaceAgent(DEFAULT_SCOPE),
+  scope: workspaceScope,
   instantiate: async (context?: Record<string, unknown>) =>
-    buildWorkspaceAgent({ ...DEFAULT_SCOPE, ...(context ?? {}) } as WorkspaceScope),
-  instantiateDefaults: DEFAULT_SCOPE,
+    buildWorkspaceAgent(workspaceScope.parse({ ...DEFAULT_SCOPE, ...(context ?? {}) })),
 };

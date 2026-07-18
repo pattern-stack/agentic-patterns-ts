@@ -33,6 +33,27 @@ export interface AgentEvalRef {
 }
 
 /**
+ * Structural (duck-typed) view of a `SessionScope` (`@agentic-patterns/core`,
+ * #308) — read without importing the class, so a registration built against
+ * a DIFFERENT `@agentic-patterns/core` module instance (a CLI-discovered
+ * agent, notably) still satisfies this. NEVER `instanceof SessionScope`
+ * across that boundary (decisions.md D4) — follows the `AgentIntrospect`/
+ * `CapabilityLike` structural-typing precedent (`routes/agents.ts:14-45`).
+ *
+ * Mirrors `SessionScope`'s own FLAT public surface — `.defaults`/`.presets`/
+ * `.redactKeys` are top-level readonly getters, not nested under an
+ * `.options` bag — so this structural type stays simple.
+ */
+export interface SessionScopeLike {
+  readonly schema: unknown;
+  readonly redactKeys: readonly string[];
+  readonly defaults?: Readonly<Record<string, unknown>> | undefined;
+  readonly presets?: Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined;
+  parse(value: unknown): Record<string, unknown>;
+  toJsonSchema(): Record<string, unknown>;
+}
+
+/**
  * Agent registration — what the server knows about each agent.
  *
  * `agent` and `runner.run/stream` use the canonical protocol shapes
@@ -88,8 +109,26 @@ export interface AgentRegistration {
    * 0004-instantiate-as-execution-seam.md`.
    */
   readonly instantiate?: (context?: Record<string, unknown>) => Promise<AgentLike>;
-  /** Seed context for `instantiate` — prefills the lens's context editor and
-   *  is the effective context on `POST /conversations` when none is supplied. */
+  /**
+   * Session-scoped configuration this agent declares (#308) — a validated
+   * shape (`.schema`/`.parse`), redaction (`.redactKeys`), and optional
+   * defaults/named presets, superseding ad hoc `context`. When present,
+   * `POST /conversations` accepts a `scope` body key (or the deprecated
+   * `context` alias — `scope` wins when both are sent) EVEN FOR A
+   * REGISTRATION WITH NO `instantiate` HOOK: `instantiation.available`
+   * widens to `hasHook || hasScope` (decisions.md D5). The value is parsed
+   * against `scope.schema` before it reaches `instantiate`, redaction, the
+   * run-metadata stamp, or `buildScopeHost` host injection (`@agentic-
+   * patterns/runtime`) — a registration declaring required fields with no
+   * defaults makes a bare `POST /conversations` a deliberate 400 (D11).
+   */
+  readonly scope?: SessionScopeLike;
+  /**
+   * Seed context for `instantiate` — prefills the lens's context editor and
+   * is the effective context on `POST /conversations` when none is supplied.
+   * @deprecated Subsumed by `scope.defaults` (#308) — falls back to this
+   * field only when `scope` is not declared.
+   */
   readonly instantiateDefaults?: Record<string, unknown>;
   /**
    * Top-level `context` keys whose values are replaced with `"[redacted]"`
@@ -97,6 +136,9 @@ export interface AgentRegistration {
    * context`), or persisted (run metadata) — #268 Decision 3. Applied before
    * any write or non-input return; the raw context exists only in-flight,
    * inside the `instantiate` call. Default (omitted): verbatim.
+   * @deprecated Subsumed by `scope.redactKeys` (#308) — merged with it
+   * (union) rather than replaced, so a hook-only registration's redaction
+   * still works unchanged.
    */
   readonly contextRedactKeys?: readonly string[];
   /**

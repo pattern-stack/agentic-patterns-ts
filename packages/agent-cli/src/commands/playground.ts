@@ -146,22 +146,15 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
 
   // A promoted registration (asAgent()) runs its node instead of LLM-looping;
   // the shared LLM runner still drives any nested AgentSteps as its inner runner.
-  const registrations: AgentRegistration[] = opts.agents.map((reg) => ({
-    id: reg.id,
-    name: reg.name,
-    description: reg.description,
-    agent: reg.agent,
-    file: reg.file,
-    provenance: reg.provenance,
-    instantiate: reg.instantiate,
-    instantiateDefaults: reg.instantiateDefaults,
-    contextRedactKeys: reg.contextRedactKeys,
-    evals: reg.evals,
-    // Thread the shared bus so a promoted agent's `stream()` lifecycle
-    // (message.start/.complete) is bus-visible too — otherwise RunStoreExporter
-    // never sees it and `/admin/runs` stays empty for promoted-pipeline chats.
-    runner: isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner, eventBus) : llmRunner,
-  }));
+  // Thread the shared bus so a promoted agent's `stream()` lifecycle
+  // (message.start/.complete) is bus-visible too — otherwise RunStoreExporter
+  // never sees it and `/admin/runs` stays empty for promoted-pipeline chats.
+  const registrations: AgentRegistration[] = opts.agents.map((reg) =>
+    toAgentRegistration(
+      reg,
+      isPromotedAgent(reg.agent) ? new NodeBackedRunner(llmRunner, eventBus) : llmRunner,
+    ),
+  );
   // Mark createToolboxExecutor as "imported for re-export discoverability" —
   // the conversation route already builds executors per request.
   void createToolboxExecutor;
@@ -270,6 +263,37 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
+
+/**
+ * Map a discovered agent + its resolved runner to the server's
+ * `AgentRegistration` shape — the ONLY bridge between CLI discovery and the
+ * server (#308 gapcheck G7). An explicit field-by-field map, deliberately
+ * NOT a spread: a `DiscoveredAgent` field that isn't listed here is silently
+ * dropped and never reaches the server (a declared `scope`, notably, would
+ * never be threaded into `POST /conversations` — the server would just see
+ * `scope: undefined` with zero errors, since `AgentRegistration.scope` is
+ * optional). Exported so a test can assert every known field survives the
+ * trip, by identity — see `__tests__/playground.test.ts`.
+ */
+export function toAgentRegistration(
+  reg: DiscoveredAgent,
+  runner: AgentRegistration["runner"],
+): AgentRegistration {
+  return {
+    id: reg.id,
+    name: reg.name,
+    description: reg.description,
+    agent: reg.agent,
+    file: reg.file,
+    provenance: reg.provenance,
+    instantiate: reg.instantiate,
+    scope: reg.scope,
+    instantiateDefaults: reg.instantiateDefaults,
+    contextRedactKeys: reg.contextRedactKeys,
+    evals: reg.evals,
+    runner,
+  };
+}
 
 /**
  * Resolve the absolute path to the bundled dashboard assets.

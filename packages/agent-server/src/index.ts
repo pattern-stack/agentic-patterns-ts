@@ -4,6 +4,7 @@ export type {
   ServerConfig,
   AgentRegistration,
   AdminServiceProtocol,
+  SessionScopeLike,
   SSEExporterLike,
   CORSConfig,
 } from "./config.js";

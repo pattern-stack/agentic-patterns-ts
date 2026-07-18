@@ -28,9 +28,20 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { SessionScopeLike } from "@agentic-patterns/server";
 import { glob } from "tinyglobby";
 import { register } from "tsx/esm/api";
 import type { AgentProvenance } from "./provenance.js";
+
+/**
+ * Structural (duck-typed) view of a `SessionScope` (`@agentic-patterns/core`,
+ * #308) — the server's `SessionScopeLike` (`config.ts`), re-exported so a
+ * `DiscoveredAgent.scope` value is BY CONSTRUCTION assignable to
+ * `AgentRegistration.scope` at the `playground.ts` map site. NEVER
+ * `instanceof SessionScope` across this boundary (decisions.md D4) — see
+ * {@link isSessionScopeShape} for the runtime check.
+ */
+export type { SessionScopeLike };
 
 // Register tsx as the ESM loader globally — once per process. After this,
 // Node's regular dynamic import() handles `.ts` files transparently AND
@@ -66,6 +77,16 @@ export interface DiscoveredAgent {
   /** Seed context for `instantiate` (prefills the lens's context editor). */
   readonly instantiateDefaults?: Record<string, unknown>;
   /**
+   * Session-scoped configuration declared by the registration wrapper
+   * (#308) — taken verbatim (by identity) when it structurally matches
+   * `SessionScope` (`.schema`/`.redactKeys`/`.parse`/`.toJsonSchema`),
+   * threaded into the server's `AgentRegistration.scope` unchanged so
+   * `POST /conversations` can validate/redact/inject it. A malformed
+   * declaration is dropped entirely — same all-or-nothing rule as
+   * `contextRedactKeys` below.
+   */
+  readonly scope?: SessionScopeLike;
+  /**
    * Top-level `instantiate` context keys whose values should be displayed as
    * `"[redacted]"` (#268 Decision 3) — taken verbatim from the registration
    * wrapper and threaded into the server's `AgentRegistration` (the playground)
@@ -92,6 +113,7 @@ interface RegistrationWrapper {
   agent?: unknown;
   instantiate?: unknown;
   instantiateDefaults?: unknown;
+  scope?: unknown;
   contextRedactKeys?: unknown;
   evals?: unknown;
 }
@@ -136,6 +158,29 @@ export function isAgentLikeShape(x: unknown): boolean {
     typeof (a.role as Record<string, unknown>).name === "string" &&
     typeof a.getModel === "function" &&
     typeof a.renderInitialPrompt === "function"
+  );
+}
+
+/**
+ * Structural `SessionScope` check (#308) — same duck-typing rationale as
+ * {@link isAgentShape}: an agent file's copy of `@agentic-patterns/core` can
+ * resolve to a DIFFERENT module instance than the CLI's own, so `instanceof
+ * SessionScope` is silently false across that boundary (decisions.md D4).
+ * Mirrors `SessionScope`'s flat public surface — `.schema`, `.redactKeys`
+ * (always an array of strings; never undefined on a real instance),
+ * `.parse`, `.toJsonSchema`. `.defaults`/`.presets` are optional and read
+ * verbatim, unchecked here — the whole-or-nothing rule applies to THIS
+ * shape, not to their contents.
+ */
+function isSessionScopeShape(x: unknown): x is SessionScopeLike {
+  if (!x || typeof x !== "object") return false;
+  const s = x as Record<string, unknown>;
+  return (
+    s.schema !== undefined &&
+    Array.isArray(s.redactKeys) &&
+    s.redactKeys.every((k) => typeof k === "string") &&
+    typeof s.parse === "function" &&
+    typeof s.toJsonSchema === "function"
   );
 }
 
@@ -213,6 +258,10 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
       wrapper.contextRedactKeys.every((k) => typeof k === "string")
         ? (wrapper.contextRedactKeys as string[])
         : undefined;
+    // Same all-or-nothing rule as `contextRedactKeys`/`instantiateDefaults`
+    // above: `scope` must fully satisfy `isSessionScopeShape` or it's
+    // dropped entirely — never `instanceof SessionScope` (decisions.md D4).
+    const scope = wrapper && isSessionScopeShape(wrapper.scope) ? wrapper.scope : undefined;
     const evals = wrapper ? normalizeEvalRefs(wrapper.evals) : undefined;
 
     if (seenIds.has(id)) continue; // e.g. a default + named export of the same agent
@@ -225,6 +274,7 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
       file,
       instantiate,
       instantiateDefaults,
+      scope,
       contextRedactKeys,
       evals,
     });

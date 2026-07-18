@@ -176,3 +176,31 @@ describe("loadAgentsFromFile — registration `contextRedactKeys` declaration (#
     expect(a?.contextRedactKeys).toBeUndefined();
   });
 });
+
+describe("loadAgentsFromFile — registration `scope` declaration (#308)", () => {
+  it("passes a well-formed SessionScope-shaped object through by identity", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "session-scoped/agent.mjs"), FX);
+    expect(a?.id).toBe("session-scoped");
+    expect(a?.scope).toBeDefined();
+    // Verbatim pass-through, not a copy — calling the fake's own `.parse`
+    // proves the exact object made the trip (the duck-type check narrows,
+    // it never reconstructs).
+    expect(a?.scope?.parse({ tenant: "override" })).toEqual({ tenant: "override" });
+    expect(a?.scope?.redactKeys).toEqual(["secret"]);
+    expect(a?.scope?.defaults).toEqual({ tenant: "acme" });
+  });
+
+  it("drops a malformed declaration entirely (`.parse` not a function) rather than salvaging a subset", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "session-scoped-bad/agent.mjs"), FX);
+    expect(a?.id).toBe("session-scoped-bad");
+    expect(a?.scope).toBeUndefined();
+  });
+
+  it("leaves scope undefined on registrations that declare none", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "todo/agent.mjs"), FX);
+    expect(a?.scope).toBeUndefined();
+  });
+});
