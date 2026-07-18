@@ -1063,8 +1063,8 @@ function ScopeContextPanel({
           ) : (
             <>
               <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.45 }}>
-                Who this conversation acts on behalf of — edit the JSON, then send. The scope
-                binds on the first message; <b>New Chat</b> to run as someone else.
+                Who this conversation acts on behalf of — edit the JSON, then send. The scope binds
+                on the first message; <b>New Chat</b> to run as someone else.
               </div>
               <Field label="Context (JSON)">
                 <textarea
