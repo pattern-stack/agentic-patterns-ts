@@ -21,6 +21,7 @@ import { Hono } from "hono";
 import { ZodError } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { AgentRegistration } from "../config.js";
+import { isPlainRecord, redactContext } from "./redact.js";
 
 /* ------------------------------------------------------------------------ */
 /* Structural views (duck-typed — never import core classes)                 */
@@ -652,6 +653,22 @@ function slotEdgesFor(
 /* ------------------------------------------------------------------------ */
 
 /**
+ * `toJsonSchema()` on a duck-typed `SessionScopeLike` (#308) could throw — a
+ * foreign core version, or a malformed hand-rolled scope — so this is
+ * wrapped: one bad registration must not 500 the composition payload
+ * (mirrors `routes/agents.ts`'s copy of this helper; small file-local
+ * helpers are deliberately not shared across route files here).
+ */
+function scopeJsonSchema(reg: AgentRegistration): Record<string, unknown> | null {
+  if (!reg.scope) return null;
+  try {
+    return reg.scope.toJsonSchema();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Serialize one agent instance into the full composition payload: role slots,
  * instantiation delta, provenance, rendered prompt sections, coherence. The
  * GET route feeds it the DECLARED instance (`reg.agent`); the delivered route
@@ -697,9 +714,15 @@ function agentCompositionPayload(reg: AgentRegistration, agent: unknown) {
     },
     prompt,
     coherence: { heuristic: true, warnings: coherenceWarnings(a) },
+    // Widened #308: `available` means "does POST /conversations accept a
+    // scope/context for this agent" — true for scope-only (hook-less)
+    // registrations too. Same sub-shape as `routes/agents.ts`'s
+    // `instantiation` (agents.ts:68's "same sub-shape" comment promises it).
     instantiation: {
-      available: typeof reg.instantiate === "function",
-      defaults: reg.instantiateDefaults ?? null,
+      available: typeof reg.instantiate === "function" || reg.scope !== undefined,
+      defaults: reg.scope?.defaults ?? reg.instantiateDefaults ?? null,
+      schema: scopeJsonSchema(reg),
+      presets: reg.scope?.presets ?? null,
     },
     evals: reg.evals ?? [],
   };
@@ -740,16 +763,54 @@ export function compositionRoutes(agents: AgentRegistration[], eventBus?: AgentE
       return c.json({ error: "Invalid JSON body" }, 400);
     }
 
-    // No explicit context → compose with the registration's declared defaults,
-    // so the echoed `context` always states what instantiate actually received.
-    const effectiveContext = context ?? reg.instantiateDefaults;
+    // No explicit context → compose with the registration's declared
+    // defaults (scope.defaults wins over the deprecated instantiateDefaults),
+    // so the echoed context always states what instantiate actually
+    // received. Shallow-copied — SAME defensive copy as POST /conversations
+    // (routes/conversations.ts) — this route previously handed
+    // `reg.instantiateDefaults` straight through by reference (a mutating
+    // hook would corrupt it for every later preview).
+    const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
+    let effectiveContext: Record<string, unknown> | undefined =
+      context ?? (declaredDefaults ? { ...declaredDefaults } : undefined);
+
+    // Scope validation (#308) — the SAME parse treatment as POST
+    // /conversations (decisions.md D10, not optional): the composition lens
+    // must preview exactly what a real conversation would run under, not
+    // unvalidated context.
+    if (reg.scope) {
+      try {
+        effectiveContext = reg.scope.parse(effectiveContext ?? {});
+      } catch (err) {
+        if (err && Array.isArray((err as { issues?: unknown }).issues)) {
+          return c.json(
+            { error: "scope validation failed", issues: (err as { issues: unknown[] }).issues },
+            400,
+          );
+        }
+        throw err;
+      }
+      if (!isPlainRecord(effectiveContext)) {
+        // Same guard as POST /conversations: only a malformed hand-rolled
+        // scope can produce a non-object; name the registration bug.
+        return c.json({ error: "scope.parse returned a non-object — malformed scope" }, 502);
+      }
+    }
 
     try {
       const delivered = await reg.instantiate(effectiveContext);
+      // Redact the echo with the SAME union as the create response
+      // (conversations.ts) — the composition preview must not leak what a
+      // real conversation would hide.
+      const { context: redactedEcho, redactedKeys } = redactContext(
+        effectiveContext,
+        Array.from(new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])])),
+      );
       return c.json({
         ...agentCompositionPayload(reg, delivered),
         delivered: true,
-        context: effectiveContext ?? null,
+        context: redactedEcho ?? null,
+        ...(redactedKeys ? { context_redacted: redactedKeys } : {}),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -44,6 +44,21 @@ interface AgentIntrospect {
   getModel?: () => string;
 }
 
+/**
+ * `toJsonSchema()` on a duck-typed `SessionScopeLike` (#308) could throw — a
+ * foreign core version, or a malformed hand-rolled scope — so this is
+ * wrapped: one bad registration must not 500 the whole roster (the
+ * `getModel()` try/catch above is the in-file precedent).
+ */
+function scopeJsonSchema(reg: AgentRegistration): Record<string, unknown> | null {
+  if (!reg.scope) return null;
+  try {
+    return reg.scope.toJsonSchema();
+  } catch {
+    return null;
+  }
+}
+
 export function agentRoutes(agents: AgentRegistration[]): Hono {
   const app = new Hono();
 
@@ -68,10 +83,14 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
         // #268 — same sub-shape as the composition/delivered payload
         // (`routes/composition.ts`'s `instantiation`), so the playground
         // seeds its context editor from `GET /agents` without an extra
-        // round trip per agent.
+        // round trip per agent. Widened #308: `available` means "does
+        // POST /conversations accept a scope/context for this agent" —
+        // true for scope-only (hook-less) registrations too.
         instantiation: {
-          available: typeof a.instantiate === "function",
-          defaults: a.instantiateDefaults ?? null,
+          available: typeof a.instantiate === "function" || a.scope !== undefined,
+          defaults: a.scope?.defaults ?? a.instantiateDefaults ?? null,
+          schema: scopeJsonSchema(a),
+          presets: a.scope?.presets ?? null,
         },
       };
     });

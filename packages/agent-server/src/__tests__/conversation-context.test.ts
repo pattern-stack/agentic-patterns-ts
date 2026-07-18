@@ -881,16 +881,26 @@ describe("GET /agents — instantiation availability (test 10)", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{
       id: string;
-      instantiation: { available: boolean; defaults: Record<string, unknown> | null };
+      instantiation: {
+        available: boolean;
+        defaults: Record<string, unknown> | null;
+        schema: Record<string, unknown> | null;
+        presets: Record<string, unknown> | null;
+      };
     }>;
 
+    // Neither registration declares a `scope` (#308) — schema/presets are null.
     expect(body.find((a) => a.id === "hooked")?.instantiation).toEqual({
       available: true,
       defaults: { tenant: "default-tenant" },
+      schema: null,
+      presets: null,
     });
     expect(body.find((a) => a.id === "hookless")?.instantiation).toEqual({
       available: false,
       defaults: null,
+      schema: null,
+      presets: null,
     });
   });
 });

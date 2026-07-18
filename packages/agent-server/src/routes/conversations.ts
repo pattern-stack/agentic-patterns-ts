@@ -24,20 +24,25 @@ import type {
   RunStore,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
-import { Conversation, deriveToolboxExecutor } from "@agentic-patterns/runtime";
+import { Conversation, buildScopeHost, deriveToolboxExecutor } from "@agentic-patterns/runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
 import { agentEventToSSE } from "../sse.js";
+import { isPlainRecord, redactContext } from "./redact.js";
 
 /** Entry in the per-server conversation registry. */
 export interface ConversationEntry {
   conversation: Conversation;
   agentId: string;
   /**
-   * The redacted effective context this conversation was bound with (#268) —
-   * `undefined` when the registration has no `instantiate` hook. Immutable
-   * for the conversation's lifetime (Decision 2): scope is fixed at creation.
+   * The redacted effective context/scope this conversation was bound with
+   * (#268, widened #308) — `undefined` when the registration has neither an
+   * `instantiate` hook nor a declared `scope`. Immutable for the
+   * conversation's lifetime (Decision 2): scope is fixed at creation. Arms
+   * the run-metadata stamp below (`entry.context !== undefined`) — a
+   * scope-declaring, hook-less registration MUST populate this too, or its
+   * runs are silently never stamped.
    */
   context?: Record<string, unknown>;
   /** Top-level `context` keys that were redacted (Decision 3), when any were. */
@@ -56,7 +61,7 @@ export function conversationRoutes(
 
   // POST /conversations — create a new conversation
   app.post("/conversations", async (c) => {
-    const body = await c.req.json<{ agent_id: string; context?: unknown }>();
+    const body = await c.req.json<{ agent_id: string; scope?: unknown; context?: unknown }>();
     const agentId = body.agent_id;
 
     const reg = agents.find((a) => a.id === agentId);
@@ -64,41 +69,87 @@ export function conversationRoutes(
       return c.json({ error: "Agent not found" }, 404);
     }
 
-    // `context` shape (mirrors composition.ts:733's grammar — an explicit
-    // `null` is rejected same as any other non-object, never silently
-    // coerced to "absent").
-    const rawContext = body.context;
+    // `scope` (#308) supersedes the deprecated `context` alias — `scope`
+    // wins when both are sent. `suppliedKey` names whichever one the caller
+    // actually used, so error messages below stay accurate for either.
+    const suppliedKey =
+      body.scope !== undefined ? "scope" : body.context !== undefined ? "context" : undefined;
+    const rawScope = body.scope !== undefined ? body.scope : body.context;
+
+    // Shape (mirrors composition.ts:733's grammar — an explicit `null` is
+    // rejected same as any other non-object, never silently coerced to
+    // "absent").
     if (
-      rawContext !== undefined &&
-      (typeof rawContext !== "object" || rawContext === null || Array.isArray(rawContext))
+      rawScope !== undefined &&
+      (typeof rawScope !== "object" || rawScope === null || Array.isArray(rawScope))
     ) {
-      return c.json({ error: "`context` must be a JSON object" }, 400);
+      return c.json({ error: `\`${suppliedKey}\` must be a JSON object` }, 400);
     }
 
     const hasHook = typeof reg.instantiate === "function";
-    if (rawContext !== undefined && !hasHook) {
-      return c.json({ error: "Agent has no instantiate hook — context is not accepted" }, 400);
+    const hasScope = reg.scope !== undefined;
+    if (rawScope !== undefined && !hasHook && !hasScope) {
+      return c.json(
+        { error: `Agent has no instantiate hook — ${suppliedKey} is not accepted` },
+        400,
+      );
     }
 
-    // Hook-less registrations are byte-identical to before this feature:
-    // `agent` binds as-is, no instantiate call, no `context` in the response.
+    // Hook-less AND scope-less registrations are byte-identical to before
+    // this feature: `agent` binds as-is, no instantiate call, no
+    // `context`/`scope` in the response.
     let agentToBind: AgentLike = reg.agent;
-    let effectiveContext: Record<string, unknown> | undefined;
+
+    // No explicit scope/context → compose with the registration's declared
+    // defaults (scope.defaults wins over the deprecated instantiateDefaults),
+    // so the echoed value always states what was actually resolved (mirror
+    // composition.ts:744-745).
+    //
+    // Shallow-copy the defaults before handing them anywhere — SessionScope
+    // freezes `.defaults` (a mutating `instantiate` hook would THROW on a
+    // frozen object rather than silently corrupt it) and `reg.
+    // instantiateDefaults` is ONE shared object across every conversation
+    // this registration ever creates. `undefined` (no defaults declared
+    // either way) is preserved as-is so the "no defaults" vs. "empty object"
+    // distinction survives.
+    const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
+    let effectiveContext: Record<string, unknown> | undefined =
+      (rawScope as Record<string, unknown> | undefined) ??
+      (declaredDefaults ? { ...declaredDefaults } : undefined);
+
+    // Scope validation (#308) — the registration's declared shape wins over
+    // ad hoc context: parse the effective value against `scope.schema` (zod
+    // defaults/coercions applied), 400 on failure. A registration that
+    // declares REQUIRED fields with no defaults turns a bare
+    // `POST /conversations` into a deliberate 400 (decisions.md D11) — the
+    // agent said it needs a scope. The PARSED value replaces
+    // `effectiveContext` for every downstream consumer: `instantiate`,
+    // redaction, the run-metadata stamp, and `buildScopeHost` injection.
+    if (reg.scope) {
+      try {
+        effectiveContext = reg.scope.parse(effectiveContext ?? {});
+      } catch (err) {
+        // Duck-typed detection: zod is a `^3.25.0 || ^4.1.8` peer dep and the
+        // throwing zod may be `@agentic-patterns/core`'s copy, not the
+        // server's — never `instanceof ZodError` / `.flatten()` (v3-only
+        // shape) across that module boundary (decisions.md D3).
+        if (err && Array.isArray((err as { issues?: unknown }).issues)) {
+          return c.json(
+            { error: "scope validation failed", issues: (err as { issues: unknown[] }).issues },
+            400,
+          );
+        }
+        throw err;
+      }
+      if (!isPlainRecord(effectiveContext)) {
+        // A real SessionScope can't get here (z.object parses to an object);
+        // only a malformed hand-rolled registration scope can — 502 names the
+        // registration bug instead of crashing redaction with a raw 500.
+        return c.json({ error: "scope.parse returned a non-object — malformed scope" }, 502);
+      }
+    }
+
     if (typeof reg.instantiate === "function") {
-      // No explicit context → compose with the registration's declared
-      // defaults, so the echoed `context` always states what `instantiate`
-      // actually received (mirror composition.ts:744-745).
-      //
-      // Shallow-copy the defaults before handing them to the hook —
-      // `reg.instantiateDefaults` is ONE shared object across every
-      // conversation this registration ever creates; a hook that mutates its
-      // `context` argument (even just top-level keys) would otherwise
-      // corrupt defaults for every later conversation. `undefined` (no
-      // defaults declared) is preserved as-is so the hook-contract
-      // distinction between "no defaults" and "empty object" survives.
-      effectiveContext =
-        (rawContext as Record<string, unknown> | undefined) ??
-        (reg.instantiateDefaults ? { ...reg.instantiateDefaults } : undefined);
       try {
         agentToBind = await reg.instantiate(effectiveContext);
       } catch (err) {
@@ -107,10 +158,13 @@ export function conversationRoutes(
       }
     }
 
-    const { context: redactedContext, redactedKeys } = redactContext(
-      effectiveContext,
-      reg.contextRedactKeys,
+    // Redact keys are the union of the scope's declared redactions and the
+    // deprecated `contextRedactKeys` — a hook-only registration's redaction
+    // keeps working unchanged when it later adds a `scope`.
+    const redactKeys = Array.from(
+      new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])]),
     );
+    const { context: redactedContext, redactedKeys } = redactContext(effectiveContext, redactKeys);
 
     // Wire a ToolExecutor so AgentRunner can actually execute tool calls
     // from the agent's Capability toolboxes (not just format them for the LLM).
@@ -130,24 +184,41 @@ export function conversationRoutes(
     const toolExecutor = deriveToolboxExecutor(
       agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
     );
+    // `host.scope` (#308) — carries the PARSED scope value across every run
+    // this conversation makes (`Conversation` forwards `_host` verbatim into
+    // every `send()`/`stream()`), so tools can read it via `readScope`/
+    // `requireScope` (`@agentic-patterns/runtime`, `workflows/scope-host.js`).
+    // Only scope-declaring registrations get a host — hook-only (no scope)
+    // registrations keep today's hostless behavior.
+    const host = hasScope ? buildScopeHost(effectiveContext ?? {}) : undefined;
     // `store` (when configured) makes `Conversation._persistExchange` actually
     // write request/response messages — previously accepted and never used.
-    const conversation = new Conversation(agentToBind, reg.runner, { toolExecutor, store });
+    const conversation = new Conversation(agentToBind, reg.runner, {
+      toolExecutor,
+      store,
+      ...(host ? { host } : {}),
+    });
     conversations.set(conversation.id, {
       conversation,
       agentId,
-      ...(hasHook ? { context: redactedContext } : {}),
+      ...(hasHook || hasScope ? { context: redactedContext } : {}),
       ...(redactedKeys ? { contextRedacted: redactedKeys } : {}),
     });
 
-    if (!hasHook) {
+    if (!hasHook && !hasScope) {
       return c.json({ id: conversation.id, agent_id: agentId }, 201);
     }
     return c.json(
       {
         id: conversation.id,
         agent_id: agentId,
+        // Kept as the deprecated alias — the dashboard's existing chip
+        // (`useChat.ts:142`) depends on `context` staying populated whether
+        // the registration used a hook, a scope, or both.
         context: redactedContext ?? null,
+        // Forward-looking name, present only for scope-declaring
+        // registrations — same (redacted) value as `context` (D8).
+        ...(hasScope ? { scope: redactedContext ?? null } : {}),
         ...(redactedKeys ? { context_redacted: redactedKeys } : {}),
       },
       201,
@@ -435,36 +506,6 @@ function notConfigured(c: Context): Response {
     },
     503,
   );
-}
-
-/**
- * Redact declared top-level keys in `context`, replacing their values with
- * `"[redacted]"` and reporting which keys were actually present (#268
- * Decision 3) — the innate-scratchpad-read posture (`conversation.ts`'s
- * `preview_redacted`): structure survives, value dropped, never silent.
- * `undefined` context, no declared keys, or none of them present → passthrough.
- *
- * Shallow only: the copy is top-level, so a nested object/array VALUE under a
- * non-redacted key is still shared by reference with whatever the hook
- * received. Deliberate, not an oversight — the context contract (Decision 3
- * "context carries identifiers, not credentials") is scalar identifiers at
- * the top level; nested structures are outside that contract's redaction
- * guarantee.
- */
-function redactContext(
-  context: Record<string, unknown> | undefined,
-  keys: readonly string[] | undefined,
-): { context: Record<string, unknown> | undefined; redactedKeys: string[] | undefined } {
-  if (context === undefined || !keys || keys.length === 0) {
-    return { context, redactedKeys: undefined };
-  }
-  const present = keys.filter((k) => k in context);
-  if (present.length === 0) {
-    return { context, redactedKeys: undefined };
-  }
-  const redacted = { ...context };
-  for (const k of present) redacted[k] = "[redacted]";
-  return { context: redacted, redactedKeys: present };
 }
 
 /**

@@ -114,29 +114,43 @@ const CreateConversationBody = z
   .object({
     agent_id: z.string(),
     /**
-     * Run-scope context (#268) — accepted only for a registration whose
-     * `instantiate` hook is set (400 otherwise). Resolved once at creation
-     * and immutable for the conversation's lifetime; the delivered instance
-     * `instantiate(context)` returns becomes what the conversation runs as.
+     * Session-scoped configuration (#308) — validated against the
+     * registration's declared `scope` schema (400 with Zod `issues` on
+     * failure). Accepted for a registration with a declared `scope` AND/OR
+     * an `instantiate` hook (400 "no instantiate hook" otherwise). A
+     * registration whose scope declares required fields with no defaults
+     * turns a bare `POST /conversations` into a deliberate 400 — it said it
+     * needs a scope. Resolved once at creation and immutable for the
+     * conversation's lifetime; the PARSED value is what the delivered
+     * instance's `instantiate(scope)` receives (when a hook is set) and what
+     * every tool's `readScope()`/`requireScope()` sees for the run.
+     */
+    scope: z.record(z.unknown()).optional(),
+    /**
+     * @deprecated Alias for `scope` (#268) — accepted only when no `scope`
+     * key is sent (`scope` wins when both are present).
      */
     context: z.record(z.unknown()).optional(),
   })
-  .describe("Which agent to converse with, and (optionally) its run-scope context");
+  .describe("Which agent to converse with, and (optionally) its run-scope `scope` (or `context`)");
 
 const ConversationCreatedResponse = z
   .object({
     id: z.string(),
     agent_id: z.string(),
     /**
-     * The redacted effective context this conversation was bound with.
-     * Present (possibly `null`) only when the registration has an
-     * `instantiate` hook; absent entirely for hook-less registrations.
+     * The redacted effective scope/context this conversation was bound
+     * with. Present (possibly `null`) whenever the registration has a
+     * declared `scope` AND/OR an `instantiate` hook; absent entirely
+     * otherwise. Kept as the deprecated alias for `scope` below.
      */
     context: z.record(z.unknown()).nullable().optional(),
-    /** Top-level `context` keys whose values were replaced with "[redacted]". */
+    /** Same (redacted) value as `context`, present only for scope-declaring registrations. */
+    scope: z.record(z.unknown()).nullable().optional(),
+    /** Top-level keys whose values were replaced with "[redacted]". */
     context_redacted: z.array(z.string()).optional(),
   })
-  .describe("The created conversation, echoing the effective (redacted) context it is bound to");
+  .describe("The created conversation, echoing the effective (redacted) scope it is bound to");
 
 const InvokeToolBody = z
   .object({ arguments: z.record(z.unknown()) })
@@ -161,8 +175,14 @@ export const OVERLAY: Readonly<Record<string, Partial<RouteDoc>>> = {
     summary: "List registered agents",
     description:
       "Every agent registration the server knows, with id/name/description, readiness, and " +
-      "instantiation availability (`instantiation.available` — whether POST /conversations " +
-      "accepts a `context` for this agent — plus its seed `instantiation.defaults`).",
+      "instantiation availability: `instantiation.available` — whether POST /conversations " +
+      "accepts a `scope`/`context` for this agent, true when the registration declares a " +
+      "`scope` and/or an `instantiate` hook (#308) — plus its seed `instantiation.defaults`, " +
+      "JSON-Schema `instantiation.schema`, and named `instantiation.presets` (materialize " +
+      "client-side; there is no `preset` body key), each `null` when no `scope` is declared. " +
+      "Declared defaults/presets are served VERBATIM — `redact` applies to bound-scope echoes " +
+      "(create response, run metadata), not to declarations; never put real secrets in a " +
+      "scope declaration.",
   },
   "GET /agents/:id/capabilities": { summary: "List an agent's capabilities" },
   "GET /agents/:id/composition": {
@@ -196,13 +216,20 @@ export const OVERLAY: Readonly<Record<string, Partial<RouteDoc>>> = {
   "POST /conversations": {
     summary: "Start a conversation",
     description:
-      "Creates a conversation bound to an agent. When the registration has an `instantiate` " +
-      "hook, an optional `context` resolves the delivered instance the conversation runs as " +
-      "(400 without a hook; 502 if the hook rejects) and is echoed back redacted.",
+      "Creates a conversation bound to an agent. Accepted when the registration declares a " +
+      "`scope` and/or has an `instantiate` hook (#308): an optional `scope` (or its " +
+      "deprecated `context` alias — `scope` wins when both are sent) is parsed against the " +
+      "declared schema, then resolves the delivered instance the conversation runs as (400 on " +
+      "scope validation failure or when neither a scope nor a hook is declared; 502 if the " +
+      "hook rejects) and is echoed back redacted.",
     request: CreateConversationBody,
     responses: {
       201: { description: "Conversation created", schema: ConversationCreatedResponse },
-      400: { description: "`context` is not a JSON object, or the agent has no instantiate hook" },
+      400: {
+        description:
+          "`scope`/`context` is not a JSON object, fails scope validation (body carries " +
+          "`issues`), or the agent declares neither a scope nor an instantiate hook",
+      },
       404: { description: "Agent not found" },
       502: { description: "The registration's `instantiate` hook rejected the given context" },
     },

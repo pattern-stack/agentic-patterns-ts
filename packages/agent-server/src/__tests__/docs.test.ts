@@ -84,6 +84,58 @@ describe("buildOpenApiDocument", () => {
   });
 });
 
+describe("session scope (#308) reflected in the docs overlay", () => {
+  it("POST /conversations request schema carries both `scope` and the deprecated `context` alias", () => {
+    const app = stub([{ method: "POST", path: "/conversations" }]);
+    const { document } = buildOpenApiDocument(app);
+    const paths = document.paths as Record<
+      string,
+      Record<
+        string,
+        {
+          requestBody?: {
+            content: Record<string, { schema: { properties?: Record<string, unknown> } }>;
+          };
+        }
+      >
+    >;
+    const schema = paths["/conversations"]?.post?.requestBody?.content["application/json"]?.schema;
+    expect(schema?.properties).toHaveProperty("scope");
+    expect(schema?.properties).toHaveProperty("context");
+  });
+
+  it("POST /conversations 201 response schema carries `scope` alongside `context`", () => {
+    const app = stub([{ method: "POST", path: "/conversations" }]);
+    const { document } = buildOpenApiDocument(app);
+    const paths = document.paths as Record<
+      string,
+      Record<
+        string,
+        {
+          responses: Record<
+            string,
+            { content?: Record<string, { schema: { properties?: Record<string, unknown> } }> }
+          >;
+        }
+      >
+    >;
+    const created = paths["/conversations"]?.post?.responses["201"];
+    const properties = created?.content?.["application/json"]?.schema?.properties;
+    expect(properties).toHaveProperty("scope");
+    expect(properties).toHaveProperty("context");
+  });
+
+  it("GET /agents description documents scope-widened availability, schema, and presets", () => {
+    const app = stub([{ method: "GET", path: "/agents" }]);
+    const { document } = buildOpenApiDocument(app);
+    const paths = document.paths as Record<string, Record<string, { description?: string }>>;
+    const description = paths["/agents"]?.get?.description ?? "";
+    expect(description).toContain("scope");
+    expect(description).toContain("instantiation.schema");
+    expect(description).toContain("instantiation.presets");
+  });
+});
+
 describe("buildMcpManifest", () => {
   const app = stub([
     { method: "GET", path: "/agents" },
