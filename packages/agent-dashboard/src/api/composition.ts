@@ -86,8 +86,16 @@ export interface AgentComposition {
   };
   prompt: { renderPath: "sections" | "joined"; sections: PromptSection[] };
   coherence: { heuristic: boolean; warnings: CoherenceWarning[] };
-  /** Whether the registration can compose its DELIVERED instance (and the seed context). */
-  instantiation?: { available: boolean; defaults: Record<string, unknown> | null };
+  /** Whether the registration can compose its DELIVERED instance (and the
+   *  seed context). `schema`/`presets` mirror `chat-client.ts`'s
+   *  `AgentSummary.instantiation` (#308) — kept in lockstep since both are
+   *  the SAME server-side sub-shape. */
+  instantiation?: {
+    available: boolean;
+    defaults: Record<string, unknown> | null;
+    schema?: Record<string, unknown> | null;
+    presets?: Record<string, Record<string, unknown>> | null;
+  };
   /** Declared eval↔agent mapping: the eval sets that grade this agent (or a step of it). */
   evals?: AgentEvalRef[];
 }

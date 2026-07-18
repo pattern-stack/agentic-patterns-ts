@@ -242,8 +242,8 @@ describe("ChatPage scope chip (#268)", () => {
     );
 
     // Expand the editor and make a genuine edit before the conversation exists.
-    fireEvent.click(getByRole("button", { name: "Scope context" }));
-    const editor = getByRole("textbox", { name: "Scope context" }) as HTMLTextAreaElement;
+    fireEvent.click(getByRole("button", { name: "Scope" }));
+    const editor = getByRole("textbox", { name: "Scope" }) as HTMLTextAreaElement;
     expect(editor.value).toBe(JSON.stringify({ tenant: "acme" }, null, 2)); // seeded from defaults
     fireEvent.change(editor, { target: { value: '{"tenant":"other"}' } });
 
@@ -254,17 +254,17 @@ describe("ChatPage scope chip (#268)", () => {
     // state persists across the re-render) swaps the textarea for the
     // read-only bound (server-echoed) context and the lock hint.
     await findByText(/Locked for this conversation/);
-    expect(() => getByRole("textbox", { name: "Scope context" })).toThrow();
+    expect(() => getByRole("textbox", { name: "Scope" })).toThrow();
 
     // Collapse it — the collapsed affordance itself carries the "· locked" tell.
     fireEvent.click(getByRole("button", { name: "Close" }));
-    getByRole("button", { name: "Scope context · locked" });
+    getByRole("button", { name: "Scope · locked" });
 
     // New Chat unlocks it — and re-seeds from defaults, NOT the prior "other" edit.
     fireEvent.click(getByRole("button", { name: "New Chat" }));
-    fireEvent.click(getByRole("button", { name: "Scope context" }));
+    fireEvent.click(getByRole("button", { name: "Scope" }));
     const reseeded = (await waitFor(() =>
-      getByRole("textbox", { name: "Scope context" }),
+      getByRole("textbox", { name: "Scope" }),
     )) as HTMLTextAreaElement;
     expect(reseeded.value).toBe(JSON.stringify({ tenant: "acme" }, null, 2));
   });
@@ -321,7 +321,7 @@ describe("ChatPage scope chip (#268)", () => {
 
     await waitFor(() => expect(container.textContent).toContain("hello"));
     expect(container.querySelector('button[title^="Scope this conversation"]')).toBeNull();
-    // The "Scope context" editor affordance is likewise absent for this agent.
-    expect(() => getByRole("button", { name: /^Scope context/ })).toThrow();
+    // The "Scope" editor affordance is likewise absent for this agent.
+    expect(() => getByRole("button", { name: /^Scope/ })).toThrow();
   });
 });

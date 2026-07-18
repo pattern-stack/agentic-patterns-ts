@@ -57,6 +57,7 @@ import { Segmented } from "../components/kit/Segmented";
 import { useAdminData } from "../hooks/useAdminData";
 import { relTime, shortId, statusTone } from "../lib/format";
 import { sessionsForAgent } from "../lib/sessions";
+import { type ToolParam, foldToolParams } from "../lib/toolParams";
 import { T } from "../ui/tokens";
 
 type RailTab = "tools" | "trace" | "scratchpad";
@@ -93,6 +94,122 @@ function parseContextJson(text: string): { value?: Record<string, unknown>; erro
   }
 }
 
+// ---------------------------------------------------------------------------
+// Typed scope form (#308) — folds `instantiation.schema` (a JSON schema) into
+// rows via `foldToolParams` (the same fold the Tool Workbench uses) and
+// assembles a POST-ready object from the rows' raw form values. Mirrors
+// `ToolRunner`'s widget/coerce/buildArgs precedent but with different
+// blank-handling semantics (see `assembleScopeRows`) — scope rows aren't tool
+// call args, and an operator clearing a defaulted field should get the
+// server's default back, not a silently omitted key that happens to read the
+// same on an OPTIONAL field but NOT on a REQUIRED one.
+// ---------------------------------------------------------------------------
+
+type ScopeWidget = "boolean" | "enum" | "number" | "json" | "text";
+
+/** boolean → checkbox; enum (any type, closed set) → picker; number/integer →
+ *  numeric input; object/array/unknown (the fold can't type these) → a JSON
+ *  sub-textarea; everything else scalar → plain text. NEVER a native
+ *  `<select>` for the enum case (playground-menus LD4). */
+function scopeWidgetFor(param: ToolParam): ScopeWidget {
+  if (param.type === "boolean") return "boolean";
+  if (param.enum && param.enum.length > 0) return "enum";
+  if (param.type === "number" || param.type === "integer") return "number";
+  if (param.type === "object" || param.type === "array" || param.type === "unknown") return "json";
+  return "text";
+}
+
+/** A schema-typed value (a default, or a preset entry) → the raw form value
+ *  its widget edits: booleans stay booleans, JSON-shaped values stringify
+ *  (pretty-printed, so the sub-textarea starts readable), everything else
+ *  becomes its string form. `undefined`/`null` → the widget's empty state. */
+function scopeValueToRaw(param: ToolParam, value: unknown): string | boolean {
+  const widget = scopeWidgetFor(param);
+  if (widget === "boolean") return typeof value === "boolean" ? value : false;
+  if (value === undefined || value === null) return "";
+  if (widget === "json") return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return typeof value === "string" ? value : String(value);
+}
+
+/** Seed every row's DISPLAYED value for an untouched draft: the scope's own
+ *  top-level `instantiation.defaults[name]` wins, falling back to the
+ *  property's own JSON-schema `default` (`ToolParam.defaultValue`) when the
+ *  scope declared no top-level default for that key — distinct from neither
+ *  existing, which seeds the widget's empty state. */
+function seedScopeRows(
+  params: ToolParam[],
+  defaults: Record<string, unknown> | null,
+): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const p of params) {
+    const hasDeclaredDefault = defaults != null && Object.hasOwn(defaults, p.name);
+    out[p.name] = scopeValueToRaw(p, hasDeclaredDefault ? defaults[p.name] : p.defaultValue);
+  }
+  return out;
+}
+
+/** Materialize a NAMED preset (D7 — presets materialize client-side; the
+ *  preset name itself is never sent) into row values, marking the draft
+ *  touched by virtue of the caller replacing `rowDraft` with this result. */
+function materializeScopePreset(
+  params: ToolParam[],
+  preset: Record<string, unknown>,
+): Record<string, string | boolean> {
+  const out: Record<string, string | boolean> = {};
+  for (const p of params) out[p.name] = scopeValueToRaw(p, preset[p.name]);
+  return out;
+}
+
+/** Coerce one row's raw string into the JS value its type implies — numeric
+ *  → `Number()`, JSON-shaped → `JSON.parse` falling back to the raw string on
+ *  a parse failure (the SERVER's zod schema produces the rejection, same
+ *  demonstrate-real-validation call as `ToolRunner`'s `coerce`), else the raw
+ *  string as-is. */
+function coerceScopeValue(param: ToolParam, raw: string): unknown {
+  const widget = scopeWidgetFor(param);
+  if (widget === "number") return Number(raw);
+  if (widget === "json") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+/**
+ * Assemble the POST-ready scope object from typed-row raw values (#308) —
+ * the row-level analogue of `parseContextJson` for the JSON-textarea
+ * fallback. Blank-vs-cleared semantics (deliberately decided, not an
+ * oversight): an empty OPTIONAL field is OMITTED so the server resolves its
+ * own current default for that key (same "no key = let the server decide"
+ * rule the whole-form untouched case already follows); an empty REQUIRED
+ * field is SENT as `""` so `scope.parse` produces an honest, field-scoped 400
+ * instead of the client silently pretending the field was never asked for.
+ * Booleans are never "blank" — always included once the draft is touched.
+ */
+function assembleScopeRows(
+  params: ToolParam[],
+  values: Record<string, string | boolean>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const p of params) {
+    const raw = values[p.name];
+    if (typeof raw === "boolean") {
+      out[p.name] = raw;
+      continue;
+    }
+    const s = raw ?? "";
+    if (s === "") {
+      if (p.required) out[p.name] = "";
+      continue; // optional + blank -> omitted, server applies its own default
+    }
+    out[p.name] = coerceScopeValue(p, s);
+  }
+  return out;
+}
+
 /** #226 — how many Backpack/Scratchpad state frames render in the timeline.
  *  Applied as `data-density` on the chat column; chat.css does the rest
  *  (Off hides `.sd` frames, Writes compacts closed reads/innate frames). */
@@ -125,10 +242,19 @@ export function ChatPage({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [maxIterations, setMaxIterations] = useState(10); // matches the runner default
-  // Scope-context editor draft (#268) — `null` = untouched, so the editor
-  // shows the SELECTED agent's `instantiation.defaults` until the operator
-  // types. Reseeded to `null` on agent switch / New Chat (see `newChat`).
+  // Scope editor draft, JSON-textarea fallback (#268; kept as the whole-form
+  // fallback #308 when `instantiation.schema` is absent/null) — `null` =
+  // untouched, so the editor shows the SELECTED agent's
+  // `instantiation.defaults` until the operator types. Reseeded to `null` on
+  // agent switch / New Chat (see `newChat`).
   const [contextText, setContextText] = useState<string | null>(null);
+  // Typed scope form draft (#308) — `null` = untouched (every row still
+  // DISPLAYS the seeded defaults, nothing has been chosen). Set to a FULL
+  // snapshot of every row's raw value the moment ANY row is edited or a
+  // preset is picked (`onScopeRowChange` / `onScopePickPreset` below) — same
+  // tri-state contract as `contextText`, just at the row level instead of
+  // one JSON blob. Reseeded to `null` on agent switch / New Chat.
+  const [rowDraft, setRowDraft] = useState<Record<string, string | boolean> | null>(null);
   const [railOpen, setRailOpen] = useState(true);
   const [railTab, setRailTab] = useState<RailTab>("tools");
   const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
@@ -222,30 +348,81 @@ export function ChatPage({
     [allSessions, selected],
   );
 
-  // Scope context (#268) — `instantiation.available` gates whether the editor
-  // + chip exist for this agent at all; `defaultsText` reseeds the editor
-  // (DISPLAY only) whenever `contextText` is untouched (`null`).
+  // Scope (#268, typed form #308) — `instantiation.available` gates whether
+  // the editor + chip exist for this agent at all; `instantiation.schema`
+  // (when present) switches the editor from the raw JSON textarea to typed
+  // rows folded via `foldToolParams` (the same fold the Tool Workbench
+  // uses). `defaultsText` reseeds the JSON fallback (DISPLAY only) whenever
+  // `contextText` is untouched (`null`); `seedScopeRows` does the analogous
+  // job for typed rows.
   const contextAvailable = selected?.instantiation?.available === true;
-  const defaultsText = useMemo(
-    () => JSON.stringify(selected?.instantiation?.defaults ?? {}, null, 2),
-    [selected],
-  );
+  const scopeSchema = selected?.instantiation?.schema ?? null;
+  const hasTypedSchema = scopeSchema != null;
+  const scopeParams = useMemo(() => foldToolParams(scopeSchema ?? undefined), [scopeSchema]);
+  const scopeDefaults = selected?.instantiation?.defaults ?? null;
+  const scopePresets = selected?.instantiation?.presets ?? null;
+
+  const defaultsText = useMemo(() => JSON.stringify(scopeDefaults ?? {}, null, 2), [scopeDefaults]);
   const contextEditorText = contextText ?? defaultsText;
-  // `contextEditorParse` drives the VISIBLE error under the textarea and
-  // Send-blocking — it re-derives on every keystroke.
+  // `contextEditorParse` drives the VISIBLE error under the JSON-fallback
+  // textarea and Send-blocking (fallback mode only — typed rows have no
+  // analogous client-side parse failure, see `assembleScopeRows`) — it
+  // re-derives on every keystroke.
   const contextEditorParse = useMemo(
     () => parseContextJson(contextEditorText),
     [contextEditorText],
   );
-  // What actually gets POSTed differs: an untouched editor (`contextText ===
-  // null`) is still just DISPLAYING the seeded defaults, not an operator
-  // decision — posting it as an explicit `context` would pin a client-side
-  // snapshot instead of letting the server resolve its own current
-  // `instantiateDefaults` at bind time (the server distinguishes "no context
-  // key" from "explicit context", Gate 2.5 review note 4). Only a genuine
-  // edit (including a deliberate clear, which also parses to `undefined` —
-  // same wire behavior, different reason) is ever sent.
-  const contextToSend = contextText === null ? {} : contextEditorParse;
+
+  // Typed rows: the DISPLAYED value per field is the touched draft
+  // (`rowDraft`) when one exists, else the seeded defaults — recomputed
+  // whenever the schema, defaults, or draft change.
+  const rowValues = useMemo(
+    () => rowDraft ?? seedScopeRows(scopeParams, scopeDefaults),
+    [rowDraft, scopeParams, scopeDefaults],
+  );
+  // A row edit assembles a FULL snapshot (the currently-displayed values,
+  // with the one changed field overwritten) — this is the moment the draft
+  // transitions from untouched (`null`) to touched, same tri-state contract
+  // `contextText` already follows (map gotcha: collapsing "untouched" and
+  // "touched back to the same values" would silently pin a client-side
+  // defaults snapshot instead of leaving the key out for the server to
+  // resolve).
+  const onScopeRowChange = useCallback(
+    (name: string, value: string | boolean) => {
+      setRowDraft((prev) => ({
+        ...(prev ?? seedScopeRows(scopeParams, scopeDefaults)),
+        [name]: value,
+      }));
+    },
+    [scopeParams, scopeDefaults],
+  );
+  // Preset pick (#308 D7 — materialize CLIENT-side; the preset name itself is
+  // never sent) seeds every row from the named preset's values and marks the
+  // draft touched.
+  const onScopePickPreset = useCallback(
+    (name: string) => {
+      const preset = scopePresets?.[name];
+      if (!preset) return;
+      setRowDraft(materializeScopePreset(scopeParams, preset));
+    },
+    [scopeParams, scopePresets],
+  );
+
+  // What actually gets POSTed differs from what's DISPLAYED: an untouched
+  // draft (`contextText`/`rowDraft` both `null`) is still just DISPLAYING the
+  // seeded defaults, not an operator decision — posting it as an explicit
+  // `scope` would pin a client-side snapshot instead of letting the server
+  // resolve its own current defaults at bind time (the server distinguishes
+  // "no scope key" from "explicit scope", Gate 2.5 review note 4). Only a
+  // genuine edit or preset pick (including a deliberate clear, which also
+  // parses to `undefined` in the JSON fallback — same wire behavior,
+  // different reason) is ever sent.
+  const contextToSend = useMemo(() => {
+    if (hasTypedSchema) {
+      return rowDraft === null ? {} : { value: assembleScopeRows(scopeParams, rowDraft) };
+    }
+    return contextText === null ? {} : contextEditorParse;
+  }, [hasTypedSchema, rowDraft, scopeParams, contextText, contextEditorParse]);
 
   const chat = useChat(selectedId, { maxIterations, context: contextToSend.value });
   // Locks the moment a create is IN FLIGHT, not just once the id lands
@@ -255,6 +432,24 @@ export function ChatPage({
   // (the context was already captured at the `send()` call, Gate 2.5 review
   // note 8). Immutable once bound either way (Decision 2).
   const contextLocked = chat.conversationId != null || chat.streaming;
+  // Map the most recent create's per-field zod issues (#308) onto rows —
+  // `issue.path[0]` matches a row name; anything that doesn't (a top-level
+  // scope error, or a path this schema doesn't recognize) surfaces in the
+  // panel's footer instead of silently dropping.
+  const scopeFieldErrors = useMemo(() => {
+    const perField = new Map<string, string>();
+    const footer: string[] = [];
+    const names = new Set(scopeParams.map((p) => p.name));
+    for (const issue of chat.scopeIssues ?? []) {
+      const key = issue.path.length > 0 ? String(issue.path[0]) : undefined;
+      if (key !== undefined && names.has(key)) {
+        if (!perField.has(key)) perField.set(key, issue.message);
+      } else {
+        footer.push(issue.message);
+      }
+    }
+    return { perField, footer };
+  }, [chat.scopeIssues, scopeParams]);
   const exchangeCount = useMemo(
     () => chat.messages.filter((m) => m.role === "user").length,
     [chat.messages],
@@ -314,6 +509,7 @@ export function ChatPage({
     // Unlocks the scope editor and reseeds it from the (possibly new)
     // agent's defaults — the "New Chat to change scope" affordance (#268).
     setContextText(null);
+    setRowDraft(null);
     chat.reset();
   }, [chat]);
 
@@ -356,6 +552,27 @@ export function ChatPage({
         streaming: chat.streaming,
         runId: chat.lastRunId,
       };
+
+  // Everything `ScopeContextPanel` (and, via `boundContext`/`boundContextRedacted`,
+  // `ScopeChip`) needs — bundled so `Header` threads ONE prop instead of the
+  // ten-odd individual ones the typed form grew (map convention: mirrors
+  // `ToolsRail`'s `scope={{...}}` bundling below).
+  const scopeForm: ScopeFormBundle = {
+    hasTypedSchema,
+    params: scopeParams,
+    rowValues,
+    onRowChange: onScopeRowChange,
+    presets: scopePresets,
+    onPickPreset: onScopePickPreset,
+    fieldErrors: scopeFieldErrors.perField,
+    footerErrors: scopeFieldErrors.footer,
+    editorText: contextEditorText,
+    onEditorText: setContextText,
+    editorError: contextEditorParse.error,
+    locked: contextLocked,
+    boundContext: chat.context,
+    boundContextRedacted: chat.contextRedacted,
+  };
 
   return (
     <div
@@ -403,12 +620,7 @@ export function ChatPage({
         onPickSession={pickSession}
         viewing={viewing}
         contextAvailable={contextAvailable}
-        contextEditorText={contextEditorText}
-        onContextEditorText={setContextText}
-        contextError={contextEditorParse.error}
-        contextLocked={contextLocked}
-        boundContext={chat.context}
-        boundContextRedacted={chat.contextRedacted}
+        scopeForm={scopeForm}
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
@@ -435,11 +647,17 @@ export function ChatPage({
               onSend={viewing ? undefined : chat.send}
               onAbort={viewing ? undefined : chat.abort}
               onRespondInput={viewing ? undefined : chat.respondInput}
-              // Block Send while the scope-context draft doesn't parse — a
-              // silently dropped edit would misreport what scope the run
+              // Block Send while the JSON-fallback scope draft doesn't parse —
+              // a silently dropped edit would misreport what scope the run
               // actually got (#268; harmless once locked, `contextEditorParse`
-              // stops mattering the instant `contextLocked` flips true).
-              disabled={!selected || (!contextLocked && contextEditorParse.error != null)}
+              // stops mattering the instant `contextLocked` flips true). The
+              // typed rows (#308) have no analogous client-side parse
+              // failure — a blank/malformed row is sent as-is and the
+              // server's `scope.parse` produces the honest per-field 400
+              // (`assembleScopeRows`), so this only gates the fallback mode.
+              disabled={
+                !selected || (!contextLocked && !hasTypedSchema && contextEditorParse.error != null)
+              }
               emptyLabel={
                 viewing
                   ? viewingMessages === null
@@ -495,6 +713,51 @@ export function ChatPage({
   );
 }
 
+/**
+ * Everything `ScopeContextPanel` needs to render either mode (typed rows or
+ * the JSON fallback) plus lock/echo state — bundled (#308) so `Header` and
+ * the panel share ONE prop instead of the individual fields the pre-typed-
+ * form editor got away with. `boundContext`/`boundContextRedacted` are ALSO
+ * `ScopeChip`'s source (Header pulls them off this bundle for both).
+ */
+interface ScopeFormBundle {
+  /** `instantiation.schema` is present → render typed rows; absent/null on
+   *  older servers or hook-only registrations → the JSON textarea is the
+   *  only editor (#268 behavior, unchanged). */
+  hasTypedSchema: boolean;
+  /** The schema folded via `foldToolParams` — `[]` when `hasTypedSchema` is
+   *  false (unused) or the schema declares no properties. */
+  params: ToolParam[];
+  /** Each row's DISPLAYED raw value (the touched draft, or seeded defaults). */
+  rowValues: Record<string, string | boolean>;
+  onRowChange: (name: string, value: string | boolean) => void;
+  /** Named preset value objects, when the registration declared any. */
+  presets: Record<string, Record<string, unknown>> | null;
+  onPickPreset: (name: string) => void;
+  /** Server 400 issues mapped onto the row whose name matched `issue.path[0]`. */
+  fieldErrors: Map<string, string>;
+  /** Issues that matched no row — a top-level scope error, or a path this
+   *  schema doesn't recognize — shown in the panel's footer instead. */
+  footerErrors: string[];
+  /** JSON-fallback editor's draft text (unused when `hasTypedSchema`). */
+  editorText: string;
+  onEditorText: (text: string) => void;
+  /** JSON-fallback parse error (unused when `hasTypedSchema` — typed rows
+   *  have no analogous client-side parse failure, see `assembleScopeRows`). */
+  editorError?: string;
+  /** Immutable once the conversation exists (Decision 2) — locks the editor
+   *  entirely (swaps to the read-only bound-scope echo), same for either mode. */
+  locked: boolean;
+  /** The server's echoed context for the live conversation (`useChat.context`) —
+   *  `null` until bound, or "(no scope)" once bound with none. Never the
+   *  editor's draft (that would defeat the chip's honesty rule). */
+  boundContext: Record<string, unknown> | null;
+  /** Top-level keys the server redacted out of `boundContext`, when any were
+   *  (`useChat.contextRedacted`) — surfaced next to `boundContext` wherever it
+   *  renders, matching `NodeInspector`'s "redacted: …" line for the same run. */
+  boundContextRedacted: string[] | null;
+}
+
 interface HeaderProps {
   agents: AgentSummary[];
   selectedId: string | null;
@@ -525,19 +788,7 @@ interface HeaderProps {
   /** Whether the selected agent's registration can compose a delivered
    *  instance (#268) — gates the scope editor + chip's very existence. */
   contextAvailable: boolean;
-  contextEditorText: string;
-  onContextEditorText: (text: string) => void;
-  contextError?: string;
-  /** Immutable once the conversation exists (Decision 2) — locks the editor. */
-  contextLocked: boolean;
-  /** The server's echoed context for the live conversation (`useChat.context`) —
-   *  `null` until bound, or "(no scope)" once bound with none. Never the
-   *  editor's draft text (that would defeat the chip's honesty rule). */
-  boundContext: Record<string, unknown> | null;
-  /** Top-level keys the server redacted out of `boundContext`, when any were
-   *  (`useChat.contextRedacted`) — surfaced next to `boundContext` wherever it
-   *  renders, matching `NodeInspector`'s "redacted: …" line for the same run. */
-  boundContextRedacted: string[] | null;
+  scopeForm: ScopeFormBundle;
 }
 
 function Header({
@@ -564,12 +815,7 @@ function Header({
   onPickSession,
   viewing,
   contextAvailable,
-  contextEditorText,
-  onContextEditorText,
-  contextError,
-  contextLocked,
-  boundContext,
-  boundContextRedacted,
+  scopeForm,
 }: HeaderProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -605,7 +851,7 @@ function Header({
             replayed session (its scope would be the wrong conversation's).
             Shown only once the live conversation is bound. */}
         {contextAvailable && !viewing && conversationId && (
-          <ScopeChip context={boundContext} redacted={boundContextRedacted} />
+          <ScopeChip context={scopeForm.boundContext} redacted={scopeForm.boundContextRedacted} />
         )}
         {exchangeCount > 0 && (
           <Badge tone="mute" variant="outline">
@@ -655,16 +901,7 @@ function Header({
           exchangeCount={exchangeCount}
           disabled={streaming || viewing}
         />
-        {contextAvailable && !viewing && (
-          <ScopeContextPanel
-            editorText={contextEditorText}
-            onEditorText={onContextEditorText}
-            error={contextError}
-            locked={contextLocked}
-            boundContext={boundContext}
-            boundContextRedacted={boundContextRedacted}
-          />
-        )}
+        {contextAvailable && !viewing && <ScopeContextPanel {...scopeForm} />}
       </div>
       {loadError && (
         <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>
@@ -986,36 +1223,47 @@ function RunSettingsMenu({
 }
 
 /**
- * ScopeContextPanel — the per-conversation context editor (#268), following
- * `AgentLensPage`'s delivered-instance JSON textarea pattern
- * (`pages/build/AgentLensPage.tsx:329`). playground-menus round 1 (LD2):
- * used to be an inline expand — a collapsed button that swapped into a
- * bordered `div` in the header flow, pushing siblings. Now a kit
- * `DropdownMenu` popover, so opening it never reflows the page. Editable
- * until the conversation exists; once `locked`, shows the ACTUAL bound
- * context (the server's echo) instead of the (possibly stale) draft — the
- * same server-is-truth rule the chip follows.
+ * ScopeContextPanel — the per-conversation scope editor (#268; typed rows
+ * #308), following `AgentLensPage`'s delivered-instance JSON textarea
+ * pattern (`pages/build/AgentLensPage.tsx:329`) for its fallback mode.
+ * playground-menus round 1 (LD2): used to be an inline expand — a collapsed
+ * button that swapped into a bordered `div` in the header flow, pushing
+ * siblings. Now a kit `DropdownMenu` popover, so opening it never reflows the
+ * page. Editable until the conversation exists; once `locked`, shows the
+ * ACTUAL bound context (the server's echo) instead of the (possibly stale)
+ * draft — the same server-is-truth rule the chip follows.
+ *
+ * Two editor modes, chosen by `hasTypedSchema` (never both): typed rows
+ * (folded from `instantiation.schema` via `foldToolParams`, one widget per
+ * field per `scopeWidgetFor`) when the registration declared a scope shape,
+ * else the raw JSON textarea (#268's original editor, unchanged) — the
+ * WHOLE-form fallback for schema-less / older-server registrations.
  */
 function ScopeContextPanel({
+  hasTypedSchema,
+  params,
+  rowValues,
+  onRowChange,
+  presets,
+  onPickPreset,
+  fieldErrors,
+  footerErrors,
   editorText,
   onEditorText,
-  error,
+  editorError,
   locked,
   boundContext,
   boundContextRedacted,
-}: {
-  editorText: string;
-  onEditorText: (text: string) => void;
-  error?: string;
-  locked: boolean;
-  boundContext: Record<string, unknown> | null;
-  boundContextRedacted: string[] | null;
-}) {
-  // Send is already blocked on this (ChatPage's `disabled` prop) — the
-  // trigger needs its OWN visible cause, or a greyed-out Send with no
-  // explanation is the only signal the operator ever sees (Gate 2.5 review
-  // note 3).
-  const showsInvalid = !locked && error != null;
+}: ScopeFormBundle) {
+  // Send is already blocked on the JSON-fallback parse error (ChatPage's
+  // `disabled` prop) — the trigger needs its OWN visible cause, or a
+  // greyed-out Send with no explanation is the only signal the operator ever
+  // sees (Gate 2.5 review note 3). Typed rows never block Send pre-flight
+  // (`assembleScopeRows`), but a SERVER-rejected field is just as much an
+  // "invalid" state worth the same tell.
+  const showsInvalid =
+    !locked &&
+    (hasTypedSchema ? fieldErrors.size > 0 || footerErrors.length > 0 : editorError != null);
 
   return (
     <DropdownMenu
@@ -1030,14 +1278,14 @@ function ScopeContextPanel({
           aria-expanded={open}
           style={showsInvalid ? { color: "var(--err)" } : undefined}
         >
-          Scope context{locked ? " · locked" : showsInvalid ? " · invalid" : ""}
+          Scope{locked ? " · locked" : showsInvalid ? " · invalid" : ""}
         </Button>
       )}
     >
       {({ close }) => (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Scope context</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>Scope</div>
             <Button variant="ghost" size="sm" onClick={close}>
               Close
             </Button>
@@ -1062,31 +1310,280 @@ function ScopeContextPanel({
             </>
           ) : (
             <>
-              <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.45 }}>
-                Who this conversation acts on behalf of — edit the JSON, then send. The scope binds
-                on the first message; <b>New Chat</b> to run as someone else.
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.45, flex: 1 }}>
+                  Who this conversation acts on behalf of —{" "}
+                  {hasTypedSchema ? "fill in the fields" : "edit the JSON"}, then send. The scope
+                  binds on the first message; <b>New Chat</b> to run as someone else.
+                </div>
+                {presets && Object.keys(presets).length > 0 && (
+                  <ScopePresetMenu presets={presets} onPick={onPickPreset} />
+                )}
               </div>
-              <Field label="Context (JSON)">
-                <textarea
-                  aria-label="Scope context"
-                  value={editorText}
-                  onChange={(e) => onEditorText(e.target.value)}
-                  spellCheck={false}
-                  rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
-                  style={{
-                    ...inputStyle,
-                    background: "var(--paper)",
-                    fontFamily: T.font.mono,
-                    fontSize: T.fz.tiny,
-                    lineHeight: 1.5,
-                    resize: "vertical",
-                  }}
-                />
-              </Field>
+              {hasTypedSchema ? (
+                params.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "var(--mute)" }}>
+                    No scope fields declared.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {params.map((p) => (
+                      <ScopeRow
+                        key={p.name}
+                        param={p}
+                        value={rowValues[p.name] ?? (p.type === "boolean" ? false : "")}
+                        onChange={(v) => onRowChange(p.name, v)}
+                        error={fieldErrors.get(p.name)}
+                      />
+                    ))}
+                  </div>
+                )
+              ) : (
+                <Field label="Context (JSON)">
+                  <textarea
+                    aria-label="Scope"
+                    value={editorText}
+                    onChange={(e) => onEditorText(e.target.value)}
+                    spellCheck={false}
+                    rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
+                    style={{
+                      ...inputStyle,
+                      background: "var(--paper)",
+                      fontFamily: T.font.mono,
+                      fontSize: T.fz.tiny,
+                      lineHeight: 1.5,
+                      resize: "vertical",
+                    }}
+                  />
+                </Field>
+              )}
             </>
           )}
-          {showsInvalid && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
+          {showsInvalid &&
+            (hasTypedSchema ? (
+              footerErrors.length > 0 && (
+                <div style={{ fontSize: 12, color: "var(--err)" }}>{footerErrors.join(" · ")}</div>
+              )
+            ) : (
+              <div style={{ fontSize: 12, color: "var(--err)" }}>{editorError}</div>
+            ))}
         </div>
+      )}
+    </DropdownMenu>
+  );
+}
+
+/**
+ * ScopePresetMenu — `Preset ▾` (#308 D7): picking a NAMED preset materializes
+ * its whole value object CLIENT-side into every row (`onPick` →
+ * `onScopePickPreset` in `ChatPage`) — the preset's NAME is never sent to the
+ * server, only the resulting field values are.
+ */
+function ScopePresetMenu({
+  presets,
+  onPick,
+}: {
+  presets: Record<string, Record<string, unknown>>;
+  onPick: (name: string) => void;
+}) {
+  const names = Object.keys(presets);
+  return (
+    <DropdownMenu
+      align="right"
+      width={220}
+      trigger={({ toggle, open }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={toggle}
+          aria-haspopup="menu"
+          aria-expanded={open}
+        >
+          Preset ▾
+        </Button>
+      )}
+    >
+      {({ close }) => (
+        <>
+          {names.map((name) => (
+            <button
+              key={name}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onPick(name);
+                close();
+              }}
+              style={{
+                display: "block",
+                width: "100%",
+                textAlign: "left",
+                padding: "8px 12px",
+                fontFamily: "inherit",
+                fontSize: T.fz.small,
+                border: "none",
+                background: "transparent",
+                color: "var(--ink)",
+                cursor: "pointer",
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </>
+      )}
+    </DropdownMenu>
+  );
+}
+
+/** One typed scope row: `Field`-wrapped widget (per `scopeWidgetFor`) +
+ *  description + a per-field server error, when one matched this row. */
+function ScopeRow({
+  param,
+  value,
+  onChange,
+  error,
+}: {
+  param: ToolParam;
+  value: string | boolean;
+  onChange: (value: string | boolean) => void;
+  error?: string;
+}) {
+  const widget = scopeWidgetFor(param);
+  const label = `${param.name}${param.required ? " *" : ""}`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <Field label={label}>
+        {widget === "boolean" ? (
+          <input
+            type="checkbox"
+            aria-label={param.name}
+            checked={value === true}
+            onChange={(e) => onChange(e.target.checked)}
+          />
+        ) : widget === "enum" ? (
+          <ScopeEnumPicker
+            ariaLabel={param.name}
+            options={param.enum ?? []}
+            value={typeof value === "string" ? value : ""}
+            onChange={onChange}
+          />
+        ) : widget === "json" ? (
+          <textarea
+            aria-label={param.name}
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value)}
+            spellCheck={false}
+            rows={3}
+            style={{
+              ...inputStyle,
+              background: "var(--paper)",
+              fontFamily: T.font.mono,
+              fontSize: T.fz.tiny,
+              lineHeight: 1.5,
+              resize: "vertical",
+            }}
+          />
+        ) : (
+          <input
+            type={widget === "number" ? "number" : "text"}
+            aria-label={param.name}
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value)}
+            style={inputStyle}
+          />
+        )}
+      </Field>
+      {param.description && (
+        <span style={{ fontSize: T.fz.micro, color: "var(--mute)", lineHeight: 1.3 }}>
+          {param.description}
+        </span>
+      )}
+      {error && <span style={{ fontSize: 12, color: "var(--err)" }}>{error}</span>}
+    </div>
+  );
+}
+
+/** The scope form's enum widget — a kit `DropdownMenu` picker, NEVER a native
+ *  `<select>` (playground-menus LD4). Mirrors `AgentPickerMenu`'s
+ *  trigger/menuitemradio shape at the row's smaller scale. */
+function ScopeEnumPicker({
+  ariaLabel,
+  options,
+  value,
+  onChange,
+}: {
+  ariaLabel: string;
+  options: string[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <DropdownMenu
+      align="left"
+      width={200}
+      trigger={({ toggle, open }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={ariaLabel}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          style={{
+            ...inputStyle,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 6,
+            width: "100%",
+            cursor: "pointer",
+          }}
+        >
+          <span>{value || "Select…"}</span>
+          <ChevronDown size={12} />
+        </button>
+      )}
+    >
+      {({ close }) => (
+        <>
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              role="menuitemradio"
+              aria-checked={opt === value}
+              onClick={() => {
+                onChange(opt);
+                close();
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                width: "100%",
+                padding: "8px 12px",
+                fontFamily: "inherit",
+                fontSize: T.fz.small,
+                border: "none",
+                background: opt === value ? "var(--accent-soft)" : "transparent",
+                color: opt === value ? "var(--accent-ink)" : "var(--ink)",
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+            >
+              {opt}
+              {opt === value && <Check size={12} />}
+            </button>
+          ))}
+        </>
       )}
     </DropdownMenu>
   );

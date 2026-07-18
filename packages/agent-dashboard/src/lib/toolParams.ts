@@ -15,11 +15,21 @@ export interface ToolParam {
   type: string;
   required: boolean;
   description?: string;
+  /** JSON-schema `enum` values, when the property declares a closed set (a
+   *  `z.enum(...)` field) — additive (#308: the scope form's typed rows pick
+   *  the picker widget off this, existing consumers ignore it). */
+  enum?: string[];
+  /** JSON-schema `default`, when the property declares one — additive (#308:
+   *  seeds an untouched scope row alongside the scope's own top-level
+   *  `instantiation.defaults`; existing consumers ignore it). */
+  defaultValue?: unknown;
 }
 
 interface JsonSchemaProperty {
   type?: string;
   description?: string;
+  enum?: unknown[];
+  default?: unknown;
 }
 
 /**
@@ -37,5 +47,7 @@ export function foldToolParams(schema: Record<string, unknown> | undefined): Too
     type: prop?.type ?? "unknown",
     required: required.includes(name),
     description: prop?.description,
+    enum: Array.isArray(prop?.enum) ? (prop.enum as string[]) : undefined,
+    defaultValue: prop?.default,
   }));
 }

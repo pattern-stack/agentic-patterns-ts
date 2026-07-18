@@ -169,8 +169,8 @@ function mockJsonFetch(body: unknown, opts: { ok?: boolean; status?: number } = 
   return { fn: fn as unknown as typeof fetch, calls };
 }
 
-describe("createConversation (#268)", () => {
-  it("posts `context` only when the caller provides one", async () => {
+describe("createConversation (#268, #308)", () => {
+  it("posts `scope` only when the caller provides one", async () => {
     const { fn, calls } = mockJsonFetch({ id: "c1", agent_id: "a1" });
     vi.stubGlobal("fetch", fn);
 
@@ -178,12 +178,12 @@ describe("createConversation (#268)", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("/conversations");
-    expect(calls[0]?.body).toEqual({ agent_id: "a1" }); // no `context` key at all
+    expect(calls[0]?.body).toEqual({ agent_id: "a1" }); // no `scope` key at all
 
     vi.unstubAllGlobals();
   });
 
-  it("posts the given `context` object alongside agent_id", async () => {
+  it("posts the given scope object under the `context` body key (works against pre-#308 servers too) alongside agent_id", async () => {
     const { fn, calls } = mockJsonFetch({
       id: "c1",
       agent_id: "a1",
