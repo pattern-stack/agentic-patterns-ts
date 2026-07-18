@@ -1,6 +1,6 @@
 // atoms barrel export
 
-export { AgenticModel, ProtocolModel } from "./base.js";
+export { AgenticModel, ProtocolModel, type RenderContext } from "./base.js";
 
 export { Persona, PersonaSchema, type PersonaData } from "./persona.js";
 export { Example, ExampleSchema, type ExampleData } from "./example.js";
@@ -24,6 +24,7 @@ export {
   Awareness,
   AwarenessSchema,
   type AwarenessData,
+  type AwarenessScopeRenderFn,
   AwarenessDomain,
   AwarenessDomainSchema,
   type AwarenessDomainData,

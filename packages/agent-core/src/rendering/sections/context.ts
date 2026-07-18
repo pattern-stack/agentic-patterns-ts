@@ -4,7 +4,7 @@
 
 import type { Awareness } from "../../atoms/awareness.js";
 import type { Background } from "../../atoms/background.js";
-import type { PromptSection } from "./base.js";
+import type { PromptSection, RenderContext } from "./base.js";
 
 /**
  * Renders Background + Awareness into Context section.
@@ -17,7 +17,7 @@ export class ContextSection implements PromptSection {
     readonly awareness?: Awareness,
   ) {}
 
-  render(): string {
+  render(ctx?: RenderContext): string {
     const parts: string[] = ["## Context"];
 
     if (this.background) {
@@ -28,7 +28,8 @@ export class ContextSection implements PromptSection {
     }
 
     if (this.awareness) {
-      const awarenessPrompt = this.awareness.toPrompt();
+      // ctx forwards ONLY here — Background.toPrompt() stays nullary.
+      const awarenessPrompt = this.awareness.toPrompt(ctx);
       if (awarenessPrompt) {
         parts.push(awarenessPrompt);
       }

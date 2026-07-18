@@ -172,6 +172,6 @@ export function applyStepModel(agent: AgentLike, model: string | undefined): Age
     role: agent.role,
     getModel: () => model,
     getTools: () => agent.getTools(),
-    renderInitialPrompt: () => agent.renderInitialPrompt(),
+    renderInitialPrompt: (ctx) => agent.renderInitialPrompt(ctx),
   };
 }

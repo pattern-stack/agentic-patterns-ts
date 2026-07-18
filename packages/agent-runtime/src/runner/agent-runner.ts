@@ -19,7 +19,7 @@
  * gate-allow regression test in agent-runner.test.ts) will be bypassed.
  */
 
-import type { ToolExecutionContext, ToolSchema } from "@agentic-patterns/core";
+import type { RenderContext, ToolExecutionContext, ToolSchema } from "@agentic-patterns/core";
 import type { LanguageModelV2 } from "@ai-sdk/provider";
 import {
   type ModelMessage,
@@ -249,6 +249,18 @@ export class AgentRunner implements RunnerProtocol {
   }
 
   /**
+   * Narrow `RunOptions.host` down to the one key the renderer cares about:
+   * `host.scope` (#308). Inline structural narrow — cannot import
+   * `workflows/scope-host.ts`'s `hostOf`/`buildScopeHost` here, since
+   * `workflows` depends on `runner` and importing it back would be a reverse
+   * layering violation. Mirrors `hostOf`'s shape without the import.
+   */
+  private _renderCtx(options?: RunOptions): RenderContext | undefined {
+    const scope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
+    return scope ? { scope } : undefined;
+  }
+
+  /**
    * Convert agent tools to the Vercel AI SDK v5 tool format.
    *
    * v5 renamed the tool's schema field `parameters → inputSchema`. Core's
@@ -306,7 +318,7 @@ export class AgentRunner implements RunnerProtocol {
 
     // #117: hoisted above the start event (was after it) so message.start can
     // stamp systemPrompt — renderInitialPrompt() is a pure render, hoisting is safe.
-    const system = agent.renderInitialPrompt();
+    const system = agent.renderInitialPrompt(this._renderCtx(options));
 
     // Emit message start event (root of the trace)
     const startEvent = createEvent("agent.message.start", {
@@ -898,7 +910,7 @@ export class AgentRunner implements RunnerProtocol {
     const modelName = model.modelId;
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
-    const system = agent.renderInitialPrompt();
+    const system = agent.renderInitialPrompt(this._renderCtx(options));
 
     // Emit message start event (root of the trace), mirroring run().
     const startEvent = createEvent("agent.message.start", {
@@ -1119,7 +1131,7 @@ export class AgentRunner implements RunnerProtocol {
     // Terminal tools — parity with run(): a successful call ends the loop.
     const terminalTools = new Set(agentTools.filter((t) => t.terminal === true).map((t) => t.name));
 
-    const system = agent.renderInitialPrompt();
+    const system = agent.renderInitialPrompt(this._renderCtx(options));
     const messages: ModelMessage[] = [];
     if (options?.messageHistory) {
       messages.push(...convertHistory(options.messageHistory));

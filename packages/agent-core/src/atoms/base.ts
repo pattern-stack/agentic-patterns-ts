@@ -14,6 +14,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Context threaded into a render call — currently just an optional
+ * server-parsed session scope bag. Lives here at layer 0 (atoms) so both the
+ * rendering layer and an atom-level render hook (see `Awareness.fromScope`)
+ * can reference it without atoms ever importing upward into rendering or
+ * molecules. Re-exported upward through `atoms/index.ts` and the rendering
+ * barrels so callers can import it from wherever's convenient.
+ */
+export interface RenderContext {
+  readonly scope?: Readonly<Record<string, unknown>>;
+}
+
+/**
  * Base model for all agentic-patterns datatypes.
  *
  * All datatypes must implement toPrompt() to render as prompt fragments.

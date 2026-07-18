@@ -22,6 +22,7 @@
 
 import {
   AgentBuilder,
+  Awareness,
   Capability,
   Judgment,
   ManualSection,
@@ -64,6 +65,14 @@ const workspaceScope = new SessionScope(
 );
 
 type WorkspaceScope = ScopeValue<typeof workspaceScope>;
+
+// A render-time-only awareness: no domains, just a scope-derived line that
+// appears when the caller supplies `{ scope }` on renderInitialPrompt/render
+// and is silently absent otherwise (see Awareness.fromScope).
+const workspaceAwareness = Awareness.fromScope(
+  workspaceScope,
+  (s) => `Acting on behalf of ${s.user} in workspace ${s.workspace} (${s.region}).`,
+);
 
 // ---------------------------------------------------------------------------
 // Toolbox 1 — ambient workspace context (read-only), scoped to `scope.user`
@@ -224,13 +233,13 @@ function buildWorkspaceAgent(scope: WorkspaceScope) {
 
   const mission = new Mission({
     objective: "Help the scoped operator navigate their workspace and deals",
-    success_criteria: [
+    successCriteria: [
       "Every answer is scoped to the bound operator",
       "Fuzzy refs are resolved, not guessed",
     ],
   });
 
-  return new AgentBuilder(role).withMission(mission).build();
+  return new AgentBuilder(role).withAwareness(workspaceAwareness).withMission(mission).build();
 }
 
 // ---------------------------------------------------------------------------

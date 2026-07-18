@@ -51,6 +51,26 @@ describe("applyStepModel", () => {
     expect(view.role.name).toBe("a");
     expect(a.getModel()).toBe("base");
   });
+
+  it("forwards the render ctx argument to the wrapped agent (#308 — no silent ctx-drop)", () => {
+    const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+    const a: AgentLike = {
+      role: { name: "a" },
+      getModel: () => "base",
+      getTools: () => [],
+      renderInitialPrompt: (ctx) => {
+        capturedCtx.push(ctx);
+        return "init";
+      },
+    };
+    const view = applyStepModel(a, "override-model");
+
+    const scope = { workspace: "acme" };
+    expect(view.renderInitialPrompt({ scope })).toBe("init");
+    expect(view.renderInitialPrompt()).toBe("init");
+
+    expect(capturedCtx).toEqual([{ scope }, undefined]);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,7 @@
  * - SDKPartialAssistantMessage → MessageChunk (streaming)
  */
 
-import type { ToolSchema } from "@agentic-patterns/core";
+import type { RenderContext, ToolSchema } from "@agentic-patterns/core";
 import {
   type HookCallback,
   type HookCallbackMatcher,
@@ -233,8 +233,10 @@ export class ClaudeCodeRunner implements RunnerProtocol {
   // Threading scope through only the toolbox half would silently leave
   // playbook-backed CC tools scope-less with no signal, which is worse than
   // the current uniform absence — so this was left undone rather than forced
-  // (decisions.md D13). Scope is silently absent on ClaudeCodeRunner /
-  // ClaudeCodeAPIRunner-backed registrations until this is revisited.
+  // (decisions.md D13). NOTE the asymmetry since #308 PR-3: PROMPT rendering
+  // IS scope-aware on this runner (`_buildOptions` passes `_renderCtx` into
+  // `renderInitialPrompt`), so `host.scope` reaches the CC system prompt —
+  // it is only TOOL execution that stays scope-less until this is revisited.
   async run(agent: AgentLikeForBridge, message: string, options?: RunOptions): Promise<RunResult> {
     if (options?.eventBus) {
       this._eventBus = options.eventBus;
@@ -495,6 +497,16 @@ export class ClaudeCodeRunner implements RunnerProtocol {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Narrow `RunOptions.host` down to `host.scope` (#308) — same inline
+   * structural narrow as `AgentRunner._renderCtx`; cannot import
+   * `workflows/scope-host.ts` here either (reverse layering).
+   */
+  private _renderCtx(options?: RunOptions): RenderContext | undefined {
+    const scope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
+    return scope ? { scope } : undefined;
+  }
+
   protected _buildOptions(
     agent: AgentLikeForBridge,
     options: RunOptions | undefined,
@@ -507,7 +519,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
   ): SDKOptions {
     const sdkOpts: SDKOptions = {
       ...this._defaults,
-      systemPrompt: agent.renderInitialPrompt(),
+      systemPrompt: agent.renderInitialPrompt(this._renderCtx(options)),
       model: mapModel(agent.getModel()) ?? this._defaults.model,
       maxTurns: options?.maxIterations ?? 10,
       permissionMode: "bypassPermissions",

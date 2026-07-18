@@ -1,6 +1,6 @@
 // sections barrel export
 
-export type { PromptSection } from "./base.js";
+export type { PromptSection, RenderContext } from "./base.js";
 export { IdentitySection } from "./identity.js";
 export { BoundariesSection } from "./boundaries.js";
 export { CapabilitiesSection } from "./capabilities.js";

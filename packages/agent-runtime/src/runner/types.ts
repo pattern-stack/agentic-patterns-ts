@@ -4,7 +4,7 @@
  * Ported from Python: systems/runners/base.py
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { RenderContext, ToolExecutionContext } from "@agentic-patterns/core";
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
@@ -27,7 +27,7 @@ export interface AgentLike {
   readonly role: { readonly name: string };
   getModel(): string | undefined;
   getTools(): unknown[];
-  renderInitialPrompt(): string;
+  renderInitialPrompt(ctx?: RenderContext): string;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,11 +141,14 @@ export interface RunOptions {
   allowOpenObjectSchemas?: boolean;
   /**
    * Opaque host payload copied verbatim onto every `ToolExecutionContext`
-   * this run's tool dispatches build (`buildToolCtx`). The runner never
-   * reads it. The workflow layer uses it to carry `{ scratchpad, deps,
-   * eventBus, scope }` across the agent-as-tool seam (#124). `scope` is a
-   * server-parsed `SessionScope` value — read it via
-   * `readScope`/`requireScope` (`workflows/scope-host.ts`).
+   * this run's tool dispatches build (`buildToolCtx`). The workflow layer
+   * uses it to carry `{ scratchpad, deps, eventBus, scope }` across the
+   * agent-as-tool seam (#124). `scope` is a server-parsed `SessionScope`
+   * value — read it via `readScope`/`requireScope` (`workflows/scope-host.ts`).
+   * The runner reads exactly one key off this bag — `host.scope` — to build
+   * the `RenderContext` passed to `renderInitialPrompt`; every other key
+   * (and the bag itself, when `scope` is absent) is otherwise opaque and
+   * copied verbatim.
    */
   host?: unknown;
 }

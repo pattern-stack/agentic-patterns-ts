@@ -10,6 +10,7 @@ import type {
   IdentitySection,
   MethodologySection,
   MissionSection,
+  RenderContext,
 } from "./sections/index.js";
 import { StateSection } from "./sections/state.js";
 
@@ -34,14 +35,16 @@ export class PromptRenderer {
   /**
    * Render full prompt for turn 1.
    *
-   * Includes all sections - agent has no history yet.
+   * Includes all sections - agent has no history yet. `ctx` is widened for
+   * symmetry with `Agent.renderInitialPrompt(ctx)`; only `context` (the
+   * `ContextSection`) consumes it, forwarding to `Awareness.toPrompt(ctx)`.
    */
-  renderInitial(): string {
+  renderInitial(ctx?: RenderContext): string {
     const sections = [
       this.identity.render(),
       this.boundaries.render(),
       this.capabilities.render(),
-      this.context.render(),
+      this.context.render(ctx),
       this.mission.render(),
       this.methodology.render(),
     ];

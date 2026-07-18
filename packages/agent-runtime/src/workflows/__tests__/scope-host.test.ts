@@ -44,7 +44,12 @@ describe("readScope — soft probe", () => {
   it("ctx.host.scope present -> returns it by reference", () => {
     const parsed = { workspace: "acme" };
     const ctx = { host: buildScopeHost(parsed) } as ToolExecutionContext;
-    expect(readScope(ctx)).toBe(parsed);
+    expect(readScope(ctx)).toEqual(parsed);
+    // buildScopeHost freezes a shallow COPY at the injection seam — reads are
+    // stable across calls, but the caller's own object is never frozen.
+    expect(readScope(ctx)).toBe(readScope(ctx));
+    expect(Object.isFrozen(readScope(ctx))).toBe(true);
+    expect(Object.isFrozen(parsed)).toBe(false);
   });
 
   it("readScope narrows exactly the sibling key — a scope-shaped value under host.deps is NOT picked up", () => {
@@ -71,7 +76,7 @@ describe("requireScope — fail-loud accessor", () => {
     const parsed = { workspace: "acme" };
     const ctx = { host: buildScopeHost(parsed) } as ToolExecutionContext;
     expect(requireScope(ctx)).toBe(readScope(ctx));
-    expect(requireScope(ctx)).toBe(parsed);
+    expect(requireScope(ctx)).toEqual(parsed);
   });
 });
 
@@ -86,7 +91,7 @@ describe("readScopeAs — typed cast sugar", () => {
     const ctx = { host: buildScopeHost(parsed) } as ToolExecutionContext;
     const typed = readScopeAs<WorkspaceScope>(ctx);
     expect(typed).toEqual(parsed);
-    expect(typed).toBe(parsed); // identity — a cast, not a copy
+    expect(typed).toBe(readScope(ctx)); // identity with the host bag — a cast, not a copy
   });
 
   it("undefined when no scope is present", () => {
@@ -111,6 +116,6 @@ describe("NodeRunContext shape — scope at ctx.scope, no host bag", () => {
   it("host.scope wins over a direct scope field when both exist", () => {
     const hostScope = { workspace: "from-host" };
     const ctx = { host: buildScopeHost(hostScope), scope: { workspace: "direct" } };
-    expect(readScope(ctx)).toBe(hostScope);
+    expect(readScope(ctx)).toEqual(hostScope);
   });
 });

@@ -846,6 +846,88 @@ describe("AgentRunner", () => {
     });
   });
 
+  // #308 PR-3 — the render seam: the runner narrows RunOptions.host.scope
+  // into a RenderContext and passes it to agent.renderInitialPrompt() at
+  // every call site. Spy on the ctx argument directly (as opposed to the
+  // #124 block above, which spies on ToolExecutionContext.host).
+  describe("renderInitialPrompt render-ctx relay (#308)", () => {
+    it("run(): delivers {scope} to renderInitialPrompt when RunOptions.host carries one", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult("hi there", 5, 5),
+      });
+      const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+      const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+      const agent = makeAgent({
+        renderInitialPrompt: (ctx) => {
+          capturedCtx.push(ctx);
+          return "system prompt";
+        },
+      });
+
+      const runner = new AgentRunner(model);
+      await runner.run(agent, "hello", { host: buildScopeHost(parsedScope) });
+
+      expect(capturedCtx).toEqual([{ scope: parsedScope }]);
+    });
+
+    it("run(): delivers undefined to renderInitialPrompt when RunOptions.host carries no scope", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult("hi there", 5, 5),
+      });
+      const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+      const agent = makeAgent({
+        renderInitialPrompt: (ctx) => {
+          capturedCtx.push(ctx);
+          return "system prompt";
+        },
+      });
+
+      const runner = new AgentRunner(model);
+      await runner.run(agent, "hello");
+
+      expect(capturedCtx).toEqual([undefined]);
+    });
+
+    it("runStructured(): delivers {scope} to renderInitialPrompt when RunOptions.host carries one", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
+      });
+      const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
+      const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+      const agent = makeAgent({
+        renderInitialPrompt: (ctx) => {
+          capturedCtx.push(ctx);
+          return "system prompt";
+        },
+      });
+      const schema = z.object({ ok: z.boolean() });
+
+      const runner = new AgentRunner(model);
+      await runner.runStructured(agent, "hello", schema, { host: buildScopeHost(parsedScope) });
+
+      expect(capturedCtx).toEqual([{ scope: parsedScope }]);
+    });
+
+    it("runStructured(): delivers undefined to renderInitialPrompt when RunOptions.host carries no scope", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
+      });
+      const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
+      const agent = makeAgent({
+        renderInitialPrompt: (ctx) => {
+          capturedCtx.push(ctx);
+          return "system prompt";
+        },
+      });
+      const schema = z.object({ ok: z.boolean() });
+
+      const runner = new AgentRunner(model);
+      await runner.runStructured(agent, "hello", schema);
+
+      expect(capturedCtx).toEqual([undefined]);
+    });
+  });
+
   // #117: message.start now carries systemPrompt (mirroring run()), and
   // message.complete carries the authoritative finishReason.
   describe("runStructured() event stamping (#117)", () => {
