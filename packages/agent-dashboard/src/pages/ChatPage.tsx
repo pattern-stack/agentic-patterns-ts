@@ -1061,22 +1061,29 @@ function ScopeContextPanel({
               )}
             </>
           ) : (
-            <Field label="Context (JSON)">
-              <textarea
-                aria-label="Scope context"
-                value={editorText}
-                onChange={(e) => onEditorText(e.target.value)}
-                spellCheck={false}
-                rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
-                style={{
-                  ...inputStyle,
-                  fontFamily: T.font.mono,
-                  fontSize: T.fz.tiny,
-                  lineHeight: 1.5,
-                  resize: "vertical",
-                }}
-              />
-            </Field>
+            <>
+              <div style={{ fontSize: 12, color: "var(--ink-2)", lineHeight: 1.45 }}>
+                Who this conversation acts on behalf of — edit the JSON, then send. The scope
+                binds on the first message; <b>New Chat</b> to run as someone else.
+              </div>
+              <Field label="Context (JSON)">
+                <textarea
+                  aria-label="Scope context"
+                  value={editorText}
+                  onChange={(e) => onEditorText(e.target.value)}
+                  spellCheck={false}
+                  rows={Math.min(8, Math.max(3, editorText.split("\n").length))}
+                  style={{
+                    ...inputStyle,
+                    background: "var(--paper)",
+                    fontFamily: T.font.mono,
+                    fontSize: T.fz.tiny,
+                    lineHeight: 1.5,
+                    resize: "vertical",
+                  }}
+                />
+              </Field>
+            </>
           )}
           {showsInvalid && <div style={{ fontSize: 12, color: "var(--err)" }}>{error}</div>}
         </div>
