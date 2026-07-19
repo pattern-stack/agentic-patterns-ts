@@ -15,6 +15,7 @@ import { EventStream } from "../../components/organisms/EventStream";
 import type { StreamEvent } from "../../hooks/useEventStream";
 import { safeParseAnswer } from "../../lib/evalApi";
 import { fetchTraceEvents } from "../../lib/eventApi";
+import { resolveDetailRenderer } from "./renderers";
 
 const preStyle = {
   margin: 0,
@@ -167,6 +168,12 @@ export function CaseDetail({ result, caseRow }: CaseDetailProps) {
 function ScoreRow({ score }: { score: EvalScoreLike }) {
   const extra = score.detail ?? (score.error ? { error: score.error } : undefined);
   const mdExplanation = explanationMd(score.detail);
+  // A registered renderer for this detail's `kind` renders the structured
+  // payload; `null` (no kind / unknown / malformed) leaves only the fallbacks.
+  const Renderer = score.detail ? resolveDetailRenderer(score.detail) : null;
+  const custom = Renderer
+    ? Renderer({ detail: score.detail as Record<string, unknown>, score })
+    : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
@@ -178,6 +185,7 @@ function ScoreRow({ score }: { score: EvalScoreLike }) {
           <Badge tone={score.passed ? "green" : "red"}>{score.passed ? "pass" : "fail"}</Badge>
         )}
       </div>
+      {custom}
       {mdExplanation && (
         <div style={{ ...mdPanelStyle, marginTop: 2 }}>
           <Markdown content={mdExplanation} />
@@ -186,7 +194,7 @@ function ScoreRow({ score }: { score: EvalScoreLike }) {
       {extra && (
         <details>
           <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
-            {mdExplanation ? "raw detail" : "details"}
+            {custom || mdExplanation ? "raw detail" : "details"}
           </summary>
           <pre style={{ ...preStyle, marginTop: 4 }}>{pretty(extra)}</pre>
         </details>
