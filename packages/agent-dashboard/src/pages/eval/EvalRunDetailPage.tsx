@@ -29,6 +29,7 @@ import { DataTable } from "../../components/organisms/DataTable";
 import { type StreamedCaseResult, useEvalRunStream } from "../../hooks/useEvalRunStream";
 import { fetchEvalCases, fetchEvalRunDetail } from "../../lib/evalApi";
 import { CaseDetail } from "./CaseDetail";
+import { RunPanels } from "./panels/RunPanels";
 
 /** `StreamedCaseResult` -> the `JoinedEvalResultRow` shape the table renders. */
 function streamedToRow(evalRunId: string, s: StreamedCaseResult): JoinedEvalResultRow {
@@ -407,6 +408,8 @@ export function EvalRunDetailPage() {
           <Stat label="Tokens Out" value={summary.outputTokens.toLocaleString()} />
         </div>
       </Card>
+
+      <RunPanels results={mergedResults} />
 
       <Card padded={false}>
         <DataTable<JoinedEvalResultRow>
