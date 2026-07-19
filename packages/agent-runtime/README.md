@@ -414,15 +414,9 @@ import { Conversation, InMemoryConversationStore } from "@agentic-patterns/runti
 // In-memory persistence
 const store = new InMemoryConversationStore();
 
-const convo = new Conversation("conv-123", "agent-name", { store });
-convo.addExchange({
-  userMessage: "Hello",
-  assistantMessage: "Hi there!",
-  inputTokens: 10,
-  outputTokens: 8,
-  toolCalls: [],
-  timestamp: new Date().toISOString(),
-});
+const convo = new Conversation(agent, runner, { id: "conv-123", store });
+const exchange = await convo.send("Hello!");
+console.log(exchange.assistant);
 ```
 
 `ConversationStore` provides full CRUD for conversations, messages, and message parts:
