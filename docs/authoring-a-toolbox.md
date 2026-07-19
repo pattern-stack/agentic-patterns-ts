@@ -92,6 +92,40 @@ What changed:
 5. **`validateReturns: false`** skips parsing entirely: the callback's value is returned verbatim
    (no transforms, no stripping), while compile-time checking and schema introspection remain.
 
+## Reading the run scope
+
+A tool that needs to know who it's acting for reads the conversation's bound `SessionScope`
+(`@agentic-patterns/core`) via `requireScope`/`readScope` (`@agentic-patterns/runtime`) instead of a
+constructor closure. Both accept a tool's `execute(args, ctx)` second argument directly:
+
+```typescript
+import { z } from "zod";
+import { defineTool } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@agentic-patterns/core";
+import { requireScope } from "@agentic-patterns/runtime";
+
+const whoami = defineTool({
+  description: "Who this run is acting on behalf of.",
+  parameters: z.object({}),
+  returns: z.object({ operator: z.string(), tier: z.enum(["free", "pro", "enterprise"]) }),
+  execute: async (_args, ctx?: ToolExecutionContext) => {
+    const scope = requireScope(ctx) as { operator: string; tier: "free" | "pro" | "enterprise" };
+    return { operator: scope.operator, tier: scope.tier };
+  },
+});
+```
+
+`requireScope` is the fail-loud default: it throws `ScopeUnavailableError` (with remediation text)
+when the run carries no `host.scope` at all — the right behavior for a tool that genuinely can't do
+its job scope-less. A tool with a legitimate scope-less fallback should use `readScope(ctx)` instead,
+which returns `undefined` rather than throwing; branch on that explicitly instead of assuming scope
+is always present.
+
+This only works when the agent's registration declares a `scope` (a `SessionScope` from
+`@agentic-patterns/core`) — see `examples/agents/support-desk` for the full pattern, including the
+case where the registration has no `instantiate` hook at all and tools read scope live at call time
+instead of from a build-time closure.
+
 ## Lint model-facing schemas in CI
 
 `lintModelFacingSchema` (core 0.12.0, issue #265) is a pure, structural Zod walker that flags

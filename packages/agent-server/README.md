@@ -72,6 +72,52 @@ data: {"content":"...","input_tokens":42,"output_tokens":128,"model":"claude-son
 
 Consumers subscribe via `EventSource("/admin/events/stream")`.
 
+## Session Scope
+
+An `AgentRegistration` can declare `scope: SessionScopeLike` — a validated shape (`.schema`/`.parse()`), redaction (`.redactKeys`), and optional `.defaults`/named `.presets`, superseding ad hoc `context`. A registration with a declared `scope` accepts scope on `POST /conversations` EVEN WITH NO `instantiate` hook — `instantiation.available` (below) widens to `hasHook || hasScope`.
+
+```typescript
+export interface SessionScopeLike {
+  readonly schema: unknown;
+  readonly redactKeys: readonly string[];
+  readonly defaults?: Readonly<Record<string, unknown>>;
+  readonly presets?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  parse(value: unknown): Record<string, unknown>;
+  toJsonSchema(): Record<string, unknown>;
+}
+```
+
+A `SessionScope` instance (`@agentic-patterns/core`) satisfies this structurally — the server never does `instanceof SessionScope` across the module boundary, so a CLI-discovered agent built against a different `@agentic-patterns/core` install still works.
+
+### `POST /conversations`
+
+```jsonc
+{ "agent_id": "workspace", "scope": { "workspace": "globex-ops", "user": "li@globex.dev", "region": "eu-west" } }
+```
+
+- `scope` is the current wire key; `context` is a deprecated alias — `scope` wins when both are sent.
+- When the registration declares `scope`, the effective value (body `scope`/`context`, else `scope.defaults` — falling back to the deprecated `instantiateDefaults` — else `{}`) is parsed against `scope.schema` before it reaches `instantiate`, redaction, or the run-metadata stamp. A registration that declares required fields with no defaults makes a bare `POST /conversations` with no body a deliberate `400` — that's correct, the agent said it needs a scope.
+- Validation failure: `400 { "error": "scope validation failed", "issues": [...] }`. `issues` is duck-typed off the thrown error (`Array.isArray(err.issues)`) — never `instanceof ZodError`, never `.flatten()` — so it works across the zod `^3.25 || ^4` peer range.
+- The parsed value's response echo lands under both `context` (back-compat — the dashboard's chat client depends on it staying populated) and `scope` (forward-looking name, present only for scope-declaring registrations), redacted identically. Redaction keys are the UNION of `scope.redactKeys` and the deprecated `contextRedactKeys` — this is echo-only: the unredacted parsed scope still reaches tools and prompt rendering via `RunOptions.host.scope`.
+- A hook-less, scope-less registration's create response stays byte-identical to before: `{ id, agent_id }`.
+
+### `GET /agents`
+
+Each entry's `instantiation` block widens to describe scope, not just the `instantiate` hook:
+
+```jsonc
+{
+  "instantiation": {
+    "available": true,          // hasHook || hasScope
+    "schema": { "...": "JSON Schema (OpenAPI 3 dialect), from scope.toJsonSchema()" },
+    "defaults": { "workspace": "acme-sales", "user": "sam@acme.dev", "region": "us-east" },
+    "presets": { "sam @ acme": { "...": "..." }, "li @ globex": { "...": "..." } }
+  }
+}
+```
+
+`schema`/`defaults`/`presets` are `null` when the registration declares no `scope`. `toJsonSchema()` is wrapped in try/catch — one bad registration's schema conversion returning `null` never 500s the whole roster. There is no `preset` body key on `POST /conversations`: presets materialize client-side (the dashboard's scope form picks a preset and posts its materialized field values), so the wire only ever carries concrete scope values.
+
 ## Claude Code Hook Bridge
 
 `POST /hooks/:eventType` accepts raw Claude Code lifecycle payloads and:
