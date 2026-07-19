@@ -144,6 +144,22 @@ const agent = new AgentBuilder(role)
   .build();
 ```
 
+### SessionScope -- per-conversation configuration
+
+Agents that need to know WHO they're running for -- a tenant, an operator, a plan tier -- declare a `SessionScope`: named, Zod-validated fields with optional defaults and presets.
+
+```typescript
+import { scopeItem, sessionScope } from "@agentic-patterns/core";
+import { z } from "zod";
+
+const scope = sessionScope({
+  workspace: scopeItem(z.string().min(1), { description: "Tenant workspace" }),
+  user: scopeItem(z.string().email(), { description: "Acting user" }),
+});
+```
+
+Declare it on an agent registration and the framework handles the rest of the arc: the server or CLI **validates** an incoming scope against the schema, **injects** the parsed value onto the run (`RunOptions.host.scope`), and any tool or prompt-render function **reads** it back -- `requireScope(ctx)` in a tool, `Awareness.fromScope(scope, fn)` in a prompt. See [docs/adr/0005-session-scope.md](./docs/adr/0005-session-scope.md) for the full design.
+
 ## Running an Agent
 
 The runtime package provides `AgentRunner`, an event bus, and

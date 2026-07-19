@@ -77,6 +77,7 @@ Composable building blocks that combine atoms into functional units.
 | `ManualToolbox` | Manual that also provides tools |
 | `Playbook` | Abstract class for named plays with Zod schemas and error-envelope semantics |
 | `Capability` | Toolbox + Manual + optional Playbook describing what an agent can do |
+| `SessionScope` | Declarative per-conversation configuration: composed Zod schema, validated defaults + named presets, redaction keys |
 
 ```typescript
 import { z } from "zod";
@@ -136,6 +137,46 @@ analysis.getTools(); // includes both toolbox tools and playbook play schemas
 ```
 
 Definitions module provides Zod schemas for workflow configuration: `WorkflowStep`, `RuleDefinition`, `TemplateDefinition`, `EscalationTrigger`, `StateDefinition`, `PriorityDefinition`, `IssueTypeDefinition`, `HealthSignal`.
+
+#### SessionScope
+
+Declarative, per-conversation configuration. `sessionScope(items, options)` composes named `scopeItem(schema, options)` field declarations into one Zod object schema. `defaults` and every named `preset` are validated against that composed schema at construction — a malformed declaration throws immediately, at agent-authoring time, rather than on the first request.
+
+```typescript
+import { scopeItem, sessionScope, type ScopeValue } from "@agentic-patterns/core";
+import { z } from "zod";
+
+const workspaceScope = sessionScope(
+  {
+    workspace: scopeItem(z.string().min(1), { description: "Tenant workspace" }),
+    user: scopeItem(z.string().email(), { description: "Acting user" }),
+    region: scopeItem(z.string().min(1), { description: "Data region" }),
+  },
+  {
+    defaults: { workspace: "acme-sales", user: "sam@acme.dev", region: "us-east" },
+    presets: {
+      "sam @ acme": { workspace: "acme-sales", user: "sam@acme.dev", region: "us-east" },
+    },
+  },
+);
+
+type WorkspaceScope = ScopeValue<typeof workspaceScope>;
+```
+
+`scopeItem(schema, { description, redact })` documents one field and, when `redact: true`, adds its key to `SessionScope.redactKeys` — read by consumers that echo or log scope values. `ScopeValue<typeof scope>` infers the parsed shape for typed use elsewhere (a toolbox constructor, a tool's return type).
+
+Give the agent a scope-derived identity line with `Awareness.fromScope(scope, fn)` — a render-time-only function whose output `Awareness.toPrompt()` appends when the caller supplies `{ scope }`, and silently omits otherwise:
+
+```typescript
+import { Awareness } from "@agentic-patterns/core";
+
+const awareness = Awareness.fromScope(
+  workspaceScope,
+  (s) => `Acting on behalf of ${s.user} in workspace ${s.workspace} (${s.region}).`,
+);
+```
+
+`SessionScope` itself is a core-only declaration. Carrying a parsed value across a run (`host.scope`), reading it from a tool, and wiring it through `POST /conversations` are `@agentic-patterns/runtime` and `@agentic-patterns/server` concerns — see those packages' READMEs.
 
 ### Rendering (`src/rendering/`)
 

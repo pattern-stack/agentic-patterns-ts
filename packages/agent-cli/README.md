@@ -92,6 +92,8 @@ export default {
 
 The CLI injects the runner from your environment — you don't construct one yourself.
 
+A registration may also declare `scope: SessionScope` (`@agentic-patterns/core`) — validated per-conversation fields with optional defaults and named presets, superseding ad hoc `context`. `ap run <agent>` validates and injects the effective scope (an explicit `--context '<json>'` flag or `AP_CONTEXT` env var, falling back to `scope.defaults`) before the first turn, the same precedence the server applies for `POST /conversations`. `ap playground` serves a typed scope form — one input per declared field, generated from `GET /agents`' `instantiation.schema` — with a preset picker sourced from `instantiation.presets`.
+
 Override the discovery glob: `ap --agents "src/bots/*/index.ts" playground`
 
 ## Environment Detection

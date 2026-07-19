@@ -1,7 +1,7 @@
 ---
 name: build-on-agentic-patterns
-description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), and compose multiple steps/agents through the typed Node layer (AgentStep/FunctionStep, the sequentialAgent/parallelAgent stage sugar with typed emit + input:'prior', Sequential/Parallel/FanOut/Loop, Scratchpad, agent-as-tool, CoordinatorStep) — not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when wiring a multi-step workflow or a model-driven coordinator over subagents, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
-when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "compose a workflow / pipeline of steps", "make a coordinator that routes to subagents", "agent-as-a-tool", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", working in a repo that imports @agentic-patterns/core or @agentic-patterns/runtime.
+description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), declare per-conversation identity via SessionScope (requireScope/readScope in tools, Awareness.fromScope for prompt identity), and compose multiple steps/agents through the typed Node layer (AgentStep/FunctionStep, the sequentialAgent/parallelAgent stage sugar with typed emit + input:'prior', Sequential/Parallel/FanOut/Loop, Scratchpad, agent-as-tool, CoordinatorStep) — not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when wiring a multi-step workflow or a model-driven coordinator over subagents, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
+when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "compose a workflow / pipeline of steps", "make a coordinator that routes to subagents", "agent-as-a-tool", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", "declare a session scope / per-user config", "requireScope threw ScopeUnavailableError", "instantiateDefaults is deprecated, what replaces it", working in a repo that imports @agentic-patterns/core or @agentic-patterns/runtime.
 # --- SDLC metadata (documentation only; not consumed by the Claude Code runtime) ---
 status: active
 ---
@@ -43,7 +43,7 @@ export default { id: "my-agent", name: "My Agent", description: "…", agent: bu
 
 **Identity is inferred** when you don't set it: the **name** comes from a meaningful export key (`reviewerAgent` → `Reviewer`), else the folder/filename; the **id** is that local name, **namespaced by `{domain}`** when the file sits under a nested `{domain}/agents/…` (`dealbrain/agents/retrieval/agent.ts` → `dealbrain/retrieval`). A top-level `agents/` stays un-namespaced. Namespacing means two domains can each ship a `retrieval` agent with no collision.
 
-**Don't set the runner.** `ap` injects it after discovery via `createRunner()` (env-detected — see §4 "Provider surprise"). Your file exports only the Agent.
+**Don't set the runner.** `ap` injects it after discovery via `createRunner()` (env-detected — see §5 "Provider surprise"). Your file exports only the Agent.
 
 **Run it:**
 
@@ -57,7 +57,58 @@ ap run <id> "your message"    # chat in the terminal — no browser
 
 If an agent "doesn't show up": check the file is under the discovery glob, that it actually **exports an Agent** (a built `Agent`, not a Role or a config), and read `ap agents` — a file with no Agent export reports a clear load error rather than failing silently. Detection is structural (duck-typed on `role`/`mission`/`awareness`/`background`), so it works even when your agent imports core through a built `dist/` entry.
 
-## 1. The slot table (read this first)
+**Session-scoped agents** use the explicit registration form (#5) plus one more field, `scope` — see §1.
+
+## 1. Session scope: per-conversation identity
+
+Who's asking, which tenant, which tier — per-conversation identity is a **declared** scope, not ad-hoc deps threaded by hand. Add one field to the wrapper registration (§0 form #5):
+
+```ts
+import { sessionScope, scopeItem, type ScopeValue, Awareness } from "@agentic-patterns/core";
+import { requireScope } from "@agentic-patterns/runtime";
+import { z } from "zod";
+
+const supportDeskScope = sessionScope(
+  {
+    operator: scopeItem(z.string().email(), { description: "The support agent this run is scoped to" }),
+    tier: scopeItem(z.enum(["free", "pro", "enterprise"]), { description: "Customer plan tier" }),
+    apiKey: scopeItem(z.string().optional(), { description: "Upstream helpdesk API key", redact: true }),
+  },
+  { defaults: { operator: "duty@support.example", tier: "free" }, presets: { "enterprise on-call": { /* … */ } } },
+);
+type SupportDeskScope = ScopeValue<typeof supportDeskScope>;
+
+export default { id: "support-desk", name: "Support Desk", agent: buildSupportDeskAgent(), scope: supportDeskScope };
+```
+
+`sessionScope(items, { defaults, presets })` composes each field's Zod schema into one object schema (the shipped examples also write `new SessionScope(items, options)` — same constructor, either form works). It **subsumes** the older `instantiateDefaults`/`contextRedactKeys` wrapper fields (deprecated) — declare a scope instead of hand-rolling both. `defaults` and every named `preset` are validated against the composed schema **at construction**, so a malformed declaration throws at agent-authoring time, not at first request. Wire behavior, in one breath: the server validates the incoming scope on `POST /conversations` (malformed input is a 400 carrying the raw zod `issues`), redacts every `redact: true` field down to `"[redacted]"` in echoes/logs, and injects the *unredacted* parsed value onto every turn for the rest of the conversation.
+
+**Reading scope in tools — two legitimate styles:**
+
+- **Mode A — closure capture** (`examples/agents/workspace`): pair `scope` with an `instantiate(context)` hook on the wrapper; it re-`parse`s the incoming context and rebuilds the agent, so a toolbox's constructor closes over one fixed, typed scope value. Reach for this when a tool needs the value at *construction* time — e.g. to build a per-user backend client — but know it means one fresh agent per conversation.
+- **Mode B — call-time reads** (`examples/agents/support-desk`): declare `scope` on the wrapper with **no** `instantiate` hook. The agent is built once, at module load; each tool reads the live value at dispatch time instead:
+  ```ts
+  execute: async (_args, ctx?: ToolExecutionContext) => {
+    const scope = requireScope(ctx) as SupportDeskScope;   // throws ScopeUnavailableError if absent
+    return { operator: scope.operator, tier: scope.tier };
+  },
+  ```
+  `requireScope(ctx)` is the fail-loud default read path. `readScope(ctx)` is the soft twin (returns `undefined` instead of throwing) — use it only for a tool that must genuinely tolerate running scope-less. `readScopeAs<T>(ctx)` is the same soft read with a typed cast; it trusts the server already ran `scope.parse()` and deliberately does **not** re-parse per call. All three (from `@agentic-patterns/runtime`) accept either a tool's `ToolExecutionContext` (`ctx.host.scope`) or a node's `NodeRunContext` (`ctx.scope` — see §7). Default to Mode B; reach for Mode A only when a tool must build something at construction time.
+
+**Prompt identity — `Awareness.fromScope`.** Render the "who am I acting for" line from the scope itself, on ONE shared `Awareness` instance instead of rebuilding the agent:
+
+```ts
+const supportDeskAwareness = Awareness.fromScope(
+  supportDeskScope,
+  (s) => `Acting for ${s.operator}, scoped to the ${s.tier} tier.`,
+);
+```
+
+Pure text-from-scope — no fetching, no side effects. `toPrompt(ctx)` appends the rendered line when a render-time `ctx.scope` is supplied and renders byte-identically (no line) when it isn't, so the same instance serves every conversation. `instantiate` stays the escape hatch for genuinely async, per-conversation assembly (building a client, warming a cache) — don't reach for it just to get scope-aware text, and don't rebuild the whole agent per message.
+
+**Playground — presets are named identity combos.** A scope's `presets` (`"enterprise on-call"`, `"sam @ acme"`) surface in the playground's typed scope form as one-click switches — "test as this user" without hand-typing a JSON body every time.
+
+## 2. The slot table (read this first)
 
 When you have a piece of knowledge, find its row before you write a line of code:
 
@@ -74,10 +125,11 @@ When you have a piece of knowledge, find its row before you write a line of code
 | What the agent is accountable for | **Responsibility** | the mission |
 | Per-run grounding (this deal, this user, as-of) | **Mission**, rendered from a context `AgenticModel` | hardcoded strings; a fat protocol |
 | The mutable backend (API client, secret, store) | **injected into the Toolbox via a factory** (closure capture) | a module global; the prompt |
+| Per-conversation identity/config (user, tenant, tier) | **SessionScope** on the wrapper (§1) + `requireScope`/`readScope` in tools | `host.deps`; closures baked at module load; hand-rolled `instantiateDefaults` |
 
 If your mission is more than ~objective + success-criteria + grounding, knowledge has leaked into the wrong slot. Move it.
 
-## 2. The layout (toolshed / roles / agents)
+## 3. The layout (toolshed / roles / agents)
 
 Proven structure. Dependency arrows point **down only**: `cli → agents → roles → toolshed → lib`. The `agents/<name>/agent.ts` files are exactly the entry points §0's discovery loads.
 
@@ -101,7 +153,7 @@ runtime/                     env/model config + non-agent consumption regimes
 
 Vocabulary: **toolshed** (the store) · **toolbox** (one bounded context, exported from `toolbox.ts`) · **tools** (what an agent wires up). New agent behaviors are new *assemblies* (a role/agent file), not new tools or new prompt text.
 
-## 3. The build recipe
+## 4. The build recipe
 
 Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clients/secrets stay out of the library.
 
@@ -136,27 +188,32 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 
 **Where the prompt text goes (one path).** `agent.renderInitialPrompt()` is the single section-composed prompt every runner ships: Identity → Boundaries → Capabilities → Context → Mission → Methodology. `agent.renderSections()` returns the same content as `{name, source, text}[]` with role-vs-instance provenance; `role.toPrompt()` previews just the role half. There is no separate `getSystemPrompt()` path anymore (removed in core 0.9.0) — if a slot edit "does nothing", check the slot is actually wired into the Role, not whether you hit the right render path.
 
-## 4. Anti-patterns (the reasons builds fail)
+## 5. Anti-patterns (the reasons builds fail)
 
 - **Agent doesn't appear.** The file exports a Role, a config object, or a *factory that returns the wrong thing* — not a built Agent. → Export the result of `new AgentBuilder(role)…build()` (or a registration `{ agent }`). `ap agents` prints a load error for files with no Agent export; read it.
 - **Fat mission.** A 90-line hand-walked protocol in `mission`. → Discipline → `Judgment`; how-to → `Manual`; the recipe itself → a `Playbook` play. Mission keeps only objective + success-criteria + per-run grounding.
 - **`EmptyToolbox`.** Reaching for a toolbox-less capability to expose "plays only" (a stub `Toolbox` with `tools = {}`). The toolbox is the **required atom** — faking it is the canonical smell. What you actually want is *curated exposure* (hide raw verbs, show plays): that's a framework exposure feature, **not** a toolbox-less capability. **Today:** give the capability the real verbs its plays compose, or keep the play-only capability *library-resident* (exported/tested, consumed by no role) until the exposure feature lands.
 - **Forgotten executor.** Build an agent with tools, call `runner.run(agent, msg)` without `toolExecutor` → every tool call silently returns `{ error: "No tool executor configured" }`, the loop continues, nothing throws. *Symptom:* "my tools aren't firing" / "the model says the tool errored." → Always pass `toolExecutor: createToolboxExecutor(agent)`. (`ap playground`/`ap run` and the HTTP entry points wire it for you; the low-level `AgentRunner.run` does not.)
-- **Deps via globals.** There is no `RunContext`-into-every-tool channel (a known framework gap). → **Closure capture**: a factory takes `deps = { context, client }`; the toolbox/playbook close over it. Mark the site `// FRAMEWORK GAP: deps injection`.
+- **Deps via globals.** There is still no `RunContext`-into-every-tool channel for *arbitrary* deps (a known framework gap) — `host.deps` is a `DepReader`, not a general bag. → **Closure capture**: a factory takes `deps = { context, client }`; the toolbox/playbook close over it. Mark the site `// FRAMEWORK GAP: deps injection`. **Exception:** per-conversation *identity/config* is no longer in this gap — declare a `SessionScope` (§1) and read it with `requireScope`/`readScope` instead of closure-capturing it.
+- **Scope in `host.deps`.** Stuffing a parsed scope value into the deps bag because "it's just another dep." → `host.deps` is a `DepReader` — a plain scope object there crashes the first `ctx.deps.get()` a leaf makes. Scope rides as the sibling `host.scope` key; read it via `requireScope`/`readScope`/`readScopeAs`, never `ctx.deps`.
+- **Re-parsing scope per tool call.** Calling `scope.parse(...)` again inside a tool "to be safe." → The server already validated it once on `POST /conversations`; every accessor (`readScopeAs<T>`, `Awareness.fromScope`'s render fn) is explicitly a **cast, not a validation**. Re-parsing means shipping the whole `SessionScope` instance down every seam just to read one field — don't.
+- **Mutating the scope bag.** `ctx.host.scope.tier = "enterprise"` (or similar) to fake a different identity mid-run. → The bag is frozen at the injection seam (shared by every render and every tool read for the conversation's life) — a write throws. Build a new conversation with a different scope instead.
+- **Baking identity into closures at module load.** Hardcoding `const operator = "duty@support.example"` (or reading it from an env var) instead of declaring a scope field. → If the value should vary per conversation/user, it belongs in a declared `SessionScope`, read via Mode A or Mode B (§1) — not frozen into the module at import time.
+- **Secrets in `defaults`/`presets`.** Putting a real API key in a scope's `defaults` or a named `preset` because `redact: true` is set on the field. → Redaction is **echo-only** — it masks what's shown back in responses/logs, not what's stored or served. `defaults`/`presets` are served verbatim to whoever can hit `POST /conversations`. Use `redact` for values a legitimate caller supplies per-run; never for baked-in secrets.
 - **Provider surprise.** `createRunner` env-detects in priority order (`ANTHROPIC_API_KEY` → … → `OLLAMA_HOST`). For a local model: set `OLLAMA_HOST`, blank competing keys (`ANTHROPIC_API_KEY=`). `@ai-sdk/*` packages must be hand-installed for non-Ollama providers; Ollama works out of the box. With **no** provider env set, `createRunner` falls back to the local `claude` CLI runner if `claude` is on PATH — which emits a *limited event vocabulary*, so the graph/trace can look sparse; set a real key to get full events.
 - **Extract without assemble** (the subtle one). You correctly move discipline → `Judgment`, recipe → `Playbook`, how-to → `Manual` — and *stop there*, leaving the running agents on their old fat missions. Now the knowledge lives in **two** places and the agents ignore the slots. Extracting is half the job: **rewire the agents to consume the slots and delete the fat-mission copies.**
 - **Backward dependency arrow.** A toolbox/capability factory that takes an *agent-level* `deps` bundle creates `toolshed → agents` — a backward arrow (often a cycle). A factory should take **only what it uses** (the client/secret), not the agent's run-context bundle. Keep arrows one-way: `cli → agents → roles → toolshed → lib`.
 - **Promoted-pipeline bare Build pages.** Every `asAgent` mount renders EMPTY playground Build pages (Universe "declares no capabilities", Roles persona blank) — regardless of what you pass: `asAgent` uses a full core `Role` ONLY to render the system prompt, then registers `role: { name }` + `getTools: () => []` unconditionally (as-agent.ts). This narrowing is deliberately load-bearing: the registered role drives the server's `deriveToolboxExecutor`, and carrying capabilities on the promoted shell would arm an OUTER executor that shadows nested `AgentStep`s' own tool derivation (the #13 disarmed-tools class). → DO pass the real spine role anyway (`buildXAgent` returns `{ node, coordinator }`; promote with `role: coordinator.role`) — it upgrades the delivered prompt from the `joined fallback` one-liner to the full Identity/Boundaries/Capabilities render. The Build pages themselves populate only once upstream's `PromotedAgent.displayRole` display seam lands (decouples display from execution). Chat-transcript tool chips are unaffected either way — they come from the run's event stream. (Found headed 2026-07-14, dealbrain workspace agent; canvas-workstation's promotions share the gap.)
 
-## 5. Validate it (the loop)
+## 6. Validate it (the loop)
 
 - **Hermetic harness first.** Implement the toolbox's backend interface (port/client) with an in-memory fake, build the agent over it, and run against a small local model (Ollama). No creds, repeatable, fast. This proves the *loop* — composition + tool dispatch + state mutation — before touching a real backend.
 - **Poke the tools with no LLM.** `ap tools list <id>` shows every tool an agent exposes; `ap tools call <id> <tool> --field=value …` invokes one directly. Prove the capability floor before involving the model.
 - **Benchmark is the gate, not eyeballing.** Any prompt/slot change runs a ground-truth suite old-vs-new on the same model. Small models magnify slot mistakes, so they're the better stress test: *strengthen the protocol (Manual/Playbook/Judgment) before upgrading the model.*
 
-## 6. Compose: the typed Node layer (multi-step & multi-agent)
+## 7. Compose: the typed Node layer (multi-step & multi-agent)
 
-§0–5 build **one** agent. To run several steps or several agents as a typed, composable graph, use the **Node layer** in `@agentic-patterns/runtime` (the "PatternStack"). One contract underneath everything:
+§0–6 build **one** agent. To run several steps or several agents as a typed, composable graph, use the **Node layer** in `@agentic-patterns/runtime` (the "PatternStack"). One contract underneath everything:
 
 > `Node<TIn, TOut>` — `run(input, ctx): Promise<NodeResult<TOut>>`. Typed object in, typed object out, plus a token rollup. **Every leaf AND every composite is a `Node`**, so they nest freely — that single contract is the whole point.
 
@@ -164,6 +221,8 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 
 - `AgentStep<TIn, TOut>` — input → LLM → typed output. **Structured output is the default:** give it an `output` zod schema and it routes through `runStructured`; omit it (or pass `z.string()`) for the raw-text path. A leaf **never throws** — on failure it returns `{ succeeded:false, error }` so the composite is the single place that decides continue-vs-abort.
 - `FunctionStep<TIn, TOut>` — deterministic glue, no LLM: transforms, branch-prep, Scratchpad writes.
+
+**Scope rides delegation for free.** A conversation's `SessionScope` value reaches every leaf as `NodeRunContext.scope` — the same `readScope`/`requireScope`/`readScopeAs` accessors a tool uses (§1), just off `ctx.scope` instead of `ctx.host.scope`, forwarded automatically across `AgentStep` → `nodeTool` → nested sub-node. `examples/agents/scope-echo` is the minimal proof: one promoted `FunctionStep` that reads `ctx.scope` and echoes it back — no LLM, no closure — showing the value survives the full rail from `POST /conversations` through `buildScopeHost` and `NodeBackedRunner` down to the leaf.
 
 **Composites (orchestrate statically — fixed shape, known order):**
 

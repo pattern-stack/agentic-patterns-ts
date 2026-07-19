@@ -178,6 +178,33 @@ const sections = parallelAgent<{ overview: string; pricing: Pricing }>(
 
 Full semantics (stop lanes, emission slots, build-time race guards) live in the module docs: `src/workflows/sequential-agents.ts`, `src/workflows/parallel-agents.ts`.
 
+#### Scope host (`src/workflows/scope-host.ts`)
+
+A parsed `SessionScope` value (`@agentic-patterns/core`) rides across a run as a SIBLING key on the host bag — `RunOptions.host.scope` — never inside `host.deps` (a `DepReader`; a plain scope object there would crash the first `ctx.deps.get()`). `buildScopeHost(parsed)` builds the injection-side fragment; merge it with any other host bits at the call site (the server and CLI wire it in right after `scope.parse()`):
+
+```typescript
+import { buildScopeHost } from "@agentic-patterns/runtime";
+
+const host = { ...otherHostBits, ...buildScopeHost(parsedScope) };
+```
+
+Reads go through three accessors that all accept BOTH a tool's `ToolExecutionContext` (`ctx.host.scope`) and a node's `NodeRunContext` (`ctx.scope` directly) — a `FunctionStep` author and a tool author call the same function:
+
+- `readScope(ctx)` — soft probe; `undefined` when the run carries no scope
+- `requireScope(ctx)` — fail-loud default read path; throws `ScopeUnavailableError` with remediation
+- `readScopeAs<T>(ctx)` — typed cast sugar over `readScope`, trusting that the server-side `scope.parse()` already ran; it does NOT re-parse per call
+
+```typescript
+import { requireScope } from "@agentic-patterns/runtime";
+import type { ScopeValue } from "@agentic-patterns/core";
+
+const scope = requireScope(ctx) as ScopeValue<typeof myScope>;
+```
+
+`Conversation` accepts scope the same way — `new Conversation(agent, runner, { store, host: buildScopeHost(parsedScope) })`. The host bag is fixed at construction and forwarded verbatim into every `send()`/`stream()` call for the conversation's lifetime. Scope also survives delegation: a nested `AgentStep` and an agent invoked as a tool (`node-tool.ts`, agent-as-tool) both forward the parent's `host.scope` onto the sub-run's context, so a promoted-node leaf or a delegated sub-agent sees the same bound scope as the top-level run.
+
+`AgentRunner` and `ClaudeCodeRunner` both narrow `RunOptions.host.scope` into the `RenderContext` passed to `agent.renderInitialPrompt()`, so scope-derived prompt text (`Awareness.fromScope`, see `@agentic-patterns/core`'s README) renders on every turn. `ClaudeCodeRunner` is the one asymmetric case, and it's worth being honest about: scope reaches its rendered system prompt but NOT its tool execution — the Claude Agent SDK's MCP tool loop has no context seam to carry `host.scope` through, so CC-native and MCP-bridged tools on that runner stay scope-less until that seam exists.
+
 #### Legacy string-pinned patterns
 
 The original pattern layer. All patterns implement `PatternProtocol` and share common types.
