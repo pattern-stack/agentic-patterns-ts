@@ -316,7 +316,7 @@ export function EvalRunDetailPage() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
           {run.setId ? (
             <Link
-              to={`/eval/sets/${run.setId}`}
+              to={`/eval/sets/${encodeURIComponent(run.setId)}`}
               style={{ textDecoration: "none" }}
               title="View this eval set"
             >

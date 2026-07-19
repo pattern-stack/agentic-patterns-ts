@@ -102,7 +102,7 @@ export async function fetchEvalRunDetail(
   opts: { baseUrl?: string } = {},
 ): Promise<EvalFetch<EvalRunDetailResponse> | { kind: "not-found" }> {
   const base = opts.baseUrl ?? "";
-  const res = await fetch(`${base}/eval/runs/${id}`);
+  const res = await fetch(`${base}/eval/runs/${encodeURIComponent(id)}`);
   if (res.status === 503) return { kind: "unconfigured" };
   if (res.status === 404) return { kind: "not-found" };
   if (!res.ok) throw new Error(`fetchEvalRunDetail: HTTP ${res.status}`);
@@ -117,7 +117,7 @@ export async function fetchEvalCases(
   opts: { baseUrl?: string } = {},
 ): Promise<EvalFetch<EvalCaseRow[]>> {
   const base = opts.baseUrl ?? "";
-  const res = await fetch(`${base}/eval/sets/${setId}/cases`);
+  const res = await fetch(`${base}/eval/sets/${encodeURIComponent(setId)}/cases`);
   if (res.status === 503) return { kind: "unconfigured" };
   if (!res.ok) throw new Error(`fetchEvalCases: HTTP ${res.status}`);
 
@@ -136,7 +136,9 @@ export async function fetchEvalCaseDetail(
   opts: { baseUrl?: string } = {},
 ): Promise<EvalFetch<EvalCaseDetailResponse> | { kind: "not-found" }> {
   const base = opts.baseUrl ?? "";
-  const res = await fetch(`${base}/eval/sets/${setId}/cases/${encodeURIComponent(caseId)}`);
+  const res = await fetch(
+    `${base}/eval/sets/${encodeURIComponent(setId)}/cases/${encodeURIComponent(caseId)}`,
+  );
   if (res.status === 503) return { kind: "unconfigured" };
   if (res.status === 404) return { kind: "not-found" };
   if (!res.ok) throw new Error(`fetchEvalCaseDetail: HTTP ${res.status}`);
@@ -413,7 +415,7 @@ export async function updateEvalSet(
   opts: { baseUrl?: string } = {},
 ): Promise<EvalFetch<EvalSetSummary>> {
   const base = opts.baseUrl ?? "";
-  const res = await fetch(`${base}/eval/sets/${id}`, {
+  const res = await fetch(`${base}/eval/sets/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -431,11 +433,14 @@ export async function upsertEvalCase(
   opts: { baseUrl?: string } = {},
 ): Promise<EvalFetch<EvalCaseRow>> {
   const base = opts.baseUrl ?? "";
-  const res = await fetch(`${base}/eval/sets/${setId}/cases/${encodeURIComponent(caseId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(
+    `${base}/eval/sets/${encodeURIComponent(setId)}/cases/${encodeURIComponent(caseId)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
   if (res.status === 503) return { kind: "unconfigured" };
   if (res.ok) return { kind: "ok", data: ((await res.json()) as { case: EvalCaseRow }).case };
   return throwServerError(res, `upsertEvalCase: HTTP ${res.status}`);
@@ -448,9 +453,12 @@ export async function deleteEvalCase(
   opts: { baseUrl?: string } = {},
 ): Promise<EvalFetch<{ deleted: true; caseId: string }>> {
   const base = opts.baseUrl ?? "";
-  const res = await fetch(`${base}/eval/sets/${setId}/cases/${encodeURIComponent(caseId)}`, {
-    method: "DELETE",
-  });
+  const res = await fetch(
+    `${base}/eval/sets/${encodeURIComponent(setId)}/cases/${encodeURIComponent(caseId)}`,
+    {
+      method: "DELETE",
+    },
+  );
   if (res.status === 503) return { kind: "unconfigured" };
   if (res.ok) return { kind: "ok", data: (await res.json()) as { deleted: true; caseId: string } };
   return throwServerError(res, `deleteEvalCase: HTTP ${res.status}`);
