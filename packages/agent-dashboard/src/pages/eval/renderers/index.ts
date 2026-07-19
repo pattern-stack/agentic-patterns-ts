@@ -9,11 +9,17 @@
  * blob already flows end-to-end (grader → SQLite → REST/SSE → this dispatch).
  */
 
+import { CurationFactsDetail } from "./CurationFactsDetail";
+import { JudgeVerdictsDetail } from "./JudgeVerdictsDetail";
 import { RenderGradeDetail } from "./RenderGradeDetail";
+import { ScoreMapDetail } from "./ScoreMapDetail";
 import { type DetailRenderer, detailKind } from "./types";
 
 const REGISTRY: Record<string, DetailRenderer> = {
   "render-grade": RenderGradeDetail,
+  "score-map": ScoreMapDetail,
+  "judge-verdicts": JudgeVerdictsDetail,
+  "curation-facts": CurationFactsDetail,
 };
 
 /**
