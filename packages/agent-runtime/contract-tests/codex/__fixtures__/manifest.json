@@ -1,0 +1,10 @@
+{
+  "cliVersion": "codex-cli 0.144.6",
+  "minimumSupportedVersion": "0.144.6",
+  "generatedWith": "codex app-server generate-json-schema --out <dir>  (stable channel: no --experimental flag)",
+  "generatedOn": "2026-07-19",
+  "notes": "Root-level *.json files from the stable bundle are committed under schema-stable/. The v1 aggregate bundle is pinned by sha256. The v2 aggregate bundle (codex_app_server_protocol.v2.schemas.json) is NON-DETERMINISTIC across generator runs in 0.144.6 (definition inclusion varies) and is deliberately not pinned; the per-type root files ARE deterministic and are the fixture of record.",
+  "aggregateSha256": {
+    "codex_app_server_protocol.schemas.json": "1a7e561efcc5a5fbb8f45bc79c24da70e948c0e6e02c3e1045307e236e595a98"
+  }
+}

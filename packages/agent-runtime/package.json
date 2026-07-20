@@ -38,6 +38,7 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:contract:codex": "vitest run --config vitest.contract.codex.config.ts",
     "lint": "biome check src/"
   },
   "peerDependencies": {
