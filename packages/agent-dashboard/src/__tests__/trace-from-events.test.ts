@@ -542,3 +542,84 @@ describe("eventsToSteps — state-delta curation (#226)", () => {
     expect(steps.map((s) => s.kind)).toEqual(["tool_call", "tool_result"]);
   });
 });
+
+describe("eventsToSteps — synthetic boundary provenance (#324/D12)", () => {
+  const TOOLS: ToolIndex = new Map();
+
+  it("flags a model step whose llm.start boundary was synthesized, keeping its OBSERVED ms", () => {
+    // Run-mode CC: iteration.start + llm.start are synthesized (meta.synthetic,
+    // carried on the wire as top-level `synthetic: true`); llm.end is observed
+    // and carries the real duration. The model step must be flagged synthetic
+    // (provenance badge) yet keep the observed `ms` — the boundary is
+    // reconstructed, the duration is not (never chart a synthetic boundary as
+    // a causal latency anchor).
+    const events = [
+      { type: "message.start", seq: 1, agent_name: "agent" },
+      { type: "iteration.start", seq: 2, iteration: 0, max_iterations: 10, synthetic: true },
+      {
+        type: "llm.start",
+        seq: 3,
+        model: "opus",
+        message_count: 1,
+        has_tools: false,
+        synthetic: true,
+      },
+      {
+        type: "llm.end",
+        seq: 4,
+        model: "opus",
+        input_tokens: 10,
+        output_tokens: 5,
+        duration_ms: 830,
+        finish_reason: "stop",
+      },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.synthetic).toBe(true);
+    expect(model?.ms).toBe(830);
+  });
+
+  it("does NOT flag a model step when llm.start is observed (non-synthetic)", () => {
+    const events = [
+      { type: "message.start", seq: 1, agent_name: "agent" },
+      { type: "llm.start", seq: 2, model: "opus", message_count: 1, has_tools: false },
+      {
+        type: "llm.end",
+        seq: 3,
+        model: "opus",
+        input_tokens: 10,
+        output_tokens: 5,
+        duration_ms: 420,
+        finish_reason: "stop",
+      },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.synthetic).toBeUndefined();
+    expect(model?.ms).toBe(420);
+  });
+
+  it("reads synthetic from the persisted camelCase meta.synthetic shape", () => {
+    const events = [
+      { type: "message.start", seq: 1, agent_name: "agent" },
+      {
+        type: "llm.start",
+        seq: 2,
+        run_id: "r1",
+        payload_json:
+          '{"model":"opus","messageCount":1,"hasTools":false,"meta":{"synthetic":true}}',
+      },
+      {
+        type: "llm.end",
+        seq: 3,
+        run_id: "r1",
+        payload_json:
+          '{"model":"opus","inputTokens":10,"outputTokens":5,"durationMs":210,"finishReason":"stop"}',
+      },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.synthetic).toBe(true);
+  });
+});

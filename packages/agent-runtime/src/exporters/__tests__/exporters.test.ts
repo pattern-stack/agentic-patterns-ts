@@ -349,6 +349,67 @@ describe("LangfuseExporter", () => {
     exporter.flush();
     expect(mockClient.flush).toHaveBeenCalled();
   });
+
+  // #324: exporter pass-through — gate.decision surfaces + costUsd maps to cost.
+  it("should surface agent.gate.decision as a span under the run", async () => {
+    const { mockClient, mockSpan } = makeMockLangfuse();
+    const exporter = new LangfuseExporter({ client: mockClient });
+
+    await exporter.handleEvent(
+      createEvent("agent.message.start", {
+        traceId: "t1",
+        runId: "r1",
+        agentName: "TestAgent",
+      }),
+    );
+    await exporter.handleEvent(
+      createEvent("agent.gate.decision", {
+        traceId: "t1",
+        runId: "r1",
+        toolName: "deleteFile",
+        outcome: "block",
+        settledBy: "gate",
+        blockedBy: "safety",
+        reason: "destructive",
+        trail: [{ gate: "safety", result: "block" }],
+      }),
+    );
+
+    expect(mockSpan.startSpan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "gate.decision",
+        metadata: expect.objectContaining({ outcome: "block", blocked_by: "safety" }),
+      }),
+    );
+  });
+
+  it("should map costUsd to Langfuse cost on message complete", async () => {
+    const { mockClient, mockSpan } = makeMockLangfuse();
+    const exporter = new LangfuseExporter({ client: mockClient });
+
+    await exporter.handleEvent(
+      createEvent("agent.message.start", {
+        traceId: "t1",
+        runId: "r1",
+        agentName: "TestAgent",
+      }),
+    );
+    await exporter.handleEvent(
+      createEvent("agent.message.complete", {
+        traceId: "t1",
+        runId: "r1",
+        content: "done",
+        inputTokens: 100,
+        outputTokens: 50,
+        model: "test-model",
+        costUsd: 0.0123,
+      }),
+    );
+
+    expect(mockSpan.update).toHaveBeenCalledWith(
+      expect.objectContaining({ cost_details: { total: 0.0123 } }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -496,5 +557,57 @@ describe("OTelExporter", () => {
     const llmSpan = spans.get("gen_ai.chat");
     expect(llmSpan?.setAttribute).toHaveBeenCalledWith("gen_ai.system", "vercel-ai-sdk");
     expect(llmSpan?.setAttribute).toHaveBeenCalledWith("gen_ai.request.model", "claude-sonnet");
+  });
+
+  // #324: exporter pass-through — gate.decision surfaces + costUsd maps to cost.
+  it("should surface agent.gate.decision as a self-contained span", async () => {
+    const { tracer, spans, endedSpans } = makeMockTracer();
+    const exporter = new OTelExporter({ tracer });
+
+    await exporter.handleEvent(
+      createEvent("agent.gate.decision", {
+        traceId: "t1",
+        runId: "r1",
+        toolName: "deleteFile",
+        outcome: "block",
+        settledBy: "gate",
+        blockedBy: "safety",
+        trail: [{ gate: "safety", result: "block" }],
+      }),
+    );
+
+    expect(tracer.startSpan).toHaveBeenCalledWith("agent.gate.decision");
+    const gateSpan = spans.get("agent.gate.decision");
+    expect(gateSpan?.setAttribute).toHaveBeenCalledWith("gate.tool_name", "deleteFile");
+    expect(gateSpan?.setAttribute).toHaveBeenCalledWith("gate.outcome", "block");
+    expect(gateSpan?.setStatus).toHaveBeenCalledWith({ code: OTelStatusCode.ERROR });
+    expect(endedSpans).toContain("agent.gate.decision");
+  });
+
+  it("should set gen_ai.usage.cost from costUsd on message complete", async () => {
+    const { tracer, spans } = makeMockTracer();
+    const exporter = new OTelExporter({ tracer });
+
+    const startEvent = createEvent("agent.message.start", {
+      traceId: "t1",
+      runId: "r1",
+      agentName: "TestAgent",
+    });
+    await exporter.handleEvent(startEvent);
+    await exporter.handleEvent(
+      createEvent("agent.message.complete", {
+        traceId: "t1",
+        runId: "r1",
+        spanId: startEvent.spanId,
+        content: "done",
+        inputTokens: 100,
+        outputTokens: 50,
+        model: "test-model",
+        costUsd: 0.0123,
+      }),
+    );
+
+    const rootSpan = spans.get("agent.run");
+    expect(rootSpan?.setAttribute).toHaveBeenCalledWith("gen_ai.usage.cost", 0.0123);
   });
 });

@@ -12,6 +12,7 @@
 import { EventProfile } from "../events/event-profiles.js";
 import type {
   ErrorEvent,
+  GateDecisionEvent,
   IterationEndEvent,
   IterationStartEvent,
   LLMCallEndEvent,
@@ -313,18 +314,53 @@ export class LangfuseExporter extends BaseExporter {
     this._rootSpans.delete(event.runId);
 
     if (rootSpan) {
-      rootSpan.update({
+      const update: Record<string, unknown> = {
         output: this.captureContent ? event.content : undefined,
-      });
+      };
+      // #324: map the harness-reported run cost to Langfuse's cost attribute
+      // (`cost_details.total`) when the runner supplied one. Absent-cost runners
+      // (e.g. AgentRunner) leave the field off — Langfuse then infers from usage.
+      if (event.costUsd !== undefined) {
+        update.cost_details = { total: event.costUsd };
+      }
+      rootSpan.update(update);
       rootSpan.updateTrace({
         output: this.captureContent ? event.content : undefined,
         metadata: {
           input_tokens: event.inputTokens,
           output_tokens: event.outputTokens,
           model: event.model,
+          ...(event.costUsd !== undefined ? { cost_usd: event.costUsd } : {}),
         },
       });
       rootSpan.end();
+    }
+  }
+
+  /**
+   * @internal
+   * Gate-decision audit signal (F-2, #324) — surfaced as a short span under the
+   * run's root/iteration parent so a Langfuse trace shows every allow/block
+   * decision, its provenance, and the evaluation trail. Requires
+   * `agent.gate.decision` in the OBSERVABILITY profile (event-profiles.ts).
+   */
+  async _onGateDecision(event: GateDecisionEvent): Promise<void> {
+    const parent = this._iterationSpans.get(event.runId) ?? this._rootSpans.get(event.runId);
+    if (parent) {
+      const gateSpan = parent.startSpan({
+        name: "gate.decision",
+        input: { tool_name: event.toolName },
+        metadata: {
+          outcome: event.outcome,
+          settled_by: event.settledBy,
+          decision_kind: event.decisionKind,
+          blocked_by: event.blockedBy,
+          reason: event.reason,
+          trail: event.trail,
+        },
+        level: event.outcome === "block" ? "WARNING" : "DEFAULT",
+      });
+      gateSpan.end();
     }
   }
 

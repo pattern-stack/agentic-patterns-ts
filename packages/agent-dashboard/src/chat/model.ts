@@ -72,6 +72,20 @@ export type Part =
   // one site fold into one summary card) — produced by `coalesceStateParts`,
   // never by `applyParts`.
   | { kind: "state_group"; parts: StateDeltaPart[] }
+  // Gate-decision audit row (F-2, #324) — an allow/block record for a tool
+  // intent, with its provenance (who settled it) and the evaluation trail.
+  | {
+      kind: "gate_decision";
+      toolName: string;
+      outcome: "allow" | "block";
+      settledBy: string;
+      blockedBy?: string;
+      reason?: string;
+      trail: { gate: string; result: string }[];
+    }
+  // Harness-native envelope (#323/#324) — a harness-specific event (compaction
+  // boundary, subagent progress, rate-limit notice) shown as a collapsed panel.
+  | { kind: "harness_native"; harness: string; name: string; payload: unknown }
   | { kind: "error"; errorType: string; message: string };
 
 export interface ChatMessage {
@@ -83,6 +97,8 @@ export interface ChatMessage {
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** #324: total run cost in USD, when the harness reported it (CC runs only). */
+  costUsd?: number;
   /** Live: content is still streaming into this message. */
   streaming?: boolean;
   /** Live: streaming was aborted by the user. */
@@ -533,10 +549,46 @@ export function applyParts(
       const model = str(p.model);
       const inT = num(p.inputTokens) ?? num(p.input_tokens);
       const outT = num(p.outputTokens) ?? num(p.output_tokens);
+      // #324: cost rides on message.complete only (llm.end carries none). Read
+      // both wire (snake_case `cost_usd`) and persisted (camelCase `costUsd`).
+      const cost = num(p.costUsd) ?? num(p.cost_usd);
       if (model) meta.model = model;
       if (inT != null) meta.inputTokens = inT;
       if (outT != null) meta.outputTokens = outT;
+      if (cost != null) meta.costUsd = cost;
       return { parts, meta: Object.keys(meta).length ? meta : undefined };
+    }
+    // Gate-decision audit row (F-2, #324) — one allow/block record per intent.
+    case "gate.decision": {
+      const rawTrail = Array.isArray(col.trail) ? col.trail : Array.isArray(p.trail) ? p.trail : [];
+      const trail = rawTrail
+        .map((t) => {
+          const r = rec(t);
+          const gate = str(r.gate);
+          const result = str(r.result);
+          return gate && result ? { gate, result } : undefined;
+        })
+        .filter((t): t is { gate: string; result: string } => t != null);
+      next.push({
+        kind: "gate_decision",
+        toolName: str(col.tool_name) ?? str(p.toolName) ?? str(p.tool_name) ?? "tool",
+        outcome: (str(col.outcome) ?? str(p.outcome)) === "block" ? "block" : "allow",
+        settledBy: str(col.settled_by) ?? str(p.settledBy) ?? str(p.settled_by) ?? "gate",
+        blockedBy: str(col.blocked_by) ?? str(p.blockedBy) ?? str(p.blocked_by),
+        reason: str(col.reason) ?? str(p.reason),
+        trail,
+      });
+      return { parts: next };
+    }
+    // Harness-native envelope (#323/#324) — passthrough, shown as a collapsed panel.
+    case "harness.native": {
+      next.push({
+        kind: "harness_native",
+        harness: str(col.harness) ?? str(p.harness) ?? "harness",
+        name: str(col.name) ?? str(p.name) ?? "native",
+        payload: p.payload ?? col.payload,
+      });
+      return { parts: next };
     }
     default:
       return { parts };

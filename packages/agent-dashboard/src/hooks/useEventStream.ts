@@ -66,6 +66,8 @@ export function useEventStream(
       // the debug log omits it — never a chat regression.
       const NAMED_EVENTS = [
         "claude_code.hook",
+        "harness.native",
+        "gate.decision",
         "step.start",
         "step.end",
         "tool.start",

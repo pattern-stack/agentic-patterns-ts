@@ -59,6 +59,66 @@ export interface SSEMapping {
   readonly payload: Record<string, unknown>;
 }
 
+/**
+ * The COMPLETE, runtime-enumerable wire vocabulary — every `SSEEventName` a
+ * client can receive, as a value array (the type union alone can't be iterated).
+ *
+ * Unlike `SSE_EVENT_NAMES` (an `AgentEventType → SSEEventName` map that misses
+ * wire-only names like `thinking.complete` and `done`), this is the authoritative
+ * FULL list. It is the source of truth for the dashboard union drift-check
+ * (#286/#324): a committed manifest is generated from it (see
+ * `tools/gen-sse-manifest.ts`), and the dashboard asserts its own client union
+ * covers every name here.
+ *
+ * The `satisfies` clause proves every entry is a valid `SSEEventName` (no typos);
+ * the `_Missing` exhaustiveness guard below proves NO name is omitted. Together
+ * they pin this array to be EXACTLY the `SSEEventName` union — add a name to the
+ * type and this file fails to compile until the array is updated.
+ */
+export const SSE_WIRE_EVENT_NAMES = [
+  "conversation.start",
+  "conversation.end",
+  "message.start",
+  "message.delta",
+  "message.complete",
+  "message.cancel",
+  "input.request",
+  "thinking.start",
+  "thinking",
+  "thinking.complete",
+  "tool.intent",
+  "tool.start",
+  "tool.progress",
+  "tool.end",
+  "tool.rejected",
+  "gate.decision",
+  "step.start",
+  "step.end",
+  "iteration.start",
+  "iteration.end",
+  "llm.start",
+  "llm.end",
+  "backpack.drop",
+  "backpack.read",
+  "backpack.absorb",
+  "scratchpad.write",
+  "scratchpad.read",
+  "scratchpad.fork",
+  "scratchpad.join",
+  "error",
+  "claude_code.hook",
+  "harness.native",
+  "done",
+] as const satisfies readonly SSEEventName[];
+
+// Exhaustiveness guard: any `SSEEventName` NOT present in the array above makes
+// `_MissingWireName` a non-`never` type, which fails this assignment at compile
+// time. This is what keeps the manifest — and the dashboard drift-check — honest.
+type _MissingWireName = Exclude<SSEEventName, (typeof SSE_WIRE_EVENT_NAMES)[number]>;
+const _wireNamesAreExhaustive: _MissingWireName extends never ? true : ["missing wire names"] =
+  true;
+void _wireNamesAreExhaustive;
+
 // ---------------------------------------------------------------------------
 // Single source of truth — event -> wire name + payload
 // ---------------------------------------------------------------------------
@@ -72,8 +132,26 @@ export interface SSEMapping {
  *
  * Returns `null` only when a non-AgentEvent slips through at runtime
  * (e.g., a hand-constructed event with an unrecognised `type`).
+ *
+ * Synthetic provenance (D12, #324): when an event carries `meta.synthetic`
+ * (a boundary the CC translator RECONSTRUCTED rather than observed — e.g. a
+ * run-mode `llm.start`), the wrapper stamps `synthetic: true` onto the wire
+ * payload. Consumers (the dashboard) badge such rows and MUST exclude them from
+ * any latency computation — a synthesized boundary is never a causal anchor.
  */
 export function toSSEMapping(event: AgentEvent): SSEMapping | null {
+  const mapping = mapEventToSSE(event);
+  if (!mapping) return null;
+  if (event.meta?.synthetic) {
+    return { name: mapping.name, payload: { ...mapping.payload, synthetic: true } };
+  }
+  return mapping;
+}
+
+/** Core event→wire mapping. Wrapped by {@link toSSEMapping}, which layers on the
+ *  cross-cutting `synthetic` provenance marker. Kept private so the marker can
+ *  never be forgotten by a caller reaching for the raw switch. */
+function mapEventToSSE(event: AgentEvent): SSEMapping | null {
   switch (event.type) {
     case "agent.conversation.start":
       return {
@@ -92,16 +170,20 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
         name: "message.delta",
         payload: { delta: event.delta, chunk_index: event.chunkIndex },
       };
-    case "agent.message.complete":
-      return {
-        name: "message.complete",
-        payload: {
-          content: event.content,
-          input_tokens: event.inputTokens,
-          output_tokens: event.outputTokens,
-          model: event.model,
-        },
+    case "agent.message.complete": {
+      const payload: Record<string, unknown> = {
+        content: event.content,
+        input_tokens: event.inputTokens,
+        output_tokens: event.outputTokens,
+        model: event.model,
       };
+      // #324 (B-1): forward the harness-reported total run cost + finish reason so
+      // the dashboard run summary can display them. Both absent for runners with
+      // no cost/finish signal (e.g. `AgentRunner`) — additive, non-breaking.
+      if (event.costUsd !== undefined) payload.cost_usd = event.costUsd;
+      if (event.finishReason !== undefined) payload.finish_reason = event.finishReason;
+      return { name: "message.complete", payload };
+    }
     case "agent.message.cancel":
       return { name: "message.cancel", payload: { reason: event.reason } };
     case "agent.input.request": {

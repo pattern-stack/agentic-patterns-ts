@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createEvent } from "../../events/types.js";
-import { SSEFormatter, SSE_EVENT_NAMES, formatSSE } from "../sse-formatter.js";
+import {
+  SSEFormatter,
+  SSE_EVENT_NAMES,
+  SSE_WIRE_EVENT_NAMES,
+  formatSSE,
+  toSSEMapping,
+} from "../sse-formatter.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -381,6 +387,79 @@ describe("SSEFormatter", () => {
 
     it("SSE_EVENT_NAMES is exported and contains mappings", () => {
       expect(SSE_EVENT_NAMES["agent.message.chunk"]).toBe("message.delta");
+    });
+  });
+
+  // #324: wire forwarding of cost + synthetic provenance.
+  describe("cost + synthetic wire forwarding (#324)", () => {
+    it("forwards costUsd as cost_usd on message.complete when present", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.message.complete", {
+          ...makeBase(),
+          content: "done",
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "opus",
+          costUsd: 0.0123,
+          finishReason: "stop",
+        }),
+      );
+      expect(mapping?.name).toBe("message.complete");
+      expect(mapping?.payload.cost_usd).toBe(0.0123);
+      expect(mapping?.payload.finish_reason).toBe("stop");
+    });
+
+    it("omits cost_usd when the runner reports no cost", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.message.complete", {
+          ...makeBase(),
+          content: "done",
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "opus",
+        }),
+      );
+      expect(mapping?.payload).not.toHaveProperty("cost_usd");
+    });
+
+    it("stamps synthetic:true onto the payload for meta.synthetic events (D12)", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.llm.start", {
+          ...makeBase(),
+          model: "opus",
+          messageCount: 1,
+          hasTools: false,
+          meta: { synthetic: true },
+        }),
+      );
+      expect(mapping?.name).toBe("llm.start");
+      expect(mapping?.payload.synthetic).toBe(true);
+    });
+
+    it("leaves synthetic off for observed events", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.llm.end", {
+          ...makeBase(),
+          model: "opus",
+          inputTokens: 10,
+          outputTokens: 5,
+          durationMs: 100,
+          hasToolCalls: false,
+          finishReason: "stop",
+        }),
+      );
+      expect(mapping?.payload).not.toHaveProperty("synthetic");
+    });
+
+    it("SSE_WIRE_EVENT_NAMES is the complete wire vocabulary (incl. wire-only names)", () => {
+      const set = new Set<string>(SSE_WIRE_EVENT_NAMES);
+      // wire-only names absent from SSE_EVENT_NAMES's values
+      expect(set.has("thinking.complete")).toBe(true);
+      expect(set.has("done")).toBe(true);
+      // every SSE_EVENT_NAMES value is covered
+      for (const wireName of Object.values(SSE_EVENT_NAMES)) {
+        expect(set.has(wireName)).toBe(true);
+      }
     });
   });
 });
