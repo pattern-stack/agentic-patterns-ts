@@ -6,6 +6,14 @@
  * (the `CaseDetail` `preStyle` idiom); the history is a `DataTable` whose rows
  * link to their run and expand to show that run's actual answer against the
  * case's expected. Case editing lands in WI-5.
+ *
+ * Family dispatch (slice 9): the case GET does not carry set meta, so the page
+ * additionally resolves the parent set's meta from the set list (tolerant — a
+ * failed lookup degrades to the generic view). A family case's body (tags +
+ * input/expected card) is REPLACED by the registered family view and the Edit
+ * affordance hides (frozen import); the cross-run history section stays below
+ * for ALL families — empty for bank cases (renderer runs key results by
+ * composite `fid#variantKey` ids), where a muted note explains the absence.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -19,8 +27,10 @@ import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
-import { fetchEvalCaseDetail, safeParseAnswer } from "../../lib/evalApi";
+import { fetchEvalCaseDetail, fetchEvalSet, safeParseAnswer } from "../../lib/evalApi";
 import { CaseEditModal } from "./CaseEditModal";
+import { resolveSetFamilyComponents } from "./families";
+import { type SetMeta, readSetMeta } from "./families/types";
 
 const preStyle = {
   margin: 0,
@@ -130,7 +140,7 @@ type LoadState =
   | { kind: "not-found" }
   | { kind: "unconfigured" }
   | { kind: "error"; message: string }
-  | { kind: "ok"; case: EvalCaseRow; history: EvalCaseHistoryRow[] };
+  | { kind: "ok"; case: EvalCaseRow; history: EvalCaseHistoryRow[]; setMeta: SetMeta | null };
 
 export function EvalCaseDetailPage() {
   const { id, caseId } = useParams<{ id: string; caseId: string }>();
@@ -144,7 +154,13 @@ export function EvalCaseDetailPage() {
     setState({ kind: "loading" });
     setExpandedKey(undefined);
     try {
-      const detail = await fetchEvalCaseDetail(id, caseId);
+      // Family lookup rides alongside the case fetch (the case GET carries no
+      // set meta); both depend only on route params, so they run concurrently.
+      // Tolerant: a failed/degraded set fetch ⇒ null ⇒ the generic view.
+      const [detail, setFetch] = await Promise.all([
+        fetchEvalCaseDetail(id, caseId),
+        fetchEvalSet(id).catch(() => null),
+      ]);
       if (detail.kind === "not-found") {
         setState({ kind: "not-found" });
         return;
@@ -153,7 +169,8 @@ export function EvalCaseDetailPage() {
         setState({ kind: "unconfigured" });
         return;
       }
-      setState({ kind: "ok", case: detail.data.case, history: detail.data.history });
+      const setMeta: SetMeta | null = setFetch?.kind === "ok" ? readSetMeta(setFetch.data) : null;
+      setState({ kind: "ok", case: detail.data.case, history: detail.data.history, setMeta });
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
     }
@@ -244,8 +261,9 @@ export function EvalCaseDetailPage() {
     );
   }
 
-  const { case: caseRow, history } = state;
+  const { case: caseRow, history, setMeta } = state;
   const heldOut = caseRow.split === "test";
+  const familyComponents = resolveSetFamilyComponents(setMeta?.family);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -266,9 +284,15 @@ export function EvalCaseDetailPage() {
           <Badge tone={heldOut ? "yellow" : "muted"}>{caseRow.split ?? "untagged"}</Badge>
           {heldOut && <Badge tone="yellow">held-out</Badge>}
         </div>
-        <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-          Edit
-        </Button>
+        {familyComponents ? (
+          <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
+            imported case — edits belong upstream
+          </span>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
+        )}
       </div>
 
       {editing && id && (
@@ -284,39 +308,45 @@ export function EvalCaseDetailPage() {
         />
       )}
 
-      <Card>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {caseRow.tags && caseRow.tags.length > 0 ? (
-            caseRow.tags.map((t) => (
-              <Chip key={t} tone="mono">
-                {t}
-              </Chip>
-            ))
-          ) : (
-            <span style={{ fontSize: 13, color: "var(--fg-subtle)" }}>no tags</span>
-          )}
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
-          <div>
-            <div style={sectionHeadingStyle}>Input</div>
-            <pre style={preStyle}>{pretty(caseRow.input)}</pre>
-          </div>
-          <div>
-            <div style={sectionHeadingStyle}>Expected</div>
-            {caseRow.expected === null || caseRow.expected === undefined ? (
-              <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>no expected value</div>
+      {familyComponents ? (
+        <familyComponents.CaseView caseRow={caseRow} history={history} meta={setMeta} />
+      ) : (
+        <Card>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            {caseRow.tags && caseRow.tags.length > 0 ? (
+              caseRow.tags.map((t) => (
+                <Chip key={t} tone="mono">
+                  {t}
+                </Chip>
+              ))
             ) : (
-              <pre style={preStyle}>{pretty(caseRow.expected)}</pre>
+              <span style={{ fontSize: 13, color: "var(--fg-subtle)" }}>no tags</span>
             )}
           </div>
-        </div>
-      </Card>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+            <div>
+              <div style={sectionHeadingStyle}>Input</div>
+              <pre style={preStyle}>{pretty(caseRow.input)}</pre>
+            </div>
+            <div>
+              <div style={sectionHeadingStyle}>Expected</div>
+              {caseRow.expected === null || caseRow.expected === undefined ? (
+                <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>no expected value</div>
+              ) : (
+                <pre style={preStyle}>{pretty(caseRow.expected)}</pre>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Run history</h2>
         {history.length === 0 ? (
           <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            This case has not been evaluated in any run yet.
+            {setMeta?.family === "answer-bank"
+              ? "Renderer runs record results under composite case ids (fid#variantKey), so bank cases carry no per-case run history here."
+              : "This case has not been evaluated in any run yet."}
           </Card>
         ) : (
           <Card padded={false}>

@@ -29,6 +29,8 @@ import { DataTable } from "../../components/organisms/DataTable";
 import { type StreamedCaseResult, useEvalRunStream } from "../../hooks/useEvalRunStream";
 import { fetchEvalCases, fetchEvalRunDetail } from "../../lib/evalApi";
 import { CaseDetail } from "./CaseDetail";
+import { resolveRunFamilyComponents } from "./families";
+import { readRunMeta } from "./families/types";
 import { RunPanels } from "./panels/RunPanels";
 
 /** `StreamedCaseResult` -> the `JoinedEvalResultRow` shape the table renders. */
@@ -301,6 +303,13 @@ export function EvalRunDetailPage() {
   const duration = formatDuration(run.tsStart, run.tsEnd);
   const mergedResults = mergeResults(results, run.id, streamedResults);
 
+  // Family dispatch (eval-family-contract.md): a family run's BODY is replaced
+  // wholesale by the registry RunDetail — the shell (header, badges, load /
+  // error states, SSE plumbing) stays shared. Absent/unknown family ⇒ the
+  // generic body renders exactly as before.
+  const runMeta = readRunMeta(run);
+  const familyComponents = resolveRunFamilyComponents(runMeta?.family ?? null);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -379,88 +388,104 @@ export function EvalRunDetailPage() {
         </Card>
       )}
 
-      <Card>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
-            gap: 16,
-          }}
-        >
-          <Stat label="Cases" value={summary.cases} />
-          <Stat label="Passed" value={summary.passed} color="var(--green)" />
-          <Stat
-            label="Failed"
-            value={summary.failed}
-            color={summary.failed > 0 ? "var(--red)" : undefined}
-          />
-          <Stat label="Ungated" value={summary.ungated} />
-          <Stat
-            label="Errored"
-            value={summary.errored}
-            color={summary.errored > 0 ? "var(--red)" : undefined}
-          />
-          <Stat
-            label="Pass Rate"
-            value={summary.passRate === null ? "—" : `${Math.round(summary.passRate * 100)}%`}
-          />
-          <Stat label="Tokens In" value={summary.inputTokens.toLocaleString()} />
-          <Stat label="Tokens Out" value={summary.outputTokens.toLocaleString()} />
-        </div>
-      </Card>
-
-      <RunPanels results={mergedResults} />
-
-      <Card padded={false}>
-        <DataTable<JoinedEvalResultRow>
-          columns={[
-            {
-              key: "caseId",
-              header: "Case",
-              render: (row) => (
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{row.caseId}</span>
-              ),
-            },
-            {
-              key: "pass",
-              header: "Result",
-              render: (row) => <Badge tone={passTone(row.pass)}>{passLabel(row.pass)}</Badge>,
-            },
-            {
-              key: "scores",
-              header: "Scores",
-              render: (row) => scoresSummary(row.scores),
-            },
-            {
-              key: "runStatus",
-              header: "Run",
-              render: (row) =>
-                row.runStatus === "error" ? (
-                  <Badge tone="red">error</Badge>
-                ) : (
-                  <span style={{ color: "var(--fg-subtle)" }}>—</span>
-                ),
-            },
-            {
-              key: "tokens",
-              header: "Tokens",
-              align: "right",
-              render: (row) => `${row.inputTokens ?? 0} / ${row.outputTokens ?? 0}`,
-            },
-            {
-              key: "elapsedMs",
-              header: "Elapsed",
-              align: "right",
-              render: (row) => formatElapsed(row.elapsedMs),
-            },
-          ]}
-          data={mergedResults}
-          rowKey={(row) => row.caseId}
-          expandedKey={expandedKey}
-          onToggleExpand={(key) => setExpandedKey((prev) => (prev === key ? undefined : key))}
-          renderExpanded={(row) => <CaseDetail result={row} caseRow={casesById.get(row.caseId)} />}
+      {runMeta !== null && familyComponents !== null ? (
+        <familyComponents.RunDetail
+          run={run}
+          results={mergedResults}
+          summary={summary}
+          casesById={casesById}
+          meta={runMeta}
         />
-      </Card>
+      ) : (
+        <>
+          <Card>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+                gap: 16,
+              }}
+            >
+              <Stat label="Cases" value={summary.cases} />
+              <Stat label="Passed" value={summary.passed} color="var(--green)" />
+              <Stat
+                label="Failed"
+                value={summary.failed}
+                color={summary.failed > 0 ? "var(--red)" : undefined}
+              />
+              <Stat label="Ungated" value={summary.ungated} />
+              <Stat
+                label="Errored"
+                value={summary.errored}
+                color={summary.errored > 0 ? "var(--red)" : undefined}
+              />
+              <Stat
+                label="Pass Rate"
+                value={summary.passRate === null ? "—" : `${Math.round(summary.passRate * 100)}%`}
+              />
+              <Stat label="Tokens In" value={summary.inputTokens.toLocaleString()} />
+              <Stat label="Tokens Out" value={summary.outputTokens.toLocaleString()} />
+            </div>
+          </Card>
+
+          <RunPanels results={mergedResults} />
+
+          <Card padded={false}>
+            <DataTable<JoinedEvalResultRow>
+              columns={[
+                {
+                  key: "caseId",
+                  header: "Case",
+                  render: (row) => (
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                      {row.caseId}
+                    </span>
+                  ),
+                },
+                {
+                  key: "pass",
+                  header: "Result",
+                  render: (row) => <Badge tone={passTone(row.pass)}>{passLabel(row.pass)}</Badge>,
+                },
+                {
+                  key: "scores",
+                  header: "Scores",
+                  render: (row) => scoresSummary(row.scores),
+                },
+                {
+                  key: "runStatus",
+                  header: "Run",
+                  render: (row) =>
+                    row.runStatus === "error" ? (
+                      <Badge tone="red">error</Badge>
+                    ) : (
+                      <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                    ),
+                },
+                {
+                  key: "tokens",
+                  header: "Tokens",
+                  align: "right",
+                  render: (row) => `${row.inputTokens ?? 0} / ${row.outputTokens ?? 0}`,
+                },
+                {
+                  key: "elapsedMs",
+                  header: "Elapsed",
+                  align: "right",
+                  render: (row) => formatElapsed(row.elapsedMs),
+                },
+              ]}
+              data={mergedResults}
+              rowKey={(row) => row.caseId}
+              expandedKey={expandedKey}
+              onToggleExpand={(key) => setExpandedKey((prev) => (prev === key ? undefined : key))}
+              renderExpanded={(row) => (
+                <CaseDetail result={row} caseRow={casesById.get(row.caseId)} />
+              )}
+            />
+          </Card>
+        </>
+      )}
     </div>
   );
 }

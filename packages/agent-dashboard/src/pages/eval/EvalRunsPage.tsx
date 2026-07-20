@@ -21,6 +21,8 @@ import { DataTable } from "../../components/organisms/DataTable";
 import { type EvalRunFilters, fetchEvalRuns, filterRuns } from "../../lib/evalApi";
 import { RunLauncher } from "./RunLauncher";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
+import { RUN_FAMILY_ORDER, resolveRunFamilyComponents } from "./families";
+import { type RunFamily, familyOf } from "./families/types";
 
 // pages never share code (playground-redesign.md) — lifted from ConversationsPage as-is.
 function shortId(id: string): string {
@@ -79,6 +81,22 @@ function getField(row: EvalRunRow, key: string): string {
 
 const SPLIT_OPTIONS: Array<EvalSplit | "untagged"> = ["train", "dev", "test", "untagged"];
 
+/** Section chrome for the stacked family sections (order = RUN_FAMILY_ORDER). */
+const FAMILY_SECTION_COPY: Record<RunFamily, { label: string; hint: string }> = {
+  renderer: {
+    label: "Renderer runs",
+    hint: "Render-grade grid benchmarks — deterministic gates + judge lenses per variant.",
+  },
+  sdc: {
+    label: "SDC runs",
+    hint: "Single-deal-context answer benchmarks — axis score-maps + judge verdicts per fixture.",
+  },
+  curation: {
+    label: "Curation runs",
+    hint: "Curation sweeps — expectation survival vs outbound tokens across configs.",
+  },
+};
+
 type LoadState =
   | { kind: "loading" }
   | { kind: "unconfigured" }
@@ -114,11 +132,34 @@ export function EvalRunsPage() {
 
   const runs = state.kind === "ok" ? state.runs : [];
 
+  // Family partition: family runs render in their own stacked sections; the
+  // generic (no-family) runs keep the entire pre-family page body verbatim.
+  const { runsByFamily, genericRuns } = useMemo(() => {
+    const byFamily = new Map<RunFamily, EvalRunRow[]>();
+    const generic: EvalRunRow[] = [];
+    for (const r of runs) {
+      const family = familyOf(r);
+      if (family === null) {
+        generic.push(r);
+      } else {
+        const list = byFamily.get(family);
+        if (list) {
+          list.push(r);
+        } else {
+          byFamily.set(family, [r]);
+        }
+      }
+    }
+    return { runsByFamily: byFamily, genericRuns: generic };
+  }, [runs]);
+
+  const hasFamilySections = runsByFamily.size > 0;
+
   const facets = useMemo(() => {
     const sets = new Set<string>();
     const targets = new Set<string>();
     const variants = new Set<string>();
-    for (const r of runs) {
+    for (const r of genericRuns) {
       if (r.setId) sets.add(r.setId);
       if (r.targetId) targets.add(r.targetId);
       if (r.variant) variants.add(r.variant);
@@ -128,12 +169,12 @@ export function EvalRunsPage() {
       targets: [...targets].sort(),
       variants: [...variants].sort(),
     };
-  }, [runs]);
+  }, [genericRuns]);
 
   const hasActiveFilter = Boolean(
     filters.set || filters.target || filters.variant || filters.split,
   );
-  const filtered = filterRuns(runs, filters);
+  const filtered = filterRuns(genericRuns, filters);
 
   const handleSort = (key: string) => {
     if (sortKey === key) {
@@ -166,7 +207,7 @@ export function EvalRunsPage() {
   const handleCompare = () => {
     // A = the older run by tsStart — the default read is A = baseline,
     // B = candidate, so "regressions" means what it says.
-    const [runA, runB] = runs
+    const [runA, runB] = genericRuns
       .filter((r) => selected.has(r.id))
       .sort((a, b) => new Date(a.tsStart).getTime() - new Date(b.tsStart).getTime());
     if (runA && runB) {
@@ -250,142 +291,172 @@ export function EvalRunsPage() {
 
       {state.kind === "ok" && runs.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-            <FilterSelect
-              id="eval-filter-set"
-              label="Set"
-              value={filters.set ?? ""}
-              options={facets.sets}
-              onChange={(v) => setFilters((f) => ({ ...f, set: v || undefined }))}
-            />
-            <FilterSelect
-              id="eval-filter-target"
-              label="Target"
-              value={filters.target ?? ""}
-              options={facets.targets}
-              onChange={(v) => setFilters((f) => ({ ...f, target: v || undefined }))}
-            />
-            <FilterSelect
-              id="eval-filter-variant"
-              label="Variant"
-              value={filters.variant ?? ""}
-              options={facets.variants}
-              onChange={(v) => setFilters((f) => ({ ...f, variant: v || undefined }))}
-            />
-            <FilterSelect
-              id="eval-filter-split"
-              label="Split"
-              value={filters.split ?? ""}
-              options={SPLIT_OPTIONS}
-              onChange={(v) =>
-                setFilters((f) => ({
-                  ...f,
-                  split: (v || undefined) as EvalSplit | "untagged" | undefined,
-                }))
-              }
-            />
-            {hasActiveFilter && (
-              <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
-                Clear filters
-              </Button>
-            )}
-          </div>
+          {RUN_FAMILY_ORDER.map((family) => {
+            const familyRuns = runsByFamily.get(family);
+            const components = resolveRunFamilyComponents(family);
+            if (!familyRuns || familyRuns.length === 0 || components === null) return null;
+            const copy = FAMILY_SECTION_COPY[family];
+            return (
+              <section key={family} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
+                  <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>{copy.label}</h2>
+                  <div style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 2 }}>
+                    {copy.hint}
+                  </div>
+                </div>
+                <components.HomeTable runs={familyRuns} />
+              </section>
+            );
+          })}
 
-          <SplitAggregatesPanel
-            filters={{ set: filters.set, target: filters.target, variant: filters.variant }}
-          />
+          {genericRuns.length > 0 && (
+            <>
+              {hasFamilySections && (
+                <div>
+                  <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Other runs</h2>
+                  <div style={{ fontSize: 12, color: "var(--fg-muted)", marginTop: 2 }}>
+                    Generic eval runs without a family — filter, aggregate, and compare as before.
+                  </div>
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
+                <FilterSelect
+                  id="eval-filter-set"
+                  label="Set"
+                  value={filters.set ?? ""}
+                  options={facets.sets}
+                  onChange={(v) => setFilters((f) => ({ ...f, set: v || undefined }))}
+                />
+                <FilterSelect
+                  id="eval-filter-target"
+                  label="Target"
+                  value={filters.target ?? ""}
+                  options={facets.targets}
+                  onChange={(v) => setFilters((f) => ({ ...f, target: v || undefined }))}
+                />
+                <FilterSelect
+                  id="eval-filter-variant"
+                  label="Variant"
+                  value={filters.variant ?? ""}
+                  options={facets.variants}
+                  onChange={(v) => setFilters((f) => ({ ...f, variant: v || undefined }))}
+                />
+                <FilterSelect
+                  id="eval-filter-split"
+                  label="Split"
+                  value={filters.split ?? ""}
+                  options={SPLIT_OPTIONS}
+                  onChange={(v) =>
+                    setFilters((f) => ({
+                      ...f,
+                      split: (v || undefined) as EvalSplit | "untagged" | undefined,
+                    }))
+                  }
+                />
+                {hasActiveFilter && (
+                  <Button variant="ghost" size="sm" onClick={() => setFilters({})}>
+                    Clear filters
+                  </Button>
+                )}
+              </div>
 
-          {selected.size > 0 && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "10px 14px",
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-              }}
-            >
-              <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-                {selected.size} of 2 selected
-              </span>
-              <Button size="sm" disabled={selected.size !== 2} onClick={handleCompare}>
-                Compare
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                Clear
-              </Button>
-            </div>
-          )}
-
-          {filtered.length === 0 ? (
-            <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-              No runs match the current filters.
-            </Card>
-          ) : (
-            <Card padded={false}>
-              <DataTable<EvalRunRow>
-                columns={[
-                  {
-                    key: "select",
-                    header: "",
-                    render: (row) => {
-                      const isSelected = selected.has(row.id);
-                      return (
-                        <input
-                          type="checkbox"
-                          aria-label={`select run ${row.id} for compare`}
-                          checked={isSelected}
-                          disabled={!isSelected && selected.size >= 2}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={() => toggleSelect(row.id)}
-                        />
-                      );
-                    },
-                  },
-                  {
-                    key: "id",
-                    header: "Run",
-                    render: (row) => (
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                        {shortId(row.id)}
-                      </span>
-                    ),
-                  },
-                  { key: "setId", header: "Set", render: (row) => row.setId ?? "—" },
-                  { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
-                  { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
-                  {
-                    key: "split",
-                    header: "Split",
-                    render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
-                  },
-                  {
-                    key: "status",
-                    header: "Status",
-                    render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
-                  },
-                  {
-                    key: "passed",
-                    header: "Passed",
-                    render: (row) => <PassCell summary={row.summary} />,
-                  },
-                  { key: "model", header: "Model", render: (row) => row.model ?? "—" },
-                  {
-                    key: "tsStart",
-                    header: "Started",
-                    render: (row) => relative(row.tsStart),
-                  },
-                ]}
-                data={sorted}
-                sortKey={sortKey}
-                sortDir={sortDir}
-                onSort={handleSort}
-                rowKey={(row) => row.id}
-                onRowClick={(row) => navigate(`/eval/runs/${row.id}`)}
+              <SplitAggregatesPanel
+                filters={{ set: filters.set, target: filters.target, variant: filters.variant }}
               />
-            </Card>
+
+              {selected.size > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 14px",
+                    background: "var(--bg-surface)",
+                    border: "1px solid var(--border)",
+                    borderRadius: 8,
+                  }}
+                >
+                  <span style={{ fontSize: 13, color: "var(--fg-muted)" }}>
+                    {selected.size} of 2 selected
+                  </span>
+                  <Button size="sm" disabled={selected.size !== 2} onClick={handleCompare}>
+                    Compare
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                    Clear
+                  </Button>
+                </div>
+              )}
+
+              {filtered.length === 0 ? (
+                <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
+                  No runs match the current filters.
+                </Card>
+              ) : (
+                <Card padded={false}>
+                  <DataTable<EvalRunRow>
+                    columns={[
+                      {
+                        key: "select",
+                        header: "",
+                        render: (row) => {
+                          const isSelected = selected.has(row.id);
+                          return (
+                            <input
+                              type="checkbox"
+                              aria-label={`select run ${row.id} for compare`}
+                              checked={isSelected}
+                              disabled={!isSelected && selected.size >= 2}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={() => toggleSelect(row.id)}
+                            />
+                          );
+                        },
+                      },
+                      {
+                        key: "id",
+                        header: "Run",
+                        render: (row) => (
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                            {shortId(row.id)}
+                          </span>
+                        ),
+                      },
+                      { key: "setId", header: "Set", render: (row) => row.setId ?? "—" },
+                      { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
+                      { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
+                      {
+                        key: "split",
+                        header: "Split",
+                        render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
+                      },
+                      {
+                        key: "status",
+                        header: "Status",
+                        render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
+                      },
+                      {
+                        key: "passed",
+                        header: "Passed",
+                        render: (row) => <PassCell summary={row.summary} />,
+                      },
+                      { key: "model", header: "Model", render: (row) => row.model ?? "—" },
+                      {
+                        key: "tsStart",
+                        header: "Started",
+                        render: (row) => relative(row.tsStart),
+                      },
+                    ]}
+                    data={sorted}
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={handleSort}
+                    rowKey={(row) => row.id}
+                    onRowClick={(row) => navigate(`/eval/runs/${row.id}`)}
+                  />
+                </Card>
+              )}
+            </>
           )}
         </div>
       )}

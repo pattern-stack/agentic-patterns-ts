@@ -12,6 +12,14 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalCaseRow, EvalRunRow, EvalSetSummary, SplitAggregate } from "../api/types";
 import { EvalSetDetailPage } from "../pages/eval/EvalSetDetailPage";
+import {
+  BANK_CASES,
+  BANK_SET_ID,
+  BANK_SET_SUMMARY,
+  BUNDLE_CASES,
+  BUNDLE_SET_ID,
+  BUNDLE_SET_SUMMARY,
+} from "./evalFamilySeedFixtures";
 
 const setSummary: EvalSetSummary = {
   id: "bank",
@@ -211,5 +219,55 @@ describe("EvalSetDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("This set has no cases yet.")).toBeTruthy();
     });
+  });
+
+  it("generic set keeps the CRUD affordances (Edit set / New case)", async () => {
+    stubFetch();
+    renderPage();
+    await waitFor(() => screen.getByText("Bank One"));
+    expect(screen.getByRole("button", { name: "Edit set" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New case" })).toBeTruthy();
+  });
+
+  it("answer-bank set: family view replaces the body, CRUD hides, links encode ids", async () => {
+    stubFetch({ sets: [BANK_SET_SUMMARY], cases: BANK_CASES, runs: [] });
+    renderPage(encodeURIComponent(BANK_SET_ID));
+
+    await waitFor(() => screen.getByText("Deal states"));
+    // computed columns from the state markdown
+    expect(screen.getByText("fid-001")).toBeTruthy();
+    expect(screen.getByText("opp-2214")).toBeTruthy();
+    // CRUD hidden — frozen import; Run eval survives
+    expect(screen.queryByRole("button", { name: "Edit set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New case" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Run eval" })).toBeTruthy();
+    expect(screen.getByText(/edits belong upstream/)).toBeTruthy();
+    // generic body replaced entirely (no split-grouped Cases section)
+    expect(screen.queryByText("Cases")).toBeNull();
+
+    // case link carries BOTH ids encoded
+    fireEvent.click(screen.getByText("fid-001"));
+    await waitFor(() => {
+      expect(screen.getByTestId("location").textContent).toBe(
+        `/eval/sets/${encodeURIComponent(BANK_SET_ID)}/cases/fid-001`,
+      );
+    });
+  });
+
+  it("question-bundle set: fixture table with gold counts + filters, CRUD hides", async () => {
+    stubFetch({ sets: [BUNDLE_SET_SUMMARY], cases: BUNDLE_CASES, runs: [] });
+    renderPage(encodeURIComponent(BUNDLE_SET_ID));
+
+    await waitFor(() => screen.getByText("Fixtures"));
+    expect(screen.getByText("question-bundle")).toBeTruthy();
+    expect(screen.getByText("sdc-bench@v2")).toBeTruthy();
+    expect(screen.getByText("3 req / 5")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit set" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New case" })).toBeNull();
+
+    // request-family filter (scope prefix) narrows the table
+    fireEvent.click(screen.getByRole("button", { name: "portfolio" }));
+    expect(screen.queryByText("fx-001")).toBeNull();
+    expect(screen.getByText("fx-003")).toBeTruthy();
   });
 });

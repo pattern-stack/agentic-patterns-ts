@@ -8,6 +8,10 @@
  * page's own idiom). Cases are grouped into train / dev / test / untagged
  * sections; the held-out `test` section is marked but still viewable (viewing
  * ≠ running). Case add/edit/delete lands in WI-5.
+ *
+ * Family dispatch (slice 9): when `setFamilyOf(set)` resolves (answer-bank /
+ * question-bundle), the registered family view REPLACES the body below the
+ * header, and the CRUD affordances hide — family sets are frozen imports.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -33,6 +37,8 @@ import { ConfirmModal } from "./ConfirmModal";
 import { RunLaunchModal } from "./RunLaunchModal";
 import { SetEditModal } from "./SetEditModal";
 import { SplitAggregatesPanel } from "./SplitAggregatesPanel";
+import { resolveSetFamilyComponents } from "./families";
+import { readSetMeta } from "./families/types";
 
 function relative(dateStr: string | undefined | null): string {
   if (!dateStr) return "—";
@@ -227,6 +233,12 @@ export function EvalSetDetailPage() {
   }
 
   const { set, cases, runs } = state;
+  // Family dispatch (slice 9): a family set's body is REPLACED by its family
+  // view, and the CRUD affordances (edit set / new case / per-case edit +
+  // delete) are hidden — family sets are frozen imports; edits belong
+  // upstream in the exporting bench. Generic sets render exactly as before.
+  const setMeta = readSetMeta(set);
+  const familyComponents = resolveSetFamilyComponents(setMeta?.family);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -246,16 +258,24 @@ export function EvalSetDetailPage() {
             {set.id}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <Button size="sm" onClick={() => setModal({ kind: "runEval" })}>
             Run eval
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "editSet" })}>
-            Edit set
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "newCase" })}>
-            New case
-          </Button>
+          {familyComponents ? (
+            <span style={{ fontSize: 12, color: "var(--fg-subtle)" }}>
+              imported set — cases are frozen; edits belong upstream
+            </span>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "editSet" })}>
+                Edit set
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setModal({ kind: "newCase" })}>
+                New case
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -305,173 +325,182 @@ export function EvalSetDetailPage() {
         />
       )}
 
-      <Card>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          <Badge tone="muted">cases · {set.caseCount}</Badge>
-          {SPLIT_GROUPS.map((g) => {
-            const n = set.splitCounts[g.key ?? ""] ?? 0;
-            if (n === 0) return null;
-            return (
-              <Badge key={g.label} tone={g.heldOut ? "yellow" : "muted"}>
-                {g.label} · {n}
-              </Badge>
-            );
-          })}
-          <Badge tone="muted">created · {relative(set.createdTs)}</Badge>
-        </div>
-        {set.description && (
-          <div style={{ marginTop: 10, fontSize: 14, color: "var(--fg-muted)" }}>
-            {set.description}
-          </div>
-        )}
-      </Card>
-
-      <SplitAggregatesPanel filters={{ set: set.id }} />
-
-      {/* Cases grouped by split */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Cases</h2>
-        {cases.length === 0 ? (
-          <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            This set has no cases yet.
-          </Card>
-        ) : (
-          SPLIT_GROUPS.map((group) => {
-            const groupCases = cases.filter((c) => c.split === group.key);
-            if (groupCases.length === 0) return null;
-            return (
-              <div key={group.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>
-                    {group.label} ({groupCases.length})
-                  </span>
-                  {group.heldOut && <Badge tone="yellow">held-out</Badge>}
-                </div>
-                <Card padded={false}>
-                  <DataTable<EvalCaseRow>
-                    columns={[
-                      {
-                        key: "caseId",
-                        header: "Case",
-                        render: (row) => (
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                            {row.caseId}
-                          </span>
-                        ),
-                      },
-                      { key: "input", header: "Input", render: (row) => preview(row.input) },
-                      {
-                        key: "expected",
-                        header: "Expected",
-                        render: (row) =>
-                          row.expected === null || row.expected === undefined ? (
-                            <span style={{ color: "var(--fg-subtle)" }}>—</span>
-                          ) : (
-                            preview(row.expected, 48)
-                          ),
-                      },
-                      {
-                        key: "tags",
-                        header: "Tags",
-                        render: (row) =>
-                          row.tags && row.tags.length > 0 ? (
-                            <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
-                              {row.tags.map((t) => (
-                                <Chip key={t} tone="mono">
-                                  {t}
-                                </Chip>
-                              ))}
-                            </span>
-                          ) : (
-                            <span style={{ color: "var(--fg-subtle)" }}>—</span>
-                          ),
-                      },
-                      {
-                        key: "actions",
-                        header: "",
-                        align: "right",
-                        render: (row) => (
-                          <span style={{ display: "inline-flex", gap: 6 }}>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`edit ${row.caseId}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setModal({ kind: "editCase", row });
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              aria-label={`delete ${row.caseId}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setModal({ kind: "deleteCase", row });
-                              }}
-                            >
-                              Delete
-                            </Button>
-                          </span>
-                        ),
-                      },
-                    ]}
-                    data={groupCases}
-                    rowKey={(row) => row.caseId}
-                    onRowClick={(row) =>
-                      navigate(`/eval/sets/${set.id}/cases/${encodeURIComponent(row.caseId)}`)
-                    }
-                  />
-                </Card>
+      {familyComponents && setMeta ? (
+        <familyComponents.SetView set={set} cases={cases} runs={runs} meta={setMeta} />
+      ) : (
+        <>
+          <Card>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <Badge tone="muted">cases · {set.caseCount}</Badge>
+              {SPLIT_GROUPS.map((g) => {
+                const n = set.splitCounts[g.key ?? ""] ?? 0;
+                if (n === 0) return null;
+                return (
+                  <Badge key={g.label} tone={g.heldOut ? "yellow" : "muted"}>
+                    {g.label} · {n}
+                  </Badge>
+                );
+              })}
+              <Badge tone="muted">created · {relative(set.createdTs)}</Badge>
+            </div>
+            {set.description && (
+              <div style={{ marginTop: 10, fontSize: 14, color: "var(--fg-muted)" }}>
+                {set.description}
               </div>
-            );
-          })
-        )}
-      </div>
+            )}
+          </Card>
 
-      {/* Runs that targeted this set */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Runs against this set</h2>
-        {runs.length === 0 ? (
-          <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            No runs against this set yet.
-          </Card>
-        ) : (
-          <Card padded={false}>
-            <DataTable<EvalRunRow>
-              columns={[
-                {
-                  key: "id",
-                  header: "Run",
-                  render: (row) => (
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {shortId(row.id)}
-                    </span>
-                  ),
-                },
-                { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
-                { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
-                {
-                  key: "split",
-                  header: "Split",
-                  render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
-                },
-                {
-                  key: "status",
-                  header: "Status",
-                  render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
-                },
-                { key: "tsStart", header: "Started", render: (row) => relative(row.tsStart) },
-              ]}
-              data={runs}
-              rowKey={(row) => row.id}
-              onRowClick={(row) => navigate(`/eval/runs/${row.id}`)}
-            />
-          </Card>
-        )}
-      </div>
+          <SplitAggregatesPanel filters={{ set: set.id }} />
+
+          {/* Cases grouped by split */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Cases</h2>
+            {cases.length === 0 ? (
+              <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
+                This set has no cases yet.
+              </Card>
+            ) : (
+              SPLIT_GROUPS.map((group) => {
+                const groupCases = cases.filter((c) => c.split === group.key);
+                if (groupCases.length === 0) return null;
+                return (
+                  <div
+                    key={group.label}
+                    style={{ display: "flex", flexDirection: "column", gap: 6 }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>
+                        {group.label} ({groupCases.length})
+                      </span>
+                      {group.heldOut && <Badge tone="yellow">held-out</Badge>}
+                    </div>
+                    <Card padded={false}>
+                      <DataTable<EvalCaseRow>
+                        columns={[
+                          {
+                            key: "caseId",
+                            header: "Case",
+                            render: (row) => (
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                                {row.caseId}
+                              </span>
+                            ),
+                          },
+                          { key: "input", header: "Input", render: (row) => preview(row.input) },
+                          {
+                            key: "expected",
+                            header: "Expected",
+                            render: (row) =>
+                              row.expected === null || row.expected === undefined ? (
+                                <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                              ) : (
+                                preview(row.expected, 48)
+                              ),
+                          },
+                          {
+                            key: "tags",
+                            header: "Tags",
+                            render: (row) =>
+                              row.tags && row.tags.length > 0 ? (
+                                <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
+                                  {row.tags.map((t) => (
+                                    <Chip key={t} tone="mono">
+                                      {t}
+                                    </Chip>
+                                  ))}
+                                </span>
+                              ) : (
+                                <span style={{ color: "var(--fg-subtle)" }}>—</span>
+                              ),
+                          },
+                          {
+                            key: "actions",
+                            header: "",
+                            align: "right",
+                            render: (row) => (
+                              <span style={{ display: "inline-flex", gap: 6 }}>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label={`edit ${row.caseId}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setModal({ kind: "editCase", row });
+                                  }}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  aria-label={`delete ${row.caseId}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setModal({ kind: "deleteCase", row });
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              </span>
+                            ),
+                          },
+                        ]}
+                        data={groupCases}
+                        rowKey={(row) => row.caseId}
+                        onRowClick={(row) =>
+                          navigate(`/eval/sets/${set.id}/cases/${encodeURIComponent(row.caseId)}`)
+                        }
+                      />
+                    </Card>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Runs that targeted this set */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Runs against this set</h2>
+            {runs.length === 0 ? (
+              <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
+                No runs against this set yet.
+              </Card>
+            ) : (
+              <Card padded={false}>
+                <DataTable<EvalRunRow>
+                  columns={[
+                    {
+                      key: "id",
+                      header: "Run",
+                      render: (row) => (
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                          {shortId(row.id)}
+                        </span>
+                      ),
+                    },
+                    { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
+                    { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
+                    {
+                      key: "split",
+                      header: "Split",
+                      render: (row) => <Badge tone="muted">{row.split ?? "untagged"}</Badge>,
+                    },
+                    {
+                      key: "status",
+                      header: "Status",
+                      render: (row) => <Badge tone={statusTone(row.status)}>{row.status}</Badge>,
+                    },
+                    { key: "tsStart", header: "Started", render: (row) => relative(row.tsStart) },
+                  ]}
+                  data={runs}
+                  rowKey={(row) => row.id}
+                  onRowClick={(row) => navigate(`/eval/runs/${row.id}`)}
+                />
+              </Card>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

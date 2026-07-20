@@ -13,11 +13,13 @@ import type { EvalSetSummary } from "../../api/types";
 import { Badge } from "../../components/atoms/Badge";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
+import { Chip } from "../../components/atoms/Chip";
 import { Spinner } from "../../components/atoms/Spinner";
 import { AlertIcon } from "../../components/atoms/icons";
 import { DataTable } from "../../components/organisms/DataTable";
 import { fetchEvalSets } from "../../lib/evalApi";
 import { SetEditModal } from "./SetEditModal";
+import { readSetMeta } from "./families/types";
 
 // pages never share code (playground-redesign.md) — lifted local.
 function relative(dateStr: string | undefined | null): string {
@@ -198,6 +200,11 @@ export function EvalSetsPage() {
                 ),
               },
               {
+                key: "family",
+                header: "Family",
+                render: (row) => <FamilySetCell row={row} />,
+              },
+              {
                 key: "caseCount",
                 header: "Cases",
                 align: "right",
@@ -221,6 +228,45 @@ export function EvalSetsPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+/**
+ * Family identity cell — answer-bank rows show the frozen state count; bundle
+ * rows show source (cache/authoring), benchmark@version, dataset, and the run
+ * families the bundle feeds (all from `set.meta`, slice 9). Generic sets show
+ * a muted dash — their row data is otherwise byte-identical to pre-family.
+ */
+function FamilySetCell({ row }: { row: EvalSetSummary }) {
+  const meta = readSetMeta(row);
+  if (!meta) return <span style={{ color: "var(--fg-subtle)" }}>—</span>;
+  if (meta.family === "answer-bank") {
+    return (
+      <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        <Badge tone="purple">answer-bank</Badge>
+        <span style={{ fontSize: 12, color: "var(--fg-muted)" }}>{row.caseCount} states</span>
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+      <Badge tone="accent">question-bundle</Badge>
+      {meta.source && (
+        <Chip tone={meta.source === "authoring" ? "accent" : "mono"}>{meta.source}</Chip>
+      )}
+      {meta.benchmark && (
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg-muted)" }}>
+          {meta.benchmark}
+          {meta.version ? `@${meta.version}` : ""}
+        </span>
+      )}
+      {meta.dataset && <Chip tone="neutral">{meta.dataset}</Chip>}
+      {meta.families?.map((f) => (
+        <Chip key={f} tone="mono">
+          {f}
+        </Chip>
+      ))}
+    </span>
   );
 }
 

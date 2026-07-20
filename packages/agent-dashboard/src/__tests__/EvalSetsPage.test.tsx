@@ -9,6 +9,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalSetSummary } from "../api/types";
 import { EvalSetsPage } from "../pages/eval/EvalSetsPage";
+import { BANK_SET_SUMMARY, BUNDLE_SET_SUMMARY } from "./evalFamilySeedFixtures";
 
 const sets: EvalSetSummary[] = [
   {
@@ -100,6 +101,25 @@ describe("EvalSetsPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("location").textContent).toBe("/eval/sets/bank");
     });
+  });
+
+  it("family chip column: bank shows state count, bundle shows meta chips, generic untouched", async () => {
+    stubFetch({ sets: [...sets, BANK_SET_SUMMARY, BUNDLE_SET_SUMMARY] });
+    renderPage();
+
+    await waitFor(() => screen.getByText("answer-bank"));
+    // answer-bank rows carry the frozen state count
+    expect(screen.getByText("2 states")).toBeTruthy();
+    // bundle columns from set.meta: source, benchmark@version, dataset, families[]
+    expect(screen.getByText("question-bundle")).toBeTruthy();
+    expect(screen.getByText("cache")).toBeTruthy();
+    expect(screen.getByText("sdc-bench@v2")).toBeTruthy();
+    expect(screen.getByText("beanmaxx")).toBeTruthy();
+    expect(screen.getByText("sdc")).toBeTruthy();
+    expect(screen.getByText("curation")).toBeTruthy();
+    // generic rows render exactly as before, alongside the family rows
+    expect(screen.getByText("Bank One")).toBeTruthy();
+    expect(screen.getByText("train 2")).toBeTruthy();
   });
 
   it("503 -> the unconfigured card, not the empty state", async () => {

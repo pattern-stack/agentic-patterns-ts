@@ -7,8 +7,16 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { EvalCaseDetailResponse } from "../api/types";
+import type { EvalCaseDetailResponse, EvalSetSummary } from "../api/types";
 import { EvalCaseDetailPage } from "../pages/eval/EvalCaseDetailPage";
+import {
+  BANK_CASES,
+  BANK_SET_ID,
+  BANK_SET_SUMMARY,
+  BUNDLE_CASES,
+  BUNDLE_SET_ID,
+  BUNDLE_SET_SUMMARY,
+} from "./evalFamilySeedFixtures";
 
 const detail: EvalCaseDetailResponse = {
   case: {
@@ -62,13 +70,18 @@ function mkFetchResponse(status: number, body: unknown) {
   };
 }
 
-function stubFetch(opts: { body?: EvalCaseDetailResponse; status?: number } = {}) {
-  const { body = detail, status = 200 } = opts;
+function stubFetch(
+  opts: { body?: EvalCaseDetailResponse; status?: number; sets?: EvalSetSummary[] } = {},
+) {
+  const { body = detail, status = 200, sets } = opts;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/cases/")) return mkFetchResponse(status, body);
+      // The family lookup's set-list GET — 404 when the test declares no sets
+      // (the page tolerates the failure and stays generic).
+      if (url.includes("/eval/sets") && sets) return mkFetchResponse(200, { sets });
       return mkFetchResponse(404, { error: "unhandled in test" });
     }),
   );
@@ -134,6 +147,50 @@ describe("EvalCaseDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("This case has not been evaluated in any run yet.")).toBeTruthy();
     });
+  });
+
+  it("generic case keeps the Edit affordance", async () => {
+    stubFetch();
+    renderPage();
+    await waitFor(() => screen.getByText("case-01"));
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+  });
+
+  it("answer-bank case: family view + empty-history explanatory note, Edit hidden", async () => {
+    const caseRow = BANK_CASES[0];
+    if (!caseRow) throw new Error("fixture missing");
+    stubFetch({ body: { case: caseRow, history: [] }, sets: [BANK_SET_SUMMARY] });
+    renderPage(`/eval/sets/${encodeURIComponent(BANK_SET_ID)}/cases/fid-001`);
+
+    await waitFor(() => screen.getByText("Golden response"));
+    // stat tiles + used-ref chips from the golden
+    expect(screen.getByText("Evidence refs")).toBeTruthy();
+    expect(screen.getByText("Used evidence")).toBeTruthy();
+    expect(screen.getByText("evidence-5")).toBeTruthy();
+    // frozen import — no Edit
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    // history stays below, empty with the composite-id note (never fake rows)
+    expect(screen.getByText(/composite case ids/)).toBeTruthy();
+    expect(screen.queryByText("This case has not been evaluated in any run yet.")).toBeNull();
+  });
+
+  it("question-bundle case: expectation cards render and the history table stays", async () => {
+    const caseRow = BUNDLE_CASES[0];
+    if (!caseRow) throw new Error("fixture missing");
+    stubFetch({ body: { case: caseRow, history: detail.history }, sets: [BUNDLE_SET_SUMMARY] });
+    renderPage(`/eval/sets/${encodeURIComponent(BUNDLE_SET_ID)}/cases/fx-001`);
+
+    await waitFor(() => screen.getByText("Gold expectations"));
+    expect(screen.getByText("3 required · 5 total")).toBeTruthy();
+    expect(screen.getAllByText("required").length).toBe(3);
+    expect(screen.getAllByText("judge").length).toBe(2);
+    expect(screen.getAllByText("Pricing call 2026-06-12").length).toBe(2);
+    expect(screen.getByText("scope · deal:opp-2214")).toBeTruthy();
+    expect(screen.getByText("as_of · 2026-07-10")).toBeTruthy();
+    // cross-run history table still renders below the family body
+    expect(screen.getByText("candidate")).toBeTruthy();
+    expect(screen.getByText("baseline")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
   });
 
   it("404 -> the not-found card", async () => {

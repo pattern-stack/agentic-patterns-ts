@@ -5,7 +5,7 @@
  * the full score list, and a lazy trace drill-down.
  */
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import type { EvalCaseRow, EvalScoreLike, JoinedEvalResultRow } from "../../api/types";
 import { Markdown } from "../../chat/atoms";
 import { Badge } from "../../components/atoms/Badge";
@@ -100,21 +100,51 @@ function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass:
   );
 }
 
+/**
+ * Any score detail flagging `missingContext: true` (e.g. the SDC `score-map`
+ * payload) surfaces a case-level notice — the answer itself declared its
+ * retrieved context insufficient.
+ */
+function hasMissingContext(scores: JoinedEvalResultRow["scores"]): boolean {
+  return Boolean(
+    scores?.some(
+      (s) => (s.detail as { missingContext?: unknown } | undefined)?.missingContext === true,
+    ),
+  );
+}
+
 interface CaseDetailProps {
   result: JoinedEvalResultRow;
   caseRow: EvalCaseRow | undefined;
+  /**
+   * Family wrappers can replace the default collapsed case-input block (e.g.
+   * a rendered question card instead of raw JSON). When provided it renders
+   * in place of the input `<details>`; everything else is unchanged.
+   */
+  inputOverride?: ReactNode;
 }
 
-export function CaseDetail({ result, caseRow }: CaseDetailProps) {
+export function CaseDetail({ result, caseRow, inputOverride }: CaseDetailProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {caseRow && (
-        <details>
-          <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
-            Input
-          </summary>
-          <pre style={{ ...preStyle, marginTop: 6 }}>{pretty(caseRow.input)}</pre>
-        </details>
+      {inputOverride !== undefined
+        ? inputOverride
+        : caseRow && (
+            <details>
+              <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--fg-muted)" }}>
+                Input
+              </summary>
+              <pre style={{ ...preStyle, marginTop: 6 }}>{pretty(caseRow.input)}</pre>
+            </details>
+          )}
+
+      {hasMissingContext(result.scores) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Badge tone="yellow">missing context</Badge>
+          <span style={mutedStyle}>
+            the answer flagged its retrieved context as insufficient for this case
+          </span>
+        </div>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

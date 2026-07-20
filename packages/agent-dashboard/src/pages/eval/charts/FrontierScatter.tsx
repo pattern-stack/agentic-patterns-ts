@@ -3,8 +3,16 @@
  * (x), "upper-left wins". On-frontier configs are filled dots joined by a
  * dashed step-line; dominated configs are hollow. Inline SVG (no chart dep),
  * theme-aware via CSS vars.
+ *
+ * Slice-8 extensions (additive — existing consumers pass `points` only and
+ * render identically): frontier step-line + a hover tooltip (a rendered
+ * in-SVG readout; the native `<title>` tooltips remain as fallback).
+ * Declared-wins frontier flagging is NOT this chart's job — flags arrive on
+ * `points`, pre-computed by `curationFrontierDeclared` (lib/evalAggregates),
+ * the one home of that rule.
  */
 
+import { useState } from "react";
 import type { FrontierPoint } from "../../../lib/evalAggregates";
 
 const W = 460;
@@ -13,12 +21,15 @@ const PAD = { top: 16, right: 16, bottom: 34, left: 44 };
 const plotW = W - PAD.left - PAD.right;
 const plotH = H - PAD.top - PAD.bottom;
 
+const TIP_W = 190;
+const TIP_H = 32;
+
 interface Scale {
   x: (v: number) => number;
   y: (v: number) => number;
 }
 
-function makeScale(points: FrontierPoint[]): Scale {
+function makeScale(points: readonly FrontierPoint[]): Scale {
   const tokens = points.map((p) => p.tokens);
   const maxTok = Math.max(1, ...tokens);
   const minTok = Math.min(...tokens, 0);
@@ -30,13 +41,20 @@ function makeScale(points: FrontierPoint[]): Scale {
   };
 }
 
-export function FrontierScatter({ points }: { points: FrontierPoint[] }) {
+export interface FrontierScatterProps {
+  points: FrontierPoint[];
+}
+
+export function FrontierScatter({ points }: FrontierScatterProps) {
+  const [hover, setHover] = useState<FrontierPoint | null>(null);
   if (points.length === 0) return null;
-  const scale = makeScale(points);
+
+  const pts = points;
+  const scale = makeScale(pts);
 
   // The frontier polyline: on-frontier points, left→right by tokens, drawn as a
   // step (horizontal then vertical) to read as a dominance boundary.
-  const front = points.filter((p) => p.onFrontier).sort((a, b) => a.tokens - b.tokens);
+  const front = pts.filter((p) => p.onFrontier).sort((a, b) => a.tokens - b.tokens);
   const stepPath = front.reduce((acc, p, i) => {
     const x = scale.x(p.tokens);
     const y = scale.y(p.survival);
@@ -47,6 +65,18 @@ export function FrontierScatter({ points }: { points: FrontierPoint[] }) {
   }, "");
 
   const yTicks = [0, 0.25, 0.5, 0.75, 1];
+
+  // Hover tooltip placement: beside the point, clamped into the plot; flips
+  // below when there is no room above.
+  const tip = hover
+    ? (() => {
+        const px = scale.x(hover.tokens);
+        const py = scale.y(hover.survival);
+        const tx = Math.min(Math.max(px + 8, PAD.left), W - PAD.right - TIP_W);
+        const ty = py - TIP_H - 8 >= 2 ? py - TIP_H - 8 : py + 10;
+        return { tx, ty };
+      })()
+    : null;
 
   return (
     <svg
@@ -101,7 +131,7 @@ export function FrontierScatter({ points }: { points: FrontierPoint[] }) {
       )}
 
       {/* points: filled ring on frontier, hollow when dominated */}
-      {points.map((p) => {
+      {pts.map((p) => {
         const cx = scale.x(p.tokens);
         const cy = scale.y(p.survival);
         return (
@@ -113,6 +143,8 @@ export function FrontierScatter({ points }: { points: FrontierPoint[] }) {
             fill={p.onFrontier ? "var(--accent)" : "transparent"}
             stroke={p.onFrontier ? "var(--accent)" : "var(--fg-muted)"}
             strokeWidth={p.onFrontier ? 2 : 1.5}
+            onMouseEnter={() => setHover(p)}
+            onMouseLeave={() => setHover(null)}
           >
             <title>
               {p.configId} · survival {(p.survival * 100).toFixed(0)}% · {Math.round(p.tokens)} tok
@@ -121,6 +153,32 @@ export function FrontierScatter({ points }: { points: FrontierPoint[] }) {
           </circle>
         );
       })}
+
+      {/* hover tooltip (rendered last so it paints above the points) */}
+      {hover && tip && (
+        <g data-testid="frontier-tooltip" pointerEvents="none">
+          <rect
+            x={tip.tx}
+            y={tip.ty}
+            width={TIP_W}
+            height={TIP_H}
+            rx={4}
+            fill="var(--bg-surface)"
+            stroke="var(--border)"
+            strokeWidth={1}
+          />
+          <text x={tip.tx + 8} y={tip.ty + 13} fontSize={9} fill="var(--fg-default)">
+            {/* ellipsize: SVG text does not clip to the rect; the native
+                <title> on the point still carries the full id. */}
+            {hover.configId.length > 22 ? `${hover.configId.slice(0, 21)}…` : hover.configId} ·{" "}
+            {hover.onFrontier ? "on frontier" : "dominated"}
+          </text>
+          <text x={tip.tx + 8} y={tip.ty + 25} fontSize={9} fill="var(--fg-muted)">
+            survival {(hover.survival * 100).toFixed(0)}% · {Math.round(hover.tokens)} tok · n=
+            {hover.n}
+          </text>
+        </g>
+      )}
     </svg>
   );
 }

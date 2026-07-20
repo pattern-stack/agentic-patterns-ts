@@ -381,6 +381,7 @@ export interface CurationConfigRow {
   nearDupRate: number | null;
   deadRowRate: number | null;
   temporalSpreadDays: number | null;
+  temporalAlignment: number | null;
 }
 
 /**
@@ -423,6 +424,7 @@ export function curationConfigTable(results: readonly JoinedEvalResultRow[]): Cu
     push(acc, "nearDupRate", num(m.nearDupRate));
     push(acc, "deadRowRate", num(m.deadRowRate));
     push(acc, "temporalSpreadDays", num(temporal.kept));
+    push(acc, "temporalAlignment", num(m.temporalAlignment));
     by.set(configId, acc);
   }
 
@@ -439,6 +441,7 @@ export function curationConfigTable(results: readonly JoinedEvalResultRow[]): Cu
       nearDupRate: mean(a.cols.nearDupRate ?? []),
       deadRowRate: mean(a.cols.deadRowRate ?? []),
       temporalSpreadDays: mean(a.cols.temporalSpreadDays ?? []),
+      temporalAlignment: mean(a.cols.temporalAlignment ?? []),
     }))
     .sort(
       (x, y) =>
