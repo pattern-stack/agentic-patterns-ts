@@ -27,7 +27,11 @@ export { ollamaProvider } from "./ollama.js";
 // Max subscription users can feed Claude through AgentRunner like any
 // other @ai-sdk/* provider with full event vocabulary.
 export { claudeCode, ClaudeCodeLanguageModel } from "./claude-code.js";
-export type { ClaudeCodeProviderOptions } from "./claude-code.js";
+export type {
+  CCSessionDebugEvent,
+  ClaudeCodeProviderOptions,
+  SessionStrategy,
+} from "./claude-code.js";
 
 import { anthropicProvider } from "./anthropic.js";
 import { deepseekProvider } from "./deepseek.js";

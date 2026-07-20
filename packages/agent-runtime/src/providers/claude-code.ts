@@ -12,20 +12,34 @@
  * `iteration.end`, `llm.end`, …) fires automatically — closing the
  * observability gap those runners have.
  *
- * Each `doGenerate` / `doStream` call runs a fresh single-turn SDK query:
+ * ## Tool interception: `deferred_tool_use`, not `canUseTool`
  *
- *   1. System prompt + conversation history (including prior tool
- *      use / tool result parts) is flattened to a string prompt.
- *   2. Tool schemas are registered as MCP tools on an in-process server.
- *   3. `canUseTool` intercepts tool invocations, records them, and denies
- *      with `interrupt: true` so the SDK stops immediately. The recorded
- *      tool calls are surfaced in the LanguageModelV2 response as
- *      `tool-call` content parts.
- *   4. SDK assistant / result messages are translated back to the
- *      LanguageModelV2 output shape (`content` parts, `finishReason`,
- *      `usage`).
- *   5. Claude-Code-native tools (Read/Write/Edit/Bash/…) are disallowed so
- *      only framework tools flow.
+ * The framework owns tool execution (AgentRunner's `toolExecutor`), so the
+ * provider must extract the model's tool call and hand control back rather
+ * than letting the SDK run the tool. It does this with a **`PreToolUse` hook
+ * returning `permissionDecision: "defer"`** (F-3;
+ * `.ai-docs/stacks/harness-runners/f3-deferred-tools.md`). Defer terminates
+ * the print-mode run *before the tool executes* and surfaces the call as
+ * `result.deferred_tool_use = { id, name, input }` — cleanly, with no denial
+ * written into history. This replaces the v1 `canUseTool` deny+`interrupt`
+ * hack, which recorded a *denial* in the transcript and so made SDK session
+ * resume desynchronize.
+ *
+ * ## Session economics (Axis A-2): two strategies
+ *
+ *   - **`deferred`** (default via `"auto"`): a single CC session is kept alive
+ *     across tool-loop iterations. Turn 1 runs a fresh `query()` and captures
+ *     the `session_id`; each later `doGenerate` parks the framework tool
+ *     result where a host-controlled **stdio MCP shim** (`cc-shim.ts`) serves
+ *     it, then `options.resume`s the session — append-only, prompt-cache
+ *     friendly, ≤1 subprocess per LLM turn. See `cc-session.ts`.
+ *   - **`flatten`** (v1 fallback, auto-selected when defer is unavailable):
+ *     every `doGenerate` re-flattens the whole history into a string prompt
+ *     and runs a fresh single-turn `query()` against an in-process SDK MCP
+ *     server. Correct but re-sends the transcript each turn.
+ *
+ * Claude-Code-native tools (Read/Write/Edit/Bash/…) are disallowed so only
+ * framework tools flow.
  */
 
 import type {
@@ -36,11 +50,10 @@ import type {
   LanguageModelV2FunctionTool,
   LanguageModelV2Prompt,
   LanguageModelV2StreamPart,
-  LanguageModelV2ToolCall,
 } from "@ai-sdk/provider";
 import {
   type McpSdkServerConfigWithInstance,
-  type PermissionResult,
+  type PreToolUseHookInput,
   type Options as SDKOptions,
   createSdkMcpServer,
   query,
@@ -56,6 +69,20 @@ import {
   removeIsolatedConfigDir,
   resolveOAuthToken,
 } from "../runner/cc-config.js";
+import {
+  DEFAULT_SESSION_TTL_MS,
+  SessionCache,
+  type SessionEntry,
+  conversationIdentity,
+  findPendingToolResult,
+} from "./cc-session.js";
+import {
+  FRAMEWORK_SERVER,
+  createShim,
+  disposeShim,
+  parkResult,
+  writeShimSchemas,
+} from "./cc-shim.js";
 
 // ---------------------------------------------------------------------------
 // Model name mapping
@@ -98,6 +125,37 @@ const BLOCKED_BUILTIN_TOOLS: readonly string[] = [
 // Provider options
 // ---------------------------------------------------------------------------
 
+/**
+ * How the provider spends CC subprocesses across an AgentRunner tool loop.
+ *
+ *   - `"auto"` (default): use `deferred` when the SDK/CLI supports it, and
+ *     degrade to `flatten` on any contradiction at runtime (poisoned resume,
+ *     shim spawn failure). Best of both — session economy where it works,
+ *     correctness always.
+ *   - `"deferred"`: force the session-resume path (opt-in; surfaces defer
+ *     failures instead of silently degrading).
+ *   - `"flatten"`: force the v1 stateless path (a fresh subprocess per turn).
+ */
+export type SessionStrategy = "auto" | "deferred" | "flatten";
+
+/**
+ * One-per-`doGenerate` observability event describing the session path taken.
+ * Emitted to `ClaudeCodeProviderOptions.onDebug` when provided — the seam used
+ * to verify session economics (≤1 subprocess per turn; append-only session):
+ * a `resume` whose `resumeOf` equals the prior turn's `sessionId` proves the
+ * CC session was continued, not re-spawned.
+ */
+export interface CCSessionDebugEvent {
+  /** Which path this turn ran. */
+  readonly phase: "fresh" | "resume" | "flatten";
+  /** CC `session_id` this turn used (stable across an append-only run). */
+  readonly sessionId: string | null;
+  /** For `resume`, the session id being resumed (equals a prior `sessionId`). */
+  readonly resumeOf: string | null;
+  /** The deferred `tool_use_id` this turn handed back, if any. */
+  readonly deferredId: string | null;
+}
+
 export interface ClaudeCodeProviderOptions {
   /** Defaults merged with every SDK query call. */
   defaults?: Partial<SDKOptions>;
@@ -106,14 +164,24 @@ export interface ClaudeCodeProviderOptions {
   /**
    * Max turns inside the SDK loop. Default: 10.
    *
-   * Within one `doGenerate`, Claude may emit prose-only on its first turn
-   * and produce a tool call on a later turn. `canUseTool` aborts on the
-   * first tool call regardless, so this only needs to be generous enough
-   * to allow "plan-then-tool" sequences. A too-low value causes the SDK
-   * to throw `Reached maximum number of turns` before Claude reaches any
-   * tool call.
+   * Within one `doGenerate`, Claude may emit prose-only on its first turn and
+   * produce a tool call on a later turn. The `PreToolUse` defer hook aborts on
+   * the first tool call regardless, so this only needs to be generous enough
+   * to allow "plan-then-tool" sequences. A too-low value causes the SDK to
+   * throw `Reached maximum number of turns` before Claude reaches any tool
+   * call.
    */
   maxTurns?: number;
+  /**
+   * Session economics strategy (Axis A-2). Default: `"auto"`.
+   * @see SessionStrategy
+   */
+  sessionStrategy?: SessionStrategy;
+  /**
+   * Idle TTL (ms) for cached `deferred`-strategy sessions. A session untouched
+   * this long is evicted and its shim child process torn down. Default: 5 min.
+   */
+  sessionTtlMs?: number;
   /**
    * Config source (Axis B). Defaults to `{ mode: "isolated" }`.
    *
@@ -129,9 +197,16 @@ export interface ClaudeCodeProviderOptions {
    * OAuth token source for isolated mode. Falls back to the
    * `CLAUDE_CODE_OAUTH_TOKEN` env var, then the macOS Keychain. In isolated
    * mode a token from one of those three sources is REQUIRED — construction
-   * fails closed when none resolves (see the constructor).
+   * fails closed when none resolves (see the constructor). Re-resolved per
+   * session so a thunk / rotated token is honored (not frozen at construction).
    */
   oauthToken?: OAuthTokenSource;
+  /**
+   * Optional per-`doGenerate` observability hook (see {@link CCSessionDebugEvent}).
+   * No-op by default; used to verify session economics. Never throws into the
+   * caller — a throwing handler is swallowed.
+   */
+  onDebug?: (event: CCSessionDebugEvent) => void;
 }
 
 /**
@@ -179,7 +254,8 @@ function stringifyValue(v: unknown): string {
  * Render non-system conversation messages into a single user-facing prompt
  * string. Tool call / tool result parts are rendered inline as tagged
  * blocks so Claude understands the history without requiring SDK session
- * resume support.
+ * resume support. Used by the `flatten` strategy and by the first (fresh)
+ * turn of the `deferred` strategy.
  */
 function renderConversation(prompt: LanguageModelV2Prompt): string {
   const parts: string[] = [];
@@ -260,19 +336,16 @@ function renderToolOutput(
 }
 
 // ---------------------------------------------------------------------------
-// Tools → MCP server
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // JSON Schema → Zod (just enough to round-trip the tool param schemas)
 //
 // The provider sits at the LanguageModelV2 boundary, where the AI SDK has
 // already projected each tool to JSON Schema (the original Zod is gone). But the
 // Agent SDK's tool() helper only accepts a ZodRawShape — so we rebuild one from
-// `inputSchema`. Without it Claude sees NO parameter types and serializes nested
-// objects (filter/rank_by) as strings → the real tool's Zod rejects them. We only
-// need enough for Claude to form valid calls; the framework's real tool does the
-// authoritative validation after canUseTool hands execution back to AgentRunner.
+// `inputSchema` for the in-process (flatten) server. Without it Claude sees NO
+// parameter types and serializes nested objects (filter/rank_by) as strings →
+// the real tool's Zod rejects them. We only need enough for Claude to form valid
+// calls; the framework's real tool does the authoritative validation after the
+// deferred call hands execution back to AgentRunner.
 // ---------------------------------------------------------------------------
 
 type JsonSchemaNode = Record<string, unknown>;
@@ -331,12 +404,13 @@ function jsonSchemaToZodShape(schema: unknown): Record<string, z.ZodTypeAny> {
   return objectShape(root, root);
 }
 
-const FRAMEWORK_SERVER = "agent_runner_tools";
-
 /**
- * Build an in-process MCP server that exposes each LanguageModelV2 function
- * tool. The handlers never actually execute — `canUseTool` intercepts first
- * and aborts. They're still installed so Claude sees real tool schemas.
+ * Build an in-process MCP server exposing each LanguageModelV2 function tool,
+ * used by the `flatten` strategy and by `doStream`. The handlers never run —
+ * the `PreToolUse` defer hook aborts before any handler is reached — they're
+ * installed only so Claude sees real tool schemas. (The `deferred` strategy
+ * uses the stdio shim in `cc-shim.ts` instead, because the in-process server
+ * is not resumable; see F-3.)
  */
 function buildToolsServer(tools: ReadonlyArray<LanguageModelV2FunctionTool>):
   | {
@@ -347,11 +421,8 @@ function buildToolsServer(tools: ReadonlyArray<LanguageModelV2FunctionTool>):
   if (tools.length === 0) return undefined;
 
   const sdkTools = tools.map((t) =>
-    // Rebuild a ZodRawShape from the tool's JSON Schema so Claude sees the real
-    // parameter types (the SDK's tool() only accepts Zod). canUseTool still
-    // records the actual call + denies, handing execution back to AgentRunner.
     sdkTool(t.name, t.description ?? "", jsonSchemaToZodShape(t.inputSchema), async () => {
-      // Never reached — canUseTool aborts before handler runs.
+      // Never reached — the defer hook aborts before the handler runs.
       return {
         content: [{ type: "text" as const, text: "__AGENT_RUNNER_INTERCEPTED__" }],
       };
@@ -380,14 +451,197 @@ function normalizeToolName(sdkToolName: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// ClaudeCodeLanguageModel
+// Defer hook
 // ---------------------------------------------------------------------------
 
-interface PendingToolCall {
-  readonly toolCallId: string;
-  readonly toolName: string;
-  readonly args: Record<string, unknown>;
+/**
+ * Build the `PreToolUse` hook that drives tool interception.
+ *
+ *   - Fresh turns (`allowId = null`): **defer every call** — the SDK ends the
+ *     run and surfaces the single call as `result.deferred_tool_use`.
+ *   - Resumed turns (`allowId = <pending tool_use_id>`): **allow exactly that
+ *     call** so the stdio shim executes it and serves the host-parked result;
+ *     defer any *new* call the model then makes (it becomes the next deferred
+ *     hand-back). Without the allow, resume would re-defer the pending call and
+ *     never consume the parked result (F-3: defer re-chaining on resume).
+ */
+function makeDeferHook(allowId: string | null): NonNullable<SDKOptions["hooks"]> {
+  return {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input): Promise<{ hookSpecificOutput: PreToolUseHookSpecificOutputShape }> => {
+            const toolUseId = (input as PreToolUseHookInput).tool_use_id;
+            if (allowId && toolUseId === allowId) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "allow",
+                  permissionDecisionReason: "host-parked framework tool result",
+                },
+              };
+            }
+            return {
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "defer",
+                permissionDecisionReason: "handed back to AgentRunner",
+              },
+            };
+          },
+        ],
+      },
+    ],
+  };
 }
+
+interface PreToolUseHookSpecificOutputShape {
+  hookEventName: "PreToolUse";
+  permissionDecision: "allow" | "defer";
+  permissionDecisionReason: string;
+}
+
+// ---------------------------------------------------------------------------
+// Query execution
+// ---------------------------------------------------------------------------
+
+interface DeferredCall {
+  readonly id: string;
+  readonly name: string;
+  readonly input: Record<string, unknown>;
+}
+
+interface QueryOutcome {
+  readonly text: string;
+  /** The single deferred call this turn produced, if any (normalized name). */
+  readonly deferred: DeferredCall | null;
+  /** CC `session_id` observed (from init and/or the result message). */
+  readonly sessionId: string | null;
+  readonly isError: boolean;
+  readonly stopReason: string | null;
+  readonly terminalReason: string | null;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+/**
+ * Run one `query()` to its first `result` message and translate it.
+ *
+ * Junk-turn guard (F-3): on resume with an empty prompt the CLI synthesizes a
+ * "Continue…" turn *after* the genuine continuation. We consume the first
+ * result (the real one) and stop iterating; a best-effort `interrupt()` closes
+ * the subprocess so no spurious extra turn runs.
+ */
+async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<QueryOutcome> {
+  const textParts: string[] = [];
+  let deferred: DeferredCall | null = null;
+  let sessionId: string | null = null;
+  let isError = false;
+  let stopReason: string | null = null;
+  let terminalReason: string | null = null;
+  let inputTokens = 0;
+  let outputTokens = 0;
+
+  const q = query({ prompt: promptString, options: sdkOptions });
+  try {
+    for await (const msg of q) {
+      const m = msg as Record<string, unknown>;
+      const type = m.type;
+      if (type === "system" && m.subtype === "init" && typeof m.session_id === "string") {
+        sessionId = m.session_id;
+      } else if (type === "assistant" && "message" in m) {
+        const content = (m.message as { content?: unknown[] } | undefined)?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (
+              block &&
+              typeof block === "object" &&
+              "text" in block &&
+              typeof (block as { text: unknown }).text === "string"
+            ) {
+              textParts.push((block as { text: string }).text);
+            }
+          }
+        }
+      } else if (type === "result") {
+        if (typeof m.session_id === "string") sessionId = m.session_id;
+        const usage = m.usage as Record<string, number> | undefined;
+        if (usage) {
+          inputTokens = usage.input_tokens ?? 0;
+          outputTokens = usage.output_tokens ?? 0;
+        }
+        if (typeof m.stop_reason === "string") stopReason = m.stop_reason;
+        if (typeof m.terminal_reason === "string") terminalReason = m.terminal_reason;
+        isError = m.is_error === true;
+        const dtu = m.deferred_tool_use as
+          | { id?: unknown; name?: unknown; input?: unknown }
+          | undefined;
+        if (dtu && typeof dtu.id === "string" && typeof dtu.name === "string") {
+          deferred = {
+            id: dtu.id,
+            name: normalizeToolName(dtu.name),
+            input: (dtu.input as Record<string, unknown> | undefined) ?? {},
+          };
+        }
+        // First result is terminal for this turn — stop consuming.
+        break;
+      }
+    }
+  } finally {
+    const maybeInterrupt = (q as { interrupt?: () => Promise<unknown> }).interrupt;
+    if (typeof maybeInterrupt === "function") {
+      try {
+        await maybeInterrupt.call(q);
+      } catch {
+        // interrupt() is only effective on streaming input; ignore otherwise.
+      }
+    }
+  }
+
+  return {
+    text: textParts.join(""),
+    deferred,
+    sessionId,
+    isError,
+    stopReason,
+    terminalReason,
+    inputTokens,
+    outputTokens,
+  };
+}
+
+/** Translate a `QueryOutcome` into a v5 `doGenerate` return value. */
+function buildGenerateResult(
+  out: QueryOutcome,
+): Awaited<ReturnType<LanguageModelV2["doGenerate"]>> {
+  const content: LanguageModelV2Content[] = [];
+  if (out.text.length > 0) content.push({ type: "text", text: out.text });
+  if (out.deferred) {
+    content.push({
+      type: "tool-call",
+      toolCallId: out.deferred.id,
+      toolName: out.deferred.name,
+      input: JSON.stringify(out.deferred.input),
+    });
+  }
+  return {
+    content,
+    finishReason: deriveFinishReason({
+      hasToolCalls: out.deferred !== null,
+      sdkStopReason: out.stopReason,
+    }),
+    usage: {
+      inputTokens: out.inputTokens,
+      outputTokens: out.outputTokens,
+      totalTokens: out.inputTokens + out.outputTokens,
+    },
+    warnings: [],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ClaudeCodeLanguageModel
+// ---------------------------------------------------------------------------
 
 export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   readonly specificationVersion = "v2" as const;
@@ -403,10 +657,15 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   private readonly _opts: ClaudeCodeProviderOptions;
   private readonly _config: CCConfigSource;
   private readonly _oauthToken: OAuthTokenSource | undefined;
+  private readonly _sessionStrategy: SessionStrategy;
   /** Isolated CLAUDE_CONFIG_DIR created at construction; null in host mode. */
   private readonly _isolatedConfigDir: string | null;
-  /** Token resolved once at construction for isolated mode; null in host mode. */
-  private readonly _isolatedToken: string | null;
+  /** Token resolved once at construction (fail-closed); re-resolved per call. */
+  private readonly _isolatedTokenAtConstruction: string | null;
+  /** Live CC sessions for the `deferred` strategy. */
+  private readonly _sessions: SessionCache;
+  /** Set once "auto" hits a defer contradiction — sticks to flatten thereafter. */
+  private _degradedToFlatten = false;
   private _disposed = false;
 
   constructor(modelId: string, opts: ClaudeCodeProviderOptions = {}) {
@@ -414,6 +673,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
     this._opts = opts;
     this._config = opts.config ?? { mode: "isolated" };
     this._oauthToken = opts.oauthToken;
+    this._sessionStrategy = opts.sessionStrategy ?? "auto";
+    this._sessions = new SessionCache(opts.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS);
 
     if (this._config.mode === "isolated") {
       // Fail closed (D11): resolve the token BEFORE creating the tmpdir so the
@@ -423,24 +684,24 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
       if (!token) {
         throw new Error(ISOLATED_NO_TOKEN_MESSAGE);
       }
-      this._isolatedToken = token;
+      this._isolatedTokenAtConstruction = token;
       this._isolatedConfigDir = createIsolatedConfigDir(this._config.profile);
     } else {
-      this._isolatedToken = null;
+      this._isolatedTokenAtConstruction = null;
       this._isolatedConfigDir = null;
     }
   }
 
   /**
-   * Remove the isolated CLAUDE_CONFIG_DIR created for this provider, if any.
-   * The dir is created once at construction and reused across every
-   * `doGenerate` / `doStream` call, so a provider you no longer need should
-   * be disposed to avoid leaking tmpdirs. Idempotent, and a no-op for
-   * host-mode providers. Mirrors `ClaudeCodeRunner.dispose()`.
+   * Tear down every live `deferred`-strategy session (shim children + tmpdirs)
+   * and remove the isolated CLAUDE_CONFIG_DIR, if any. Idempotent, and a no-op
+   * for host-mode providers with no open sessions. Dispose a provider you no
+   * longer need so it does not leak subprocesses or tmpdirs.
    */
   dispose(): void {
     if (this._disposed) return;
     this._disposed = true;
+    this._sessions.disposeAll();
     if (this._isolatedConfigDir) {
       removeIsolatedConfigDir(this._isolatedConfigDir);
     }
@@ -457,83 +718,187 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   private async _doGenerate(
     options: LanguageModelV2CallOptions,
   ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
-    const { systemPrompt, promptString, sdkOptions, captured } = this._prepare(options);
-
-    const textParts: string[] = [];
-    let inputTokens = 0;
-    let outputTokens = 0;
-    let sdkStopReason: string | null = null;
-
+    if (this._resolveStrategy() === "flatten") {
+      return this._flattenGenerate(options);
+    }
     try {
-      for await (const msg of query({
-        prompt: promptString,
-        options: { ...sdkOptions, systemPrompt },
-      })) {
-        if (msg.type === "assistant" && "message" in msg) {
-          const content = msg.message?.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if (
-                block &&
-                typeof block === "object" &&
-                "text" in block &&
-                typeof block.text === "string"
-              ) {
-                textParts.push(block.text);
-              }
-            }
-          }
-        } else if (msg.type === "result") {
-          const m = msg as Record<string, unknown>;
-          const usage = m.usage as Record<string, number> | undefined;
-          if (usage) {
-            inputTokens = usage.input_tokens ?? 0;
-            outputTokens = usage.output_tokens ?? 0;
-          }
-          if (typeof m.stop_reason === "string") {
-            sdkStopReason = m.stop_reason;
-          }
-        }
-      }
+      return await this._deferGenerate(options);
     } catch (err) {
-      // `canUseTool` may throw `AbortError` when we interrupt. If we have
-      // captured tool calls, that's a successful short-circuit — fall
-      // through. Otherwise rethrow.
-      if (captured.toolCalls.length === 0) throw err;
+      // Unexpected defer failure (shim spawn, SDK resolution). In "auto",
+      // degrade permanently and fall back; explicit "deferred" surfaces it.
+      if (this._sessionStrategy === "auto") {
+        this._degradedToFlatten = true;
+        return this._flattenGenerate(options);
+      }
+      throw err;
     }
+  }
 
-    const text = textParts.join("");
-
-    // v5 output is an ordered `content` parts array (was top-level
-    // text/toolCalls). Tool-call `input` is a stringified JSON object.
-    const content: LanguageModelV2Content[] = [];
-    if (text.length > 0) {
-      content.push({ type: "text" as const, text });
-    }
-    for (const tc of captured.toolCalls) {
-      content.push({
-        type: "tool-call" as const,
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        input: JSON.stringify(tc.args),
-      });
-    }
-
-    const finishReason = deriveFinishReason({
-      hasToolCalls: captured.toolCalls.length > 0,
-      sdkStopReason,
-    });
-
-    return {
-      content,
-      finishReason,
-      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
-      warnings: [],
-    };
+  /** `"deferred"`/`"auto"` → attempt defer; `"flatten"` or degraded → flatten. */
+  private _resolveStrategy(): "deferred" | "flatten" {
+    if (this._sessionStrategy === "flatten") return "flatten";
+    if (this._degradedToFlatten) return "flatten";
+    return "deferred";
   }
 
   // -------------------------------------------------------------------------
-  // doStream
+  // deferred strategy — one CC session across the tool loop
+  // -------------------------------------------------------------------------
+
+  private async _deferGenerate(
+    options: LanguageModelV2CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    const systemPrompt = extractSystemPrompt(options.prompt);
+    const fnTools = extractFunctionTools(options);
+    const identity = conversationIdentity(
+      systemPrompt,
+      options.prompt,
+      fnTools.map((t) => t.name),
+    );
+    const session = this._sessions.get(identity);
+    const pendingResult = findPendingToolResult(options.prompt, session?.pendingDeferredId ?? null);
+
+    if (session?.pendingDeferredId && pendingResult) {
+      return this._deferResume(options, identity, session, pendingResult, fnTools, systemPrompt);
+    }
+    return this._deferFresh(options, identity, fnTools, systemPrompt);
+  }
+
+  /** First turn of a conversation: fresh session, capture `session_id`. */
+  private async _deferFresh(
+    options: LanguageModelV2CallOptions,
+    identity: string,
+    fnTools: LanguageModelV2FunctionTool[],
+    systemPrompt: string | undefined,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    if (fnTools.length === 0) {
+      // Nothing to keep a session for — a plain single-turn flatten suffices.
+      return this._flattenGenerate(options);
+    }
+    const shim = createShim(fnTools, this._stringEnv());
+    const sdkOptions = this._baseSdkOptions();
+    sdkOptions.systemPrompt = systemPrompt;
+    sdkOptions.mcpServers = shim.mcpServers;
+    sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...shim.allowedTools];
+    sdkOptions.hooks = makeDeferHook(null);
+
+    const promptString = renderConversation(options.prompt) || " ";
+    const out = await runQuery(promptString, sdkOptions);
+
+    if (!out.sessionId) {
+      // Never learned a session id — cannot resume later; drop the shim and
+      // treat this turn's output as-is (flatten will run next turn).
+      disposeShim(shim.storeDir);
+      return buildGenerateResult(out);
+    }
+
+    const entry: SessionEntry = {
+      sessionId: out.sessionId,
+      shim,
+      pendingDeferredId: out.deferred?.id ?? null,
+      lastSeenAt: Date.now(),
+    };
+    this._sessions.set(identity, entry);
+    this._emitDebug({
+      phase: "fresh",
+      sessionId: out.sessionId,
+      resumeOf: null,
+      deferredId: out.deferred?.id ?? null,
+    });
+    return buildGenerateResult(out);
+  }
+
+  /** Later turn: park the tool result and resume the live session. */
+  private async _deferResume(
+    options: LanguageModelV2CallOptions,
+    identity: string,
+    session: SessionEntry,
+    pendingResult: NonNullable<ReturnType<typeof findPendingToolResult>>,
+    fnTools: LanguageModelV2FunctionTool[],
+    systemPrompt: string | undefined,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    // Park the framework's real result where the shim will serve it, and keep
+    // the advertised schemas current (tool set can shift between turns).
+    parkResult(session.shim.resultFile, pendingResult);
+    writeShimSchemas(session.shim.schemasFile, fnTools);
+
+    const sdkOptions = this._baseSdkOptions();
+    sdkOptions.systemPrompt = systemPrompt;
+    sdkOptions.mcpServers = session.shim.mcpServers;
+    sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...session.shim.allowedTools];
+    sdkOptions.hooks = makeDeferHook(session.pendingDeferredId);
+    sdkOptions.resume = session.sessionId;
+
+    // Empty resume prompt: the parked tool result drives the continuation.
+    const out = await runQuery("", sdkOptions);
+
+    if (out.isError || out.terminalReason === "tool_deferred_unavailable") {
+      // Poisoned-call guard (F-3): the deferred state was consumed by a failed
+      // availability check. Drop the session and recover this turn via flatten
+      // (the full history is still in the prompt, so correctness holds).
+      this._sessions.delete(identity);
+      if (this._sessionStrategy === "auto") this._degradedToFlatten = true;
+      return this._flattenGenerate(options);
+    }
+
+    // Advance the session: the next pending call (if any) is this turn's
+    // deferred hand-back; a terminal turn clears it.
+    session.pendingDeferredId = out.deferred?.id ?? null;
+    this._sessions.set(identity, session);
+    this._emitDebug({
+      phase: "resume",
+      sessionId: out.sessionId ?? session.sessionId,
+      resumeOf: session.sessionId,
+      deferredId: out.deferred?.id ?? null,
+    });
+    return buildGenerateResult(out);
+  }
+
+  // -------------------------------------------------------------------------
+  // flatten strategy — v1 stateless path (a fresh subprocess per turn)
+  // -------------------------------------------------------------------------
+
+  private async _flattenGenerate(
+    options: LanguageModelV2CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    const systemPrompt = extractSystemPrompt(options.prompt);
+    const fnTools = extractFunctionTools(options);
+    const sdkOptions = this._baseSdkOptions();
+    sdkOptions.systemPrompt = systemPrompt;
+    sdkOptions.hooks = makeDeferHook(null);
+
+    const built = buildToolsServer(fnTools);
+    if (built) {
+      sdkOptions.mcpServers = {
+        ...(sdkOptions.mcpServers ?? {}),
+        [FRAMEWORK_SERVER]: built.server,
+      } as SDKOptions["mcpServers"];
+      sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...built.allowedTools];
+    }
+
+    const promptString = renderConversation(options.prompt) || " ";
+    const out = await runQuery(promptString, sdkOptions);
+    this._emitDebug({
+      phase: "flatten",
+      sessionId: out.sessionId,
+      resumeOf: null,
+      deferredId: out.deferred?.id ?? null,
+    });
+    return buildGenerateResult(out);
+  }
+
+  private _emitDebug(event: CCSessionDebugEvent): void {
+    const onDebug = this._opts.onDebug;
+    if (!onDebug) return;
+    try {
+      onDebug(event);
+    } catch {
+      // Observability must never break a generation.
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // doStream — single-turn stream (flatten-style; no session resume)
   // -------------------------------------------------------------------------
 
   doStream(options: LanguageModelV2CallOptions): ReturnType<LanguageModelV2["doStream"]> {
@@ -543,15 +908,29 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   private async _doStream(
     options: LanguageModelV2CallOptions,
   ): Promise<Awaited<ReturnType<LanguageModelV2["doStream"]>>> {
-    const { systemPrompt, promptString, sdkOptions, captured } = this._prepare(options);
-    // v5 text deltas are grouped by a stable `id` between text-start/text-end.
-    const textId = "text-0";
+    const systemPrompt = extractSystemPrompt(options.prompt);
+    const fnTools = extractFunctionTools(options);
+    const promptString = renderConversation(options.prompt) || " ";
 
+    const sdkOptions = this._baseSdkOptions();
+    sdkOptions.systemPrompt = systemPrompt;
+    sdkOptions.hooks = makeDeferHook(null);
+    const built = buildToolsServer(fnTools);
+    if (built) {
+      sdkOptions.mcpServers = {
+        ...(sdkOptions.mcpServers ?? {}),
+        [FRAMEWORK_SERVER]: built.server,
+      } as SDKOptions["mcpServers"];
+      sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...built.allowedTools];
+    }
+
+    const textId = "text-0";
     const stream = new ReadableStream<LanguageModelV2StreamPart>({
       start: async (controller) => {
         let inputTokens = 0;
         let outputTokens = 0;
         let sdkStopReason: string | null = null;
+        let deferred: DeferredCall | null = null;
         const emittedTextChunks = new Set<number>();
         const textBuffer: string[] = [];
         let textStarted = false;
@@ -562,32 +941,32 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
           }
         };
 
-        // v5 requires a leading `stream-start` carrying any warnings.
         controller.enqueue({ type: "stream-start", warnings: [] });
 
+        const q = query({
+          prompt: promptString,
+          options: { ...sdkOptions, includePartialMessages: true },
+        });
         try {
-          for await (const msg of query({
-            prompt: promptString,
-            options: { ...sdkOptions, systemPrompt, includePartialMessages: true },
-          })) {
-            const msgType = (msg as { type?: string }).type;
-            if (msgType === "stream_event" && "event" in msg) {
-              const maybe = msg as { event?: { delta?: { text?: string } } };
-              const delta = maybe.event?.delta?.text;
+          for await (const msg of q) {
+            const m = msg as Record<string, unknown>;
+            const type = m.type;
+            if (type === "stream_event" && "event" in m) {
+              const delta = (m as { event?: { delta?: { text?: string } } }).event?.delta?.text;
               if (delta) {
                 textBuffer.push(delta);
                 startText();
                 controller.enqueue({ type: "text-delta", id: textId, delta });
               }
-            } else if (msgType === "assistant" && "message" in msg) {
-              const content = (msg as { message?: { content?: unknown[] } }).message?.content;
+            } else if (type === "assistant" && "message" in m) {
+              const content = (m.message as { content?: unknown[] } | undefined)?.content;
               if (Array.isArray(content)) {
                 let idx = 0;
                 for (const block of content) {
                   if (
                     block &&
                     typeof block === "object" &&
-                    "text" in (block as Record<string, unknown>) &&
+                    "text" in block &&
                     typeof (block as { text: unknown }).text === "string"
                   ) {
                     if (textBuffer.length === 0 && !emittedTextChunks.has(idx)) {
@@ -603,45 +982,56 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
                   idx++;
                 }
               }
-            } else if (msgType === "result") {
-              const m = msg as Record<string, unknown>;
+            } else if (type === "result") {
               const usage = m.usage as Record<string, number> | undefined;
               if (usage) {
                 inputTokens = usage.input_tokens ?? 0;
                 outputTokens = usage.output_tokens ?? 0;
               }
               if (typeof m.stop_reason === "string") sdkStopReason = m.stop_reason;
+              const dtu = m.deferred_tool_use as
+                | { id?: unknown; name?: unknown; input?: unknown }
+                | undefined;
+              if (dtu && typeof dtu.id === "string" && typeof dtu.name === "string") {
+                deferred = {
+                  id: dtu.id,
+                  name: normalizeToolName(dtu.name),
+                  input: (dtu.input as Record<string, unknown> | undefined) ?? {},
+                };
+              }
+              break;
             }
           }
         } catch (err) {
-          if (captured.toolCalls.length === 0) {
-            controller.enqueue({ type: "error", error: err });
-            controller.close();
-            return;
+          controller.enqueue({ type: "error", error: err });
+          controller.close();
+          return;
+        } finally {
+          const maybeInterrupt = (q as { interrupt?: () => Promise<unknown> }).interrupt;
+          if (typeof maybeInterrupt === "function") {
+            try {
+              await maybeInterrupt.call(q);
+            } catch {
+              // ignore — streaming-input only
+            }
           }
         }
 
         if (textStarted) {
           controller.enqueue({ type: "text-end", id: textId });
         }
-
-        for (const tc of captured.toolCalls) {
+        if (deferred) {
           controller.enqueue({
             type: "tool-call",
-            toolCallId: tc.toolCallId,
-            toolName: tc.toolName,
-            input: JSON.stringify(tc.args),
-          } satisfies LanguageModelV2ToolCall & { type: "tool-call" });
+            toolCallId: deferred.id,
+            toolName: deferred.name,
+            input: JSON.stringify(deferred.input),
+          });
         }
-
-        const finishReason = deriveFinishReason({
-          hasToolCalls: captured.toolCalls.length > 0,
-          sdkStopReason,
-        });
 
         controller.enqueue({
           type: "finish",
-          finishReason,
+          finishReason: deriveFinishReason({ hasToolCalls: deferred !== null, sdkStopReason }),
           usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
         });
         controller.close();
@@ -656,69 +1046,17 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   }
 
   // -------------------------------------------------------------------------
-  // Internal — build SDK options + prompt string for a call
+  // Internal — shared SDK option assembly
   // -------------------------------------------------------------------------
 
-  private _prepare(options: LanguageModelV2CallOptions): {
-    systemPrompt: string | undefined;
-    promptString: string;
-    sdkOptions: SDKOptions;
-    captured: { toolCalls: PendingToolCall[] };
-  } {
-    const systemPrompt = extractSystemPrompt(options.prompt);
-    const promptString = renderConversation(options.prompt) || " ";
-
-    // v5 lifts tools to the top-level `options.tools` array (was
-    // `options.mode.tools`). We only handle plain function tools.
-    const fnTools: LanguageModelV2FunctionTool[] = [];
-    if (options.tools) {
-      for (const t of options.tools) {
-        if (t.type === "function") fnTools.push(t);
-      }
-    }
-
-    const captured: { toolCalls: PendingToolCall[] } = { toolCalls: [] };
-
-    const canUseTool: SDKOptions["canUseTool"] = async (
-      toolName: string,
-      input: Record<string, unknown>,
-      ctx: { toolUseID: string },
-    ): Promise<PermissionResult> => {
-      const normalized = normalizeToolName(toolName);
-      captured.toolCalls.push({
-        toolCallId: ctx.toolUseID,
-        toolName: normalized,
-        args: input,
-      });
-      return {
-        behavior: "deny",
-        message: "Tool call intercepted by AgentRunner",
-        interrupt: true,
-      };
-    };
-
+  /** Base SDK options common to every query: model, turns, isolation, blocks. */
+  private _baseSdkOptions(): SDKOptions {
     const sdkOptions: SDKOptions = {
       ...(this._opts.defaults ?? {}),
       model: mapModel(this.modelId) ?? this._opts.defaults?.model ?? this.modelId,
       maxTurns: this._opts.maxTurns ?? 10,
       permissionMode: "default",
-      canUseTool,
     };
-
-    const built = buildToolsServer(fnTools);
-    if (built) {
-      sdkOptions.mcpServers = {
-        ...(sdkOptions.mcpServers ?? {}),
-        [FRAMEWORK_SERVER]: built.server,
-      } as SDKOptions["mcpServers"];
-      // Do NOT add these to `allowedTools`. Under permissionMode:"default", a tool
-      // in `allowedTools` is PRE-APPROVED — the SDK auto-runs its MCP handler and
-      // never consults `canUseTool`. Our handler just returns the
-      // `__AGENT_RUNNER_INTERCEPTED__` placeholder, so the call would "succeed" with
-      // no data and never reach the framework's toolExecutor. Leaving the tools
-      // unlisted routes every call through `canUseTool` (deny + interrupt) — the
-      // intercept this provider depends on to hand execution back to AgentRunner.
-    }
 
     if (!this._opts.allowBuiltinTools) {
       sdkOptions.disallowedTools = [
@@ -727,15 +1065,48 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
       ];
     }
 
-    // Axis B — isolated config dir + injected OAuth (resolved fail-closed at
-    // construction). Redirects CLAUDE_CONFIG_DIR to strip host connectors /
-    // plugins / skills without breaking auth. Host mode injects nothing.
-    if (this._isolatedConfigDir && this._isolatedToken) {
-      applyIsolatedEnv(sdkOptions, this._isolatedConfigDir, this._isolatedToken);
+    // Axis B — isolated config dir + injected OAuth (re-resolved per call so a
+    // rotated / thunk token is honored — not frozen at construction).
+    if (this._isolatedConfigDir) {
+      const token = this._resolveIsolatedToken();
+      if (token) applyIsolatedEnv(sdkOptions, this._isolatedConfigDir, token);
     }
 
-    return { systemPrompt, promptString, sdkOptions, captured };
+    return sdkOptions;
   }
+
+  /**
+   * Re-resolve the isolated-mode OAuth token per call (A-1 review nit: don't
+   * freeze the token at construction). Falls back to the construction-time
+   * value that already satisfied fail-closed, so a transiently-empty thunk
+   * never breaks a call.
+   */
+  private _resolveIsolatedToken(): string | null {
+    if (!this._isolatedConfigDir) return null;
+    return resolveOAuthToken(this._oauthToken) ?? this._isolatedTokenAtConstruction;
+  }
+
+  /** Current process env as a `Record<string, string>` for the shim child. */
+  private _stringEnv(): Record<string, string> {
+    return Object.fromEntries(
+      Object.entries(process.env).filter(([, v]) => typeof v === "string") as [string, string][],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/** Pull the plain function tools out of the call options (drop provider tools). */
+function extractFunctionTools(options: LanguageModelV2CallOptions): LanguageModelV2FunctionTool[] {
+  const fnTools: LanguageModelV2FunctionTool[] = [];
+  if (options.tools) {
+    for (const t of options.tools) {
+      if (t.type === "function") fnTools.push(t);
+    }
+  }
+  return fnTools;
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +1125,7 @@ function deriveFinishReason(args: {
     case "max_tokens":
       return "length";
     case "tool_use":
+    case "tool_deferred":
       return "tool-calls";
     default:
       return "stop";
@@ -773,7 +1145,7 @@ function deriveFinishReason(args: {
  * the `CLAUDE_CODE_OAUTH_TOKEN` env var, or the macOS Keychain) and fails
  * closed at construction when none is available. Pass `config: { mode: "host" }`
  * to opt into the host config instead. Dispose the model when done to remove
- * the isolated tmpdir.
+ * the isolated tmpdir and tear down any live `deferred`-strategy sessions.
  *
  * @example
  * ```ts
