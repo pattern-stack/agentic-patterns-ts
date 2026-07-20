@@ -6,13 +6,18 @@
  * These are unit tests on the SDK options object — we don't spawn the
  * Claude Code subprocess. End-to-end verification requires a Max
  * subscription and is out of scope for unit tests.
+ *
+ * Since the API runner defaults to isolated config mode, and isolated mode
+ * now FAILS CLOSED on an unresolvable OAuth token (D11), every isolated
+ * probe here is constructed with an explicit token so `_buildOptions` is
+ * deterministic across platforms (no macOS Keychain dependency, no CI skip).
  */
 
 import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { ClaudeCodeAPIRunner } from "../claude-code-api-runner.js";
-import { ClaudeCodeRunner } from "../claude-code-runner.js";
+import { ClaudeCodeAPIRunner, type ClaudeCodeAPIRunnerOptions } from "../claude-code-api-runner.js";
+import { ClaudeCodeRunner, type ClaudeCodeRunnerOptions } from "../claude-code-runner.js";
 import type { AgentLikeForBridge } from "../sdk-bridge.js";
 
 // Subclasses that expose the protected _buildOptions for inspection.
@@ -34,6 +39,29 @@ class CCRunnerProbe extends ClaudeCodeRunner {
   }
 }
 
+const TOKEN = "test-oauth-token-1234567890";
+
+// Track isolated runners so their tmpdirs are cleaned up after each test.
+const tracked: ClaudeCodeRunner[] = [];
+function track<T extends ClaudeCodeRunner>(r: T): T {
+  tracked.push(r);
+  return r;
+}
+afterEach(() => {
+  for (const r of tracked) r.dispose();
+  tracked.length = 0;
+});
+
+/** Isolated API-runner probe with an explicit token (fail-closed safe). */
+function apiProbe(opts: ClaudeCodeAPIRunnerOptions = {}): APIRunnerProbe {
+  return track(new APIRunnerProbe({ oauthToken: TOKEN, ...opts }));
+}
+
+/** Base runner probe — host config mode by default (no token needed). */
+function ccProbe(opts: ClaudeCodeRunnerOptions = {}): CCRunnerProbe {
+  return track(new CCRunnerProbe(opts));
+}
+
 function makeAgent(overrides: Partial<AgentLikeForBridge> = {}): AgentLikeForBridge {
   return {
     role: { name: "test-agent", capabilities: [] },
@@ -46,8 +74,7 @@ function makeAgent(overrides: Partial<AgentLikeForBridge> = {}): AgentLikeForBri
 
 describe("ClaudeCodeAPIRunner", () => {
   it("replaces Claude Code's system prompt with the framework prompt", () => {
-    const runner = new APIRunnerProbe();
-    const opts = runner.publicBuildOptions(makeAgent());
+    const opts = apiProbe().publicBuildOptions(makeAgent());
 
     // Passing a string fully replaces the SDK default (per @anthropic-ai/
     // claude-agent-sdk type docs). If we wanted CC's prompt we'd pass
@@ -57,17 +84,16 @@ describe("ClaudeCodeAPIRunner", () => {
   });
 
   it("disables all Claude Code built-in tools via tools: []", () => {
-    const runner = new APIRunnerProbe();
-    const opts = runner.publicBuildOptions(makeAgent()) as SDKOptions & { tools?: string[] };
+    const opts = apiProbe().publicBuildOptions(makeAgent()) as SDKOptions & { tools?: string[] };
 
     expect(opts.tools).toEqual([]);
   });
 
   it("differs from base ClaudeCodeRunner only by tools: []", () => {
-    const apiOpts = new APIRunnerProbe().publicBuildOptions(makeAgent()) as SDKOptions & {
+    const apiOpts = apiProbe().publicBuildOptions(makeAgent()) as SDKOptions & {
       tools?: unknown;
     };
-    const ccOpts = new CCRunnerProbe().publicBuildOptions(makeAgent()) as SDKOptions & {
+    const ccOpts = ccProbe().publicBuildOptions(makeAgent()) as SDKOptions & {
       tools?: unknown;
     };
 
@@ -82,29 +108,24 @@ describe("ClaudeCodeAPIRunner", () => {
   it("does not impose a default disallowedTools list", () => {
     // Connectors are stripped via CLAUDE_CONFIG_DIR isolation, not
     // a disallowedTools enumeration.
-    const opts = new APIRunnerProbe().publicBuildOptions(makeAgent());
+    const opts = apiProbe().publicBuildOptions(makeAgent());
     expect(opts.disallowedTools).toBeUndefined();
   });
 
-  it("sandboxes by setting CLAUDE_CONFIG_DIR to an isolated tmpdir", () => {
-    const opts = new APIRunnerProbe().publicBuildOptions(makeAgent());
-    // env may be undefined on platforms where OAuth load fails — that's
-    // the documented fallback. On darwin with a logged-in user it's set.
-    if (process.platform === "darwin" && opts.env) {
-      expect(opts.env.CLAUDE_CONFIG_DIR).toBeDefined();
-      expect(opts.env.CLAUDE_CONFIG_DIR).toContain("ap-cc-cfg-");
-      expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN?.length ?? 0).toBeGreaterThan(20);
-    }
+  it("sandboxes by setting CLAUDE_CONFIG_DIR to an isolated tmpdir with the injected token", () => {
+    // With an explicit token this is deterministic on every platform — the
+    // fail-closed contract guarantees isolated env is always fully applied.
+    const opts = apiProbe().publicBuildOptions(makeAgent());
+    expect(opts.env?.CLAUDE_CONFIG_DIR).toBeDefined();
+    expect(opts.env?.CLAUDE_CONFIG_DIR).toContain("ap-cc-cfg-");
+    expect(opts.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe(TOKEN);
   });
 
   it("disables sandboxing when disableSandbox: true", () => {
-    class NoSandbox extends ClaudeCodeAPIRunner {
-      publicBuildOptions(agent: AgentLikeForBridge): SDKOptions {
-        return this._buildOptions(agent, undefined, { runId: "r", traceId: "t" });
-      }
-    }
-    const runner = new NoSandbox({ disableSandbox: true });
-    const opts = runner.publicBuildOptions(makeAgent());
+    // host config mode — no isolated dir, no token required.
+    const opts = track(new APIRunnerProbe({ disableSandbox: true })).publicBuildOptions(
+      makeAgent(),
+    );
     expect(opts.env?.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(opts.env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     // tools: [] still applies even without sandbox.
@@ -112,20 +133,14 @@ describe("ClaudeCodeAPIRunner", () => {
   });
 
   it("forwards extraDisallowedTools when provided", () => {
-    class WithExtras extends ClaudeCodeAPIRunner {
-      publicBuildOptions(agent: AgentLikeForBridge): SDKOptions {
-        return this._buildOptions(agent, undefined, { runId: "r", traceId: "t" });
-      }
-    }
-    const runner = new WithExtras({
+    const opts = apiProbe({
       extraDisallowedTools: ["mcp__claude_ai_Gmail", "mcp__weather__forecast"],
-    });
-    const opts = runner.publicBuildOptions(makeAgent());
+    }).publicBuildOptions(makeAgent());
     expect(opts.disallowedTools).toEqual(["mcp__claude_ai_Gmail", "mcp__weather__forecast"]);
   });
 
   it("maps Claude model names to the SDK model alias", () => {
-    const runner = new APIRunnerProbe();
+    const runner = apiProbe();
     expect(runner.publicBuildOptions(makeAgent({ getModel: () => "claude-opus-4-7" })).model).toBe(
       "opus",
     );
@@ -138,15 +153,13 @@ describe("ClaudeCodeAPIRunner", () => {
   });
 
   it("uses bypassPermissions mode (built-ins disabled, MCP tools allow-listed)", () => {
-    const runner = new APIRunnerProbe();
-    const opts = runner.publicBuildOptions(makeAgent());
+    const opts = apiProbe().publicBuildOptions(makeAgent());
     expect(opts.permissionMode).toBe("bypassPermissions");
     expect(opts.allowDangerouslySkipPermissions).toBe(true);
   });
 
   it("wires PreToolUse / PostToolUse hooks for the gate chain", () => {
-    const runner = new APIRunnerProbe();
-    const opts = runner.publicBuildOptions(makeAgent());
+    const opts = apiProbe().publicBuildOptions(makeAgent());
     expect(opts.hooks?.PreToolUse).toBeDefined();
     expect(opts.hooks?.PostToolUse).toBeDefined();
   });
