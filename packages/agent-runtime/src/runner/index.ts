@@ -39,3 +39,4 @@ export type {
   RunnerSelection,
   RunnerSource,
 } from "./create-runner.js";
+export * from "./harness/index.js";
