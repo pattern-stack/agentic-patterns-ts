@@ -26,7 +26,7 @@ import { type RunFamily, familyOf } from "./families/types";
 
 // pages never share code (playground-redesign.md) — lifted from ConversationsPage as-is.
 function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
 }
 
 function relative(dateStr: string | undefined | null): string {
@@ -417,7 +417,10 @@ export function EvalRunsPage() {
                         key: "id",
                         header: "Run",
                         render: (row) => (
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                          <span
+                            title={row.id}
+                            style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                          >
                             {shortId(row.id)}
                           </span>
                         ),

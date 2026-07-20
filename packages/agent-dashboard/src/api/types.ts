@@ -259,6 +259,9 @@ export interface EvalCaseHistoryRow {
   evalRunId: string;
   tsStart: string;
   targetId: string | null;
+  /** The result's own case id — differs from the page's case id when the run
+   * recorded under a composite id ('caseId#variantKey' / 'configId#caseId'). */
+  resultCaseId: string;
   variant: string | null;
   split: EvalSplit | null;
   model: string | null;

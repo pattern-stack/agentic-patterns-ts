@@ -13,7 +13,9 @@
  * Self-hides (returns null) when no finite points exist.
  */
 
-const PAD = { top: 16, right: 16, bottom: 34, left: 44 };
+// top inset clears the y-axis caption, which draws ABOVE the plot (at y=12)
+// so it can never collide with the topmost tick label.
+const PAD = { top: 28, right: 16, bottom: 34, left: 44 };
 
 export interface ScatterPoint {
   x: number;
@@ -125,7 +127,7 @@ export function ScatterPlot({
       <text x={PAD.left} y={height - 8} fontSize={9} fill="var(--fg-muted)">
         {xLabel} →
       </text>
-      <text x={4} y={PAD.top + 4} fontSize={9} fill="var(--fg-muted)">
+      <text x={4} y={12} fontSize={9} fill="var(--fg-muted)">
         {yLabel} ↑
       </text>
 

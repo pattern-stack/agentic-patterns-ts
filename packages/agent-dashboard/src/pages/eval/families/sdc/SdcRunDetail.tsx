@@ -139,13 +139,7 @@ function pct(v: number | null | undefined): string | undefined {
   return typeof v === "number" ? `${Math.round(v * 100)}%` : undefined;
 }
 
-const sectionHeadingStyle = {
-  fontSize: 12,
-  fontWeight: 600,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
-  color: "var(--fg-subtle)",
-};
+const sectionHeadingStyle = { fontSize: 15, fontWeight: 600, margin: 0 };
 
 // ---- the component ----------------------------------------------------------
 
@@ -279,7 +273,7 @@ export function SdcRunDetail({ run, results, summary, casesById, meta }: FamilyR
 
       <Card data-testid="sdc-score-map">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <div style={sectionHeadingStyle}>Score map</div>
+          <h2 style={sectionHeadingStyle}>Score map</h2>
           <Badge
             tone={declaredScores ? "accent" : "muted"}
             title={
@@ -300,7 +294,7 @@ export function SdcRunDetail({ run, results, summary, casesById, meta }: FamilyR
 
       {hasCharts && (
         <Card>
-          <div style={{ ...sectionHeadingStyle, marginBottom: 8 }}>Distributions</div>
+          <h2 style={{ ...sectionHeadingStyle, marginBottom: 8 }}>Distributions</h2>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "flex-end" }}>
             <Histogram
               values={hybridValues}
@@ -330,9 +324,9 @@ export function SdcRunDetail({ run, results, summary, casesById, meta }: FamilyR
 
       {failures.length > 0 && (
         <Card data-testid="sdc-crashed-strip" style={{ borderColor: "var(--red)" }}>
-          <div style={{ ...sectionHeadingStyle, color: "var(--red)", marginBottom: 8 }}>
+          <h2 style={{ ...sectionHeadingStyle, color: "var(--red)", marginBottom: 8 }}>
             Crashed fixtures ({failures.length}) — not in results
-          </div>
+          </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {failures.map((f) => (
               <div key={f.fixtureId} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>

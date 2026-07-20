@@ -243,6 +243,9 @@ export interface EvalCaseHistoryRow {
   readonly evalRunId: string;
   readonly tsStart: string;
   readonly targetId: string | null;
+  /** The eval_result's own case id — differs from the page's case id when the
+   * run recorded under a composite id ('caseId#variantKey' / 'configId#caseId'). */
+  readonly resultCaseId: string;
   readonly variant: string | null;
   readonly split: EvalSplit | null;
   readonly model: string | null;
@@ -309,6 +312,9 @@ export class EvalStore extends RunStore {
     // Cross-run history for one case: every eval_result for (set, case),
     // joined to its run metadata and the runs-table execution fields. Newest
     // first. Scoped by ev.set_id so the same case_id in another set is excluded.
+    // Matches composite result ids on either side of the '#' separator —
+    // renderer runs record 'caseId#variantKey', curation runs 'configId#caseId'
+    // — so composite-keyed results still surface on the case's history.
     this._caseResultHistoryStmt = this._db.prepare(`
       SELECT
         ev.id           AS evalRunId,
@@ -318,6 +324,7 @@ export class EvalStore extends RunStore {
         ev.split        AS split,
         ev.model        AS model,
         ev.status       AS runStatus,
+        er.case_id      AS resultCaseId,
         er.pass         AS pass,
         er.scores_json  AS scoresJson,
         r.final_answer  AS finalAnswer,
@@ -327,8 +334,11 @@ export class EvalStore extends RunStore {
       FROM eval_result er
       JOIN eval_run ev ON er.eval_run_id = ev.id
       LEFT JOIN runs r ON er.run_id = r.run_id
-      WHERE ev.set_id = @setId AND er.case_id = @caseId
-      ORDER BY ev.ts_start DESC
+      WHERE ev.set_id = @setId
+        AND (er.case_id = @caseId
+          OR er.case_id LIKE @caseIdPrefix ESCAPE '\\'
+          OR er.case_id LIKE @caseIdSuffix ESCAPE '\\')
+      ORDER BY ev.ts_start DESC, er.case_id ASC
     `);
 
     this._listEvalSetsStmt = this._db.prepare(`
@@ -696,7 +706,13 @@ export class EvalStore extends RunStore {
   /** Every run that evaluated `(setId, caseId)`, newest first — the case's
    *  cross-run history. Empty when the case was never run (or is unknown). */
   caseResultHistory(setId: string, caseId: string): EvalCaseHistoryRow[] {
-    const rows = this._caseResultHistoryStmt.all({ setId, caseId }) as RawCaseHistoryRow[];
+    const escaped = caseId.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+    const rows = this._caseResultHistoryStmt.all({
+      setId,
+      caseId,
+      caseIdPrefix: `${escaped}#%`,
+      caseIdSuffix: `%#${escaped}`,
+    }) as RawCaseHistoryRow[];
     return rows.map(rowToCaseHistoryRow);
   }
 
@@ -952,6 +968,7 @@ interface RawCaseHistoryRow {
   evalRunId: string;
   tsStart: string;
   targetId: string | null;
+  resultCaseId: string;
   variant: string | null;
   split: string | null;
   model: string | null;
@@ -969,6 +986,7 @@ function rowToCaseHistoryRow(r: RawCaseHistoryRow): EvalCaseHistoryRow {
     evalRunId: r.evalRunId,
     tsStart: r.tsStart,
     targetId: r.targetId,
+    resultCaseId: r.resultCaseId,
     variant: r.variant,
     split: (r.split as EvalSplit | null) ?? null,
     model: r.model,

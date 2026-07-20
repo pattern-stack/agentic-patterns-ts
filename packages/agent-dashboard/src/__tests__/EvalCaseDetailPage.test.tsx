@@ -30,6 +30,7 @@ const detail: EvalCaseDetailResponse = {
   history: [
     {
       evalRunId: "run-newest0",
+      resultCaseId: "case-01",
       tsStart: "2026-07-02T10:00:00Z",
       targetId: "dealbrain/curator",
       variant: "candidate",
@@ -45,6 +46,7 @@ const detail: EvalCaseDetailResponse = {
     },
     {
       evalRunId: "run-oldest0",
+      resultCaseId: "case-01",
       tsStart: "2026-07-01T10:00:00Z",
       targetId: "dealbrain/curator",
       variant: "baseline",
@@ -60,6 +62,8 @@ const detail: EvalCaseDetailResponse = {
     },
   ],
 };
+
+const HISTORY_ROW = detail.history[0] as EvalCaseDetailResponse["history"][number];
 
 function mkFetchResponse(status: number, body: unknown) {
   return {
@@ -156,7 +160,7 @@ describe("EvalCaseDetailPage", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
   });
 
-  it("answer-bank case: family view + empty-history explanatory note, Edit hidden", async () => {
+  it("answer-bank case: family view + generic empty-history message, Edit hidden", async () => {
     const caseRow = BANK_CASES[0];
     if (!caseRow) throw new Error("fixture missing");
     stubFetch({ body: { case: caseRow, history: [] }, sets: [BANK_SET_SUMMARY] });
@@ -169,9 +173,25 @@ describe("EvalCaseDetailPage", () => {
     expect(screen.getByText("evidence-5")).toBeTruthy();
     // frozen import — no Edit
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    // history stays below, empty with the composite-id note (never fake rows)
-    expect(screen.getByText(/composite case ids/)).toBeTruthy();
-    expect(screen.queryByText("This case has not been evaluated in any run yet.")).toBeNull();
+    // history stays below; composite results now MATCH (prefix/suffix of '#'),
+    // so an empty history simply means the case was never evaluated.
+    expect(screen.getByText("This case has not been evaluated in any run yet.")).toBeTruthy();
+  });
+
+  it("composite-id history rows surface with a Recorded as column and unique keys", async () => {
+    const caseRow = BANK_CASES[0];
+    if (!caseRow) throw new Error("fixture missing");
+    const compositeHistory = [
+      { ...HISTORY_ROW, evalRunId: "seed-renderer-01", resultCaseId: "fid-001#prose-brief-inline" },
+      { ...HISTORY_ROW, evalRunId: "seed-renderer-01", resultCaseId: "fid-001#table-dense-inline" },
+    ];
+    stubFetch({ body: { case: caseRow, history: compositeHistory }, sets: [BANK_SET_SUMMARY] });
+    renderPage(`/eval/sets/${encodeURIComponent(BANK_SET_ID)}/cases/fid-001`);
+
+    await waitFor(() => screen.getByText("Golden response"));
+    expect(screen.getByText("Recorded as")).toBeTruthy();
+    expect(screen.getByText("fid-001#prose-brief-inline")).toBeTruthy();
+    expect(screen.getByText("fid-001#table-dense-inline")).toBeTruthy();
   });
 
   it("question-bundle case: expectation cards render and the history table stays", async () => {

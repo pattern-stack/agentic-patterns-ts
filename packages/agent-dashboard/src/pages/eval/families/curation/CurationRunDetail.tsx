@@ -114,13 +114,7 @@ function knobAbbrev(knobs: Record<string, unknown>): string {
 
 // ---- presentation ----------------------------------------------------------
 
-const headingStyle = {
-  fontSize: 12,
-  fontWeight: 600,
-  textTransform: "uppercase" as const,
-  letterSpacing: "0.05em",
-  color: "var(--fg-subtle)",
-};
+const headingStyle = { fontSize: 15, fontWeight: 600, margin: 0 };
 const monoCell = { fontFamily: "var(--font-mono)", fontSize: 12 };
 const mutedStyle = { color: "var(--fg-muted)", fontSize: 13 };
 
@@ -220,7 +214,7 @@ export function CurationRunDetail({ results, meta }: FamilyRunDetailProps) {
       {/* Pareto frontier — declared-wins-else-compute */}
       <Card>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <div style={headingStyle}>Pareto frontier · survival vs outbound tokens</div>
+          <h2 style={headingStyle}>Pareto frontier · survival vs outbound tokens</h2>
           <Badge
             tone={declared ? "accent" : "muted"}
             title={
@@ -242,7 +236,7 @@ export function CurationRunDetail({ results, meta }: FamilyRunDetailProps) {
       {/* Distributions */}
       {(survivalValues.length > 0 || tokenValues.length > 0) && (
         <Card>
-          <div style={{ ...headingStyle, marginBottom: 10 }}>Per-fixture distributions</div>
+          <h2 style={{ ...headingStyle, marginBottom: 10 }}>Per-fixture distributions</h2>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 24 }}>
             <div style={{ flex: "1 1 300px", minWidth: 260 }}>
               <Histogram
@@ -268,7 +262,7 @@ export function CurationRunDetail({ results, meta }: FamilyRunDetailProps) {
 
       {/* Config table (survival↓ then tokens↑ — the aggregate's ordering) */}
       <div>
-        <div style={{ ...headingStyle, marginBottom: 8 }}>Configs · survival ↓ · tokens ↑</div>
+        <h2 style={{ ...headingStyle, marginBottom: 8 }}>Configs · survival ↓ · tokens ↑</h2>
         <DataTable<CurationConfigRow>
           columns={[
             {
@@ -326,8 +320,14 @@ export function CurationRunDetail({ results, meta }: FamilyRunDetailProps) {
             {
               key: "compressionPct",
               header: "Compr",
-              align: "right",
-              render: (row) => pct100(row.compressionPct),
+              render: (row) => (
+                <BarCell
+                  value={row.compressionPct}
+                  max={100}
+                  width={48}
+                  format={(v) => `${Math.round(v)}%`}
+                />
+              ),
             },
             {
               key: "dealMinShare",
@@ -418,7 +418,7 @@ export function CurationRunDetail({ results, meta }: FamilyRunDetailProps) {
       {/* Bench scoreboard (markdown, verbatim from the source bench) */}
       {scoreboardMd && (
         <Card>
-          <div style={{ ...headingStyle, marginBottom: 8 }}>Bench scoreboard</div>
+          <h2 style={{ ...headingStyle, marginBottom: 8 }}>Bench scoreboard</h2>
           <div data-testid="curation-scoreboard">
             <Markdown content={scoreboardMd} />
           </div>

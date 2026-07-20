@@ -325,6 +325,35 @@ describe("EvalStore", () => {
       expect(row?.inputTokens).toBeNull();
       expect(row?.elapsedMs).toBeNull();
     });
+
+    it("matches composite result ids on either side of '#' (renderer caseId#variant, curation configId#caseId) and labels each row's resultCaseId", () => {
+      store.upsertEvalSet({ id: "set-1" });
+      store.upsertEvalCase("set-1", { caseId: "fx-003", input: { q: "a" } });
+      const evalRunId = store.startEvalRun({ setId: "set-1" });
+      for (const caseId of [
+        "fx-003", // exact
+        "cfg-baseline#fx-003", // curation suffix
+        "fx-003#prose-brief-inline", // renderer prefix
+        "cfg#fx-0031", // NOT a match: superstring after '#'
+        "fx-0030#v", // NOT a match: superstring before '#'
+      ]) {
+        store.recordEvalResult({ evalRunId, caseId, scores: [], pass: true });
+      }
+
+      const ids = store.caseResultHistory("set-1", "fx-003").map((h) => h.resultCaseId);
+      expect(ids).toEqual(["cfg-baseline#fx-003", "fx-003", "fx-003#prose-brief-inline"]);
+    });
+
+    it("escapes SQL LIKE wildcards in the case id when matching composites", () => {
+      store.upsertEvalSet({ id: "set-1" });
+      store.upsertEvalCase("set-1", { caseId: "c_1", input: { q: "a" } });
+      const evalRunId = store.startEvalRun({ setId: "set-1" });
+      store.recordEvalResult({ evalRunId, caseId: "cfg#cx1", scores: [], pass: true });
+      store.recordEvalResult({ evalRunId, caseId: "cfg#c_1", scores: [], pass: true });
+
+      const ids = store.caseResultHistory("set-1", "c_1").map((h) => h.resultCaseId);
+      expect(ids).toEqual(["cfg#c_1"]); // '_' must not act as a single-char wildcard
+    });
   });
 
   describe("suite lifecycle", () => {

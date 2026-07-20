@@ -82,6 +82,13 @@ function isStringArray(v: unknown): v is string[] {
  * evals), pretty JSON otherwise. Fail border preserved either way.
  */
 function ActualAnswer({ finalAnswer, pass }: { finalAnswer: string | null; pass: boolean | null }) {
+  if (finalAnswer == null) {
+    return (
+      <div style={{ color: "var(--fg-muted)", fontSize: 13 }}>
+        no final answer recorded — see the run's detail page
+      </div>
+    );
+  }
   const value = safeParseAnswer(finalAnswer);
   if (isStringArray(value)) {
     return (
@@ -111,10 +118,6 @@ function relative(dateStr: string | undefined | null): string {
   if (abs < 3600) return `${Math.round(diffSec / 60)}m ago`;
   if (abs < 86400) return `${Math.round(diffSec / 3600)}h ago`;
   return `${Math.round(diffSec / 86400)}d ago`;
-}
-
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
 }
 
 function formatElapsed(ms: number | null): string {
@@ -263,6 +266,9 @@ export function EvalCaseDetailPage() {
 
   const { case: caseRow, history, setMeta } = state;
   const heldOut = caseRow.split === "test";
+  // Composite-keyed results (renderer 'caseId#variantKey', curation
+  // 'configId#caseId') surface in history; label which id each row ran under.
+  const hasCompositeHistory = history.some((row) => row.resultCaseId !== caseRow.caseId);
   const familyComponents = resolveSetFamilyComponents(setMeta?.family);
 
   return (
@@ -344,9 +350,7 @@ export function EvalCaseDetailPage() {
         <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0 }}>Run history</h2>
         {history.length === 0 ? (
           <Card style={{ textAlign: "center", padding: 32, color: "var(--fg-muted)" }}>
-            {setMeta?.family === "answer-bank"
-              ? "Renderer runs record results under composite case ids (fid#variantKey), so bank cases carry no per-case run history here."
-              : "This case has not been evaluated in any run yet."}
+            This case has not been evaluated in any run yet.
           </Card>
         ) : (
           <Card padded={false}>
@@ -356,11 +360,49 @@ export function EvalCaseDetailPage() {
                   key: "evalRunId",
                   header: "Run",
                   render: (row) => (
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {shortId(row.evalRunId)}
+                    <span
+                      title={row.evalRunId}
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12,
+                        display: "inline-block",
+                        maxWidth: 160,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        verticalAlign: "bottom",
+                      }}
+                    >
+                      {row.evalRunId}
                     </span>
                   ),
                 },
+                ...(hasCompositeHistory
+                  ? [
+                      {
+                        key: "resultCaseId",
+                        header: "Recorded as",
+                        render: (row: EvalCaseHistoryRow) => (
+                          <span
+                            title={row.resultCaseId}
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 12,
+                              color: "var(--fg-muted)",
+                              display: "inline-block",
+                              maxWidth: 200,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              verticalAlign: "bottom",
+                            }}
+                          >
+                            {row.resultCaseId === caseRow.caseId ? "—" : row.resultCaseId}
+                          </span>
+                        ),
+                      },
+                    ]
+                  : []),
                 { key: "tsStart", header: "Started", render: (row) => relative(row.tsStart) },
                 { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
                 { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
@@ -398,7 +440,7 @@ export function EvalCaseDetailPage() {
                 },
               ]}
               data={history}
-              rowKey={(row) => row.evalRunId}
+              rowKey={(row) => `${row.evalRunId}::${row.resultCaseId}`}
               expandedKey={expandedKey}
               onToggleExpand={(key) => setExpandedKey((prev) => (prev === key ? undefined : key))}
               renderExpanded={(row) => (

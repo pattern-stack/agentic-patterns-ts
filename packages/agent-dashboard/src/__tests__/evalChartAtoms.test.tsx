@@ -87,9 +87,11 @@ describe("MeterCell", () => {
     expect(container.querySelector('span[style*="75%"]')).toBeTruthy();
   });
 
-  it("shows an em dash and empty meter for a null value", () => {
-    render(<MeterCell value={null} label="axis" />);
+  it("shows an em dash and NO meter track for a null value", () => {
+    const { container } = render(<MeterCell value={null} label="axis" />);
     expect(screen.getByText("—")).toBeTruthy();
+    // an empty track would read as a zero score — the dash stands alone
+    expect(container.querySelector('span[style*="%"]')).toBeNull();
   });
 });
 
@@ -104,5 +106,23 @@ describe("FrontierScatter relocation", () => {
     ];
     render(<FrontierScatter points={points} />);
     expect(screen.getByRole("img", { name: /Curation frontier/ })).toBeTruthy();
+  });
+});
+
+describe("FrontierScatter axes", () => {
+  it("labels the x domain and floors the y domain to a quarter below the data min", () => {
+    const points: FrontierPoint[] = [
+      { configId: "A", survival: 1, tokens: 9800, n: 3, onFrontier: true },
+      { configId: "B", survival: 0.77, tokens: 3100, n: 3, onFrontier: false },
+    ];
+    render(<FrontierScatter points={points} />);
+    // x domain labels (min includes 0 by the scale's design)
+    expect(screen.getByText("0")).toBeTruthy();
+    expect(screen.getByText("9800")).toBeTruthy();
+    // y spans [0.75, 1] in 0.05 steps — no wasted 0..0.75 band
+    expect(screen.getByText("0.75")).toBeTruthy();
+    expect(screen.getByText("1.00")).toBeTruthy();
+    expect(screen.queryByText("0.00")).toBeNull();
+    expect(screen.queryByText("0.25")).toBeNull();
   });
 });

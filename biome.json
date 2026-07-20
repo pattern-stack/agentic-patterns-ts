@@ -41,7 +41,9 @@
       "bun.lock",
       "demo/",
       ".worktrees/",
+      ".qa/",
       "packages/agent-cli/assets/dashboard/",
+      "packages/agent-cli/src/assets/dashboard/",
       "packages/agent-cli/assets/plugin-template/",
       "**/__fixtures__/**"
     ]

@@ -64,6 +64,7 @@ const detailA: EvalRunDetailResponse = {
     mkResult("case-regress", { evalRunId: "run-a", pass: true, finalAnswer: '"4"' }),
     mkResult("case-improve", { evalRunId: "run-a", pass: false, finalAnswer: '"wrong"' }),
     mkResult("case-aonly", { evalRunId: "run-a", pass: true, finalAnswer: '"9"' }),
+    mkResult("case-noanswer", { evalRunId: "run-a", pass: true, finalAnswer: null }),
     mkResult("case-error", { evalRunId: "run-a", pass: true, finalAnswer: '"4"' }),
   ],
   summary: {
@@ -93,6 +94,7 @@ const detailB: EvalRunDetailResponse = {
       runError: "boom: model call failed",
       traceId: "run-b:case-error",
     }),
+    mkResult("case-noanswer", { evalRunId: "run-b", pass: true, finalAnswer: null }),
     // case-bonly is present only in B.
     mkResult("case-bonly", { evalRunId: "run-b", pass: true, finalAnswer: '"11"' }),
   ],
@@ -262,6 +264,23 @@ describe("EvalComparePage", () => {
     expect(screen.getByText("B · Actual")).toBeTruthy();
     expect(screen.getByText('"4"')).toBeTruthy();
     expect(screen.getByText('"5"')).toBeTruthy();
+  });
+
+  it("a null finalAnswer on an ok result shows the muted placeholder, not the literal 'null'", async () => {
+    stubFetch();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("case-noanswer")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("case-noanswer"));
+    await waitFor(() => {
+      expect(screen.getByText("A · Actual")).toBeTruthy();
+    });
+    expect(screen.getAllByText("no final answer recorded — see the run's detail page").length).toBe(
+      2,
+    );
+    expect(screen.queryByText("null")).toBeNull();
   });
 
   it("expanding a one-sided row shows 'not run in this eval run' for the absent side", async () => {

@@ -1,9 +1,14 @@
 /**
- * MeterCell — a compact labeled meter for table cells, composing the ONE
- * shipped meter core (`MeterBar` + its threshold colors in renderers/shared)
- * with the ScoreMapDetail grouped-row layout: mono 11px ellipsized label,
- * right-aligned value, full-width bar underneath. No second meter
- * implementation exists — this is a layout wrapper over the shared core.
+ * MeterCell — a compact meter for table cells, composing the ONE shipped
+ * meter core (`MeterBar` + its threshold colors in renderers/shared). No
+ * second meter implementation exists — this is a layout wrapper over the
+ * shared core, in two shapes:
+ *
+ * - WITH a label (score maps, judge panels): the ScoreMapDetail grouped-row
+ *   layout — mono 11px ellipsized label, right-aligned value, full-width bar
+ *   underneath.
+ * - WITHOUT a label (plain table cells): a single line — fixed-width bar +
+ *   value beside it, matching BarCell's rhythm so mixed columns align.
  *
  * `value` is 0..1 by default; pass `max` for other bounded scales (the bar is
  * normalized, the text shows the raw value).
@@ -46,14 +51,41 @@ export function MeterCell({
     value === null || !Number.isFinite(value) || max <= 0
       ? null
       : Math.max(0, Math.min(1, value / max));
+
+  // Missing value ⇒ the house muted dash alone — no empty meter track (matches
+  // the Gates/Coverage empty states; an empty bar reads as a zero score).
+  if (bounded === null) {
+    if (label === undefined) {
+      return <span style={{ ...valStyle, color: "var(--fg-subtle)" }}>—</span>;
+    }
+    return (
+      <div style={rowStyle}>
+        <span style={nameStyle} title={label}>
+          {label}
+        </span>
+        <span style={{ ...valStyle, color: "var(--fg-subtle)" }}>—</span>
+      </div>
+    );
+  }
+
+  // Label-less table cell ⇒ one line, BarCell rhythm (bar left, value right).
+  if (label === undefined) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span style={{ width: 72, flex: "none" }}>
+          <MeterBar value={bounded} />
+        </span>
+        <span style={valStyle}>{value === null ? "—" : format(value)}</span>
+      </span>
+    );
+  }
+
   return (
     <div style={rowStyle}>
       <span style={nameStyle} title={label}>
-        {label ?? ""}
+        {label}
       </span>
-      <span style={valStyle}>
-        {value === null || !Number.isFinite(value) ? "—" : format(value)}
-      </span>
+      <span style={valStyle}>{value === null ? "—" : format(value)}</span>
       <div style={{ gridColumn: "1 / 3" }}>
         <MeterBar value={bounded} />
       </div>

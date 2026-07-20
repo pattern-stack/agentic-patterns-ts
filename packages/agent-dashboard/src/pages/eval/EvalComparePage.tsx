@@ -689,6 +689,8 @@ function SideActualPanel({ label, result }: { label: string; result: JoinedEvalR
         <pre style={{ ...preStyle, borderLeft: "3px solid var(--red)", color: "var(--red)" }}>
           {result.runError ?? "(no error message recorded)"}
         </pre>
+      ) : result.finalAnswer == null ? (
+        <div style={mutedStyle}>no final answer recorded — see the run's detail page</div>
       ) : (
         <ActualAnswer finalAnswer={result.finalAnswer} pass={result.pass} />
       )}

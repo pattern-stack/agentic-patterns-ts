@@ -1,6 +1,6 @@
 /**
- * Curation Pareto-frontier scatter — survival (y, 0..1) vs outbound tokens
- * (x), "upper-left wins". On-frontier configs are filled dots joined by a
+ * Curation Pareto-frontier scatter — survival (y, quarter-floored data min..1)
+ * vs outbound tokens (x), "upper-left wins". On-frontier configs are filled dots joined by a
  * dashed step-line; dominated configs are hollow. Inline SVG (no chart dep),
  * theme-aware via CSS vars.
  *
@@ -17,7 +17,9 @@ import type { FrontierPoint } from "../../../lib/evalAggregates";
 
 const W = 460;
 const H = 240;
-const PAD = { top: 16, right: 16, bottom: 34, left: 44 };
+// top inset clears the y-axis caption, which draws ABOVE the plot (at y=12)
+// so it can never collide with the topmost tick label.
+const PAD = { top: 28, right: 16, bottom: 34, left: 44 };
 const plotW = W - PAD.left - PAD.right;
 const plotH = H - PAD.top - PAD.bottom;
 
@@ -27,6 +29,12 @@ const TIP_H = 32;
 interface Scale {
   x: (v: number) => number;
   y: (v: number) => number;
+  minTok: number;
+  maxTok: number;
+  // Lowest survival shown — floored to a quarter boundary below the data's
+  // minimum so tight high-survival clusters aren't crammed into a top sliver.
+  yLo: number;
+  yTicks: number[];
 }
 
 function makeScale(points: readonly FrontierPoint[]): Scale {
@@ -34,10 +42,21 @@ function makeScale(points: readonly FrontierPoint[]): Scale {
   const maxTok = Math.max(1, ...tokens);
   const minTok = Math.min(...tokens, 0);
   const span = maxTok - minTok || 1;
+  const minSurvival = Math.min(...points.map((p) => Math.max(0, Math.min(1, p.survival))));
+  const yLo = Math.min(0.75, Math.floor(minSurvival / 0.25) * 0.25);
+  const ySpan = 1 - yLo;
+  const step = ySpan <= 0.25 ? 0.05 : ySpan <= 0.5 ? 0.1 : 0.25;
+  const yTicks: number[] = [];
+  for (let t = yLo; t < 1 - 1e-9; t += step) yTicks.push(Number(t.toFixed(2)));
+  yTicks.push(1);
   return {
     x: (v) => PAD.left + ((v - minTok) / span) * plotW,
-    // survival is a rate 0..1; y inverts (1 at top).
-    y: (v) => PAD.top + (1 - Math.max(0, Math.min(1, v))) * plotH,
+    // survival is a rate; y inverts (1 at top), spanning [yLo, 1].
+    y: (v) => PAD.top + ((1 - Math.max(yLo, Math.min(1, v))) / ySpan) * plotH,
+    minTok,
+    maxTok,
+    yLo,
+    yTicks,
   };
 }
 
@@ -64,8 +83,6 @@ export function FrontierScatter({ points }: FrontierScatterProps) {
     return `${acc} L ${x} ${py} L ${x} ${y}`;
   }, "");
 
-  const yTicks = [0, 0.25, 0.5, 0.75, 1];
-
   // Hover tooltip placement: beside the point, clamped into the plot; flips
   // below when there is no room above.
   const tip = hover
@@ -89,7 +106,7 @@ export function FrontierScatter({ points }: FrontierScatterProps) {
       <title>Curation frontier — survival vs outbound tokens (upper-left wins)</title>
 
       {/* y grid + labels */}
-      {yTicks.map((t) => (
+      {scale.yTicks.map((t) => (
         <g key={t}>
           <line
             x1={PAD.left}
@@ -115,8 +132,16 @@ export function FrontierScatter({ points }: FrontierScatterProps) {
       <text x={PAD.left} y={H - 8} fontSize={9} fill="var(--fg-muted)">
         outbound tokens →
       </text>
-      <text x={4} y={PAD.top + 4} fontSize={9} fill="var(--fg-muted)">
+      <text x={4} y={12} fontSize={9} fill="var(--fg-muted)">
         survival ↑
+      </text>
+
+      {/* x domain labels */}
+      <text x={PAD.left} y={H - 20} fontSize={9} fill="var(--fg-muted)">
+        {Math.round(scale.minTok)}
+      </text>
+      <text x={W - PAD.right} y={H - 20} textAnchor="end" fontSize={9} fill="var(--fg-muted)">
+        {Math.round(scale.maxTok)}
       </text>
 
       {/* frontier step-line */}

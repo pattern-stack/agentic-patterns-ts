@@ -20,7 +20,7 @@ import { type RunMeta, readRunMeta } from "../types";
 
 // pages never share code (playground-redesign.md) — small local formatters.
 function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
 }
 
 function relative(dateStr: string | undefined | null): string {
@@ -73,6 +73,7 @@ export function RendererHomeTable({ runs }: FamilyHomeTableProps) {
             <Link
               to={`/eval/runs/${encodeURIComponent(run.id)}`}
               onClick={(e) => e.stopPropagation()}
+              title={run.id}
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 12,

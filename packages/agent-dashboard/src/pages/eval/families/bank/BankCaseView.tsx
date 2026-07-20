@@ -3,8 +3,8 @@
  * derivation the set table uses), the deal state + golden rendered as markdown
  * with `[evidence-N]` highlighting (`EvidenceText`), and the golden's used
  * evidence-ref chips. Replaces the generic pretty-JSON input/expected panes;
- * the page keeps the cross-run history section below (empty for bank cases —
- * renderer runs key results by composite `fid#variantKey` ids).
+ * the page keeps the cross-run history section below (composite
+ * `fid#variantKey` results match by prefix and carry a "Recorded as" label).
  */
 
 import { Card } from "../../../../components/atoms/Card";
@@ -31,6 +31,9 @@ const panelStyle = {
   wordBreak: "break-word" as const,
 };
 
+// Standalone stat tile — bordered like the root dashboard's stat cards. (Run
+// details use borderless label/value tiles instead because theirs sit inside
+// an already-bordered summary Card; value size 20 is shared across both.)
 function StatTile({ label, value }: { label: string; value: string | number }) {
   return (
     <div
@@ -45,7 +48,7 @@ function StatTile({ label, value }: { label: string; value: string | number }) {
       <div style={{ fontSize: 11, color: "var(--fg-subtle)", textTransform: "uppercase" }}>
         {label}
       </div>
-      <div style={{ fontSize: 18, fontWeight: 600, marginTop: 2 }}>{value}</div>
+      <div style={{ fontSize: 20, fontWeight: 600, marginTop: 2 }}>{value}</div>
     </div>
   );
 }

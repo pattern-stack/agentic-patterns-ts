@@ -17,3 +17,9 @@ screenshots/
 
 # Throwaway git worktrees (session harnesses)
 .worktrees/
+
+# Local QA artifacts (seeded family dbs)
+.qa/
+
+# Source-run dashboard assets (regenerated: build:dashboard + cp, see handoff)
+packages/agent-cli/src/assets/
