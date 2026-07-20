@@ -34,6 +34,13 @@ export interface BaseEvent {
   readonly spanId: string;
   readonly parentSpanId?: string;
   readonly timestamp: Date;
+  /**
+   * Optional per-event metadata (D12, F-2). `synthetic: true` marks events the
+   * CC/harness translator synthesized rather than observed (e.g. an `llm.start`
+   * boundary reconstructed at the prior turn). Open record so translators and
+   * exporters can attach provenance without a schema bump. Non-breaking.
+   */
+  readonly meta?: { synthetic?: boolean } & Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +99,26 @@ export interface ToolCallRejectedEvent extends BaseEvent {
   readonly gateName: string;
   readonly gateCategory: string;
   readonly originalIntent: ToolCallIntent;
+}
+
+// ---------------------------------------------------------------------------
+// Gate decision event (F-2) — a post-decision audit signal for exporters.
+// Published by AgentEventBus.evaluateIntent after the guaranteed audit phase,
+// for every intent (allow or block). `decisionKind` is the HarnessDecision
+// discriminant when an approval gate decided; kept as a plain string so the
+// events layer (5) stays free of a gates-layer (6) import.
+// ---------------------------------------------------------------------------
+
+export interface GateDecisionEvent extends BaseEvent {
+  readonly type: "agent.gate.decision";
+  readonly toolName: string;
+  readonly outcome: "allow" | "block";
+  readonly settledBy: "gate" | "human" | "timeout";
+  /** The HarnessDecision discriminant, when an approval gate decided. */
+  readonly decisionKind?: string;
+  readonly blockedBy?: string;
+  readonly reason?: string;
+  readonly trail: readonly { gate: string; result: "allow" | "block" | "modified" }[];
 }
 
 export interface ToolCallStartEvent extends BaseEvent {
@@ -424,6 +451,7 @@ export type AgentEvent =
   | ThinkingStartEvent
   | ToolCallIntent
   | ToolCallRejectedEvent
+  | GateDecisionEvent
   | ToolCallStartEvent
   | ToolCallEndEvent
   | ToolProgressEvent

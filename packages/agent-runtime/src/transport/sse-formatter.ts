@@ -34,6 +34,7 @@ export type SSEEventName =
   | "tool.progress"
   | "tool.end"
   | "tool.rejected"
+  | "gate.decision"
   | "step.start"
   | "step.end"
   | "iteration.start"
@@ -165,6 +166,19 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
           tool_name: event.toolName,
           reason: event.reason,
           gate_name: event.gateName,
+        },
+      };
+    case "agent.gate.decision":
+      return {
+        name: "gate.decision",
+        payload: {
+          tool_name: event.toolName,
+          outcome: event.outcome,
+          settled_by: event.settledBy,
+          decision_kind: event.decisionKind,
+          blocked_by: event.blockedBy,
+          reason: event.reason,
+          trail: event.trail,
         },
       };
     case "agent.iteration.start":
@@ -377,6 +391,7 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.tool.progress": "tool.progress",
   "agent.tool.end": "tool.end",
   "agent.tool.rejected": "tool.rejected",
+  "agent.gate.decision": "gate.decision",
   "agent.step.start": "step.start",
   "agent.step.end": "step.end",
   "agent.iteration.start": "iteration.start",

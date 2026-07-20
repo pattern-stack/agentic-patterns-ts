@@ -59,8 +59,12 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.scratchpad.join"]).toBe("scratchpad.join");
   });
 
-  it("has exactly 29 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(29);
+  it("maps agent.gate.decision", () => {
+    expect(SSE_EVENT_NAMES["agent.gate.decision"]).toBe("gate.decision");
+  });
+
+  it("has exactly 30 mappings", () => {
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(30);
   });
 });
 

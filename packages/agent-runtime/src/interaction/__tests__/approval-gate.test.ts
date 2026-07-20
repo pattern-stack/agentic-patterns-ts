@@ -44,7 +44,7 @@ describe("createHumanInputApprovalGate", () => {
 
     // Human approves → the gate allows.
     registry.resolve("call-1", { decision: "approve" });
-    await expect(result).resolves.toEqual({ action: "allow" });
+    await expect(result).resolves.toEqual({ action: "allow", decision: { kind: "allowOnce" } });
   });
 
   it("blocks on deny", async () => {
@@ -77,12 +77,12 @@ describe("createHumanInputApprovalGate", () => {
     // First check (the runner's observability `emit`): publishes + blocks.
     const first = gate.check(intent("ratify_definition", "call-3"));
     registry.resolve("call-3", { decision: "approve" });
-    await expect(first).resolves.toEqual({ action: "allow" });
+    await expect(first).resolves.toEqual({ action: "allow", decision: { kind: "allowOnce" } });
 
     // Second check (the runner's block-detecting `emitIntent`): reuses the
     // memoized decision — NO second prompt, NO new registry entry.
     const second = gate.check(intent("ratify_definition", "call-3"));
-    await expect(second).resolves.toEqual({ action: "allow" });
+    await expect(second).resolves.toEqual({ action: "allow", decision: { kind: "allowOnce" } });
     expect(requests).toHaveLength(1);
     expect(registry.has("call-3")).toBe(false);
   });
