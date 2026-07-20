@@ -47,8 +47,15 @@ duplicates. So:
 
 `judge-verdicts` (as shipped): `{ kind:"judge-verdicts", verdicts:[{expectationId,passed,reason,evidence}] }`
 
-`curation-facts`: `{ kind:"curation-facts", configId, knobs{…}, metrics:CurationMetrics }`
-(full metrics incl. `perExpectation[]`, `typeCoverage`, `temporalAlignment`, `temporalSpreadDays`).
+`curation-facts` — metrics are **FLAT on the payload, not nested under `metrics`**
+(the shipped consumers require it: `curationFrontier` reads top-level
+`outboundTokens`/`survival.rate`; `CurationFactsDetail` reads top-level
+`survival`/`typeCoverage`; only `curationConfigTable` tolerates both):
+```
+{ kind:"curation-facts", configId, knobs{…},
+  survival{…}, outboundTokens, typeCoverage, temporalAlignment,
+  temporalSpreadDays, perExpectation[], … }
+```
 
 ## `eval_run.meta`
 
