@@ -107,16 +107,16 @@ The subtle type issue: `RunnerProtocol.run` declares `agent: AgentLike`. `Claude
 
 ### 3.2 Prerequisites
 
-`@anthropic-ai/claude-agent-sdk`'s `query()` spawns the `claude` CLI as a subprocess via stdio. So in practice:
+`@anthropic-ai/claude-agent-sdk`'s `query()` runs Claude Code as a subprocess. As of SDK `0.3.x` the SDK **bundles its own platform-specific executable**: it ships a per-platform package (`@anthropic-ai/claude-agent-sdk-<os>-<arch>`, one of its `optionalDependencies`, pinned to the SDK's own version) and "uses the built-in executable if `pathToClaudeCodeExecutable` is not specified." The SDK↔Claude-Code pair is therefore pinned by the lockfile, and the committed contract fixture (`packages/agent-runtime/src/runner/__fixtures__/claude-agent-sdk-contract.json`, asserted by `sdk-contract.test.ts` in CI) records the tested pair (SDK `0.3.215` ↔ CC `2.1.215`). So in practice:
 
-1. The `claude` binary must be on PATH (installed via `npm i -g @anthropic-ai/claude-code` or the platform installer). **Required.**
+1. **The SDK must be installed.** `@anthropic-ai/claude-agent-sdk` is a **hard dependency** of `@agentic-patterns/runtime` (pulled in transitively — *not* an optional peer dep). It brings its own executable, so a separately-installed `claude` on PATH is **not required** to run the Claude-Code runners. Since 0.3 the SDK also declares `@anthropic-ai/sdk` and `@modelcontextprotocol/sdk` as peer deps; `@agentic-patterns/runtime` absorbs both as direct dependencies so consumer installs stay whole.
 2. Auth is one of:
-   * An active `claude` login in `~/.claude/` (Max subscription OAuth token) — `claude login` previously.
+   * An active `claude` login in `~/.claude/` (Max subscription OAuth token) — via `claude login`.
    * `ANTHROPIC_API_KEY` exported in the environment.
-   * `CLAUDE_CODE_OAUTH_TOKEN` (programmatic OAuth) — rarely used.
-3. `@anthropic-ai/claude-agent-sdk` must be installed (it is a peer dep of `@agentic-patterns/runtime`, marked optional).
+   * `CLAUDE_CODE_OAUTH_TOKEN` (programmatic OAuth) — e.g. for isolated-config runs (see `cc-config.ts`).
+3. A host `claude` binary on PATH is **optional**: it is consulted only by the hooks telemetry bridge and by `createRunner`'s `hasClaudeCli()` probe. That PATH probe can false-negative a perfectly runnable bundled-SDK setup, so treat it as a fallback-selection heuristic, not a hard prerequisite.
 
-If `claude` is not on PATH the SDK throws a spawn error the first time the async iterator is consumed — not when `new ClaudeCodeAPIRunner()` is constructed, and not when `query()` returns. From the consumer's perspective, `runner.run(...)` rejects with something like `Error: spawn claude ENOENT`. That's recoverable — the factory can probe `claude --version` up-front and fall through to the next choice rather than constructing a doomed runner. Without probing, the error surfaces at first use, which is acceptable but worse DX.
+If auth is missing (or the bundled executable can't launch) the SDK errors the first time the async iterator is consumed — not when `new ClaudeCodeAPIRunner()` is constructed, and not when `query()` returns. From the consumer's perspective, `runner.run(...)` rejects. That's recoverable — the factory can probe launch/auth readiness up-front and fall through to the next choice rather than constructing a doomed runner. Without probing, the error surfaces at first use, which is acceptable but worse DX.
 
 ### 3.3 Event-emission gaps vs `AgentRunner`
 

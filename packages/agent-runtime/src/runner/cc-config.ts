@@ -51,9 +51,6 @@ export type NativeToolsSetting = "all" | "none" | readonly string[];
  */
 export type OAuthTokenSource = string | (() => string | undefined);
 
-// `tools` is accepted at runtime but absent from the SDK's typed Options.
-type SDKOptionsWithTools = SDKOptions & { tools?: string[] };
-
 // ---------------------------------------------------------------------------
 // OAuth
 // ---------------------------------------------------------------------------
@@ -152,7 +149,8 @@ export function removeIsolatedConfigDir(dir: string): void {
  */
 export function applyNativeTools(sdkOpts: SDKOptions, setting: NativeToolsSetting): void {
   if (setting === "all") return;
-  (sdkOpts as SDKOptionsWithTools).tools = setting === "none" ? [] : [...setting];
+  // `tools` is a first-class typed Option as of SDK 0.3 (was an untyped cast in 0.2).
+  sdkOpts.tools = setting === "none" ? [] : [...setting];
 }
 
 /**
