@@ -72,6 +72,28 @@ duplicates. So:
 - Answer-bank: `{ family:"answer-bank" }`.
 - Question-bundle: `{ family:"question-bundle", source:"cache"|"authoring", benchmark, version, dataset, createdAt, families[] }`. Bundle set ids embed the source (`bundle:cache:render-bench@v3`) — cache & authoring can hold the same benchmark@version.
 
+## The ingest seam (`POST /eval/runs/ingest`, slice 2)
+
+One transactional, idempotent call recording a COMPLETE externally-executed run
+(full replacement on re-ingest — stale results are removed, not merged):
+
+```
+{ run:{ id, setId, targetId, variant?, split?, model?, gitSha?, scorer?,
+        tsStart, tsEnd, status:"ok"|"error", meta? },
+  results:[ { caseId, pass,
+              scores?: [ { name, value:number|null, passed?, detail?, error? } ] } ] }
+```
+
+- `tsStart`/`tsEnd` persist **verbatim** — never re-stamped with import time.
+- `status` is terminal-only; a `"running"` import would dangle in the SSE
+  `run.detached` branch forever.
+- **`scores` is an ARRAY of Score objects** (the runtime's `EvalScoreLike`) —
+  the same shape native runs write. The read path (`parseScores`) surfaces
+  only arrays; record-shaped scores are rejected at the route (400), never
+  silently persisted as write-only data. Per-case detail payloads (§ above)
+  ride each score's `detail`.
+- Body limit 32 MiB; oversize ⇒ 413.
+
 ## Cross-links (obsolete the viewer's `/api/bundle-locate`)
 
 - Renderer render → its bank case: `/eval/sets/${run.setId}/cases/${fid}` (join by `detail.fid`).

@@ -4,12 +4,19 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { EvalRunDetailResponse, EvalRunRow, SplitAggregate } from "../api/types";
+import type {
+  EvalRunDetailResponse,
+  EvalRunRow,
+  EvalSetSummary,
+  SplitAggregate,
+} from "../api/types";
 import {
   type CaptureFromSessionResponse,
   captureFromSession,
   fetchEvalRunDetail,
   fetchEvalRuns,
+  fetchEvalSet,
+  fetchEvalSets,
   fetchSplitAggregates,
   filterRuns,
   safeParseAnswer,
@@ -47,11 +54,41 @@ describe("fetchEvalRuns", () => {
         gitSha: "abc1234",
         status: "ok",
       },
+      {
+        id: "run-2",
+        tsStart: "2026-07-02T10:00:00Z",
+        tsEnd: "2026-07-02T10:05:00Z",
+        setId: "bank",
+        targetId: "dealbrain/curator",
+        variant: "baseline",
+        split: "dev",
+        model: "sonnet",
+        gitSha: "abc1234",
+        status: "ok",
+        meta: { family: "renderer", summary: { detPassRate: 0.5 } },
+      },
+      {
+        id: "run-3",
+        tsStart: "2026-07-03T10:00:00Z",
+        tsEnd: null,
+        setId: "bank",
+        targetId: "dealbrain/curator",
+        variant: "baseline",
+        split: "dev",
+        model: "sonnet",
+        gitSha: null,
+        status: "ok",
+        meta: null,
+      },
     ];
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mkResponse(200, { runs }));
 
     const result = await fetchEvalRuns({ limit: 200 });
     expect(result).toEqual({ kind: "ok", data: runs });
+    if (result.kind !== "ok") throw new Error("expected ok");
+    // meta (schema v5) rides through verbatim — including explicit null.
+    expect(result.data[1]?.meta).toEqual({ family: "renderer", summary: { detPassRate: 0.5 } });
+    expect(result.data[2]?.meta).toBeNull();
 
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     const url = call?.[0] as string;
@@ -72,6 +109,62 @@ describe("fetchEvalRuns", () => {
       mkResponse(500, { error: "boom" }),
     );
     await expect(fetchEvalRuns()).rejects.toThrow(/HTTP 500/);
+  });
+});
+
+describe("fetchEvalSets / fetchEvalSet — meta passthrough", () => {
+  const sets: EvalSetSummary[] = [
+    {
+      id: "bundle-a",
+      name: "Bundle A",
+      description: null,
+      createdTs: "2026-07-01T09:00:00Z",
+      caseCount: 12,
+      splitCounts: { train: 8, dev: 4 },
+      meta: { family: "question-bundle", source: "cache" },
+    },
+    {
+      id: "plain-bank",
+      name: null,
+      description: null,
+      createdTs: "2026-07-02T09:00:00Z",
+      caseCount: 3,
+      splitCounts: {},
+      meta: null,
+    },
+  ];
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("fetchEvalSets carries meta verbatim (and null survives)", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mkResponse(200, { sets }));
+
+    const result = await fetchEvalSets();
+    expect(result).toEqual({ kind: "ok", data: sets });
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.data[0]?.meta).toEqual({ family: "question-bundle", source: "cache" });
+    expect(result.data[1]?.meta).toBeNull();
+  });
+
+  it("fetchEvalSet (the .find-derived one) preserves meta on the matched row", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mkResponse(200, { sets }));
+
+    const result = await fetchEvalSet("bundle-a");
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.data?.meta).toEqual({ family: "question-bundle", source: "cache" });
+  });
+
+  it("fetchEvalSet preserves null meta on the matched row", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(mkResponse(200, { sets }));
+
+    const result = await fetchEvalSet("plain-bank");
+    if (result.kind !== "ok") throw new Error("expected ok");
+    expect(result.data?.meta).toBeNull();
   });
 });
 

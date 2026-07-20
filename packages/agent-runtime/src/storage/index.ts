@@ -16,6 +16,7 @@ export type {
   EvalSetMeta,
   EvalSetSummary,
   EvalSplit,
+  IngestEvalRunInput,
   JoinedEvalResultRow,
   SplitAggregate,
   StoredEvalCase,

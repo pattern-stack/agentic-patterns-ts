@@ -97,7 +97,12 @@ describe("eval routes", () => {
     store = new EvalStore({ path: ":memory:", Database });
 
     // --- case bank: "bank" set, mixed train/dev/untagged splits ---
-    store.upsertEvalSet({ id: "bank", name: "Bank One", description: "smoke bank" });
+    store.upsertEvalSet({
+      id: "bank",
+      name: "Bank One",
+      description: "smoke bank",
+      meta: { family: "renderer-grid" },
+    });
     store.upsertEvalCase("bank", {
       caseId: "case-01",
       input: "2+2?",
@@ -129,6 +134,7 @@ describe("eval routes", () => {
       model: "sonnet",
       gitSha: "sha-a",
       tsStart: new Date("2026-07-01T00:00:00Z"),
+      meta: { lens: "curation" },
     });
     seedResult(store, runAId, "case-01", {
       inputTokens: 100,
@@ -219,6 +225,55 @@ describe("eval routes", () => {
       expect(body.sets[0]?.id).toBe("bank");
       expect(body.sets[0]?.caseCount).toBe(4);
       expect(body.sets[0]?.splitCounts).toEqual({ dev: 1, train: 2, "": 1 });
+    });
+
+    it("passes the set's meta blob through verbatim (v5)", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/sets");
+      const body = (await res.json()) as {
+        sets: Array<{ id: string; meta: Record<string, unknown> | null }>;
+      };
+      expect(body.sets[0]?.meta).toEqual({ family: "renderer-grid" });
+    });
+  });
+
+  describe("GET /eval/sets/:id", () => {
+    it("returns the one set summary, meta included", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/sets/bank");
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        set: {
+          id: string;
+          name: string | null;
+          caseCount: number;
+          meta: Record<string, unknown> | null;
+        };
+      };
+      expect(body.set.id).toBe("bank");
+      expect(body.set.name).toBe("Bank One");
+      expect(body.set.caseCount).toBe(4);
+      expect(body.set.meta).toEqual({ family: "renderer-grid" });
+    });
+
+    it("404s for an unknown set id with the file's grammar", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/sets/nope");
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error: string }).error).toBe('eval set "nope" not found');
+    });
+
+    it("does not shadow the sibling /eval/sets/:id/cases route", async () => {
+      const app = mkApp(store);
+      const cases = await app.request("/eval/sets/bank/cases");
+      expect(cases.status).toBe(200);
+      const casesBody = (await cases.json()) as { setId: string; cases: unknown[] };
+      expect(casesBody.setId).toBe("bank");
+      expect(casesBody.cases).toHaveLength(4);
+      // …and the detail route still answers alongside it.
+      const detail = await app.request("/eval/sets/bank");
+      expect(detail.status).toBe(200);
+      expect(((await detail.json()) as { set: { id: string } }).set.id).toBe("bank");
     });
   });
 
@@ -377,6 +432,15 @@ describe("eval routes", () => {
       // Suite C recorded no results -> no summary field (backward-compatible row shape).
       expect(byId.get(runCId)?.summary).toBeUndefined();
     });
+
+    it("passes each run's meta blob through verbatim (v5); meta-less runs carry null", async () => {
+      const app = mkApp(store);
+      const res = await app.request("/eval/runs");
+      const body = (await res.json()) as { runs: EvalRunRow[] };
+      const byId = new Map(body.runs.map((r) => [r.id, r]));
+      expect(byId.get(runAId)?.meta).toEqual({ lens: "curation" });
+      expect(byId.get(runBId)?.meta).toBeNull();
+    });
   });
 
   describe("GET /eval/runs/:id", () => {
@@ -405,6 +469,7 @@ describe("eval routes", () => {
       expect(body.run.variant).toBe("a");
       expect(body.run.split).toBe("dev");
       expect(body.run.status).toBe("ok");
+      expect(body.run.meta).toEqual({ lens: "curation" }); // v5 passthrough
 
       expect(body.results).toHaveLength(3);
       const byCase = new Map(body.results.map((r) => [r.caseId, r]));
@@ -441,6 +506,7 @@ describe("eval routes", () => {
     const app = mkApp(undefined);
     for (const path of [
       "/eval/sets",
+      "/eval/sets/bank",
       "/eval/sets/bank/cases",
       "/eval/runs",
       "/eval/runs/x",
@@ -619,6 +685,30 @@ describe("eval routes", () => {
       const res = await postJson(app, "/eval/sets", { id: "x", name: 42 });
       expect(res.status).toBe(400);
     });
+
+    it("persists meta on create (201) and surfaces it on the detail read", async () => {
+      const app = mkApp(store);
+      const res = await postJson(app, "/eval/sets", {
+        id: "with-meta",
+        name: "Meta Bank",
+        meta: { family: "renderer-grid", version: 2 },
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { set: { meta: Record<string, unknown> | null } };
+      expect(body.set.meta).toEqual({ family: "renderer-grid", version: 2 });
+
+      const detail = await app.request("/eval/sets/with-meta");
+      expect(
+        ((await detail.json()) as { set: { meta: Record<string, unknown> | null } }).set.meta,
+      ).toEqual({ family: "renderer-grid", version: 2 });
+    });
+
+    it("400s when meta is not an object", async () => {
+      const app = mkApp(store);
+      const res = await postJson(app, "/eval/sets", { id: "x", meta: "renderer-grid" });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe("meta must be an object");
+    });
   });
 
   describe("PATCH /eval/sets/:id", () => {
@@ -641,6 +731,35 @@ describe("eval routes", () => {
       const app = mkApp(store);
       const res = await patchJson(app, "/eval/sets/bank", { name: 7 });
       expect(res.status).toBe(400);
+    });
+
+    it("400s on a non-object meta", async () => {
+      const app = mkApp(store);
+      const res = await patchJson(app, "/eval/sets/bank", { meta: "nope" });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toBe("meta must be an object");
+    });
+
+    // The overlay trio — upsertEvalSet always rewrites meta_json, so PATCH
+    // must carry the current blob through when the body omits the key.
+    it("meta overlay: omit preserves, object replaces, null clears", async () => {
+      const app = mkApp(store);
+      type SetBody = { set: { meta: Record<string, unknown> | null } };
+
+      // omit-preserves: a name-only PATCH leaves the seeded meta untouched.
+      const omitted = await patchJson(app, "/eval/sets/bank", { name: "Bank Renamed" });
+      expect(omitted.status).toBe(200);
+      expect(((await omitted.json()) as SetBody).set.meta).toEqual({ family: "renderer-grid" });
+
+      // object-replaces: a present meta key wins wholesale (no deep merge).
+      const replaced = await patchJson(app, "/eval/sets/bank", { meta: { family: "score-map" } });
+      expect(replaced.status).toBe(200);
+      expect(((await replaced.json()) as SetBody).set.meta).toEqual({ family: "score-map" });
+
+      // null-clears: an explicit null empties the column (reads back as null).
+      const cleared = await patchJson(app, "/eval/sets/bank", { meta: null });
+      expect(cleared.status).toBe(200);
+      expect(((await cleared.json()) as SetBody).set.meta).toBeNull();
     });
   });
 

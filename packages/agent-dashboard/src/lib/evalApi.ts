@@ -83,9 +83,11 @@ export async function fetchEvalSets(
 }
 
 /**
- * One set summary, derived from `GET /eval/sets` (there is no dedicated
- * single-set route — the list is the source of truth). `data: null` means the
- * set id was not found, distinct from `unconfigured`.
+ * One set summary, derived from `GET /eval/sets`. A dedicated
+ * `GET /eval/sets/:id` exists server-side since schema v5, but the list is
+ * still the client's source of truth (one fetch, cached by callers); repoint
+ * here if set payloads ever outgrow the list. `data: null` means the set id
+ * was not found, distinct from `unconfigured`.
  */
 export async function fetchEvalSet(
   id: string,

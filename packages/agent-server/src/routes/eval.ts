@@ -40,7 +40,9 @@ import {
   setMembership,
 } from "@agentic-patterns/runtime";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
+import { z } from "zod";
 import type { AgentRegistration, EvalExecutionConfig } from "../config.js";
 import type { ConversationEntry } from "./conversations.js";
 
@@ -82,6 +84,7 @@ interface SetWriteBody {
   id: string;
   name?: string | null;
   description?: string | null;
+  meta?: Record<string, unknown> | null;
 }
 
 interface CaseWriteBody {
@@ -115,6 +118,59 @@ interface CaptureFromSessionResponse {
   tags: string[];
   split: EvalSplit;
 }
+
+// ---------------------------------------------------------------------------
+// POST /eval/runs/ingest — request shape (the file's one Zod body; see the
+// write-route precedent comment for why this route alone gets a schema)
+// ---------------------------------------------------------------------------
+
+/** A JSON object that is genuinely an object — `z.record` already rejects
+ *  arrays via parsed-type, the refine is belt-and-braces documentation. */
+const JsonObjectSchema = z
+  .record(z.unknown())
+  .refine((v) => !Array.isArray(v), { message: "expected an object, not an array" });
+
+/** Mirrors the runtime's `EvalScoreLike` (storage/eval-store.ts) — the ONE
+ *  shape `parseScores` surfaces on reads. Ingesting any other scores shape
+ *  would persist write-only dead data (stored verbatim, read back null). */
+const EvalScoreSchema = z.object({
+  name: z.string().min(1),
+  value: z.number().nullable(),
+  passed: z.boolean().optional(),
+  detail: JsonObjectSchema.optional(),
+  error: z.string().optional(),
+});
+
+const IngestEvalRunBodySchema = z.object({
+  run: z.object({
+    id: z.string().min(1),
+    setId: z.string().min(1),
+    targetId: z.string().min(1),
+    variant: z.string().optional(),
+    split: z.string().optional(),
+    model: z.string().optional(),
+    gitSha: z.string().optional(),
+    scorer: z.string().optional(),
+    tsStart: z.string().min(1),
+    tsEnd: z.string().min(1),
+    // Terminal-only by design: an ingested "running" row would have no live
+    // handle in this process, so GET /eval/runs/:id/stream would answer
+    // `run.detached` forever and the row could never finalize — ingest imports
+    // COMPLETE runs, full stop.
+    status: z.enum(["ok", "error"]),
+    meta: JsonObjectSchema.optional(),
+  }),
+  results: z.array(
+    z.object({
+      caseId: z.string().min(1),
+      pass: z.boolean(),
+      scores: z.array(EvalScoreSchema).optional(),
+    }),
+  ),
+});
+
+/** 32 MiB — renderer-grid ingests run ~3-5 MB; generous headroom, not unbounded. */
+const INGEST_BODY_LIMIT_BYTES = 32 * 1024 * 1024;
 
 /** SSE broadcast message — mirrors Hono's `writeSSE()` argument shape. */
 interface Broadcast {
@@ -150,6 +206,22 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
       return notConfigured(c);
     }
     return c.json({ sets: evalStore.listEvalSets() });
+  });
+
+  // One set by id (slice 2) — the list row IS the detail shape (EvalSetSummary
+  // carries meta since schema v5), so this is a find over listEvalSets, not a
+  // new store query. Literal segments outrank params in Hono, so the sibling
+  // /eval/sets/:id/cases routes are untouched.
+  app.get("/eval/sets/:id", (c) => {
+    if (!evalStore) {
+      return notConfigured(c);
+    }
+    const id = c.req.param("id");
+    const set = evalStore.listEvalSets().find((s) => s.id === id);
+    if (!set) {
+      return c.json({ error: `eval set "${id}" not found` }, 404);
+    }
+    return c.json({ set });
   });
 
   app.get("/eval/sets/:id/cases", (c) => {
@@ -271,7 +343,10 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
 
   // ---------------------------------------------------------------------------
   // Set / case write routes — create/edit/delete (hand-validated, the
-  // POST /eval/runs precedent — no zod in routes). `upsertEvalSet` /
+  // POST /eval/runs precedent — no zod in routes, with ONE exception:
+  // POST /eval/runs/ingest below uses a Zod schema, because its body is the
+  // file's first deeply nested machine-to-machine payload and hand-walking it
+  // would be longer and weaker than the schema). `upsertEvalSet` /
   // `upsertEvalCase` already exist on the store; only delete is new (#WI-1).
   // ---------------------------------------------------------------------------
 
@@ -300,12 +375,16 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
     ) {
       return c.json({ error: "description must be a string" }, 400);
     }
+    if (!isMetaValid(body.meta)) {
+      return c.json({ error: "meta must be an object" }, 400);
+    }
 
     const existed = evalStore.listEvalSets().some((s) => s.id === body.id);
     evalStore.upsertEvalSet({
       id: body.id,
       name: body.name ?? undefined,
       description: body.description ?? undefined,
+      meta: body.meta ?? undefined,
     });
     const set = evalStore.listEvalSets().find((s) => s.id === body.id);
     return c.json({ set }, existed ? 200 : 201);
@@ -334,6 +413,9 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
     ) {
       return c.json({ error: "description must be a string" }, 400);
     }
+    if (!isMetaValid(body.meta)) {
+      return c.json({ error: "meta must be an object" }, 400);
+    }
 
     const current = evalStore.listEvalSets().find((s) => s.id === id);
     if (!current) {
@@ -341,13 +423,18 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
     }
 
     // Overlay only the keys present in the body; absent keys keep the current
-    // value (upsert's ON CONFLICT preserves created_ts).
+    // value (upsert's ON CONFLICT preserves created_ts). `meta` must be
+    // explicitly carried through: upsertEvalSet always writes meta_json (an
+    // undefined input NULLs the column on conflict-update), so an omitted body
+    // key re-sends `current.meta`; an explicit `meta: null` passes undefined —
+    // that IS the clear.
     const name = body.name !== undefined ? (body.name ?? undefined) : (current.name ?? undefined);
     const description =
       body.description !== undefined
         ? (body.description ?? undefined)
         : (current.description ?? undefined);
-    evalStore.upsertEvalSet({ id, name, description });
+    const meta = body.meta !== undefined ? (body.meta ?? undefined) : (current.meta ?? undefined);
+    evalStore.upsertEvalSet({ id, name, description, meta });
     const set = evalStore.listEvalSets().find((s) => s.id === id);
     return c.json({ set }, 200);
   });
@@ -597,6 +684,49 @@ export function evalRoutes(opts: EvalRoutesOptions): Hono {
 
     return c.json({ runId: evalRunId, total: cases.length, scorer: chosenScorer.id }, 202);
   });
+
+  // ---------------------------------------------------------------------------
+  // POST /eval/runs/ingest (slice 2) — import a COMPLETE externally-run suite.
+  // Store-only by construction: it never touches `liveRuns`, so the SSE stream
+  // route sees an ingested run exactly like any other terminal row written by
+  // another process. Timestamps/status are persisted VERBATIM from the body —
+  // the store must record when the run RAN, never when it landed here.
+  // ---------------------------------------------------------------------------
+
+  app.post(
+    "/eval/runs/ingest",
+    // The server's first body-size guard: ingest is the one route that accepts
+    // arbitrarily large machine-generated payloads. Oversize -> 413 before the
+    // body is buffered.
+    bodyLimit({
+      maxSize: INGEST_BODY_LIMIT_BYTES,
+      onError: (c) =>
+        c.json({ error: "request body too large — ingest accepts up to 32 MiB" }, 413),
+    }),
+    async (c) => {
+      if (!evalStore) {
+        return notConfigured(c);
+      }
+      let raw: unknown;
+      try {
+        raw = await c.req.json();
+      } catch {
+        return c.json({ error: "invalid JSON body" }, 400);
+      }
+      const parsed = IngestEvalRunBodySchema.safeParse(raw);
+      if (!parsed.success) {
+        const issues = parsed.error.issues
+          .map((i) => `${i.path.join(".") || "(body)"}: ${i.message}`)
+          .join("; ");
+        return c.json({ error: `invalid ingest body — ${issues}` }, 400);
+      }
+
+      const { replaced } = evalStore.ingestEvalRun(parsed.data);
+      // Post-write re-read (the file's convention — never echo the request).
+      const run = evalStore.getEvalRun(parsed.data.run.id);
+      return c.json({ run, resultCount: parsed.data.results.length }, replaced ? 200 : 201);
+    },
+  );
 
   // ---------------------------------------------------------------------------
   // POST /eval/cases/from-session (#140, E5d) — capture a live exchange as a case
@@ -860,6 +990,12 @@ function deriveCaseId(conversationId: string, exchangeNumber: number): string {
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+/** `meta`, when present, must be a plain object (`null` = absent/clear —
+ *  the `name`/`description` nullability idiom above). */
+function isMetaValid(v: unknown): v is Record<string, unknown> | null | undefined {
+  return v === undefined || v === null || (typeof v === "object" && !Array.isArray(v));
 }
 
 /** Mirrors `notConfigured`'s shape — `ServerConfig.evalExecution` absent. */

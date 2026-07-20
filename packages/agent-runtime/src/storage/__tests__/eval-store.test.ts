@@ -401,6 +401,41 @@ describe("EvalStore", () => {
           .sort(),
       ).toEqual([null, "exact-match"].sort());
     });
+
+    it("meta omitted -> null; meta provided -> parsed object on getEvalRun AND listEvalRuns", () => {
+      const meta = { family: "e2e-answer", lens: { scope: "cross" } };
+      const withMeta = store.startEvalRun({ setId: "s", meta });
+      const without = store.startEvalRun({ setId: "s" });
+
+      expect(store.getEvalRun(withMeta)?.meta).toEqual(meta);
+      expect(store.getEvalRun(without)?.meta).toBeNull();
+
+      const listed = new Map(store.listEvalRuns({ setId: "s" }).map((r) => [r.id, r.meta]));
+      expect(listed.get(withMeta)).toEqual(meta);
+      expect(listed.get(without)).toBeNull();
+    });
+  });
+
+  describe("eval_set meta", () => {
+    it("meta omitted -> null; provided -> parsed; ON CONFLICT re-upsert replaces meta, created_ts unchanged", () => {
+      store.upsertEvalSet({ id: "plain" });
+      store.upsertEvalSet({
+        id: "family",
+        createdTs: new Date("2026-01-01T00:00:00Z"),
+        meta: { family: "retrieval", version: 1 },
+      });
+
+      let bySet = new Map(store.listEvalSets().map((s) => [s.id, s]));
+      expect(bySet.get("plain")?.meta).toBeNull();
+      expect(bySet.get("family")?.meta).toEqual({ family: "retrieval", version: 1 });
+
+      // Second upsert with different meta: last write wins, created_ts kept
+      // (the ON CONFLICT clause deliberately never touches created_ts).
+      store.upsertEvalSet({ id: "family", meta: { family: "retrieval", version: 2 } });
+      bySet = new Map(store.listEvalSets().map((s) => [s.id, s]));
+      expect(bySet.get("family")?.meta).toEqual({ family: "retrieval", version: 2 });
+      expect(bySet.get("family")?.createdTs).toBe("2026-01-01T00:00:00.000Z");
+    });
   });
 
   describe("v3 -> v4 in-place migration", () => {
@@ -454,6 +489,76 @@ describe("EvalStore", () => {
       const scored = es.startEvalRun({ setId: "set-legacy", scorer: "none" });
       expect(es.getEvalRun(scored)?.scorer).toBe("none");
       es.close();
+
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+  });
+
+  describe("v4 -> v5 in-place migration", () => {
+    it("adds meta_json to eval_run AND eval_set in a hand-built v4 DB; pre-v5 rows read meta null", () => {
+      const fs = require("node:fs") as typeof import("node:fs");
+      const os = require("node:os") as typeof import("node:os");
+      const path = require("node:path") as typeof import("node:path");
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "evalstore-migrate-v5-"));
+      const dbPath = path.join(dir, "events.db");
+
+      // Hand-build a v4 DB: the v3 tables PLUS eval_run.scorer, WITHOUT
+      // meta_json anywhere (the exact pre-v5 shape).
+      const raw = new Database(dbPath);
+      raw.exec(`
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL, timestamp TEXT NOT NULL, trace_id TEXT, run_id TEXT,
+          span_id TEXT, cc_session_id TEXT, cc_hook_name TEXT, cc_cwd TEXT, data TEXT NOT NULL
+        );
+        CREATE TABLE runs (
+          run_id TEXT PRIMARY KEY, trace_id TEXT, ts_start TEXT NOT NULL, ts_end TEXT,
+          agent_name TEXT, model TEXT, system_prompt TEXT, agent_config TEXT, final_answer TEXT,
+          tool_calls INTEGER, iterations INTEGER, input_tokens INTEGER, output_tokens INTEGER,
+          finish_reason TEXT, elapsed_ms INTEGER, status TEXT NOT NULL, error TEXT,
+          step_metrics TEXT, metadata TEXT
+        );
+        CREATE TABLE eval_set (id TEXT PRIMARY KEY, name TEXT, description TEXT, created_ts TEXT NOT NULL);
+        CREATE TABLE eval_case (
+          set_id TEXT NOT NULL, case_id TEXT NOT NULL, input_json TEXT, expected_json TEXT,
+          tags_json TEXT, split TEXT, PRIMARY KEY (set_id, case_id)
+        );
+        CREATE TABLE eval_run (
+          id TEXT PRIMARY KEY, ts_start TEXT NOT NULL, ts_end TEXT, set_id TEXT, target_id TEXT,
+          variant TEXT, split TEXT, model TEXT, git_sha TEXT, status TEXT NOT NULL, scorer TEXT
+        );
+        CREATE TABLE eval_result (
+          eval_run_id TEXT NOT NULL, case_id TEXT NOT NULL, run_id TEXT, scores_json TEXT,
+          pass INTEGER, PRIMARY KEY (eval_run_id, case_id)
+        );
+      `);
+      raw
+        .prepare("INSERT INTO eval_run (id, ts_start, set_id, status) VALUES (?, ?, ?, ?)")
+        .run("legacy-run", "2026-05-11T18:00:00.000Z", "set-legacy", "ok");
+      raw
+        .prepare("INSERT INTO eval_set (id, name, created_ts) VALUES (?, ?, ?)")
+        .run("set-legacy", "Legacy Set", "2026-05-11T18:00:00.000Z");
+      raw.pragma("user_version = 4");
+      raw.close();
+
+      // Reopen via EvalStore: both ALTERs land; the legacy run AND set read
+      // meta null; fresh writes round-trip a meta object.
+      const es = new EvalStore({ path: dbPath, Database });
+      expect(es.getEvalRun("legacy-run")?.meta).toBeNull();
+      expect(es.listEvalSets().find((s) => s.id === "set-legacy")?.meta).toBeNull();
+
+      const withMeta = es.startEvalRun({ setId: "set-legacy", meta: { family: "e2e-answer" } });
+      expect(es.getEvalRun(withMeta)?.meta).toEqual({ family: "e2e-answer" });
+      es.upsertEvalSet({ id: "set-new", meta: { kind: "eval-family" } });
+      expect(es.listEvalSets().find((s) => s.id === "set-new")?.meta).toEqual({
+        kind: "eval-family",
+      });
+      es.close();
+
+      // The ladder stamped the file at v5.
+      const check = new Database(dbPath);
+      expect(check.pragma("user_version", { simple: true })).toBe(5);
+      check.close();
 
       fs.rmSync(dir, { recursive: true, force: true });
     });
@@ -602,6 +707,120 @@ describe("EvalStore", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]?.pass).toBe(true);
       expect(rows[0]?.scores).toEqual([{ name: "exact", value: 1, passed: true }]);
+    });
+  });
+
+  describe("ingestEvalRun", () => {
+    // Score[] — the same shape as EvalResultRecord.scores; the ONE shape
+    // parseScores surfaces on the read path.
+    const scoresOf = (passed: boolean) => [{ name: "exact", value: passed ? 1 : 0, passed }];
+
+    it("fresh ingest: replaced false; ts_start/ts_end/status/meta land VERBATIM (never stamped with now())", () => {
+      const { replaced } = store.ingestEvalRun({
+        run: {
+          id: "imported-1",
+          setId: "set-x",
+          targetId: "agent-a",
+          variant: "a",
+          split: "test",
+          model: "m1",
+          gitSha: "abc123",
+          scorer: "exact-match",
+          tsStart: "2025-12-01T00:00:00.000Z", // long before "now" — proves verbatim
+          tsEnd: "2025-12-01T00:05:00.000Z",
+          status: "ok",
+          meta: { family: "e2e-answer" },
+        },
+        results: [
+          { caseId: "c1", pass: true, scores: scoresOf(true) },
+          { caseId: "c2", pass: false, scores: scoresOf(false) },
+          { caseId: "c3", pass: true }, // scores omitted -> NULL
+        ],
+      });
+      expect(replaced).toBe(false);
+
+      const row = store.getEvalRun("imported-1");
+      expect(row?.tsStart).toBe("2025-12-01T00:00:00.000Z");
+      expect(row?.tsEnd).toBe("2025-12-01T00:05:00.000Z");
+      expect(row?.status).toBe("ok");
+      expect(row?.setId).toBe("set-x");
+      expect(row?.targetId).toBe("agent-a");
+      expect(row?.variant).toBe("a");
+      expect(row?.split).toBe("test");
+      expect(row?.model).toBe("m1");
+      expect(row?.gitSha).toBe("abc123");
+      expect(row?.scorer).toBe("exact-match");
+      expect(row?.meta).toEqual({ family: "e2e-answer" });
+
+      const results = store.evalRunResults("imported-1");
+      expect(results).toHaveLength(3);
+      const byCase = new Map(results.map((r) => [r.caseId, r]));
+      expect(byCase.get("c1")?.pass).toBe(true);
+      expect(byCase.get("c1")?.scores).toEqual([{ name: "exact", value: 1, passed: true }]);
+      expect(byCase.get("c2")?.pass).toBe(false);
+      expect(byCase.get("c2")?.scores).toEqual([{ name: "exact", value: 0, passed: false }]);
+      expect(byCase.get("c3")?.scores).toBeNull();
+      // Imported cases carry no RunStore runs row — run_id stays NULL.
+      expect(byCase.get("c1")?.runId).toBeNull();
+    });
+
+    it("re-ingest same id with FEWER results: replaced true, the stale result row is GONE, exactly one eval_run row", () => {
+      const inspectable = new InspectableEvalStore({ path: ":memory:", Database });
+
+      const run = {
+        id: "imported-1",
+        setId: "set-x",
+        targetId: "agent-a",
+        tsStart: "2025-12-01T00:00:00.000Z",
+        tsEnd: "2025-12-01T00:05:00.000Z",
+        status: "ok" as const,
+        meta: { attempt: 1 },
+      };
+      expect(
+        inspectable.ingestEvalRun({
+          run,
+          results: [
+            { caseId: "c1", pass: true },
+            { caseId: "c2", pass: false },
+          ],
+        }).replaced,
+      ).toBe(false);
+
+      // Re-ingest with only c1 — the whole point of delete-then-insert: the
+      // stale c2 row must vanish (an upsert could never shrink the set).
+      expect(
+        inspectable.ingestEvalRun({
+          run: { ...run, meta: { attempt: 2 } },
+          results: [{ caseId: "c1", pass: true }],
+        }).replaced,
+      ).toBe(true);
+
+      expect(inspectable.evalRunResults("imported-1").map((r) => r.caseId)).toEqual(["c1"]);
+      expect(inspectable.getEvalRun("imported-1")?.meta).toEqual({ attempt: 2 });
+
+      const { n } = inspectable
+        .rawDb()
+        .prepare("SELECT COUNT(*) AS n FROM eval_run WHERE id = ?")
+        .get("imported-1") as { n: number };
+      expect(n).toBe(1);
+
+      inspectable.close();
+    });
+
+    it("status 'error' is written verbatim", () => {
+      store.ingestEvalRun({
+        run: {
+          id: "imported-err",
+          setId: "set-x",
+          targetId: "agent-a",
+          tsStart: "2025-12-02T00:00:00.000Z",
+          tsEnd: "2025-12-02T00:01:00.000Z",
+          status: "error",
+        },
+        results: [],
+      });
+      expect(store.getEvalRun("imported-err")?.status).toBe("error");
+      expect(store.getEvalRun("imported-err")?.meta).toBeNull();
     });
   });
 

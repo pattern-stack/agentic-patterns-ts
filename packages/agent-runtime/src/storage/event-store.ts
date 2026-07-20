@@ -210,7 +210,21 @@ const SCHEMA_V4 = `
 ALTER TABLE eval_run ADD COLUMN scorer TEXT;
 `;
 
-const TARGET_SCHEMA_VERSION = 4;
+/**
+ * v5 — adds `meta_json` to `eval_run` AND `eval_set`: family/run-level
+ * metadata as JSON (see packages/agent-dashboard/docs/eval-family-contract.md)
+ * — e.g. a set's eval-family identity and a run's harness-specific extras
+ * that don't merit dedicated columns. NULL = generic/pre-v5 row.
+ * Same downgrade caveat as v2/v3/v4: a v5 DB opened by an older runtime
+ * hard-throws the version-mismatch error below. Dev telemetry, lockstep —
+ * accepted.
+ */
+const SCHEMA_V5 = `
+ALTER TABLE eval_run ADD COLUMN meta_json TEXT;
+ALTER TABLE eval_set ADD COLUMN meta_json TEXT;
+`;
+
+const TARGET_SCHEMA_VERSION = 5;
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -418,6 +432,11 @@ export class EventStore {
     if (version < 4) {
       this._db.exec(SCHEMA_V4);
       version = 4;
+    }
+
+    if (version < 5) {
+      this._db.exec(SCHEMA_V5);
+      version = 5;
     }
 
     if (version !== TARGET_SCHEMA_VERSION) {

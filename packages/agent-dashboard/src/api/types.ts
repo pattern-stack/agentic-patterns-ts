@@ -134,6 +134,11 @@ export interface EvalSetSummary {
   createdTs: string;
   caseCount: number;
   splitCounts: Record<string, number>;
+  /**
+   * Set-level family metadata (schema v5) — question-bundle/bank identity per
+   * `docs/eval-family-contract.md`. Absent/null = generic set or older server.
+   */
+  meta?: Record<string, unknown> | null;
 }
 
 /** Row returned by `GET /eval/sets/:id/cases`. */
@@ -176,6 +181,11 @@ export interface EvalRunRow {
   status: "running" | "ok" | "error";
   /** Present on `GET /eval/runs` list rows when the run has results; absent otherwise. */
   summary?: EvalRunListSummary;
+  /**
+   * Run-level family metadata (schema v5) — see `docs/eval-family-contract.md`.
+   * Absent/null = generic run or older server.
+   */
+  meta?: Record<string, unknown> | null;
 }
 
 export interface EvalScoreLike {

@@ -61,6 +61,8 @@ export interface EvalSetMeta {
   readonly name?: string;
   readonly description?: string;
   readonly createdTs?: Date; // omit -> now
+  /** Family/set-level metadata blob (v5). Omit when the set carries none. */
+  readonly meta?: Record<string, unknown>;
 }
 
 export interface EvalSetSummary {
@@ -70,6 +72,8 @@ export interface EvalSetSummary {
   readonly createdTs: string;
   readonly caseCount: number;
   readonly splitCounts: Readonly<Record<string, number>>; // per-split, "" bucket = untagged
+  /** Parsed meta_json; NULL = generic/pre-v5 row (or unparseable payload). */
+  readonly meta: Record<string, unknown> | null;
 }
 
 export interface StoredEvalCase {
@@ -100,6 +104,8 @@ export interface EvalRunMeta {
   readonly gitSha?: string;
   /** Scorer id the run grades with (v4). Omit when the caller scores externally. */
   readonly scorer?: string;
+  /** Run-level metadata blob (v5). Omit when the run carries none. */
+  readonly meta?: Record<string, unknown>;
 }
 
 export interface EvalRunRow {
@@ -114,6 +120,8 @@ export interface EvalRunRow {
   readonly gitSha: string | null;
   /** Scorer id the run graded with; NULL = unrecorded (pre-v4 rows / external scoring). */
   readonly scorer: string | null;
+  /** Parsed meta_json; NULL = generic/pre-v5 row (or unparseable payload). */
+  readonly meta: Record<string, unknown> | null;
   readonly status: "running" | "ok" | "error";
 }
 
@@ -123,6 +131,38 @@ export interface EvalResultRecord {
   readonly runId?: string; // -> runs.run_id; optional (annotate-later)
   readonly scores?: readonly EvalScoreLike[];
   readonly pass?: boolean | null;
+}
+
+/**
+ * Input to `ingestEvalRun` — a COMPLETE, already-finished suite run imported
+ * from an external harness (file-first eval runners that never touched this
+ * store while executing). Unlike `EvalRunMeta`, `tsStart`/`tsEnd`/`status`
+ * are REQUIRED and written VERBATIM: the store must never re-stamp an
+ * imported run with ingest time (the no-misrepresenting-state rule — an
+ * import records when the run RAN, not when it landed here).
+ */
+export interface IngestEvalRunInput {
+  readonly run: {
+    readonly id: string;
+    readonly setId: string;
+    readonly targetId: string;
+    readonly variant?: string;
+    readonly split?: string;
+    readonly model?: string;
+    readonly gitSha?: string;
+    readonly scorer?: string;
+    readonly tsStart: string;
+    readonly tsEnd: string;
+    readonly status: "ok" | "error";
+    readonly meta?: Record<string, unknown>;
+  };
+  readonly results: ReadonlyArray<{
+    readonly caseId: string;
+    readonly pass: boolean;
+    /** Same array shape as `EvalResultRecord.scores` — `parseScores` on the
+     *  read path only surfaces arrays, so any other shape would be write-only. */
+    readonly scores?: readonly EvalScoreLike[];
+  }>;
 }
 
 /** eval_result LEFT JOIN runs — annotation fields + run-owned fields, never copied. */
@@ -229,6 +269,9 @@ export class EvalStore extends RunStore {
   private readonly _listEvalCasesStmt: Statement;
   private readonly _startEvalRunStmt: Statement;
   private readonly _finishEvalRunStmt: Statement;
+  private readonly _deleteEvalRunStmt: Statement;
+  private readonly _deleteEvalRunResultsStmt: Statement;
+  private readonly _ingestEvalRunStmt: Statement;
   private readonly _recordEvalResultStmt: Statement;
   private readonly _getEvalRunStmt: Statement;
   private readonly _listEvalRunsStmt: Statement;
@@ -239,12 +282,14 @@ export class EvalStore extends RunStore {
   constructor(opts: EventStoreOptions) {
     super(opts);
 
+    // created_ts deliberately stays un-updated on conflict — first insert wins.
     this._upsertEvalSetStmt = this._db.prepare(`
-      INSERT INTO eval_set (id, name, description, created_ts)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO eval_set (id, name, description, created_ts, meta_json)
+      VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
-        description = excluded.description
+        description = excluded.description,
+        meta_json = excluded.meta_json
     `);
 
     this._upsertEvalCaseStmt = this._db.prepare(`
@@ -287,7 +332,7 @@ export class EvalStore extends RunStore {
     `);
 
     this._listEvalSetsStmt = this._db.prepare(`
-      SELECT id, name, description, created_ts AS createdTs
+      SELECT id, name, description, created_ts AS createdTs, meta_json AS metaJson
       FROM eval_set
       ORDER BY created_ts ASC, id ASC
     `);
@@ -314,14 +359,33 @@ export class EvalStore extends RunStore {
 
     this._startEvalRunStmt = this._db.prepare(`
       INSERT INTO eval_run (
-        id, ts_start, set_id, target_id, variant, split, model, git_sha, scorer, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running')
+        id, ts_start, set_id, target_id, variant, split, model, git_sha, scorer, meta_json, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running')
     `);
 
     // First-terminal-wins, same idiom as RunStore.finishRun (run-store.ts:149).
     this._finishEvalRunStmt = this._db.prepare(`
       UPDATE eval_run SET ts_end = ?, status = ?
       WHERE id = ? AND status = 'running'
+    `);
+
+    // ingestEvalRun's replacement pair: delete-then-insert (see the method doc).
+    this._deleteEvalRunStmt = this._db.prepare(`
+      DELETE FROM eval_run WHERE id = ?
+    `);
+
+    this._deleteEvalRunResultsStmt = this._db.prepare(`
+      DELETE FROM eval_result WHERE eval_run_id = ?
+    `);
+
+    // Unlike _startEvalRunStmt (which hardcodes status 'running' and leaves
+    // ts_end for the finish UPDATE), ingest writes ALL columns in one INSERT:
+    // an imported run arrives already terminal.
+    this._ingestEvalRunStmt = this._db.prepare(`
+      INSERT INTO eval_run (
+        id, ts_start, ts_end, set_id, target_id, variant, split, model, git_sha,
+        scorer, meta_json, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     this._recordEvalResultStmt = this._db.prepare(`
@@ -332,14 +396,16 @@ export class EvalStore extends RunStore {
     this._getEvalRunStmt = this._db.prepare(`
       SELECT
         id, ts_start AS tsStart, ts_end AS tsEnd, set_id AS setId,
-        target_id AS targetId, variant, split, model, git_sha AS gitSha, scorer, status
+        target_id AS targetId, variant, split, model, git_sha AS gitSha, scorer,
+        meta_json AS metaJson, status
       FROM eval_run WHERE id = ?
     `);
 
     this._listEvalRunsStmt = this._db.prepare(`
       SELECT
         id, ts_start AS tsStart, ts_end AS tsEnd, set_id AS setId,
-        target_id AS targetId, variant, split, model, git_sha AS gitSha, scorer, status
+        target_id AS targetId, variant, split, model, git_sha AS gitSha, scorer,
+        meta_json AS metaJson, status
       FROM eval_run
       WHERE (@setId    IS NULL OR set_id = @setId)
         AND (@targetId IS NULL OR target_id = @targetId)
@@ -419,6 +485,7 @@ export class EvalStore extends RunStore {
       meta.name ?? null,
       meta.description ?? null,
       (meta.createdTs ?? new Date()).toISOString(),
+      meta.meta !== undefined ? JSON.stringify(meta.meta) : null,
     );
   }
 
@@ -461,6 +528,7 @@ export class EvalStore extends RunStore {
         createdTs: s.createdTs,
         caseCount,
         splitCounts,
+        meta: parseJsonRecord(s.metaJson),
       };
     });
   }
@@ -491,6 +559,7 @@ export class EvalStore extends RunStore {
       meta.model ?? null,
       meta.gitSha ?? null,
       meta.scorer ?? null,
+      meta.meta !== undefined ? JSON.stringify(meta.meta) : null,
     );
     return id;
   }
@@ -498,6 +567,75 @@ export class EvalStore extends RunStore {
   /** Stamp the terminal status. First finalize wins; re-finalizing is a no-op. */
   finishEvalRun(id: string, outcome: { status: "ok" | "error" }): void {
     this._finishEvalRunStmt.run(new Date().toISOString(), outcome.status, id);
+  }
+
+  /**
+   * Import an ALREADY-FINISHED suite run — transactional, idempotent full
+   * replacement. The file's third idempotency shape, next to
+   * `_upsertEvalSetStmt`'s ON CONFLICT and `_recordEvalResultStmt`'s INSERT
+   * OR REPLACE: delete-then-insert, because a re-ingest must also REMOVE
+   * stale `eval_result` rows the new payload no longer carries (upserts
+   * can't shrink a result set).
+   *
+   * `tsStart`/`tsEnd`/`status` are written VERBATIM from the input — never
+   * stamped with now(). An import records when the run RAN, not when it
+   * landed here (the no-misrepresenting-state rule; contrast startEvalRun/
+   * finishEvalRun above, which describe live runs and rightly stamp now()).
+   *
+   * The delete+insert pair must land atomically: a reader between the DELETE
+   * and the last result INSERT would see a half-replaced run, and a crash
+   * would LOSE the prior import. First transaction in agent-runtime — done
+   * via `exec("BEGIN"/"COMMIT"/"ROLLBACK")`, not better-sqlite3's
+   * `.transaction()`, to stay driver-agnostic (the injected Database may be
+   * bun:sqlite; same reasoning as the PRAGMA idiom, event-store.ts
+   * constructor). All JSON is serialized BEFORE `BEGIN` so a serializer
+   * throw can't abort mid-transaction.
+   */
+  ingestEvalRun(input: IngestEvalRunInput): { replaced: boolean } {
+    const { run } = input;
+    const metaJson = run.meta !== undefined ? JSON.stringify(run.meta) : null;
+    const results = input.results.map((r) => ({
+      caseId: r.caseId,
+      scoresJson: r.scores ? JSON.stringify(r.scores) : null,
+      pass: boolToInt(r.pass),
+    }));
+
+    this._db.exec("BEGIN");
+    try {
+      const replaced = this._deleteEvalRunStmt.run(run.id).changes > 0;
+      this._deleteEvalRunResultsStmt.run(run.id);
+      this._ingestEvalRunStmt.run(
+        run.id,
+        run.tsStart,
+        run.tsEnd,
+        run.setId,
+        run.targetId,
+        run.variant ?? null,
+        run.split ?? null,
+        run.model ?? null,
+        run.gitSha ?? null,
+        run.scorer ?? null,
+        metaJson,
+        run.status,
+      );
+      for (const r of results) {
+        // Reuse the annotation stmt (INSERT OR REPLACE is a plain INSERT
+        // here — the delete above already cleared the key space). run_id
+        // stays NULL: imported cases have no RunStore runs row to join.
+        this._recordEvalResultStmt.run(run.id, r.caseId, null, r.scoresJson, r.pass);
+      }
+      this._db.exec("COMMIT");
+      return { replaced };
+    } catch (err) {
+      try {
+        this._db.exec("ROLLBACK");
+      } catch {
+        // SQLite auto-rolls-back on FULL/IOERR/NOMEM, after which an explicit
+        // ROLLBACK throws "no transaction is active" — the original `err` is
+        // the one that matters; never let the rollback error mask it.
+      }
+      throw err;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -521,8 +659,8 @@ export class EvalStore extends RunStore {
 
   /** Full eval_run row by id. */
   getEvalRun(id: string): EvalRunRow | null {
-    const row = this._getEvalRunStmt.get(id) as EvalRunRow | undefined;
-    return row ?? null;
+    const row = this._getEvalRunStmt.get(id) as RawEvalRunRow | undefined;
+    return row ? rowToEvalRunRow(row) : null;
   }
 
   /** Newest first. */
@@ -535,13 +673,14 @@ export class EvalStore extends RunStore {
       limit?: number;
     } = {},
   ): EvalRunRow[] {
-    return this._listEvalRunsStmt.all({
+    const rows = this._listEvalRunsStmt.all({
       setId: opts.setId ?? null,
       targetId: opts.targetId ?? null,
       variant: opts.variant ?? null,
       split: opts.split ?? null,
       limit: opts.limit ?? 50,
-    }) as EvalRunRow[];
+    }) as RawEvalRunRow[];
+    return rows.map(rowToEvalRunRow);
   }
 
   /**
@@ -697,6 +836,42 @@ interface RawEvalSetRow {
   name: string | null;
   description: string | null;
   createdTs: string;
+  metaJson: string | null;
+}
+
+// The SQL-aliased eval_run row (v5 grew meta_json past what a direct cast to
+// EvalRunRow can absorb — a mapper now parses it; precedent: run-store.ts
+// rowToRunRow at ~345).
+interface RawEvalRunRow {
+  id: string;
+  tsStart: string;
+  tsEnd: string | null;
+  setId: string | null;
+  targetId: string | null;
+  variant: string | null;
+  split: string | null;
+  model: string | null;
+  gitSha: string | null;
+  scorer: string | null;
+  metaJson: string | null;
+  status: "running" | "ok" | "error";
+}
+
+function rowToEvalRunRow(r: RawEvalRunRow): EvalRunRow {
+  return {
+    id: r.id,
+    tsStart: r.tsStart,
+    tsEnd: r.tsEnd,
+    setId: r.setId,
+    targetId: r.targetId,
+    variant: r.variant,
+    split: (r.split as EvalSplit | null) ?? null,
+    model: r.model,
+    gitSha: r.gitSha,
+    scorer: r.scorer,
+    meta: parseJsonRecord(r.metaJson),
+    status: r.status,
+  };
 }
 
 interface RawCaseCountRow {
@@ -811,6 +986,22 @@ function parseJsonUnknown(s: string | null): unknown {
   if (s === null) return null;
   try {
     return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+// Duplicated (not imported) from run-store.ts:434 by design — cross-file
+// helper duplication is the house pattern (run-store.ts:398-399). typeof-object
+// + not-array guard: a JSON array or scalar payload reads as null, matching
+// the `meta: Record<string, unknown> | null` contract.
+function parseJsonRecord(s: string | null): Record<string, unknown> | null {
+  if (s === null) return null;
+  try {
+    const v = JSON.parse(s);
+    return typeof v === "object" && v !== null && !Array.isArray(v)
+      ? (v as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }

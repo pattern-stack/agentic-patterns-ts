@@ -266,7 +266,13 @@ export async function runEvalCommand(opts: EvalCommandOptions): Promise<void> {
   // -------------------------------------------------------------------------
 
   if (isFileMode && store) {
-    store.upsertEvalSet({ id: setId, name: setId });
+    // Create-if-missing, NOT a bare upsert: since v5 `upsertEvalSet` rewrites
+    // meta_json on conflict (undefined -> NULL), so re-upserting an existing
+    // set here would silently wipe family meta set via the API. Same defense
+    // as the server's from-session capture route.
+    if (!store.listEvalSets().some((s) => s.id === setId)) {
+      store.upsertEvalSet({ id: setId, name: setId });
+    }
     for (const c of cases) {
       store.upsertEvalCase(setId, {
         caseId: c.id,
