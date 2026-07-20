@@ -28,6 +28,7 @@ type Scripted = {
   inputTokens: number;
   outputTokens: number;
   stopReason: string | null;
+  sessionId?: string;
 };
 
 const script: { current: Scripted } = {
@@ -37,6 +38,7 @@ const script: { current: Scripted } = {
     inputTokens: 0,
     outputTokens: 0,
     stopReason: "end_turn",
+    sessionId: "sess-1",
   },
 };
 
@@ -59,16 +61,21 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
     ) => ({ name, description, handler }),
     query: ({ options }: { prompt: string; options: Record<string, unknown> }) => {
       captured.options = options;
-      const canUseTool = options.canUseTool as
-        | ((
-            toolName: string,
-            input: Record<string, unknown>,
-            ctx: { signal: AbortSignal; toolUseID: string },
-          ) => Promise<{ behavior: "allow" | "deny"; interrupt?: boolean; message?: string }>)
-        | undefined;
+      // Fire the PreToolUse defer hook for fidelity — the provider extracts
+      // tool calls via `deferred_tool_use`, not `canUseTool` (deleted).
+      type Hook = (
+        input: Record<string, unknown>,
+        toolUseId: string,
+        ctx: { signal: AbortSignal },
+      ) => Promise<unknown>;
+      const preToolUse = (options.hooks as { PreToolUse?: Array<{ hooks?: Hook[] }> } | undefined)
+        ?.PreToolUse;
+      const hook = preToolUse?.[0]?.hooks?.[0];
 
       async function* gen() {
         const pending = script.current;
+        yield { type: "system", subtype: "init", session_id: pending.sessionId ?? "sess-1" };
+
         if (pending.assistantText.length > 0) {
           yield {
             type: "assistant",
@@ -76,32 +83,38 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           };
         }
 
-        let interrupted = false;
-        let idx = 0;
-        for (const call of pending.toolCalls) {
-          if (!canUseTool) break;
-          const res = await canUseTool(`mcp__agent_runner_tools__${call.toolName}`, call.input, {
-            signal: new AbortController().signal,
-            toolUseID: `tc-${idx++}`,
-          });
-          if (res.behavior === "deny" && res.interrupt) {
-            interrupted = true;
-            break;
+        // Solo-only: at most one deferred call per run (matches the CLI).
+        const first = pending.toolCalls[0];
+        let deferred: { id: string; name: string; input: Record<string, unknown> } | undefined;
+        if (first) {
+          const sdkName = `mcp__agent_runner_tools__${first.toolName}`;
+          if (hook) {
+            await hook(
+              {
+                hook_event_name: "PreToolUse",
+                tool_name: sdkName,
+                tool_input: first.input,
+                tool_use_id: "tc-0",
+              },
+              "tc-0",
+              { signal: new AbortController().signal },
+            );
           }
-        }
-
-        if (interrupted) {
-          throw new Error("SDK interrupted by canUseTool deny");
+          deferred = { id: "tc-0", name: sdkName, input: first.input };
         }
 
         yield {
           type: "result",
           subtype: "success",
+          is_error: false,
           usage: {
             input_tokens: pending.inputTokens,
             output_tokens: pending.outputTokens,
           },
-          stop_reason: pending.stopReason,
+          stop_reason: first ? "tool_deferred" : pending.stopReason,
+          terminal_reason: first ? "tool_deferred" : "completed",
+          session_id: pending.sessionId ?? "sess-1",
+          deferred_tool_use: deferred,
         };
       }
 
@@ -166,7 +179,10 @@ function track<T extends { dispose: () => void }>(m: T): T {
  * are covered by the dedicated tests below and in cc-fail-closed.test.ts.
  */
 function makeModel(modelId = "sonnet") {
-  return claudeCode(modelId, { config: { mode: "host" } });
+  // `flatten` keeps these generation-behavior tests off the subprocess-
+  // spawning defer path; the defer path has its own suite
+  // (cc-session-strategy.test.ts).
+  return claudeCode(modelId, { config: { mode: "host" }, sessionStrategy: "flatten" });
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +197,7 @@ describe("claudeCode provider", () => {
       inputTokens: 0,
       outputTokens: 0,
       stopReason: "end_turn",
+      sessionId: "sess-1",
     };
     captured.options = null;
   });
