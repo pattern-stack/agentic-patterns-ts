@@ -1,0 +1,372 @@
+# Harness Runners — subscription-powered standard agents (Track A)
+#   + interchangeable coding-agent harnesses w/ cross-harness permission bridge (Track B)
+# Gate 0: design v4 approved-in-session (2026-07-19); plan rev 2 approved 2026-07-19 ("Aligned - please sync").
+# Plan rev 2 folded the 3-lens reviewer panel (adherence PASS_WITH_NOTES / logic REVISE / scope REVISE).
+# Spec of record: .ai-docs/stacks/harness-runners/design.md (v4; section refs below).
+# Review trail: review-codex-sol*.md (design rounds 1-3) + in-session plan panel.
+
+plan:
+  slug: harness-runners
+  summary: "Subscription-powered standard agents (claudeCode provider promotion) + interchangeable coding-agent harnesses (CodingAgentRunner base, CC + Codex adapters) with a cross-harness human-permission bridge."
+  milestone: null                # no milestone discipline in this repo; epic + sub-issues carry the rollup
+  auto_approve: false            # gate1: strict — every leaf gets gate:human
+  epic_title: "Harness Runners: subscription-powered agents + interchangeable coding-agent harnesses"
+  epic_body: |
+    Two tracks, one foundation. **Spec of record:** `.ai-docs/stacks/harness-runners/design.md` (v4,
+    iterated through 3 adversarial Codex review rounds; reviews alongside the design).
+    Plan: `.ai-docs/plans/harness-runners.yaml` (rev 2, 3-lens reviewer panel folded).
+
+    **Track A** — users power standard framework agents with their Claude Max subscription as if it
+    were an API key: `claudeCode()` LMv2 provider gains the cc-config isolation/OAuth seams
+    (fail-closed), session economics stop spawning a subprocess per tool-loop iteration, and
+    `createRunner()` gains a probe-backed subscription rung.
+
+    **Track B** — CodingAgents for SDLC phases where the harness owns the loop: extract a
+    `CodingAgentRunner` base + bidirectional `HarnessAdapter`/`HarnessSession`, refactor
+    `ClaudeCodeRunner` onto it, build the cross-harness permission bridge (AskContext through
+    gates → transport → dashboard approval UI → native reply), then validate the abstraction with a
+    Codex App Server adapter.
+
+    **Foundations:** SDK ^0.3.x bump (F1), public gate-evaluation API w/ guaranteed audit (F2,
+    fixes #288), `deferred_tool_use` spike (F3), Codex contract-test spike (R1).
+
+    **Waves:** 1: F1+F2+F3+R1 (merge barrier; F3/R1 findings get a human read) → 2: A1→B1 →
+    3: A2+B2+E1 → 4: A3+B3 → 5: B4+U1 → 6: DOC1→REL1.
+
+    **Issue coordination:** E1 subsumes #286; F2 implements #289's invariant (spec states
+    disposition); B3 must declare subsume-or-sequence vs #296/#234; B2 states #302 disposition.
+    Durable-decision feature flag stays OFF until #307 (design D13).
+
+issues:
+  - key: "318"
+    key_original: f1
+    title: "runtime: Claude Agent SDK ^0.3.x bump + executable-contract verification"
+    depends_on: []
+    labels: [runtime]
+    description: |
+      **Size S · branch `hr/f1-sdk-bump` · packages: runtime · spec: design.md §3 (SDK changes + reproducibility), D7**
+
+      Bump `@anthropic-ai/claude-agent-sdk` to ^0.3.x; add `@anthropic-ai/sdk` +
+      `@modelcontextprotocol/sdk` peerDeps; re-check the untyped `tools` workaround
+      (cc-config.ts:55) against 0.3 typings; verify the 0.3.x bundled-executable contract
+      (platform packages? claudeCodeVersion?); commit SDK message-type schema fixtures; fix
+      docs/runners.md §3.2 optional-peer claim.
+
+      **Acceptance:** `bun run check` green; no behavior change; fixtures committed; tested SDK/CC
+      pair recorded.
+
+  - key: "319"
+    key_original: f2
+    title: "runtime: evaluateIntent/GateEvaluation/AskContext — public gate API + guaranteed audit (fixes #288)"
+    depends_on: []
+    labels: [runtime]
+    description: |
+      **Size M · branch `hr/f2-gate-evaluation` · packages: runtime · spec: design.md §5.4 (F-2), D5, D12**
+
+      `AgentEventBus.evaluateIntent(intent, ctx?) → GateEvaluation {outcome, intent, decision?,
+      settledBy, trail}`; `publish()` delegates; audit phase ALWAYS runs (fixes
+      early-return-on-block skipping audit, agent-event-bus.ts:61); audit gates gain
+      `recordDecision(evaluation, ctx)`; `GateResult` gains optional decision payload;
+      `HumanApprovalGate` callback widens (booleans coerced); `BaseEvent` gains optional `meta`
+      record (`meta.synthetic` carrier); `agent.gate.decision` event.
+
+      **Blast radius:** kills `emitIntent`'s rejection-subscription inference in the CC runner
+      (claude-code-runner.ts:209) AND the equivalent path in agent-runner.ts:162 with its 3 call
+      sites (:531/:819/:1462) — the 63KB main runner is in scope, not just the CC side.
+      Coordinates with #289 (spec states whether F2 folds #289's test in or closes it as duplicate;
+      #302 said "land #289 first" — F2 satisfies that ordering).
+
+      **Acceptance:** #288 repro test (concurrent intents, correct attribution); audit-on-block
+      test; boolean-callback back-compat tests; existing gate tests pass unchanged; #289
+      disposition stated in the spec.
+
+  - key: "320"
+    key_original: f3
+    title: "SPIKE: deferred_tool_use semantics — does the host execute and resume?"
+    depends_on: []
+    labels: [runtime]
+    description: |
+      **Size S · branch `hr/f3-deferred-tools-spike` · packages: runtime · spec: design.md §4 A-2 option 1, OQ-1**
+
+      Empirically determine `SDKResultSuccess.deferred_tool_use` behavior (installed type proves
+      only `{id,name,input}`). Findings note committed to
+      `.ai-docs/stacks/harness-runners/f3-deferred-tools.md`; picks A2's strategy
+      (deferred ≫ resume+inject ≫ flatten). **HUMAN READ before A2 starts.**
+
+      **Acceptance:** findings note answers execute/resume questions with runnable evidence.
+
+  - key: "321"
+    key_original: r1
+    title: "SPIKE: Codex App Server contract tests — pinned schema + protocol facts"
+    depends_on: []
+    labels: [runtime, testing]
+    description: |
+      **Size M · branch `hr/r1-codex-contract-tests` · packages: runtime · spec: design.md §8 R-1, §5.5**
+
+      Pinned validated Codex CLI version + generated STABLE-channel schema fixture + minimum
+      supported version floor. Tests: command/file-change/permission approval round-trips incl.
+      proposal payloads (exec-policy AND network-policy amendments — determine per-amendment
+      persistence; proposal `allowedScopes` derive from this); decline vs cancel vs timeout vs
+      disconnect (local-settlement vs wire-response separately); concurrent requests; PreToolUse
+      coverage + hosted-tool exclusions; empty/custom CODEX_HOME file-auth vs keyring; AGENTS.md
+      composition; fresh/resume/forked/interrupted sessions; `exec --json` vs App Server schema
+      diff.
+
+      **LEAST-BOUNDED item on the critical path** (sole pole for B2→B3→B4): TIMEBOX — if
+      floor/persistence work overflows, split remaining families into an R1b follow-up rather than
+      expanding silently. **HUMAN READ before B2 starts.**
+
+      **Acceptance:** contract-test suite runs green against the pinned CLI; findings note with the
+      §5.2 enforcement matrix filled in from evidence.
+
+  - key: "322"
+    key_original: a1
+    title: "runtime: claudeCode() provider gains cc-config seams (isolated default, OAuth, fail-closed)"
+    depends_on: ["318"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `hr/a1-provider-seams` · packages: runtime · spec: design.md §4 A-1, D11**
+
+      `ClaudeCodeProviderOptions` grows `config: CCConfigSource` + `oauthToken: OAuthTokenSource`,
+      reusing cc-config free functions via SDK `options.env`; isolated mode default for the
+      provider; FAIL CLOSED on unresolvable token — including fixing the same fail-open in
+      `ClaudeCodeRunner._buildOptions` (claude-code-runner.ts:556).
+
+      Shared-surface note: edits claude-code-runner.ts — merges before B1 branches (plan
+      execution_policy).
+
+      **Acceptance:** fail-closed tests (no token → construction error, both provider and runner);
+      isolation env-injection tests; existing provider tests pass.
+
+  - key: "323"
+    key_original: b1
+    title: "runtime: CC event-translation parity — per-call llm.end, iterations, durations, finishReason, cost"
+    depends_on: ["318", "319", "322"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `hr/b1-cc-event-parity` · packages: runtime · spec: design.md §5.3, §2 (D2, D12)**
+
+      Dependency notes: F2 is a COMPILE dep — B1 writes `BaseEvent.meta`, which F2 introduces
+      (types.ts:30 has no meta field today). A1 is a file-serialization edge on
+      claude-code-runner.ts, not a logical dep.
+
+      Upgrade ClaudeCodeRunner's SDK-message translator: `llm.end` per SDKAssistantMessage
+      (usage/model/stop_reason from BetaMessage); `llm.start` from stream message_start else
+      synthesized w/ `meta.synthetic`; `iteration.*` at turn boundaries reconciled vs `num_turns`;
+      tool `durationMs` via start timestamping; `finishReason` from result subtypes; `costUsd` on
+      RunResult + `agent.message.complete`; `harness-native` envelope event for
+      compaction/subagent/rate-limit messages. B2 refactors OVER this translator — the translator
+      test suite is TRANSITIONAL (B2 relocates it); dashboard-visible value arrives via E1.
+
+      **Acceptance:** translator tests per event kind incl. synthetic provenance; docs/runners.md
+      §3.3 gap table updated.
+
+  - key: "324"
+    key_original: e1
+    title: "dashboard+runtime: SSE event-union sync + drift check — new event kinds reach the UI (subsumes #286)"
+    depends_on: ["319", "323"]
+    labels: [dashboard, runtime]
+    description: |
+      **Size M · branch `hr/e1-dashboard-event-sync` · packages: dashboard, runtime · spec: plan-panel scope blocker + design §5.3/§5.4 event additions**
+
+      `agent-dashboard/src/api/sse-events.ts` hand-mirrors the runtime SSE union and is already 5
+      names adrift (#286). Sync it AND add a build-time drift check so it can't silently rot again;
+      register the new kinds in `events/event-profiles.ts` (per-profile emit allow-lists); render
+      `agent.gate.decision`, `harness-native` envelope, `costUsd` on message.complete, and
+      `meta.synthetic` markers (badge synthesized events; never chart them as causal latency).
+      Verify exporter pass-through: otel + langfuse surface `agent.gate.decision` and map `costUsd`
+      to the span/generation cost attribute where the exporter schema has one.
+
+      **Acceptance:** drift check fails CI on union mismatch (proven by test); #286 closed; new
+      kinds visible on /live; exporter smoke shows gate.decision + cost.
+
+  - key: "325"
+    key_original: a2
+    title: "runtime: claudeCode() session economics — kill subprocess-per-iteration"
+    depends_on: ["320", "322"]
+    labels: [runtime]
+    description: |
+      **Size M (L if F3 forces resume+inject) · branch `hr/a2-session-economics` · packages: runtime · spec: design.md §4 A-2**
+
+      Strategy per F3's findings: `deferred_tool_use` ≫ resume+result-injection ≫ status-quo
+      flatten. Whatever lands must preserve LMv2 statelessness from AgentRunner's perspective
+      (internal session cache keyed off conversation identity is an implementation detail).
+
+      **Acceptance:** multi-iteration run spawns ≤1 subprocess (or documented fallback);
+      prompt-cache-friendly history verified; provider tests green.
+
+  - key: "326"
+    key_original: b2
+    title: "runtime: extract CodingAgentRunner base + HarnessAdapter/HarnessSession; CC adapter refactor"
+    depends_on: ["319", "321", "323"]
+    labels: [runtime]
+    description: |
+      **Size L · branch `hr/b2-coding-agent-runner` · packages: runtime · spec: design.md §5.1, §5.2, D3**
+
+      Base owns AP-event construction, evaluateIntent wiring, span correlation, per-session
+      correlation env (kills process.env race, claude-code-runner.ts:86).
+      `HarnessAdapter.probe(ctx) → HarnessProbeResult` (structured issues; per-OperationClass
+      enforcement; sandbox record; features); async `start()` → `HarnessSession`
+      (respond/interrupt/close; exactly-once local settlement; close idempotent); `HarnessEvent`
+      envelope w/ NativeIds + discriminated ParentRef; mandatory requestId on ask variants.
+      `GateRequirements` on the Gate interface + run-start compatibility check. `ClaudeCodeRunner`
+      refactored onto the base; `ClaudeCodeAPIRunner` preset intact. Acceptance INCLUDES CC
+      contract tests establishing per-class enforcement (design: contract-tested, not asserted).
+      Base is provisional until B4. Coordinates with #302 (spec states whether the base extraction
+      subsumes #302 or leaves it scoped to AgentRunner internals).
+
+      **Acceptance:** existing runner tests pass (updated for B1 translator); CC contract tests
+      green; run-start requirement-mismatch fails loud with named gate + class; #302 disposition
+      stated in the spec.
+
+  - key: "327"
+    key_original: a3
+    title: "runtime+cli: subscription rung in createRunner — SDK launch/auth-readiness probe"
+    depends_on: ["322", "325"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `hr/a3-subscription-rung` · packages: runtime, cli · spec: design.md §4 A-3, D8**
+
+      Dependency note: the A2 edge is DELIBERATE SHIP-ORDER, not a build dep (true build edge is
+      A1 + F3's accepted strategy) — don't headline the subscription rung while it still spawns a
+      subprocess per turn.
+
+      New createRunner rung above the ClaudeCodeAPIRunner fallback, below API-key providers;
+      probe = actual SDK launch/auth readiness against the bundled executable (NOT hasClaudeCli
+      PATH probe — retire its false-negative for this rung); revise claude-* mismatch behavior
+      (create-runner.ts:263): classified id + no key + verified subscription → subscription rung;
+      fail-loud error retained for no-key no-subscription. Update docs/runners.md choice matrix +
+      ExecutionService preflight messaging.
+
+      **Acceptance:** rung-selection tests (key present/absent × subscription present/absent ×
+      claude-* id); preflight message tests; docs updated.
+
+  - key: "328"
+    key_original: b3
+    title: "runtime+server: permission bridge — canUseTool seam + AskContext transport (UI split to U1)"
+    depends_on: ["326"]
+    labels: [runtime, server]
+    description: |
+      **Size M · branch `hr/b3-permission-bridge` · packages: runtime, server · spec: design.md §5.4, D4, D10, D13**
+
+      CC adapter: `canUseTool` as the ask seam + permissionMode switch when interactive (hooks
+      demoted to observation). Widen the `interaction/` transport (PendingInputRegistry, SSE,
+      `POST /conversations/:id/input`) to carry AskContext + HarnessDecision;
+      CONVERSATION-BINDING FIX on the input route (conversations.ts:447 — `:id` must bind, not
+      address). 4-step decision validation before respond(). `askTimeout` 300s default → native
+      decline + `agent.tool.rejected` reason=timeout, `settledBy` preserved end-to-end. Durable
+      kinds rejected while the D13 flag is off. Dashboard components split to U1.
+
+      **COLLISION:** #296 + #234 share conversations.ts — spec declares subsume-or-sequence before
+      implementation; do not let both rewrite the same fan-out unaware.
+
+      **Acceptance:** headless approval round-trip test (suspend → POSTed decision → native reply);
+      timeout-vs-decline distinguished in audit; conversation-binding test; durable kinds rejected
+      while flag off; #296/#234 disposition stated in the spec.
+
+  - key: "329"
+    key_original: u1
+    title: "dashboard: approval components — allowOnce/deny/cancel/rewriteInput/allowWithRules/grant flows"
+    depends_on: ["328", "324"]
+    labels: [dashboard]
+    description: |
+      **Size M · branch `hr/u1-approval-ui` · packages: dashboard · spec: design.md §5.4 (ask payload + decision contract), D13**
+
+      Net-new component set (none exist today): per-operation ask renderers (shell → command;
+      file-change → diff; MCP tool → schema'd args; permission → requested set); decision buttons
+      driven by `availableDecisions`; rewriteInput editor; allowWithRules(session) proposal
+      picker; durable options rendered but DISABLED (D13 flag off until #307). Timeout state
+      distinct from declined. No mono font for UI text (project convention).
+
+      **Acceptance:** full e2e approval round-trip through the UI (suspend → click → native
+      reply); durable options visibly disabled w/ explanation; timeout renders distinctly.
+
+  - key: "330"
+    key_original: b4
+    title: "runtime: CodexRunner adapter — App Server, pinned schemas, full event translation"
+    depends_on: ["328"]
+    labels: [runtime]
+    description: |
+      **Size L · branch `hr/b4-codex-runner` · packages: runtime · spec: design.md §5.5, §5.1, R1 findings**
+
+      App Server only (JSON-RPC/JSONL, R1's pinned stable schema + version floor); request-id
+      correlation w/ local-settlement semantics; explicit translation for
+      command/file-change/MCP/permission/subagent/compaction/usage/cancellation/failure events;
+      per-class enforcement declaration from R1 contract tests (hosted tools advisory); AGENTS.md
+      composition (global role mount composes with, never overwrites, profile AGENTS.md);
+      CODEX_HOME isolation + workspace caveat; credentials never in profiles. Interface breaks vs
+      B2 are expected — fold back into the base deliberately (D3).
+
+      **Acceptance:** R1 contract suite passes through the adapter; cross-harness bridge test
+      (same gate chain drives CC and Codex asks); enforcement matrix surfaced on message.start.
+
+  - key: "331"
+    key_original: doc1
+    title: "docs: runners doc overhaul + build-on-agentic-patterns skill + ADR-0006"
+    depends_on: ["330", "327", "329"]
+    labels: [documentation]
+    description: |
+      **Size M · branch `hr/doc1-docs-skill` · packages: runtime, cli (skill lives in BOTH homes incl. the cli plugin template) · spec: design.md (whole), SessionScope docs precedent (#313/#314)**
+
+      docs/runners.md rewritten around the final ladder (subscription rung, harness runners,
+      updated §3.3 parity table); build-on-agentic-patterns SKILL.md updated in both homes incl.
+      the cli plugin template (SKILL.md:203 teaches the createRunner ladder A3 reorders); package
+      READMEs; ADR-0006 recording the two-seams / harness-runner doctrine + D13 durability split
+      (promoted from design §2/§6). Examples: a CodingAgent example under examples/agents/.
+
+      **Acceptance:** docs match shipped behavior (no fabricated examples — #315 precedent); skill
+      teaches the new ladder; ADR merged.
+
+  - key: "332"
+    key_original: rel1
+    title: "release: lockstep bump + publish (runtime/server/cli + dashboard)"
+    depends_on: ["331"]
+    labels: []
+    description: |
+      **Size S · branch `hr/rel1-release` · packages: runtime, server, cli, dashboard · spec: CLAUDE.md landing-changes + publish-gate memory**
+
+      `just bump-lockstep` (core floats — untouched by this arc unless B2's event-type changes
+      leak into core, which the design forbids); PUBLISH GATE: `rm bun.lock && bun install` in the
+      SAME commit as the version bump; publish fires on merge to main when versions changed.
+      Release notes summarize both tracks + the subscription-policy caveat (D9).
+
+      **Acceptance:** publish green on npm; `ap` CLI smoke against published versions.
+
+# --- Auxiliary plan metadata (not consumed by /sync-issues; source of truth for execution) ---
+
+execution_policy:
+  - >-
+    Wave N merges to main before wave N+1 branches (barrier — depends_on alone is not
+    sufficient: claude-code-runner.ts is edited by F2, A1, B1 and rewritten by B2).
+  - >-
+    claude-code-runner.ts is a SHARED SURFACE; its editors serialize F2 → A1 → B1 → B2.
+  - >-
+    F1 and F2 are file-disjoint (verified) — parallel is safe; only coupling is typecheck
+    integration where the SDK bump touches runner types both edit.
+
+waves:
+  - id: wave1              # foundations + spikes — parallel worktrees off main; MERGE BARRIER after
+    slices: [f1, f2, f3, r1]
+    human_gate: F3 and R1 findings get a human read before wave3 starts
+  - id: wave2              # a1 then b1 (serialized — shared runner file); both need wave1 merged
+    slices: [a1, b1]
+  - id: wave3
+    slices: [a2, b2, e1]
+  - id: wave4
+    slices: [a3, b3]
+  - id: wave5              # parallel: b4 needs b3 (seam); u1 needs b3+e1 (UI)
+    slices: [b4, u1]
+  - id: wave6              # ship tail
+    slices: [doc1, rel1]
+
+locked_decisions:          # curated subset of design §6 — the load-bearing ones implementers must not relitigate
+  - D1 two seams — LMv2 iff framework owns the loop; RunnerProtocol iff the harness does. No LMv2 coding agents.
+  - D3 R-1 contract facts land BEFORE base extraction (B2); base stays provisional until B4.
+  - D4 decision contract — allowSession (native cache, Codex-only) ≠ allowWithRules (≥1 proposal refs); 4-step validation kind/compat/scope/authz.
+  - D5 AskContext threads adapter→gates→transport→audit; audit phase guaranteed via recordDecision(evaluation, ctx).
+  - D9 policy hedge — every auth path keeps an explicit token/API-key swap seam (both vendors); a subscription-policy reversal must be a config change.
+  - D11 isolation fails closed — unresolvable auth in isolated mode is an error, never host fall-through.
+  - D13 durability split — durable decisions feature-flagged OFF until #307 provides actor identity.
+  - Reproducibility = lockfile + committed schema fixtures (stable channel) asserted in CI; manifest range is intake policy, not the pin.
+  - Codex integration surface is App Server (bidirectional JSON-RPC/JSONL); `codex exec --json` is telemetry-only; no `proto`.
+  - The Agent SDK bundles its CC executable (platform packages, lockfile-pinned); probes test SDK launch/auth readiness, not PATH.
