@@ -25,7 +25,7 @@ import type { EvalScoreLike, JoinedEvalResultRow } from "../../../../api/types";
 import { Badge } from "../../../../components/atoms/Badge";
 import { Card } from "../../../../components/atoms/Card";
 import { DataTable } from "../../../../components/organisms/DataTable";
-import { p50, sdcAxisMeans } from "../../../../lib/evalAggregates";
+import { p50, scoreMapCoreAxes, sdcAxisMeans } from "../../../../lib/evalAggregates";
 import { CaseDetail } from "../../CaseDetail";
 import { Histogram } from "../../charts/Histogram";
 import { ScatterPlot } from "../../charts/ScatterPlot";
@@ -89,16 +89,18 @@ interface FixtureRow {
 
 function projectFixture(row: JoinedEvalResultRow): FixtureRow {
   const d = detailOfKind(row.scores, "score-map");
-  const axes = d ? (isRecord(d.scores) ? d.scores : isRecord(d.axes) ? d.axes : null) : null;
+  const core = d
+    ? scoreMapCoreAxes(d)
+    : { hybrid: null, correctness: null, retrieval: null, citation: null };
   const verdictsRaw = detailOfKind(row.scores, "judge-verdicts")?.verdicts;
   const verdicts = Array.isArray(verdictsRaw) ? verdictsRaw.filter(isRecord) : null;
   const dealsRaw = d?.dealIds;
   return {
     row,
-    hybrid: num(d?.hybrid) ?? (axes ? num(axes.hybrid) : null),
-    correctness: axes ? num(axes.answer_correctness) : null,
-    retrieval: axes ? num(axes.evidence_seen_recall) : null,
-    citation: axes ? num(axes.citation_claim_support) : null,
+    hybrid: core.hybrid,
+    correctness: core.correctness,
+    retrieval: core.retrieval,
+    citation: core.citation,
     judgeNum: verdicts ? verdicts.filter((v) => v.passed === true).length : null,
     judgeDen: verdicts ? verdicts.length : null,
     deals: Array.isArray(dealsRaw)

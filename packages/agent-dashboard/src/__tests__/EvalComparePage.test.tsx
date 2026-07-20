@@ -313,3 +313,159 @@ describe("EvalComparePage", () => {
     });
   });
 });
+
+// ---- Family branch (slice 10) ----------------------------------------------
+
+function renderGradeScore(
+  fid: string,
+  variantKey: string,
+  pass: boolean,
+  readability: number,
+  ratio: number,
+  usd: number,
+) {
+  return {
+    name: "render-grade",
+    value: pass ? 1 : 0,
+    passed: pass,
+    detail: {
+      kind: "render-grade",
+      fid,
+      variantKey,
+      variant: { shape: "prose", verbosity: "brief" },
+      status: "ok",
+      report: {
+        pass,
+        relativeLength: { ratio, stateWords: 100, renderedWords: Math.round(100 * ratio) },
+      },
+      judge: { readability, faithful_emphasis: 4.0, tone_differentiation: 3.5 },
+      cost: { inputTokens: 900, outputTokens: 260, estimatedUsd: usd },
+      latencyMs: 1500,
+    },
+  };
+}
+
+function scoreMapScore(hybrid: number, correctness: number, retrieval: number) {
+  const axes = {
+    hybrid,
+    answer_correctness: correctness,
+    evidence_seen_recall: retrieval,
+    citation_claim_support: 0.75,
+  };
+  return { name: "score-map", value: hybrid, detail: { kind: "score-map", scores: axes, axes } };
+}
+
+const emptySummary = {
+  cases: 1,
+  passed: 1,
+  failed: 0,
+  ungated: 0,
+  errored: 0,
+  passRate: 1,
+  inputTokens: 10,
+  outputTokens: 5,
+};
+
+function familyDetail(
+  runOverrides: Partial<EvalRunRow>,
+  results: JoinedEvalResultRow[],
+): EvalRunDetailResponse {
+  return { run: mkRun(runOverrides), results, summary: emptySummary };
+}
+
+const rendererDetailA = familyDetail(
+  { id: "run-a", variant: "baseline", meta: { family: "renderer" } },
+  [
+    mkResult("fid-001#prose#brief", {
+      evalRunId: "run-a",
+      scores: [renderGradeScore("fid-001", "prose#brief", true, 4.0, 1.0, 0.004)],
+    }),
+  ],
+);
+const rendererDetailB = familyDetail(
+  { id: "run-b", variant: "candidate", meta: { family: "renderer" } },
+  [
+    mkResult("fid-001#prose#brief", {
+      evalRunId: "run-b",
+      scores: [renderGradeScore("fid-001", "prose#brief", true, 4.5, 1.2, 0.002)],
+    }),
+  ],
+);
+
+const sdcDetailA = familyDetail({ id: "run-a", meta: { family: "sdc" } }, [
+  mkResult("fx-001", { evalRunId: "run-a", scores: [scoreMapScore(0.8, 0.9, 0.7)] }),
+]);
+const sdcDetailB = familyDetail({ id: "run-b", meta: { family: "sdc" } }, [
+  mkResult("fx-001", { evalRunId: "run-b", scores: [scoreMapScore(0.9, 0.85, 0.8)] }),
+]);
+
+describe("EvalComparePage — family branch", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("a renderer pair replaces the generic body with the per-variant delta table", async () => {
+    stubFetch({ aBody: rendererDetailA, bBody: rendererDetailB });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("prose#brief")).toBeTruthy();
+    });
+    // The family delta columns are up.
+    expect(screen.getByText("Δ det-pass")).toBeTruthy();
+    expect(screen.getByText("Δ readability")).toBeTruthy();
+    expect(screen.getByText("Δ len-ratio")).toBeTruthy();
+    expect(screen.getByText("Δ $ / render")).toBeTruthy();
+    // Provenance survives; the generic six-tile summary + case table do NOT.
+    expect(screen.getByText("A · baseline")).toBeTruthy();
+    expect(screen.queryByText("Both passed")).toBeNull();
+    expect(screen.queryByText("Regressions")).toBeNull();
+    expect(screen.queryByText("Scores A")).toBeNull();
+  });
+
+  it("an sdc pair shows the per-fixture axis delta table, not the generic body", async () => {
+    stubFetch({ aBody: sdcDetailA, bBody: sdcDetailB });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("fx-001")).toBeTruthy();
+    });
+    expect(screen.getByText("Δ hybrid")).toBeTruthy();
+    expect(screen.getByText("Δ correctness")).toBeTruthy();
+    expect(screen.getByText("Δ retrieval")).toBeTruthy();
+    expect(screen.queryByText("Both passed")).toBeNull();
+  });
+
+  it("a curation pair warns and keeps the generic body unchanged", async () => {
+    const aBody = { ...detailA, run: { ...runA, meta: { family: "curation" } } };
+    const bBody = { ...detailB, run: { ...runB, meta: { family: "curation" } } };
+    stubFetch({ aBody, bBody });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Family compare is not available for curation runs — showing the generic compare.",
+        ),
+      ).toBeTruthy();
+    });
+    expect(screen.getByText("Both passed")).toBeTruthy();
+    expect(screen.getByText("case-both-pass")).toBeTruthy();
+  });
+
+  it("a mixed-family pair warns and keeps the generic body unchanged", async () => {
+    const aBody = { ...detailA, run: { ...runA, meta: { family: "renderer" } } };
+    stubFetch({ aBody });
+    renderPage();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Runs are different families — showing the generic compare."),
+      ).toBeTruthy();
+    });
+    expect(screen.getByText("Both passed")).toBeTruthy();
+    expect(screen.queryByText("Δ det-pass")).toBeNull();
+  });
+});

@@ -6,6 +6,12 @@
  * would be (spec finding 3), so no server change backs this view. Alignment
  * + the six-bucket delta summary is the pure `lib/evalCompare.ts` merge.
  *
+ * Family branch (slice 10): when BOTH runs share a family, renderer/sdc pairs
+ * replace the generic comparison body with the `lib/evalFamilyCompare.ts`
+ * delta table (per-variantKey / per-fixture). Curation pairs and mixed-family
+ * pairs show a warning banner above the unchanged generic body; generic
+ * (no-family) pairs render exactly as before.
+ *
  * Deep-linkable and refresh-safe — the URL is the source of truth for A/B
  * order. The `Swap` button just navigates to the swapped URL.
  */
@@ -32,7 +38,16 @@ import {
   alignResults,
   summarizeComparison,
 } from "../../lib/evalCompare";
+import {
+  type MetricDelta,
+  type RendererCompareRow,
+  type SdcCompareRow,
+  rendererCompare,
+  sdcCompare,
+} from "../../lib/evalFamilyCompare";
 import { TraceSection } from "./CaseDetail";
+import { DeltaCell } from "./components/DeltaCell";
+import { familyOf } from "./families/types";
 
 const preStyle = {
   margin: 0,
@@ -277,48 +292,74 @@ export function EvalComparePage() {
   }
 
   const { a, b } = state;
+  const differentSets = a.run.setId !== b.run.setId;
+  const aFamily = familyOf(a.run);
+  const bFamily = familyOf(b.run);
+  const sharedFamily = aFamily !== null && aFamily === bFamily ? aFamily : null;
+
+  const header = (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {backLink}
+        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Compare</h1>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => aId && bId && navigate(`/eval/compare/${bId}/${aId}`)}
+      >
+        Swap
+      </Button>
+    </div>
+  );
+
+  const setsBanner = differentSets ? (
+    <WarningBanner text="Runs are from different sets — case alignment may be sparse." />
+  ) : null;
+
+  const provenance = (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <ProvenanceCard label="A · baseline" run={a.run} />
+      <ProvenanceCard label="B · candidate" run={b.run} />
+    </div>
+  );
+
+  // Family branch: renderer/sdc pairs replace the generic comparison body.
+  if (sharedFamily === "renderer" || sharedFamily === "sdc") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {header}
+        {setsBanner}
+        {provenance}
+        {sharedFamily === "renderer" ? (
+          <RendererCompareBody aResults={a.results} bResults={b.results} />
+        ) : (
+          <SdcCompareBody aResults={a.results} bResults={b.results} />
+        )}
+      </div>
+    );
+  }
+
+  // Curation pairs and mixed-family pairs warn, then fall through to generic.
+  const familyNotice =
+    sharedFamily === "curation"
+      ? "Family compare is not available for curation runs — showing the generic compare."
+      : aFamily !== bFamily
+        ? "Runs are different families — showing the generic compare."
+        : null;
+
   const aligned = alignResults(a.results, b.results);
   const summary = summarizeComparison(aligned);
-  const differentSets = a.run.setId !== b.run.setId;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {backLink}
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Compare</h1>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => aId && bId && navigate(`/eval/compare/${bId}/${aId}`)}
-        >
-          Swap
-        </Button>
-      </div>
+      {header}
 
-      {differentSets && (
-        <Card
-          style={{
-            borderColor: "var(--yellow)",
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 12,
-          }}
-        >
-          <span style={{ color: "var(--yellow)", display: "inline-flex", flexShrink: 0 }}>
-            <AlertIcon size={18} />
-          </span>
-          <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>
-            Runs are from different sets — case alignment may be sparse.
-          </div>
-        </Card>
-      )}
+      {familyNotice && <WarningBanner text={familyNotice} />}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-        <ProvenanceCard label="A · baseline" run={a.run} />
-        <ProvenanceCard label="B · candidate" run={b.run} />
-      </div>
+      {setsBanner}
+
+      {provenance}
 
       <Card>
         <div
@@ -430,6 +471,187 @@ function Stat({
         {value}
       </div>
     </div>
+  );
+}
+
+function WarningBanner({ text }: { text: string }) {
+  return (
+    <Card
+      style={{
+        borderColor: "var(--yellow)",
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 12,
+      }}
+    >
+      <span style={{ color: "var(--yellow)", display: "inline-flex", flexShrink: 0 }}>
+        <AlertIcon size={18} />
+      </span>
+      <div style={{ fontSize: 13, color: "var(--fg-muted)" }}>{text}</div>
+    </Card>
+  );
+}
+
+// ---- Family compare bodies (slice 10) --------------------------------------
+
+const fmtPct = (v: number) => `${Math.round(v * 100)}%`;
+const fmtPts = (v: number) => `${v > 0 ? "+" : ""}${(v * 100).toFixed(1)} pts`;
+const fmtUsd = (v: number) => `$${v.toFixed(4)}`;
+const fmtUsdDelta = (v: number) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(4)}`;
+const fmt2 = (v: number) => v.toFixed(2);
+const fmtSigned2 = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
+
+/** "A → B" for one metric, muted mono; "—" per absent side. */
+function ABPair({ m, fmt }: { m: MetricDelta; fmt: (v: number) => string }) {
+  const f = (v: number | null) => (v === null ? "—" : fmt(v));
+  return (
+    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--fg-muted)" }}>
+      {f(m.a)} → {f(m.b)}
+    </span>
+  );
+}
+
+/** An uncolored delta — for metrics without a better direction (len-ratio). */
+function NeutralDelta({ value, fmt }: { value: number | null; fmt: (v: number) => string }) {
+  return (
+    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-muted)" }}>
+      {value === null || !Number.isFinite(value) ? "—" : fmt(value)}
+    </span>
+  );
+}
+
+function RendererCompareBody({
+  aResults,
+  bResults,
+}: {
+  aResults: JoinedEvalResultRow[];
+  bResults: JoinedEvalResultRow[];
+}) {
+  const rows = rendererCompare(aResults, bResults);
+  return (
+    <Card padded={false}>
+      <DataTable<RendererCompareRow>
+        columns={[
+          {
+            key: "variantKey",
+            header: "Variant",
+            render: (r) => (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{r.variantKey}</span>
+            ),
+          },
+          {
+            key: "n",
+            header: "n (A/B)",
+            render: (r) => (
+              <span style={mutedStyle}>
+                {r.a?.n ?? "—"} / {r.b?.n ?? "—"}
+              </span>
+            ),
+          },
+          {
+            key: "detPass",
+            header: "Det pass",
+            render: (r) => <ABPair m={r.detPass} fmt={fmtPct} />,
+          },
+          {
+            key: "dDetPass",
+            header: "Δ det-pass",
+            render: (r) => <DeltaCell value={r.detPass.delta} formatValue={fmtPts} />,
+          },
+          {
+            key: "readability",
+            header: "Readability",
+            render: (r) => <ABPair m={r.readability} fmt={fmt2} />,
+          },
+          {
+            key: "dReadability",
+            header: "Δ readability",
+            render: (r) => <DeltaCell value={r.readability.delta} />,
+          },
+          {
+            key: "lenRatio",
+            header: "Len ratio",
+            render: (r) => <ABPair m={r.lenRatio} fmt={fmt2} />,
+          },
+          {
+            key: "dLenRatio",
+            header: "Δ len-ratio",
+            render: (r) => <NeutralDelta value={r.lenRatio.delta} fmt={fmtSigned2} />,
+          },
+          {
+            key: "usdPerRender",
+            header: "$ / render",
+            render: (r) => <ABPair m={r.usdPerRender} fmt={fmtUsd} />,
+          },
+          {
+            key: "dUsdPerRender",
+            header: "Δ $ / render",
+            render: (r) => (
+              <DeltaCell
+                value={r.usdPerRender.delta}
+                formatValue={fmtUsdDelta}
+                higherIsBetter={false}
+              />
+            ),
+          },
+        ]}
+        data={rows}
+        rowKey={(r) => r.variantKey}
+      />
+    </Card>
+  );
+}
+
+function SdcCompareBody({
+  aResults,
+  bResults,
+}: {
+  aResults: JoinedEvalResultRow[];
+  bResults: JoinedEvalResultRow[];
+}) {
+  const rows = sdcCompare(aResults, bResults);
+  return (
+    <Card padded={false}>
+      <DataTable<SdcCompareRow>
+        columns={[
+          {
+            key: "caseId",
+            header: "Fixture",
+            render: (r) => (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{r.caseId}</span>
+            ),
+          },
+          { key: "hybrid", header: "Hybrid", render: (r) => <ABPair m={r.hybrid} fmt={fmt2} /> },
+          {
+            key: "dHybrid",
+            header: "Δ hybrid",
+            render: (r) => <DeltaCell value={r.hybrid.delta} />,
+          },
+          {
+            key: "correctness",
+            header: "Correctness",
+            render: (r) => <ABPair m={r.correctness} fmt={fmt2} />,
+          },
+          {
+            key: "dCorrectness",
+            header: "Δ correctness",
+            render: (r) => <DeltaCell value={r.correctness.delta} />,
+          },
+          {
+            key: "retrieval",
+            header: "Retrieval",
+            render: (r) => <ABPair m={r.retrieval} fmt={fmt2} />,
+          },
+          {
+            key: "dRetrieval",
+            header: "Δ retrieval",
+            render: (r) => <DeltaCell value={r.retrieval.delta} />,
+          },
+        ]}
+        data={rows}
+        rowKey={(r) => r.caseId}
+      />
+    </Card>
   );
 }
 

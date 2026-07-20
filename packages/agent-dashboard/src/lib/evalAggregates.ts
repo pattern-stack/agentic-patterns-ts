@@ -343,6 +343,34 @@ export function rendererVariantScoreboard(
 // ---- SDC axis means (run-level score map fallback) -------------------------
 
 /**
+ * The axes record off a `score-map` detail — contract-canonical `scores`,
+ * legacy `axes` alias. THE one projection site: `SdcRunDetail.projectFixture`,
+ * `sdcCompare.readSdcAxes`, and `sdcAxisMeans` all read through here so a
+ * contract shift cannot silently diverge the run-detail and compare pages.
+ */
+export function scoreMapAxes(detail: Record<string, unknown>): Record<string, unknown> | null {
+  return isRecord(detail.scores) ? detail.scores : isRecord(detail.axes) ? detail.axes : null;
+}
+
+/** The named per-case axis projection every SDC surface shares. */
+export interface ScoreMapCoreAxes {
+  hybrid: number | null;
+  correctness: number | null;
+  retrieval: number | null;
+  citation: number | null;
+}
+
+export function scoreMapCoreAxes(detail: Record<string, unknown>): ScoreMapCoreAxes {
+  const axes = scoreMapAxes(detail);
+  return {
+    hybrid: num(detail.hybrid) ?? (axes ? num(axes.hybrid) : null),
+    correctness: axes ? num(axes.answer_correctness) : null,
+    retrieval: axes ? num(axes.evidence_seen_recall) : null,
+    citation: axes ? num(axes.citation_claim_support) : null,
+  };
+}
+
+/**
  * Mean of each `score-map` axis across a run's cases — the client-computed
  * fallback for the run-level SDC score map when `meta.sdc.scores` is absent.
  */
@@ -351,7 +379,7 @@ export function sdcAxisMeans(results: readonly JoinedEvalResultRow[]): Record<st
   for (const r of results) {
     const score = scoreWithKind(r.scores, "score-map");
     if (!score || !isRecord(score.detail)) continue;
-    const axes = score.detail.scores ?? score.detail.axes;
+    const axes = scoreMapAxes(score.detail);
     if (!isRecord(axes)) continue;
     for (const [k, v] of Object.entries(axes)) {
       const n = num(v);
