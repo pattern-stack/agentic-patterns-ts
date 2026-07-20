@@ -40,6 +40,7 @@
       "pnpm-lock.yaml",
       "bun.lock",
       "demo/",
+      ".worktrees/",
       "packages/agent-cli/assets/dashboard/",
       "packages/agent-cli/assets/plugin-template/",
       "**/__fixtures__/**"

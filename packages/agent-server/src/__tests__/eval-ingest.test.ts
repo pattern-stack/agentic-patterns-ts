@@ -59,7 +59,11 @@ function validBody() {
       meta: { family: "renderer-grid", lens: "curation" },
     },
     results: [
-      { caseId: "case-01", pass: true, scores: [{ name: "claim-support", value: 0.81, passed: true }] },
+      {
+        caseId: "case-01",
+        pass: true,
+        scores: [{ name: "claim-support", value: 0.81, passed: true }],
+      },
       { caseId: "case-02", pass: false },
     ],
   };
@@ -140,7 +144,11 @@ describe("POST /eval/runs/ingest", () => {
     const rerun = validBody();
     rerun.run.status = "error" as never;
     rerun.results = [
-      { caseId: "case-01", pass: true, scores: [{ name: "claim-support", value: 0.9, passed: true }] },
+      {
+        caseId: "case-01",
+        pass: true,
+        scores: [{ name: "claim-support", value: 0.9, passed: true }],
+      },
     ];
     const res = await postJson(app, "/eval/runs/ingest", rerun);
     expect(res.status).toBe(200); // replaced, not created

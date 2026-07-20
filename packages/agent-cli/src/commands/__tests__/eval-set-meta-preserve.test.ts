@@ -50,6 +50,7 @@ beforeEach(() => {
 afterEach(() => {
   stdoutSpy.mockRestore();
   process.exitCode = undefined;
+  // biome-ignore lint/performance/noDelete: assigning undefined would store the string "undefined" in process.env
   if (savedModel === undefined) delete process.env.AGENT_MODEL;
   else process.env.AGENT_MODEL = savedModel;
   rmSync(dir, { recursive: true, force: true });

@@ -14,3 +14,6 @@ demo/
 # Local session + QA artifacts (not source)
 **/.claude/.session/
 screenshots/
+
+# Throwaway git worktrees (session harnesses)
+.worktrees/
