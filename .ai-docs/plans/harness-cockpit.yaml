@@ -1,0 +1,931 @@
+# Harness Cockpit — revive the Go chat-patterns TUI as the terminal cockpit for the
+# agentic-patterns TS server.
+#
+# Gate-0 provenance: strategy locked per .ai-docs/research/cli-chat-parity/gap-analysis.md
+#   (rev 2) — Strategy A (revive chat-patterns against the live server contract), rounds
+#   pre → R1 → R2 → R3. This plan does NOT relitigate the strategy.
+# Spec of record: the six scout dossiers under .ai-docs/stacks/harness-cockpit/scout/
+#   (constraints-alignment, server-n5-cancel, server-shim-displaytype, go-wire-abort,
+#   go-hitl, go-scope-replay). Every file:line anchor below was verified by a scout at
+#   agentic-patterns-ts main@10d5c0b and chat-patterns origin/main@187411b.
+# Rollout narrative (build order, gates, risks, deferred): .ai-docs/stacks/harness-cockpit/plan.md
+#
+# Schema: canonical /sdlc:plan → /sdlc:sync-issues shape (exemplar: harness-runners.yaml,
+#   proven by epic #317 + leaves #318-#332). Cross-repo augmentation: each issue also
+#   carries explicit `repo` (agentic-patterns-ts | chat-patterns), `round` (pre|R1|R2|R3),
+#   `size`, and `files` fields; sync-issues consumes key/title/depends_on/labels/description
+#   — the extra fields are mirrored in each description header for the tracker.
+# Tracker home (locked, OD-5): ALL issues — Go included — sync to
+#   pattern-stack/agentic-patterns-ts; Go issues name their chat-patterns branch and carry
+#   the `go` label. chat-patterns revival base is PINNED at 187411b (work from a fresh
+#   clone of github.com/pattern-stack/chat-patterns — the sandbox clone is disposable).
+
+plan:
+  slug: harness-cockpit
+  summary: "Revive chat-patterns (Go TUI) as the harness cockpit speaking the TS server's live
+    HTTP/SSE contract: strategy-neutral server pre-work, R1 wire/abort/scope, R2 HITL, R3
+    picker/replay + display_type + token footer, closed by a live e2e validation."
+  milestone: null
+  auto_approve: false
+  epic_title: "Harness cockpit: chat-patterns TUI ⇄ agentic-patterns server (pre + R1-R3)"
+  epic_body: |
+    Revive the dormant Go chat-patterns TUI (pinned base `187411b`, BSL 1.1, builds+tests
+    green under Go 1.26.1) as the terminal cockpit for the agentic-patterns server.
+    Strategy locked in `.ai-docs/research/cli-chat-parity/gap-analysis.md`; evidence in
+    `.ai-docs/stacks/harness-cockpit/scout/*.md`; rollout narrative in
+    `.ai-docs/stacks/harness-cockpit/plan.md`.
+
+    **Tracks.** TS server track (pre-work N5+cancel, R3 history shim + display_type,
+    release tail) and Go cockpit track (R1 hygiene/wire/abort/scope/cmd, R2 HITL, R3
+    footer/replay). The two tracks parallelize; Go issues land on
+    github.com/pattern-stack/chat-patterns branches named in each issue.
+
+    **Coordination / dispositions (do not re-derive):**
+    - #234 and pre-work N5 share the identical 14-byte torn-stream signature but are TWO
+      defects: N5 = missing catch in the drain loop (fixed here); #234 = bun/hono transport
+      stall. The N5 issue verifies under node AND bun and closes #234 only if the bun repro
+      passes post-fix; otherwise #234 stays open with the transport half.
+    - COLLISION: `packages/agent-server/src/routes/conversations.ts` is edited by pre-work
+      (n5, cancel), the R3 shim, #296 (SSE fan-out consolidation) and #328 (harness-runners
+      B3). Protocol: pre-work lands first; the shim PR states its ordering vs whatever of
+      #296/#328 has landed; the cancel route joins the same protocol.
+    - harness-runners is a LIVE open arc (#317-#332), not a draft. The cockpit builds R2 on
+      TODAY'S input transport and declares the forward-compat seam vs #328/B3 (requestId
+      alias + availableDecisions-driven rendering); R1/R3 need only lenient-decode rules.
+      See plan.md "Forward compatibility".
+    - #287 (SendMessageBody doc drift): the Go client is fixed to send `content` — no
+      server-side `message` alias is added; #287 stays a pure docs fix.
+    - #306 (chat organism package-ization) and #304 (ChatPage split): NO overlap — the
+      cockpit consumes the HTTP/SSE contract, not the React chat organism, and is not
+      #306's "second consumer".
+    - #300 naming: an older doc uses "cockpit-port" for a shipped dashboard effort. This
+      arc is "harness cockpit" — distinct; #300 cleanup must not sweep
+      `.ai-docs/stacks/harness-cockpit/`.
+
+    **Human gates:** A after pre-work (N5 under node+bun, cancel demo) · B after R1
+    first-light (cockpit full turn vs live `ap playground`) · C after R2 HITL e2e
+    (approve/deny/timeout with a real key) · D final walkthrough + publish.
+issues:
+  - key: "340"
+    title: "server+runtime: N5 torn-stream fix — error+done frames on pre-token runner failure"
+    repo: agentic-patterns-ts
+    round: pre
+    size: M
+    depends_on: []
+    labels:
+      - cockpit
+      - server
+      - runtime
+    files:
+      - packages/agent-server/src/routes/conversations.ts:391-406 (drain loop, no catch)
+      - packages/agent-runtime/src/conversation/conversation.ts:290-306 (empty-exchange pollution
+        guard)
+      - packages/agent-server/src/__tests__/conversations-stream-error.test.ts (new)
+      - packages/agent-runtime/src/conversation/__tests__/conversation.test.ts (extend)
+      - examples/agents/broken-model/agent.ts (new N5 canary fixture)
+    description: >
+      **Size M · branch `cockpit/n5-torn-stream` · repo agentic-patterns-ts · round pre ·
+
+      packages: server, runtime · spec: scout/server-n5-cancel.md Part A**
+
+
+      Add the missing `catch` between the drain loop's `try` and `finally`
+
+      (`routes/conversations.ts:391-406`): on a pre-token runner throw (model-resolution
+
+      reject, provider construction failure) write the canonical `error` frame
+
+      (`{error_type, message, recoverable:false}` — toSSEMapping's agent.error shape) then
+
+      the `done` terminator, then swallow (do NOT use hono's `streamSSE` onError — it
+
+      writes a non-JSON error frame). Optionally publish a synthesized `agent.error` on the
+
+      bus (guarded on turnTraceId). Companion (D5, recommended in-PR): guard
+
+      `Conversation.stream`'s bookkeeping so a zero-output errored turn records no phantom
+
+      empty exchange (`conversation.ts:290-306`, revert `_exchangeCount` too); partial-text
+
+      errored turns keep recording. Fix the stale disconnect comment at
+
+      `conversations.ts:414-416`. Ship `examples/agents/broken-model`
+      (`.withModel("bogus-model-9000")`)
+
+      as the permanent N5 canary.
+
+
+      COLLISION: conversations.ts protocol (see epic). Disposition: fixes N5 (missing error
+
+      frame); *references* #234; closes #234 only if the bun repro passes post-fix. Cites
+
+      #293 (failure-branch test backfill).
+
+
+      **Acceptance:**
+
+      - Unit: throwing-before-first-yield runner through POST …/messages yields, in order,
+        `conversation.start`, `conversation.end {reason:"error"}`, `error` (JSON-parses to
+        `{error_type, message:/cannot resolve model id/, recoverable:false}`), final `done {}`;
+        mid-stream-throw variant carries `done {run_id}`; status stays 200 + text/event-stream.
+      - Runtime: pre-token failure with a wired store → history empty, exchangeCount 0, no
+        stored messages; partial-text variant IS recorded.
+      - Manual: `broken-model` curl repro shows all four frames under **node AND bun**;
+        #234 disposition stated in the PR body.
+      - `bun run check` green; no version bump in this PR (rides `rel1`).
+    key_original: n5
+  - key: "341"
+    title: "runtime+server: cancellation — RunOptions.abortSignal + POST /conversations/:id/cancel +
+      disconnect hardening"
+    repo: agentic-patterns-ts
+    round: pre
+    size: M
+    depends_on:
+      - "340"
+    labels:
+      - cockpit
+      - server
+      - runtime
+    files:
+      - packages/agent-runtime/src/runner/types.ts:112-141 (RunOptions.abortSignal)
+      - packages/agent-runtime/src/runner/agent-runner.ts:1208-1213,1237-1349,1177,1450 (streamText
+        signal, abort part, guards)
+      - packages/agent-runtime/src/conversation/conversation.ts:211-267 (signal passthrough, honest
+        end reason)
+      - packages/agent-server/src/routes/conversations.ts:35-50,331-445,454+
+        (ConversationEntry.activeTurn, onAbort, cancel route)
+      - packages/agent-server/src/__tests__/conversations-cancel.test.ts (new)
+      - packages/agent-runtime/src/runner/__tests__/agent-runner-stream.test.ts (extend)
+    description: |
+      **Size M · branch `cockpit/cancel` · repo agentic-patterns-ts · round pre ·
+      packages: runtime, server · spec: scout/server-n5-cancel.md Part B (stacks on n5)**
+
+      Both halves in one PR (Option 2 as the contract, Option 1 as the safety net):
+      (1) `RunOptions.abortSignal` → `streamText({abortSignal})`, `case "abort"` in the
+      fullStream switch, top-of-iteration + pre-tool-dispatch guards, AbortError
+      belt-and-braces; the RUNNER emits `agent.message.cancel` + `agent.conversation.end
+      {reason:"cancelled"}` and returns — never throws (D1). (2) `Conversation.stream`
+      accepts `signal`, stamps its trailing end reason honestly. (3) Server:
+      `ConversationEntry.activeTurn {controller, runId?, startedAt}`; messages route wires
+      the signal, mirrors runId, registers `stream.onAbort(onCancel)` where onCancel aborts
+      + deny-sweeps pending inputs (fixes the blocked-approval disconnect hang), 409 guard
+      on concurrent sends (D2). (4) New `POST /conversations/:id/cancel`: 404 unknown /
+      409 idle / 202 `{ok, run_id?}` (D3); idempotent while winding down. Wire contract for
+      a cancelled turn: `…delta* → message.cancel → conversation.end{cancelled} ×2 → done`.
+      CLI adoption of the signal is deferred (D6). Route auto-appears in /openapi.json.
+
+      COLLISION: conversations.ts protocol (see epic) — this is why it stacks on n5.
+
+      **Acceptance:**
+      - Runtime: pre-aborted signal → cancel pair, no llm.start, generator returns; abort
+        between iterations → no second llm.start; abort mid-provider-stream (MockLanguageModelV2
+        never-closing stream) → cancel pair; Conversation end reason "cancelled" + partial
+        exchange recorded.
+      - Server: cancel grammar 404/409/202; cancelled turn's SSE body ends
+        `message.cancel … done`; deny-sweep-on-cancel unparks a registry-blocked run;
+        disconnect (reader .cancel()) aborts the runner double and denies pending input;
+        concurrent second POST …/messages → 409.
+      - Manual: React Stop now actually stops the runner (token burn ends); curl cancel
+        returns 202 and the open stream winds down.
+      - `bun run check` green; bump rides `rel1`.
+    key_original: cancel
+  - key: "342"
+    title: "go: revival hygiene — CI `check` workflow, license name fix + BSL posture note, base pin"
+    repo: chat-patterns
+    round: R1
+    size: S
+    depends_on: []
+    labels:
+      - cockpit
+      - go
+    files:
+      - .github/workflows/check.yml (new — job `check` running `just quality`, go-version-file
+        go.mod)
+      - LICENSE (Licensed Work "agentic-tui" → chat-patterns; keep BSL 1.1)
+      - README/CLAUDE.md (PR-to-main discipline, pinned base 187411b)
+    description: |
+      **Size S · branch `cockpit/hygiene` · repo chat-patterns · round R1 ·
+      spec: scout/constraints-alignment.md §2.2, §3.1-3.2; scout/go-wire-abort.md §5**
+
+      The repo has no `.github/` at all and 12 direct-to-main commits. Add
+      `.github/workflows/check.yml` (job named `check`, mirroring the TS repo's
+      required-status convention) running `just quality` (= go build/vet/test, exists at
+      Justfile:43-45 and passes at 187411b) on push/PR; adopt PR-to-main from this PR
+      onward. License (OD-3): keep BSL 1.1, fix the Licensed Work name (predates the
+      rename), record the one-paragraph posture note — cockpit use is inside the
+      Additional Use Grant; relicensing deferred until code must cross into an MIT repo.
+      Leave `go 1.25.0` in go.mod.
+
+      **Acceptance:**
+      - CI runs and passes on this PR itself (`check` green on the PR).
+      - LICENSE names the correct Licensed Work; posture note committed (LICENSE-NOTE or
+        README section).
+      - README states the revival base (`187411b`) and PR-to-main rule.
+    key_original: hygiene
+  - key: "343"
+    title: "go: charm dependency bump (bubbletea/bubbles/lipgloss v2 patches) + TUI smoke"
+    repo: chat-patterns
+    round: R1
+    size: S
+    depends_on:
+      - "342"
+    labels:
+      - cockpit
+      - go
+    files:
+      - go.mod / go.sum (charm.land/bubbletea/v2 v2.0.2→v2.0.8, bubbles/v2 v2.0.0→v2.1.1,
+        lipgloss/v2 v2.0.2→v2.0.5)
+    description: |
+      **Size S · branch `cockpit/deps` · repo chat-patterns · round R1 ·
+      spec: scout/constraints-alignment.md §3.3 (OD-4: bump first, dedicated PR)**
+
+      `go get -u` the three charm modules BEFORE behavioral fixes stack on top, so fix PRs
+      are never entangled with dependency behavior changes. Bubble Tea v2 patch releases
+      have occasionally adjusted key/mouse event details — smoke the mouse-wheel and
+      click-to-expand handling (`internal/chat/model.go:175-204` area) manually.
+
+      **Acceptance:**
+      - `just quality` green in CI.
+      - Manual TUI smoke recorded in the PR: scroll wheel, click-to-expand, key nav in the
+        gallery and demo apps behave as before.
+    key_original: deps
+  - key: "344"
+    title: "go: wire fixes #1-#3 — /messages+content, agent_id, role-object decode ×2 + first httpclient
+      tests"
+    repo: chat-patterns
+    round: R1
+    size: M
+    depends_on:
+      - "343"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/httpclient/client.go:32,171,204 (send path default, create body, marshal)
+      - internal/types/types.go:106-114 (CreateConversationRequest.AgentID,
+        SendMessageRequest.Content)
+      - internal/httpclient/client.go:110-168 (ListAgents wireAgent decode, description-first
+        display)
+      - contracttest/validate.go:50-57 (role → json.RawMessage) + validate_test.go:13-17 (mock →
+        real role shape)
+      - internal/httpclient/client_test.go (NEW — package's first tests)
+    description: |
+      **Size M · branch `cockpit/wire` · repo chat-patterns · round R1 ·
+      spec: scout/go-wire-abort.md §1.1-1.3, §6**
+
+      The three blocking shape mismatches, diffed in the dossier: (1) default sendMessage
+      path `/conversations/{id}/send` → `/conversations/{id}/messages` (code catches up to
+      its own comment at types.go:178 — resolves N6) and body `{"message"}` → `{"content"}`;
+      (2) create body `{"agent_name"}` → `{"agent_id"}` (kills the misleading N2 404);
+      (3) role-object decode via a `wireAgent` DTO (role `{id,name}|null`, display =
+      description, fallback role.name — OD "picker display" per §7.3) in BOTH httpclient
+      and contracttest (`json.RawMessage`), keeping the legacy `[]string` fallback. Update
+      the contracttest mock server to the real role shape. contracttest hardening (OD-7):
+      add the fifth check asserting ≥1 `event:` line before `done` (N5/#234 tripwire), and
+      the env-gated `TestLiveBackend` (`CHAT_BACKEND_URL`, skipped in CI). Legacy posture
+      (OD §7.4): paths stay configurable via EndpointConfig; body shapes canonical-only.
+      Disposition vs #287 stated in the PR (no server `message` alias).
+
+      **Acceptance:**
+      - NEW `internal/httpclient/client_test.go` (httptest): send hits
+        `POST /conversations/c1/messages` with `{"content":"hi"}`; create body
+        `{"agent_id":"a1"}`, 201 → ID; ListAgents decodes role-object / role-null /
+        description-only + legacy `[]string` fixture stays green; EndpointConfig override
+        still rewrites paths.
+      - contracttest: `ValidateBackend` passes against the updated mock; stream-content
+        assertion (≥1 event line before done) in place.
+      - Live (manual): all contracttest checks pass against `ap playground` at 3456.
+      - `just quality` green in CI.
+    key_original: wire
+  - key: "345"
+    title: "go: parser round — tool.rejected/iteration aliases, message.complete demotion +
+      tokens/model, done.run_id, no-allowlist flip"
+    repo: chat-patterns
+    round: R1
+    size: M
+    depends_on:
+      - "344"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/sse/parse.go:69-72,119,133,136-137,150-152
+        (complete/rejected/iteration/done/default cases)
+      - internal/sse/types.go:11-16 (SSEMessageCompleteData + Model + CostUsd)
+      - internal/types/types.go (ChunkMsgComplete, ChunkUnknown, StreamChunk.RunID/RawEvent/RawData,
+        base Meta)
+      - internal/chat/model.go:607+,724 (stash stats/run_id; debug sink)
+      - internal/sse/parse_test.go:84,182,193 (flip/update existing tests)
+    description: |
+      **Size M · branch `cockpit/parse` · repo chat-patterns · round R1 ·
+      spec: scout/go-wire-abort.md §1.4-1.5, §3; scout/constraints-alignment.md §1.2**
+
+      One PR over the two SSE files + chunk vocab: (a) `case "agent.tool.rejected",
+      "tool.rejected":` with optional `reason`/`gate_name` capture (C4 timeout prep) +
+      canonical `iteration.*` aliases; (b) demote `message.complete` from Done-carrier to
+      `ChunkMsgComplete` data-carrier (tokens + model + optional `costUsd` field per
+      harness-runners C4) — REQUIRED to ever reach `done.run_id`; channel-close synthesizes
+      Done at two layers so no backend hangs (OD §7.2 accepted); (c) `done` decodes
+      `{run_id}` onto the terminal chunk; (d) no-allowlist flip: `default:` returns
+      `ChunkUnknown{RawEvent, RawData}` — only malformed frames drop (matches React's
+      §2.6.3 rule; keeps future vocabulary `agent.gate.decision`, `harness-native`, `meta`
+      reachable without a parser release); (e) `CHAT_DEBUG_EVENTS` status-line debug sink;
+      (f) lenient-decode tests: unknown fields (extra costUsd+meta keys) and unknown event
+      names never error — the declared harness-runners forward-compat seam for R1/R3.
+      Model stashes `lastModel/lastInputTokens/lastOutputTokens/lastRunID` — RENDERING is
+      R3's footer job (key `footer`).
+
+      **Acceptance:**
+      - Updated `TestChunkFromSSE_MessageComplete_NoDuplication`: not Done, ChunkMsgComplete,
+        tokens/model populated, Content empty; malformed payload → non-nil zero-field chunk.
+      - `TestChunkFromSSE_Done`: `{"run_id":"r-1"}` → Done+RunID; `{}` → RunID "".
+      - Canonical `tool.rejected` → ChunkToolReject with reason (+gate suffix); legacy
+        name still parses.
+      - Flipped unknown-event test asserts passthrough (ChunkUnknown, RawEvent/RawData,
+        !Done); invalid-JSON test unchanged (still drops).
+      - Chat-model: delta → msg_complete → done finalizes exactly once, stats/run_id
+        stashed; stream WITHOUT `done` (channel close) still finalizes; ChunkUnknown adds
+        zero parts with debug off / one PartStatus with debug on and never terminates.
+      - `just quality` green in CI.
+    key_original: parse
+  - key: "346"
+    title: "go: cmd/cockpit consumer + Justfile recipe + _examples/agentic-patterns disposition"
+    repo: chat-patterns
+    round: R1
+    size: S
+    depends_on:
+      - "344"
+    labels:
+      - cockpit
+      - go
+    files:
+      - cmd/cockpit/main.go (new — tui.New{BackendURL http://localhost:3456, EnvOverride
+        AP_SERVER_URL})
+      - Justfile (cockpit recipe, pattern of `kit:` at :31-33)
+      - _examples/agentic-patterns/ (delete or 3-line pointer at cmd/cockpit)
+    description: |
+      **Size S · branch `cockpit/cmd` · repo chat-patterns · round R1 ·
+      spec: scout/go-wire-abort.md §4 (OD §7.6)**
+
+      New `cmd/cockpit` (binary `cockpit`) per the dossier's main.go — points at
+      `ap playground`'s default 3456, `AP_SERVER_URL` override (EnvOverride semantics
+      verified tui.go:62-67,94-95). No `Endpoints:` override needed once `wire` lands.
+      Grows a `commands/` dir in R2/R3 following the agenti-kit aggregator pattern; do NOT
+      build on `Config.OnReady` (declared, never invoked). Delete or repoint
+      `_examples/agentic-patterns/` (dead Python-orchestrator contract under the same
+      name = N6-style drift factory). **This PR closes Gate B (first light) when demoed.**
+
+      **Acceptance:**
+      - `go build ./cmd/cockpit` green in CI (via `just quality`).
+      - `just cockpit` against a live `ap playground`: agent list appears (description as
+        tertiary text), one full turn streams to completion.
+      - `_examples/agentic-patterns` no longer describes the Python contract.
+    key_original: cmd
+  - key: "347"
+    title: "go: abort — Esc cancels the in-flight turn (ctx-cancel + optional POST /cancel),
+      spinner-leak fix"
+    repo: chat-patterns
+    round: R1
+    size: M
+    depends_on:
+      - "345"
+      - "341"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/chat/model.go:149-169,423-430,566-575,596-602,724-737 (cancelStream/aborted, Esc
+        branch, submit ctx, error/Done arms)
+      - internal/app/model.go:276-291,397 (Esc interception order, legend)
+      - internal/chat/model_test.go, internal/httpclient/client_test.go (abort tests)
+    description: |
+      **Size M · branch `cockpit/abort` · repo chat-patterns · round R1 ·
+      spec: scout/go-wire-abort.md §2; scout/server-n5-cancel.md B.3**
+
+      Per-turn `context.CancelFunc` on the chat model; Esc during streaming aborts
+      (aborted ≠ error → "⊘ stopped" system line, discriminated by the `aborted` flag —
+      never string-match "context canceled"); app-level `updateChat` Esc must check
+      `IsStreaming()` BEFORE the back-to-picker branch; Done/error arms release the
+      cancel func; drive-by fix for the pre-existing spinner leak (error arm never resets
+      `spinnerActive`). Ctrl+C stays quit (OD §7.1). Cross-repo edge (soft): client-side
+      teardown lands regardless, but the server actually aborting the runner (token burn
+      stops, blocked approvals denied) requires `cancel`'s onAbort hardening — hence the
+      dependency; where the server exposes `POST /conversations/:id/cancel`, prefer
+      cancel-route-then-ctx-cancel for an acknowledged stop (202 {run_id}), falling back
+      to bare ctx-cancel on 404/older servers. Expect the deny/rejected race when
+      cancelling mid-approval — render as cancelled, not server error (constraints §1.2).
+
+      **Acceptance:**
+      - Chat-model tests: abort then error-chunk → "stopped" line, streaming/spinner
+        false, flag reset; error without abort → "Error:" (existing behavior); Done-after-
+        abort race clears the flag.
+      - httpclient test: handler flushes one delta then blocks; ctx cancel → channel
+        closes with terminal chunk within timeout.
+      - App-level: Esc while streaming keeps `PhaseChat` (no picker exit); legend reads
+        `esc: stop/back`.
+      - Live vs a `cancel`-bearing server: Esc mid-turn → server run row closes cancelled,
+        no further token burn.
+      - `just quality` green in CI.
+    key_original: abort
+  - key: "348"
+    title: "go: scope-on-create + preset picker + /scope command + Config.DefaultScope"
+    repo: chat-patterns
+    round: R1
+    size: L
+    depends_on:
+      - "344"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/types/types.go:100-114 (Instantiation, Scope on create req, result echo,
+        ScopeValidationError)
+      - internal/types/client.go:15 (CreateConversation signature — 6 impls touched)
+      - internal/httpclient/client.go:170-197 (scope marshal, non-201 body decode — fixes
+        undebuggable N2)
+      - internal/app/model.go:25-28,258-270 + internal/app/scope.go (new PhaseScopeSetup, picker,
+        JSON editor)
+      - internal/command/commands.go:32-77 (/scope display-only), config.go:14-45 (DefaultScope)
+      - internal/app/scope_test.go, internal/httpclient/client_test.go (extend)
+    description: |
+      **Size L (mini-plan = scout/go-scope-replay.md §1, adjudicated ODs S-1..S-4) ·
+      branch `cockpit/scope` · repo chat-patterns · round R1**
+
+      Decode `instantiation {available, defaults, schema, presets}` from GET /agents;
+      insert `PhaseScopeSetup` between agent-select and create with rows Defaults /
+      preset:* / Custom JSON. Locked semantics: Defaults row OMITS scope (server composes
+      its own defaults, D11 400s honestly); preset row sends client-merged
+      `defaults ⊕ preset` (S-1 — the server does NOT compose defaults under a supplied
+      scope, conversations.ts:115-118); Custom JSON sends raw unmerged (pre-seeded with
+      marshaled defaults; PasteMsg forwarded to the phase). 400 `scope validation failed`
+      decodes into a typed `ScopeValidationError` and renders the issues list in-phase
+      (the issues ARE the form for MVP). 201 echo (`scope`/`context_redacted`) stored and
+      surfaced as a system line + `/scope` display-only command (scope is immutable
+      server-side). `Config.DefaultScope` bypasses the phase (consumer cmd owns
+      `--context`/`AP_CONTEXT` parsing later). Non-HTTP transports error LOUDLY on
+      non-empty scope (S-2). Schema-driven forms deferred (S-3) — decode
+      `instantiation.schema`, render nothing. Clear the latent never-reset `loadErr`.
+
+      **Acceptance:**
+      - httpclient tests: instantiation decode (presets/defaults/null schema/absent→nil);
+        nil scope → no `scope` key on the wire; map → carried; 400-with-issues → typed
+        error; other 400/404 surface the server `error` string; 201 echo lands in result.
+      - app tests: available=false → immediate create, nil scope; preset enter sends
+        merged map (preset keys win); custom JSON happy/parse-error/paste; ValErr keeps
+        phase + renders `path: message`; DefaultScope bypasses.
+      - Live: picker→preset→(force a 400)→fix→201→`/scope` shows redacted echo.
+      - `just quality` green in CI.
+    key_original: scope
+  - key: "349"
+    title: "go: HITL wire layer — input.request parse, InputResponder, httpclient RespondInput"
+    repo: chat-patterns
+    round: R2
+    size: M
+    depends_on:
+      - "345"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/sse/types.go (SSEInputRequestData) + parse.go:150 (input.request case,
+        drop-if-no-correlation_id)
+      - internal/types/types.go (ChunkInputRequest, StreamChunk HITL fields, InputResponse)
+      - internal/types/client.go (optional InputResponder interface — NOT a Client widening, D1)
+      - internal/httpclient/client.go (RespondInput + ErrInputOrphaned + endpoint default
+        /conversations/{id}/input)
+      - internal/sse/parse_test.go, internal/httpclient/client_test.go (extend)
+    description: |
+      **Size M · branch `cockpit/hitl-wire` · repo chat-patterns · round R2 ·
+      spec: scout/go-hitl.md §3.A-C, §3.E — server leg is DONE and tested (§1); build
+      against TODAY'S transport (constraints OD-6), forward-compat seam vs #328/B3:
+      optional `requestId` alias (wins when present), `availableDecisions`/`payload`
+      passthrough fields on the request struct, decisions rendered from availableDecisions
+      when present.**
+
+      Parser case for `input.request` (`{correlation_id, kind, prompt, options?, tool_name?,
+      tool_call_id?, arguments?}` — sse-formatter.ts:105-116); missing correlation_id →
+      drop (server timeout/teardown denies). Optional `InputResponder` interface — the
+      chat model type-asserts; CLI-spawn transports get the read-only branch for free.
+      `RespondInput` always sends an explicit decision (empty → "deny", fail-closed),
+      maps 404 → `ErrInputOrphaned`, 501 → registry-missing error. StubClient deliberately
+      does NOT implement it. KNOWN TRAP encoded here: on the per-turn POST stream a deny
+      arrives as `error {error_type:"ToolCallBlocked"}` — `tool.rejected` NEVER rides this
+      stream (bus-only); the alias from `parse` serves the admin firehose.
+
+      **Acceptance:**
+      - parse tests: full/minimal payloads, missing correlation_id → nil, malformed → nil;
+        requestId alias preferred when present.
+      - httpclient tests: POST path/body `{"correlation_id","decision"}` (+value only when
+        set); empty decision → "deny"; 404→ErrInputOrphaned; 501/200 grammar; endpoint
+        override honored.
+      - `just quality` green in CI.
+    key_original: hitl-wire
+  - key: "350"
+    title: "go: HITL prompt UX — state machine, key routing, ConfirmPrompt/RadioSelect render, shell
+      guards"
+    repo: chat-patterns
+    round: R2
+    size: L
+    depends_on:
+      - "349"
+      - "347"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/chat/model.go (PartInputRequest, pendingInput, handlePendingInputKey, D3 dismissal,
+        D5 skip-drain guard)
+      - internal/chat/view.go:289-380 (renderInputRequestPart; ⏸ status line)
+      - internal/app/model.go:277-285,385-398 (esc guard via HasPendingInput, legend)
+      - internal/chat/model_test.go + render golden tests (11-case plan, go-hitl §5.D/F)
+    description: |
+      **Size L (mini-plan = scout/go-hitl.md §3.D/F + §4 walkthroughs, ODs D1-D6) ·
+      branch `cockpit/hitl-ux` · repo chat-patterns · round R2**
+
+      Inline transcript prompt card (D4 — not a modal): `PartInputRequest` +
+      single `pendingInput` ref (server invariant: at most one pending per stream — but
+      always echo the stored correlation_id, never assume). Key routing intercepts before
+      streaming branches: approval (and unknown kinds) y/n/arrows/enter with DEFAULT DENY
+      (fail-closed zero-value); select via RadioSelect + value; text via TextBuf; scroll
+      keys still reach the viewport. All three kinds shipped (D3; cut text first under
+      pressure, never approval). TWO TRAPS closed with tests: (1) enter-to-skip drain
+      deadlock — `skipStreaming` must break on ChunkInputRequest, restore streaming, re-arm
+      the reader (a parked gate never emits again); (2) deny renders the resulting
+      `ToolCallBlocked` error as the calm `⊘ blocked:` outcome, not a red client bug (D2
+      — deliberate deviation from React, noted in PR). Auto-dismissal on Error/Done chunks
+      (timeout auto-deny, own deny, teardown) stamps `⊘ auto-denied (run ended)`;
+      ErrInputOrphaned → `(expired)`; other errors keep the prompt pending for retry.
+      Read-only transports show "awaiting decision elsewhere". App shell: Esc must NOT
+      bail to agent-select while pending (else the run parks forever pre-`cancel` servers);
+      status line shows `⏸ awaiting your decision`. No client-side countdown (D5 — timeout
+      is not on the wire; do not invent). **Closes Gate C when the e2e demo passes.**
+
+      **Acceptance:**
+      - The 11-case model test plan from go-hitl §5.D (arrival/dedupe/keys/select/text/
+        resolution/orphan/auto-dismiss/channel-close/deadlock-guard/read-only) all green —
+        deadlock guard's failing mode is a test timeout.
+      - Golden renders: pending approval (no-selected default red), pending select cursor,
+        resolved single line; app Esc-with-pending keeps PhaseChat.
+      - Live e2e (real key, `AP_APPROVAL_TOOLS=bash AP_APPROVAL_TIMEOUT_MS=30000
+        ap playground`): approve run, deny run, timeout run; dashboard admin stream
+        cross-check shows matching correlation ids.
+      - `just quality` green in CI.
+    key_original: hitl-ux
+  - key: "351"
+    title: "server: chat-patterns history compat shim — bare GET /conversations + inline messages[]
+      aliases"
+    repo: agentic-patterns-ts
+    round: R3
+    size: S
+    depends_on:
+      - "341"
+    labels:
+      - cockpit
+      - server
+    files:
+      - packages/agent-server/src/routes/conversations.ts:229,246-275 (new bare list route; detail
+        aliases + inline messages)
+      - packages/agent-server/src/__tests__/conversations.test.ts (extend, 5-case plan)
+    description: |
+      **Size S · branch `cockpit/shim` · repo agentic-patterns-ts · round R3 ·
+      packages: server only · spec: scout/server-shim-displaytype.md Part A (ODs A-1..A-5)**
+
+      Bare `GET /conversations` (no route conflict — verified; Go's default path needs
+      zero EndpointConfig override, A-4): snake_case rows `{id, agent_name, model, state,
+      exchange_count, total_input_tokens, total_output_tokens, created_at, updated_at}`,
+      optional exact-match `?agent_name=`, aggregates via in-route `getMessages` N+1 (A-1
+      — deliberate at picker scale; summary-projection extension is the follow-up if
+      latency ever matters), `notConfigured` 503 reused, branch fields deliberately
+      omitted (Go decodes nil). Detail route: ADDITIVE snake_case aliases + inline
+      `messages[]` (`sequence` = array index, parts `{type, content, metadata}` — metadata
+      included per A-3) — zero extra store calls (messages already fetched at L253);
+      every existing camelCase key untouched (dashboard regression guard). `kind` emitted
+      verbatim `request|response` (A-2 — the Go renderer owns the user/assistant mapping,
+      table in dossier A.3). Cross-repo edge: Go `replay` depends on this landing.
+
+      COLLISION: conversations.ts protocol — this PR states its ordering vs whatever of
+      #296/#328 has landed at PR time.
+
+      **Acceptance:**
+      - The 5-case test plan from A.4: 503 shape; seeded 2×2 → bare array, snake_case
+        exact, per-kind exchange_count, token splits (not combined tokenCount),
+        branched_from_id absent; agent_name filter (match / unknown → `[]` 200); detail
+        keeps ALL camelCase keys + gains messages[] with sequence 0..n-1 and
+        content:null for content-less state_delta; empty conversation zeroes.
+      - `bun run check` green; server-only — bump rides `rel1`.
+    key_original: shim
+  - key: "352"
+    title: "core+runtime: displayType on ToolDefinition/ToolSchema → display_type on tool.start/end SSE"
+    repo: agentic-patterns-ts
+    round: R3
+    size: M
+    depends_on: []
+    labels:
+      - cockpit
+      - core
+      - runtime
+    files:
+      - packages/agent-core/src/molecules/toolbox.ts:54-84,123-162,176-180
+        (ToolDefinition.displayType, defineTool, getToolSchemas)
+      - packages/agent-core/src/molecules/tool-schema.ts:51,56-94,108-123 (field, ctor, fromZod,
+        toDict)
+      - packages/agent-core/src/molecules/playbook.ts:55 (2nd fromZod site — B-3)
+      - packages/agent-runtime/src/events/types.ts:97-114 (ToolCallStart/End displayType)
+      - packages/agent-runtime/src/runner/agent-runner.ts (3×2 stamp sites: 540/588, 824/865, 1487/1550)
+      - packages/agent-runtime/src/transport/sse-formatter.ts:133-141,151-160 (backpack-display
+        idiom)
+    description: |
+      **Size M · branch `cockpit/display-type` · repo agentic-patterns-ts · round R3 ·
+      packages: core, runtime (server relays verbatim — zero server changes) ·
+      spec: scout/server-shim-displaytype.md Part B (ODs B-1..B-5)**
+
+      Bare `displayType?: string` (B-1 — `terminal` precedent: core carries the flag, the
+      renderer interprets; vocabulary by convention `code | diff | bash`), threaded
+      ToolDefinition → defineTool → ToolSchema.fromZod (BOTH call sites incl.
+      playbook.ts:55) → runner event stamps at all 3×2 sites (conditional spread, no
+      explicit-undefined on frozen events; displayTypes Map next to the existing
+      terminalTools Sets) → sse-formatter conditional `display_type` on tool.start/end
+      (identical idiom to backpack `display` at L270/283/299). Do NOT stamp `tool.intent`
+      (B-2). Go side already declares the field (sse/types.go:27,36) — absent → "" →
+      generic render; composes with the Go heuristic in `footer` (server field wins when
+      non-empty, B-4). Producer contract doc note (B-5): "diff" = unified diff +
+      arguments.path; "code" = code string; "bash" = bash block; chat-patterns
+      rich-renders STRING results only. Harness-runners: no contact with this formatter
+      case. **This slice is what forces `bump-both` in rel1.**
+
+      **Acceptance:**
+      - core: fromZod/toDict presence-absence tests (byte-identical dict for undeclared
+        tools); toolbox passthrough; defineTool passthrough (mirror terminal test).
+      - runtime: run()/stream()/convertExecutableTools emissions carry displayType iff
+        declared (key absent otherwise); BOTH sse-formatter test files checked; payload
+        gains `display_type` only when set.
+      - optional server sse.test.ts relay assertion.
+      - `bun run check` green; bump rides `rel1` (bump-both).
+    key_original: display
+  - key: "353"
+    title: "go: token footer + display_type heuristic (R3 client polish)"
+    repo: chat-patterns
+    round: R3
+    size: S
+    depends_on:
+      - "345"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/chat/model.go:149-169 (total counters), handleResponse + skipStreaming
+        ChunkMsgComplete cases
+      - internal/chat/view.go:71-89 (status-line footer slot — R3-5)
+      - internal/sse/parse.go (optional llm.end case — R3-4), internal/chat render (heuristic)
+    description: |
+      **Size S · branch `cockpit/footer` · repo chat-patterns · round R3 ·
+      spec: scout/go-scope-replay.md §3 (R3-4/R3-5); scout/server-shim-displaytype.md B-4;
+      constraints OD-2**
+
+      Render the stats `parse` already captures: status-line footer
+      `model · 1,234 in / 567 out (turn) · totals` when `!streaming && totalOut > 0`
+      (tertiary chrome; drop totals clause on first exchange; token-only when model
+      empty — never invent). Explicit ChunkMsgComplete case in `skipStreaming` so
+      Enter-to-skip keeps the footer. Land the SSE `llm.end` parse case (R3-4) and watch
+      chattiness live before folding. Heuristic display_type (~30 lines, OD-2): when wire
+      `display_type` is empty, sniff tool name/hunk markers for diff/code/bash rendering;
+      non-empty wire field (from `display`) always wins; string results only (documented
+      limit).
+
+      **Acceptance:**
+      - parse tests (if llm.end taken): SSE llm.end → ChunkLLMEnd fields.
+      - model tests: msg_complete → done stashes turn stats + accumulates totals across
+        two turns; skip path preserves footer data.
+      - golden: footer present after completion, absent while streaming / at zero;
+        formatNumber grouping.
+      - heuristic unit: obvious diff/code/bash samples classify; wire field overrides.
+      - Live (needs LLM key): real turn shows non-zero in/out + model id; second turn
+        updates totals.
+      - `just quality` green in CI.
+    key_original: footer
+  - key: "354"
+    title: "go: conversation picker + read-only replay (branch disabled) against the TS shim"
+    repo: chat-patterns
+    round: R3
+    size: M
+    depends_on:
+      - "348"
+      - "351"
+    labels:
+      - cockpit
+      - go
+    files:
+      - internal/app/model.go (PhasePickConversation; picker/message routing; conversationLoadedMsg)
+      - internal/chat/picker.go (dead code comes alive — zero UI changes expected)
+      - internal/chat/replay.go (new — ReplayMessages mapping per shim A.3), chat.Model.ReadOnly
+      - internal/types/types.go:163-166 (MessagePart + Metadata map)
+      - internal/chat/replay_test.go, decode golden fixtures byte-synced with shim tests
+    description: |
+      **Size M · branch `cockpit/replay` · repo chat-patterns · round R3 ·
+      spec: scout/go-scope-replay.md §2 (ODs R3-1..R3-3) · CROSS-REPO: hard dependency on
+      TS `shim` (buildable in parallel against the shim dossier's golden fixtures; demo
+      needs the shim live + AP_PERSISTENCE)**
+
+      Wire the complete-but-dead `PickerModel` into a new `PhasePickConversation`
+      (SelectAgent → PickConversation → ScopeSetup(new-only) → Chat). Locked decisions:
+      no `?agent_name=` filter for MVP (R3-1 — store's agentName is role.name, mismatch
+      risk; rows self-label); skip picker on empty-or-error list (R3-2 — degradation =
+      today's UX); **read-only replay** (R3-3): `chat.Model.ReadOnly` short-circuits
+      submit with an honest system line (server registry is in-memory; a stored id 404s
+      on send — never burn the user's typed message), `replay` badge in the header,
+      slash commands still work. Branch stays DISABLED: ActionBranch swallowed, picker
+      code kept (shim leaves fields omitempty). `ReplayMessages` mapping per shim A.3:
+      request→user, response→assistant, user_prompt/text→PartText,
+      state_delta→`Δ <metadata.event>` PartStatus, tool_call defensive, unknown → labeled
+      degradation, never crash. Extend `MessagePart` with `Metadata`. ExchangeCount badge
+      finally gets assigned.
+
+      **Acceptance:**
+      - replay_test: role mapping, part mapping incl. metadata-less state_delta →
+        `Δ state change`, unknown labeled, empty-parts dropped, order preserved.
+      - model test: ReadOnly submit → zero client calls + system line; /help still works.
+      - app tests: enter → ListConversations("") ; err/empty → skip to create; rows →
+        picker; row enter → GetConversation → PhaseChat with ExchangeCount; `b` → no-op;
+        ActionNew → scope entry decision.
+      - Decode fixtures byte-synced with the shim's test seeds decode with every field
+        non-zero (N3 regression lock).
+      - Live: AP_PERSISTENCE on + shim landed: one keyed turn → restart TUI → picker row
+        (exchange_count 1) → replay renders both turns + read-only banner.
+      - `just quality` green in CI.
+    key_original: replay
+  - key: "355"
+    title: "release: TS lockstep+core bump for the cockpit arc (bump-both) + publish"
+    repo: agentic-patterns-ts
+    round: R3
+    size: S
+    depends_on:
+      - "341"
+      - "351"
+      - "352"
+    labels:
+      - cockpit
+      - release
+    files:
+      - package.json versions (Justfile:97 `just bump-both` — display touches core; n5/cancel/shim
+        ride the lockstep)
+      - bun.lock (regenerated IN THE SAME COMMIT as the bump — proven publish gate)
+    description: |
+      **Size S · branch `cockpit/rel1` · repo agentic-patterns-ts · round R3 ·
+      spec: scout/constraints-alignment.md §2.1**
+
+      One release covers the whole TS side of the arc: `just bump-both` (core floats for
+      `display`; runtime/server/cli lockstep carries n5/cancel/shim). Publish fires on
+      merge when versions changed. HARD RULE (proven on the eval-surface ship):
+      `rm bun.lock && bun install` in the SAME commit as the version bump.
+
+      **Acceptance:**
+      - `bun run check` green; publish workflow succeeds on merge.
+      - Changelog/PR body enumerates: N5 fix, cancel route + RunOptions.abortSignal,
+        history shim, displayType — with wire-contract notes for external consumers.
+    key_original: rel1
+  - key: "356"
+    title: "go: final e2e validation — cockpit against live `ap playground` (smoke-harness approach)"
+    repo: chat-patterns
+    round: R3
+    size: M
+    depends_on:
+      - "346"
+      - "347"
+      - "348"
+      - "350"
+      - "353"
+      - "354"
+      - "355"
+    labels:
+      - cockpit
+      - go
+      - validation
+    files:
+      - contracttest/ (live runner already env-gated from `wire`; extend with input-404 +
+        scope-create probes)
+      - docs/e2e-cockpit.md (new — scripted checklist, reusing the (scratchpad)/contract-live recipe
+        from the gap-analysis smoke test)
+    description: |
+      **Size M · branch `cockpit/e2e` · repo chat-patterns · round R3 · CROSS-REPO
+      terminal issue: validates every slice of both tracks against a live server built
+      from the released TS packages · spec: gap-analysis §4 (smoke harness note),
+      go-hitl §5 e2e, go-scope-replay §1.6/§2.5/§3.3 live legs**
+
+      Commit the reusable live harness the gap-analysis smoke test pioneered: the
+      env-gated `TestLiveBackend` (CHAT_BACKEND_URL) extended with the input-orphan probe
+      (`POST …/input {correlation_id:"nonexistent"}` ⇒ 404 JSON — no LLM key needed) and
+      the scope-create probe (empty-object POST vs an instantiation.available agent ⇒
+      201-or-400-with-issues, never 500); plus a scripted human checklist
+      (docs/e2e-cockpit.md) for the keyed session. Checklist covers: agents list
+      (role/description render), scope preset → 400 → fix → 201 → /scope, streamed turn +
+      token footer, Esc abort (server run row closes cancelled — pre-work verification),
+      HITL approve/deny/timeout with dashboard correlation cross-check, N5 canary
+      (`broken-model` renders an honest error, node AND bun runtimes), picker/replay with
+      AP_PERSISTENCE + read-only banner, display_type wire field rendering (diff/code/bash
+      fixture tool) + heuristic fallback. **Closes Gate D.**
+
+      **Acceptance:**
+      - Keyless leg: full contracttest live suite (incl. new probes + ≥1-event-before-done
+        assertion) passes against `ap playground` from the released versions, under node
+        AND bun (#234 disposition re-confirmed at arc close).
+      - Keyed leg: every checklist item demonstrated and initialed in docs/e2e-cockpit.md;
+        deviations filed as issues, not silently absorbed.
+      - CI green on the harness additions (live tests skip without env).
+    key_original: e2e
+execution_policy:
+  - "Tracker home: ALL issues (Go included) sync to pattern-stack/agentic-patterns-ts under this
+    epic (OD-5); Go issues carry the `go` label and name their chat-patterns branch. chat-patterns
+    code lands via PR to its own main through the new `check` workflow; revival base pinned at
+    187411b; work from a fresh clone (the sandbox clone was mutated mid-scout — treat it as
+    disposable)."
+  - "agentic-patterns-ts: protected main, every commit via PR, required status `check` (bun run
+    check). Version bumps happen ONLY in rel1 (bump-both; rm bun.lock && bun install in the same
+    commit). No other TS PR touches versions."
+  - "conversations.ts merge barrier: n5 → cancel → shim strictly serialized (same file); each of
+    those PRs states its ordering vs #296/#328 at open time. `display` is file-disjoint from all
+    three (core/runtime only) and may land any time."
+  - "chat-patterns shared-surface serialization: internal/types/types.go, internal/chat/model.go,
+    internal/app/model.go and internal/sse/parse.go are shared across
+    wire/parse/abort/scope/hitl-*/footer/replay. Merge in the listed dependency order; parallel
+    DEVELOPMENT is fine, rebase-before-merge is mandatory (serial-merge throttle proven on the
+    eval-surface arc)."
+  - "R2 builds on TODAY'S input transport; do not wait for or partially implement #328/B3's
+    AskContext/HarnessDecision widening (feature-flagged behind #307 anyway). The declared seam:
+    requestId alias + availableDecisions-driven rendering + payload passthrough. When #328 lands the
+    cockpit needs only new decision-kind strings."
+  - "Scope discipline: nothing beyond Round 3. Branch UI, schema-driven forms, scratchpad/ trace
+    rails, tui-patterns consolidation, client timeout countdown, CLI abortSignal adoption,
+    conversation rehydrate — all deferred with stated triggers (plan.md §7)."
+waves:
+  - id: wave1
+    slices:
+      - "340"
+      - "341"
+      - "342"
+      - "343"
+    human_gate: "GATE A — pre-work verified: N5 four-frame repro under node AND bun with the #234
+      disposition stated; cancel demo (curl 202 + stream winds down; React Stop kills the run). Go
+      CI green on its own PR."
+  - id: wave2
+    slices:
+      - "344"
+      - "345"
+      - "346"
+    human_gate: "GATE B — first light: `just cockpit` against live `ap playground` lists agents and
+      streams one full turn; contracttest live suite passes."
+  - id: wave3
+    slices:
+      - "347"
+      - "348"
+      - "349"
+      - "351"
+      - "352"
+    human_gate: null
+  - id: wave4
+    slices:
+      - "350"
+    human_gate: "GATE C — HITL e2e demo with a real key: approve, deny, timeout runs; dashboard
+      correlation-id cross-check; deadlock guard exercised (enter-skip during a parked gate)."
+  - id: wave5
+    slices:
+      - "353"
+      - "354"
+    human_gate: null
+  - id: wave6
+    slices:
+      - "355"
+      - "356"
+    human_gate: GATE D — final walkthrough of docs/e2e-cockpit.md against the released versions; publish
+      confirmed; deferred-items list re-affirmed (no scope creep into R4).
+locked_decisions:
+  - "OD-1: cancellation = BOTH cancel route (contract) + onAbort drop-hardening (safety net) in one
+    server PR; runner owns message.cancel emission (D1); 202 status (D3); 409 concurrent-send guard
+    (D2); cancel and input-deny stay orthogonal (D4)."
+  - "N5 ships the runtime persistence-pollution companion (D5) and the broken-model canary fixture;
+    #234 is referenced, closed only if the bun repro passes."
+  - "OD-2: display_type heuristic ships Go-side in `footer`; the server field (`display`) overrides
+    when non-empty; string results only."
+  - "OD-3: keep BSL 1.1; fix the Licensed-Work name; relicense deferred until code crosses into an
+    MIT repo; Go code stays in the Go repo."
+  - "OD-4: charm deps bump in a dedicated PR before any behavioral fix."
+  - "OD-5: single tracker board in agentic-patterns-ts; Go issues name their chat-patterns branch."
+  - "OD-6: R2 on today's transport; forward-compat seam = requestId alias + availableDecisions
+    rendering; no AskContext implementation ahead of #319/#328."
+  - "OD-7: contracttest gains the ≥1-event-line-before-done assertion (N5/#234 tripwire)."
+  - "Go abort: Esc aborts (ctx-cancel; cancel-route-first when available), Ctrl+C quits; `aborted`
+    flag discriminates — never string-match 'context canceled'."
+  - message.complete demoted from Done-carrier (required for done.run_id); legacy hang risk accepted
+    — channel close synthesizes Done at two layers.
+  - "HITL: deny renders as calm `⊘ blocked` outcome (D2 deviation from React, documented);
+    default-deny fail-closed; all three kinds, cut text first under pressure; no client countdown
+    (D5); inline card, not modal (D4); optional InputResponder, no Client widening (D1)."
+  - "Scope: client merges defaults ⊕ preset (S-1); raw JSON sends unmerged; loud error on non-empty
+    scope over non-HTTP transports (S-2); schema forms deferred, schema decoded (S-3);
+    Config.DefaultScope bypasses the phase (S-4)."
+  - "Replay: read-only + honest banner until the server grows rehydrate (R3-3); no agent_name filter
+    MVP (R3-1); skip picker on empty (R3-2); branch UI disabled, code kept."
+  - "Shim: bare GET /conversations (A-4); route-level N+1 aggregates (A-1); kind verbatim
+    request|response — Go owns the vocab mapping (A-2); metadata included on inline parts (A-3); no
+    limit param (A-5)."
+  - "Footer: status-line placement (R3-5); llm.end parse case lands, fold-not-append if too chatty
+    (R3-4)."
