@@ -203,24 +203,18 @@ export class ClaudeCodeRunner implements RunnerProtocol {
   }
 
   /**
-   * Publish a ToolCallIntent through the gate chain.
-   * Returns true if the intent was allowed, false if blocked.
+   * Publish a ToolCallIntent through the gate chain and report whether it was
+   * allowed. Delegates to {@link AgentEventBus.evaluateIntent}, which returns a
+   * definitive per-intent {@link GateEvaluation} — the runner reads THIS
+   * intent's own `outcome` instead of inferring block-vs-allow from a bus-wide
+   * `agent.tool.rejected` subscription. That inference misattributed a
+   * concurrent sibling's rejection to this call (#288); `evaluateIntent` is
+   * per-call, so there is nothing to cross-contaminate. The rejection event and
+   * the guaranteed audit phase are still driven by `evaluateIntent`.
    */
   protected async emitIntent(intent: AgentEvent & { type: "agent.tool.intent" }): Promise<boolean> {
-    // Track whether a gate blocked the intent by listening for rejection events.
-    // We can't use publish()'s return value because an empty array means either
-    // "blocked by gate" or "no subscribers" — both return [].
-    let blocked = false;
-    const onRejected = () => {
-      blocked = true;
-    };
-    this.eventBus.subscribe("agent.tool.rejected", onRejected);
-    try {
-      await this.eventBus.publish(intent);
-    } finally {
-      this.eventBus.unsubscribe("agent.tool.rejected", onRejected);
-    }
-    return !blocked;
+    const evaluation = await this.eventBus.evaluateIntent(intent);
+    return evaluation.outcome === "allow";
   }
 
   // TODO(#308): `options.host` (and therefore `host.scope`, see

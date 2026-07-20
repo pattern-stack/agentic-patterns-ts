@@ -6,6 +6,7 @@
  */
 
 import type { BaseEvent } from "../events/types.js";
+import type { AskContext, GateEvaluation, HarnessDecision } from "./decisions.js";
 
 // ---------------------------------------------------------------------------
 // Gate category — lower values run first
@@ -32,9 +33,9 @@ export const GATE_CATEGORY_NAMES: Readonly<Record<GateCategory, string>> = {
 // ---------------------------------------------------------------------------
 
 export type GateResult =
-  | { action: "allow" }
-  | { action: "block"; reason: string }
-  | { action: "modify"; event: BaseEvent };
+  | { action: "allow"; decision?: HarnessDecision }
+  | { action: "block"; reason: string; decision?: HarnessDecision }
+  | { action: "modify"; event: BaseEvent; decision?: HarnessDecision };
 
 export const GateAllow: GateResult = { action: "allow" };
 
@@ -60,11 +61,25 @@ export interface Gate {
   /** Human-readable category name. */
   readonly categoryName: string;
 
-  /** Check an intent event. */
-  check(event: BaseEvent): Promise<GateResult>;
+  /**
+   * Check an intent event. `ctx` is the optional native ask context (F-2),
+   * threaded by the bus when a harness adapter drives the ask; plain intents
+   * pass none. Gates that don't need it simply omit the parameter.
+   */
+  check(event: BaseEvent, ctx?: AskContext): Promise<GateResult>;
 
   /** Get reason why event was blocked. */
   getBlockReason(event: BaseEvent): string;
+
+  /**
+   * Optional audit-phase hook (F-2). Audit-category gates implement this to
+   * record the full {@link GateEvaluation} — decision kind, actor, native
+   * request id, scope, resulting policy, `settledBy`. `AgentEventBus`
+   * invokes it in the GUARANTEED audit phase after the check chain, so it
+   * runs even when a gate blocked the intent (fixing the audit-skipped-on-block
+   * bug). `check()` cannot consume a decision record, hence the separate hook.
+   */
+  recordDecision?(evaluation: GateEvaluation, ctx?: AskContext): void | Promise<void>;
 }
 
 /**

@@ -178,6 +178,108 @@ describe("HumanApprovalGate", () => {
     const result = await gate.check(makeNonIntent());
     expect(result.action).toBe("allow");
   });
+
+  // F-2: the callback widens to boolean | HarnessDecision. Booleans coerce.
+  it("coerces boolean true to an allowOnce decision", async () => {
+    const gate = new HumanApprovalGate({ approvalFn: () => true });
+
+    const result = await gate.check(makeToolIntent("test"));
+    expect(result.action).toBe("allow");
+    if (result.action === "allow") {
+      expect(result.decision).toEqual({ kind: "allowOnce" });
+    }
+  });
+
+  it("coerces boolean false to a deny decision", async () => {
+    const gate = new HumanApprovalGate({ approvalFn: () => false });
+
+    const result = await gate.check(makeToolIntent("test"));
+    expect(result.action).toBe("block");
+    if (result.action === "block") {
+      expect(result.decision).toEqual({ kind: "deny" });
+    }
+  });
+
+  it("honors a HarnessDecision deny (with reason) from the callback", async () => {
+    const gate = new HumanApprovalGate({
+      approvalFn: () => ({ kind: "deny", reason: "policy" }),
+    });
+
+    const result = await gate.check(makeToolIntent("test"));
+    expect(result.action).toBe("block");
+    if (result.action === "block") {
+      expect(result.reason).toBe("policy");
+      expect(result.decision).toEqual({ kind: "deny", reason: "policy" });
+    }
+  });
+
+  it("honors a HarnessDecision allowWithRules from the callback", async () => {
+    const gate = new HumanApprovalGate({
+      approvalFn: () => ({
+        kind: "allowWithRules",
+        ruleRefs: [{ proposalId: "p1" }],
+        scope: "session",
+      }),
+    });
+
+    const result = await gate.check(makeToolIntent("test"));
+    expect(result.action).toBe("allow");
+    if (result.action === "allow") {
+      expect(result.decision?.kind).toBe("allowWithRules");
+    }
+  });
+
+  it("maps a rewriteInput decision to a modify result", async () => {
+    const gate = new HumanApprovalGate({
+      approvalFn: () => ({ kind: "rewriteInput", updatedInput: { redacted: true } }),
+    });
+
+    const result = await gate.check(makeToolIntent("test"));
+    expect(result.action).toBe("modify");
+    if (result.action === "modify") {
+      expect((result.event as unknown as { arguments: unknown }).arguments).toEqual({
+        redacted: true,
+      });
+    }
+  });
+
+  it("receives the AskContext as a second argument", async () => {
+    const approvalFn = vi.fn(() => true);
+    const gate = new HumanApprovalGate({ approvalFn });
+    const ctx = {
+      requestId: "req-1",
+      operation: "shell" as const,
+      payload: { summary: "run ls" },
+      proposals: [],
+      availableDecisions: ["allowOnce" as const, "deny" as const],
+      nativeIds: {},
+      durableEnabled: false,
+    };
+
+    await gate.check(makeToolIntent("test"), ctx);
+
+    expect(approvalFn).toHaveBeenCalledWith(expect.objectContaining({ toolName: "test" }), ctx);
+  });
+});
+
+describe("AuditGate.recordDecision (F-2)", () => {
+  it("records a decision entry distinct from check() entries", async () => {
+    const gate = new AuditGate();
+
+    gate.recordDecision({
+      outcome: "block",
+      intent: makeToolIntent("rm_rf") as never,
+      settledBy: "gate",
+      blockedBy: "SafetyGate",
+      reason: "blocked",
+      trail: [{ gate: "SafetyGate", result: "block" }],
+    });
+
+    expect(gate.entries).toHaveLength(0);
+    expect(gate.decisions).toHaveLength(1);
+    expect(gate.decisions[0]!.outcome).toBe("block");
+    expect(gate.decisions[0]!.blockedBy).toBe("SafetyGate");
+  });
 });
 
 describe("AuditGate", () => {

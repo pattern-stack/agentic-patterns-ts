@@ -34,7 +34,7 @@ import {
 import type { ZodType } from "zod";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
-import { type AgentEvent, type BaseEvent, createEvent } from "../events/types.js";
+import { type AgentEvent, type ToolCallIntent, createEvent } from "../events/types.js";
 import {
   type ModelResolver,
   constantModelResolver,
@@ -150,38 +150,20 @@ export class AgentRunner implements RunnerProtocol {
    * Emit an intent event and check if it was blocked by a gate.
    * Returns true if allowed, false if blocked.
    *
-   * We cannot infer allowed-vs-blocked from publish()'s return value: an
-   * *allowed* intent returns `[]` whenever nothing is subscribed to
-   * `agent.tool.intent` (gates are not handlers, so they don't contribute to
-   * the handler-results array). That is indistinguishable from a block, so the
-   * old `results.length > 0` heuristic wrongly blocked every tool call when a
-   * gate was attached but no observability exporter happened to subscribe.
-   * Instead, listen for the `agent.tool.rejected` event the gate chain emits
-   * on a block. (Mirrors ClaudeCodeRunner.emitIntent.)
+   * Delegates to {@link AgentEventBus.evaluateIntent}, which returns THIS
+   * intent's own {@link GateEvaluation} — no inference from publish()'s
+   * ambiguous `[]` return, and no bus-wide `agent.tool.rejected` subscription.
+   * The AI SDK runs a step's tool calls concurrently, and the old
+   * subscription-based inference had to hand-correlate each rejection back to
+   * its `originalIntent.toolCallId` to avoid a concurrent sibling's rejection
+   * flipping this call's verdict (#288). `evaluateIntent` is per-call and
+   * definitive, so that correlation is no longer needed and the class of bug is
+   * gone. `evaluateIntent` still emits the rejection event and runs the
+   * guaranteed audit phase, so subscriber and audit semantics are unchanged.
    */
   private async emitIntent(event: AgentEvent): Promise<boolean> {
-    // Correlate the rejection to THIS intent's toolCallId. The AI SDK runs
-    // multiple tool calls within a step concurrently (the capable runStructured
-    // path hands execute-bearing tools to the SDK), so a payload-blind handler
-    // would let one tool's rejection spuriously block a concurrent sibling.
-    const intentId = (event as { toolCallId?: string }).toolCallId;
-    let blocked = false;
-    const onRejected = (rejected: BaseEvent) => {
-      // The gate chain emits the rejection carrying `originalIntent` (the intent
-      // it blocked), NOT a top-level toolCallId — correlate on that so a
-      // concurrent sibling's rejection can't flip this intent's `blocked`.
-      const oi = (rejected as { originalIntent?: { toolCallId?: string } }).originalIntent;
-      if (oi?.toolCallId === intentId) {
-        blocked = true;
-      }
-    };
-    this.eventBus.subscribe("agent.tool.rejected", onRejected);
-    try {
-      await this.eventBus.publish(event);
-    } finally {
-      this.eventBus.unsubscribe("agent.tool.rejected", onRejected);
-    }
-    return !blocked;
+    const evaluation = await this.eventBus.evaluateIntent(event as ToolCallIntent);
+    return evaluation.outcome === "allow";
   }
 
   /**

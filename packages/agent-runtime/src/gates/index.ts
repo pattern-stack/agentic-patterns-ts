@@ -14,4 +14,19 @@ export { RateLimitGate } from "./rate-limit.js";
 export { HumanApprovalGate } from "./approval.js";
 export type { ApprovalCallback } from "./approval.js";
 export { AuditGate } from "./audit.js";
-export type { AuditLogger } from "./audit.js";
+export type { AuditLogger, AuditDecisionEntry } from "./audit.js";
+
+export type {
+  OperationClass,
+  NativeIds,
+  ActorRef,
+  NormalizedAskPayload,
+  NativeProposal,
+  ProposalRef,
+  PermissionSet,
+  HarnessDecision,
+  DecisionKind,
+  AskContext,
+  GateTrailEntry,
+  GateEvaluation,
+} from "./decisions.js";

@@ -16,6 +16,7 @@ export type {
   ThinkingStartEvent,
   ToolCallIntent,
   ToolCallRejectedEvent,
+  GateDecisionEvent,
   ToolCallStartEvent,
   ToolCallEndEvent,
   ToolProgressEvent,
