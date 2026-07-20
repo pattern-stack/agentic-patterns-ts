@@ -25,10 +25,6 @@ import { RUN_FAMILY_ORDER, resolveRunFamilyComponents } from "./families";
 import { type RunFamily, familyOf } from "./families/types";
 
 // pages never share code (playground-redesign.md) — lifted from ConversationsPage as-is.
-function shortId(id: string): string {
-  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
-}
-
 function relative(dateStr: string | undefined | null): string {
   if (!dateStr) return "—";
   const then = new Date(dateStr).getTime();
@@ -419,9 +415,18 @@ export function EvalRunsPage() {
                         render: (row) => (
                           <span
                             title={row.id}
-                            style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 12,
+                              display: "inline-block",
+                              maxWidth: 180,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                              verticalAlign: "bottom",
+                            }}
                           >
-                            {shortId(row.id)}
+                            {row.id}
                           </span>
                         ),
                       },

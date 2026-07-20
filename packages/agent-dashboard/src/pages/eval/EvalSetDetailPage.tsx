@@ -52,10 +52,6 @@ function relative(dateStr: string | undefined | null): string {
   return `${Math.round(diffSec / 86400)}d ago`;
 }
 
-function shortId(id: string): string {
-  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
-}
-
 /** Truncated one-line preview of an unknown JSON payload. */
 function preview(value: unknown, max = 80): string {
   if (value === null || value === undefined) return "—";
@@ -475,9 +471,18 @@ export function EvalSetDetailPage() {
                       render: (row) => (
                         <span
                           title={row.id}
-                          style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}
+                          style={{
+                            fontFamily: "var(--font-mono)",
+                            fontSize: 12,
+                            display: "inline-block",
+                            maxWidth: 180,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            verticalAlign: "bottom",
+                          }}
                         >
-                          {shortId(row.id)}
+                          {row.id}
                         </span>
                       ),
                     },

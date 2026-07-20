@@ -159,7 +159,7 @@ describe("EvalSetDetailPage", () => {
     expect(screen.getByText("case-test")).toBeTruthy();
 
     // Runs panel: this set's run is shown, the other-bank run is filtered out
-    expect(screen.getByText("run-aaaa…")).toBeTruthy();
+    expect(screen.getByText("run-aaaaaaaa")).toBeTruthy();
     expect(screen.queryByText("run-othe")).toBeNull();
   });
 
@@ -190,8 +190,8 @@ describe("EvalSetDetailPage", () => {
   it("navigates into a run on row click", async () => {
     stubFetch();
     renderPage();
-    await waitFor(() => screen.getByText("run-aaaa…"));
-    fireEvent.click(screen.getByText("run-aaaa…"));
+    await waitFor(() => screen.getByText("run-aaaaaaaa"));
+    fireEvent.click(screen.getByText("run-aaaaaaaa"));
     await waitFor(() => {
       expect(screen.getByTestId("location").textContent).toBe("/eval/runs/run-aaaaaaaa");
     });

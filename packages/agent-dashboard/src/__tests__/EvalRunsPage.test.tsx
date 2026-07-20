@@ -205,8 +205,8 @@ describe("EvalRunsPage", () => {
     const variantSelect = screen.getByLabelText("Variant") as HTMLSelectElement;
     fireEvent.change(variantSelect, { target: { value: "candidate" } });
 
-    expect(screen.queryByText("run-aaaa…")).toBeNull();
-    expect(screen.getByText("run-bbbb…")).toBeTruthy();
+    expect(screen.queryByText("run-aaaaaaaa")).toBeNull();
+    expect(screen.getByText("run-bbbbbbbb")).toBeTruthy();
     expect(screen.getByText("Clear filters")).toBeTruthy();
 
     // "candidate" (run-bbbbbbbb) is split "train" — narrowing to split "dev"

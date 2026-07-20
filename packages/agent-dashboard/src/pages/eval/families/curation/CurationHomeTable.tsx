@@ -22,10 +22,6 @@ import type { FamilyHomeTableProps } from "../index";
 import { type RunMeta, readRunMeta } from "../types";
 
 // pages never share code (playground-redesign.md) — small local formatters.
-function shortId(id: string): string {
-  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
-}
-
 function relative(dateStr: string | undefined | null): string {
   if (!dateStr) return "—";
   const then = new Date(dateStr).getTime();
@@ -96,9 +92,15 @@ export function CurationHomeTable({ runs }: FamilyHomeTableProps) {
                 fontSize: 12,
                 color: "var(--accent)",
                 textDecoration: "none",
+                display: "inline-block",
+                maxWidth: 180,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                verticalAlign: "bottom",
               }}
             >
-              {shortId(run.id)}
+              {run.id}
             </Link>
           ),
         },

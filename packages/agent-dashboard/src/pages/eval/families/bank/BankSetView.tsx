@@ -72,10 +72,6 @@ function relative(dateStr: string | undefined | null): string {
   return `${Math.round(diffSec / 86400)}d ago`;
 }
 
-function shortId(id: string): string {
-  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
-}
-
 function statusTone(status: EvalRunRow["status"]): BadgeTone {
   switch (status) {
     case "ok":
@@ -177,8 +173,20 @@ export function BankSetView({ set, cases, runs }: FamilySetViewProps) {
                   key: "id",
                   header: "Run",
                   render: (row) => (
-                    <span title={row.id} style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                      {shortId(row.id)}
+                    <span
+                      title={row.id}
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 12,
+                        display: "inline-block",
+                        maxWidth: 180,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        verticalAlign: "bottom",
+                      }}
+                    >
+                      {row.id}
                     </span>
                   ),
                 },
