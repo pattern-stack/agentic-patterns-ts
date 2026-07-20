@@ -69,6 +69,12 @@ export interface MessageCompleteEvent extends BaseEvent {
   readonly model: string;
   /** #117: authoritative run finish reason ("stop" | "max_iterations" | …). */
   readonly finishReason?: string;
+  /**
+   * Total run cost in USD when the harness reports it (#323, B-1). Sourced
+   * from the CC SDK result's `total_cost_usd`; absent for runners with no
+   * cost signal (e.g. `AgentRunner`). Optional and additive — non-breaking.
+   */
+  readonly costUsd?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +211,29 @@ export interface LLMCallEndEvent extends BaseEvent {
   readonly durationMs: number;
   readonly hasToolCalls: boolean;
   readonly finishReason: string;
+}
+
+// ---------------------------------------------------------------------------
+// Harness-native envelope event (#323, B-1)
+//
+// A namespaced escape hatch for harness-specific richness that has no canonical
+// AgentEvent yet — compaction boundaries, task/subagent progress, rate-limit
+// notices from the Claude Code SDK stream. Precedent: `claude_code.hook`
+// (which carries raw hook payloads verbatim). Consumers that don't understand a
+// given `name` can pass it through by `harness`+`name`; the raw `payload` is
+// preserved for exporters/dashboards. Canonical promotion (to a first-class
+// AgentEvent) happens only once a SECOND harness emits the same concept — until
+// then it rides here rather than inventing a cross-harness schema prematurely.
+// ---------------------------------------------------------------------------
+
+export interface HarnessNativeEvent extends BaseEvent {
+  readonly type: "harness.native";
+  /** The harness that produced this event (e.g. "claude-code"). */
+  readonly harness: string;
+  /** The harness-native event name — the SDK message subtype (e.g. "compact_boundary"). */
+  readonly name: string;
+  /** The raw harness payload, preserved verbatim. */
+  readonly payload: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -469,6 +498,7 @@ export type AgentEvent =
   | ScratchpadReadEvent
   | ScratchpadForkEvent
   | ScratchpadJoinEvent
+  | HarnessNativeEvent
   | ClaudeCodeHookEvent;
 
 /** All possible agent event type strings. */

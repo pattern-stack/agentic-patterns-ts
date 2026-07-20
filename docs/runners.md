@@ -13,7 +13,7 @@ Scope: a `createRunner()` factory + documentation clarifying when to use each of
 
 ## 1. Summary
 
-The runtime today ships four runners behind a single `RunnerProtocol`: `AgentRunner` (Vercel AI SDK, multi-provider, full 20-event vocabulary), `ClaudeCodeRunner` (Claude Agent SDK subprocess, native file/bash tools), `ClaudeCodeAPIRunner` (same subprocess with Code-native tools disabled), and `MockRunner` (scripted, no LLM). The Vercel AI SDK is effectively the "LiteLLM of TypeScript" — there are ~20 first-party `@ai-sdk/*` packages spanning every major hosted and local provider, and `AgentRunner` already drives it through `generateText` / `streamText`, so picking a provider is just picking an `@ai-sdk/*` package. Right now there is no ergonomic entry point: every consumer has to know which runner to instantiate and wire it up by hand (see `packages/agent-server/examples/live-demo.ts`). This doc proposes `createRunner(options?)` with an explicit-beats-env-beats-CLI priority order, dynamic imports so unused provider packages are never loaded, and a one-page "Runners" docs matrix. The major caveat: `ClaudeCodeAPIRunner` is attractive as a zero-config default (works with a Claude Max subscription, no explicit API key), but it does not emit `agent.iteration.*` events and emits tool start/end via hooks rather than the canonical tool-call flow — so we want `AgentRunner` preferred whenever an API key is present, with `ClaudeCodeAPIRunner` as the "you have `claude` on PATH and nothing else" fallback.
+The runtime today ships four runners behind a single `RunnerProtocol`: `AgentRunner` (Vercel AI SDK, multi-provider, full 20-event vocabulary), `ClaudeCodeRunner` (Claude Agent SDK subprocess, native file/bash tools), `ClaudeCodeAPIRunner` (same subprocess with Code-native tools disabled), and `MockRunner` (scripted, no LLM). The Vercel AI SDK is effectively the "LiteLLM of TypeScript" — there are ~20 first-party `@ai-sdk/*` packages spanning every major hosted and local provider, and `AgentRunner` already drives it through `generateText` / `streamText`, so picking a provider is just picking an `@ai-sdk/*` package. Right now there is no ergonomic entry point: every consumer has to know which runner to instantiate and wire it up by hand (see `packages/agent-server/examples/live-demo.ts`). This doc proposes `createRunner(options?)` with an explicit-beats-env-beats-CLI priority order, dynamic imports so unused provider packages are never loaded, and a one-page "Runners" docs matrix. The major caveat: `ClaudeCodeAPIRunner` is attractive as a zero-config default (works with a Claude Max subscription, no explicit API key), but its `agent.iteration.*` boundaries are *synthesized* rather than causal and it emits tool start/end via hooks rather than the canonical tool-call flow (see §3.3) — so we want `AgentRunner` preferred whenever an API key is present, with `ClaudeCodeAPIRunner` as the "you have `claude` on PATH and nothing else" fallback.
 
 ---
 
@@ -118,34 +118,53 @@ The subtle type issue: `RunnerProtocol.run` declares `agent: AgentLike`. `Claude
 
 If auth is missing (or the bundled executable can't launch) the SDK errors the first time the async iterator is consumed — not when `new ClaudeCodeAPIRunner()` is constructed, and not when `query()` returns. From the consumer's perspective, `runner.run(...)` rejects. That's recoverable — the factory can probe launch/auth readiness up-front and fall through to the next choice rather than constructing a doomed runner. Without probing, the error surfaces at first use, which is acceptable but worse DX.
 
-### 3.3 Event-emission gaps vs `AgentRunner`
+### 3.3 Event-emission parity vs `AgentRunner`
 
-Running the same agent through both runners, here's what each emits:
+As of #323 (B-1), `ClaudeCodeRunner` runs one shared translator (`cc-event-translator.ts`)
+over the SDK message stream for both `run()` and `stream()`. Because the harness owns
+the tool loop, several events are **testimony translated from the native stream** rather
+than causally observed — where the SDK gives us no true signal (iteration boundaries; an
+`llm.start` in non-streaming mode) the translator **synthesizes** the event and marks it
+`meta.synthetic: true` (D12). "Synthesized" below means exactly that.
+
+Running the same agent through both runners:
 
 | Event | `AgentRunner` | `ClaudeCodeRunner` / `ClaudeCodeAPIRunner` |
 |---|---|---|
 | `agent.conversation.start` | stream only | no |
 | `agent.message.start` | yes | yes |
-| `agent.iteration.start` / `agent.iteration.end` | yes (one per tool-loop turn) | **no** (Claude Code owns the loop; exposed as a single iteration) |
-| `agent.llm.start` / `agent.llm.end` | yes — with `model`, `inputTokens`, `outputTokens`, `durationMs`, `finishReason`, `hasToolCalls` | **no** — token usage surfaces only on `agent.message.complete` from the final `result` SDK message |
-| `agent.message.chunk` | yes (text deltas) | yes (in `stream()` only, from `stream_event` messages) |
+| `agent.iteration.start` / `agent.iteration.end` | yes (one per tool-loop turn) | yes — **synthesized** (`meta.synthetic`) at assistant-message turn boundaries; reconciled against the result's `num_turns` (mismatch logs, never throws) |
+| `agent.llm.start` | yes | yes — **observed** from `message_start` in `stream()`; **synthesized** (`meta.synthetic`) at the prior boundary in `run()` |
+| `agent.llm.end` | yes — `model`, `inputTokens`, `outputTokens`, `durationMs`, `finishReason`, `hasToolCalls` | yes — per `SDKAssistantMessage`, with `model` / `inputTokens` / `outputTokens` / `finishReason` (per-call `stop_reason`) / `hasToolCalls` from the embedded `BetaMessage`; `durationMs` best-effort (≈0 in `run()`, wall-clock in `stream()`) |
+| `agent.message.chunk` | yes (text deltas) | yes (in `stream()` only, from `stream_event` deltas) |
 | `agent.reasoning` | **no** (SDK emits reasoning parts, runner drops them) | yes (from `thinking` blocks in assistant messages) |
-| `agent.tool.intent` | yes | yes (emitted from `PreToolUse` hook, runs through gate chain with `permissionDecision: "deny"` fallback) |
+| `agent.tool.intent` | yes | yes (from `PreToolUse` hook, through the gate chain with `permissionDecision: "deny"` fallback) |
 | `agent.tool.start` | yes | yes (from `PreToolUse`, after gate check) |
-| `agent.tool.end` | yes — with `durationMs`, `resultTokens` | yes (from `PostToolUse`) — **`durationMs` always 0**, `resultTokens` always 0 |
+| `agent.tool.end` | yes — `durationMs`, `resultTokens` | yes (from `PostToolUse`) — `durationMs` now **measured** (start stamped at `PreToolUse`); `resultTokens` still `0` (no source in the hook payload) |
 | `agent.tool.rejected` | emitted by gate chain | emitted by gate chain |
-| `agent.message.complete` | yes — `inputTokens`, `outputTokens`, `model` | yes — `inputTokens`, `outputTokens`, `model` |
+| `harness.native` | no | yes — CC-specific richness (compaction boundaries, task/subagent progress, rate-limit notices) as a namespaced envelope carrying `harness: "claude-code"`, `name`, raw `payload` |
+| `agent.message.complete` | yes — `inputTokens`, `outputTokens`, `model` | yes — `inputTokens`, `outputTokens`, `model`, `finishReason`, and `costUsd` (from the result's `total_cost_usd`) |
 | `agent.conversation.end` | stream only | no |
 | `agent.error` | yes | yes |
 
-**Observable gaps that matter for the dashboard / observability stack:**
+`RunResult` now carries the real `iterations` (from `num_turns`, not a hardcoded `1`), the
+mapped `finishReason` (`success`→`stop`, `error_max_turns`→`max-turns`,
+`error_during_execution`→`error`, `error_max_budget_usd`→`budget`, else `unknown`), and an
+optional `costUsd`.
 
-1. **No per-LLM-call tokens**: tokens are only available at message-complete, so latency charts keyed on `llm.end` show nothing.
-2. **No iteration markers**: "how many tool-loop turns did Claude Code take?" is invisible. It reports `iterations: 1` regardless of how many tool calls happened.
-3. **Tool call `durationMs: 0`**: `PostToolUse` hook doesn't give us a start timestamp. To fix, we'd need to stash `Date.now()` in `tcSpanIds` alongside the span id. Cheap followup, not in this PR.
-4. **`finishReason` always `"stop"`** — no visibility into `max_turns`, tool-error, etc.
+**Remaining honest gaps** (no native source — left at zero/absent rather than faked):
 
-These don't break correctness but they do degrade the admin dashboard's usefulness when `ClaudeCodeAPIRunner` is the active runner. Documented; the factory should prefer `AgentRunner` over `ClaudeCodeAPIRunner` when both are possible (see §4).
+1. **Per-call `llm.end.durationMs` in `run()`** is ≈0: non-streaming mode surfaces no
+   per-call timing, so start and end are synthesized at the same boundary. `stream()`
+   times `message_start`→assistant for a meaningful value.
+2. **`agent.tool.end.resultTokens` is `0`**: the `PostToolUse` payload carries no per-tool
+   token count.
+3. **Iteration boundaries are synthesized, not causal**: one per assistant turn, reconciled
+   to `num_turns`. They mark turns for the dashboard; they are not mid-loop control points
+   (the harness owns the loop — design §2/D1).
+
+Dashboard/exporter **rendering** of these newly-emitted events (per-call latency charts,
+cost display, `harness.native` panels) is out of scope here — tracked in #324.
 
 ### 3.4 Conclusion: use it as last-resort default, not first-choice
 
@@ -316,7 +335,7 @@ export async function createRunner(
       reason:
         "No API key env var found, but `claude` CLI is on PATH. " +
         "Using ClaudeCodeAPIRunner (Claude Max auth). " +
-        "Note: this runner does not emit per-iteration or per-LLM-call events.",
+        "Note: its iteration/llm.start events are synthesized, not causal (see §3.3).",
     });
   }
 
@@ -622,7 +641,7 @@ const result = await runner.run(agent, "What is 2 + 2?");
 
 Uses the Claude Agent SDK subprocess but blocks Claude Code's native tools (`Read`, `Write`, `Bash`, `WebFetch`, etc.). MCP tools from agent capabilities still work. Requires the `claude` CLI installed and logged in (or `ANTHROPIC_API_KEY`).
 
-**Trade-off:** does not emit `agent.iteration.*` events; token usage and reasoning are reported only at message-complete time; `agent.tool.end.durationMs` is always 0. Use `AgentRunner + @ai-sdk/anthropic` if you want per-call timing in the admin dashboard.
+**Trade-off:** `agent.iteration.*` and (in `run()`) `agent.llm.start` are *synthesized* boundaries (`meta.synthetic`), not causal ones, and per-call `agent.llm.end.durationMs` is best-effort (≈0 in `run()`). Use `AgentRunner + @ai-sdk/anthropic` if you want fully causal per-call timing in the admin dashboard. Since #323 this runner does emit per-call `agent.llm.end` tokens, real `agent.tool.end.durationMs`, mapped `finishReason`, and run `costUsd` (see §3.3).
 
 #### `ClaudeCodeRunner` — Claude Code's native tools
 
@@ -712,7 +731,7 @@ const selection = await svc.resolveRunner(runnerOpts, agents);
 
 6. **`AgentRunner` dropping reasoning deltas.** Flagged in §2.4. Not a `createRunner` concern, but users who `createRunner({ provider: "anthropic", modelId: "claude-opus-4" })` and expect extended-thinking events will be surprised. File a follow-up issue to teach `AgentRunner.stream()` to handle `reasoning` parts from `fullStream`.
 
-7. **Event parity between runners.** Documented in §3.3. We should consider a small normalization layer — e.g. `ClaudeCodeRunner` synthesizing `agent.iteration.start/end` events around each tool-use/tool-result pair so the dashboard shows a unified view. Probably a separate PR once this factory lands.
+7. **Event parity between runners.** ~~We should consider a small normalization layer — e.g. `ClaudeCodeRunner` synthesizing `agent.iteration.start/end` events.~~ **Done in #323 (B-1):** a shared translator synthesizes `agent.iteration.*` and per-call `agent.llm.*`, emits real tool `durationMs`, mapped `finishReason`, run `costUsd`, and `harness.native` envelope events. See §3.3. Dashboard *rendering* of the new events is tracked in #324.
 
 8. **Telemetry / metric on `source`.** The `RunnerSelection.source` field is a free metric dimension (`runner_source="env-anthropic"`). If we add Prometheus/OTel metrics later, label runs with this. No action now, just noted.
 

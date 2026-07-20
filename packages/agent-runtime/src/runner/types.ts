@@ -50,6 +50,12 @@ export interface RunResult {
   readonly iterations: number;
   /** Reason the run finished (e.g. "stop", "max_iterations"). */
   readonly finishReason: string;
+  /**
+   * Total run cost in USD when the harness reports it (#323, B-1). Populated
+   * by `ClaudeCodeRunner` from the SDK result's `total_cost_usd`; absent for
+   * runners with no cost signal (e.g. `AgentRunner`). Optional and additive.
+   */
+  readonly costUsd?: number;
 }
 
 /**

@@ -63,8 +63,9 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.gate.decision"]).toBe("gate.decision");
   });
 
-  it("has exactly 30 mappings", () => {
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(30);
+  it("has exactly 31 mappings", () => {
+    // 31 since #323 added the `harness.native` envelope mapping.
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(31);
   });
 });
 

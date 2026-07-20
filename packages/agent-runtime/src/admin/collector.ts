@@ -368,6 +368,9 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.step.end":
       case "agent.llm.start":
       case "claude_code.hook":
+      // Harness-native envelope (#323): observed, ring-buffered only. Canonical
+      // aggregation/rendering is deferred to #324.
+      case "harness.native":
       // State-delta events (#226): observed, never aggregated — the dashboard
       // folds these client-side (timeline frames + the Scratchpad rail).
       case "agent.backpack.drop":
