@@ -1,0 +1,94 @@
+{
+  "_note": "Curated wire captures from codex-cli 0.144.6 (2026-07-19). Paths/ids are from the capture session \u2014 shapes are the contract, values are illustrative.",
+  "appServer": {
+    "commandApprovalRequest": {
+      "method": "item/commandExecution/requestApproval",
+      "id": 0,
+      "params": {
+        "threadId": "019f7d49-c77c-7cc2-9cb9-93635324db02",
+        "turnId": "019f7d49-c7a9-7c71-9da1-5aa85227e4a1",
+        "itemId": "exec-4552265d-14bd-43f3-bf4c-5ed44208efbe",
+        "startedAtMs": 1784513426060,
+        "environmentId": "local",
+        "command": "/bin/zsh -lc 'touch /tmp/codex-probe-battery-a'",
+        "cwd": "/private/tmp/claude-501/-Users-dug-Projects-sandbox-agentic-patterns-ts/2f45aa23-503c-41de-b326-e56cc10603f7/scratchpad/workspaces/s2",
+        "commandActions": [
+          {
+            "type": "unknown",
+            "command": "touch /tmp/codex-probe-battery-a"
+          }
+        ],
+        "proposedExecpolicyAmendment": [
+          "touch",
+          "/tmp/codex-probe-battery-a"
+        ],
+        "availableDecisions": [
+          "accept",
+          {
+            "acceptWithExecpolicyAmendment": {
+              "execpolicy_amendment": [
+                "touch",
+                "/tmp/codex-probe-battery-a"
+              ]
+            }
+          },
+          "cancel"
+        ]
+      }
+    },
+    "fileChangeApprovalRequest": {
+      "method": "item/fileChange/requestApproval",
+      "id": 0,
+      "params": {
+        "threadId": "019f7d51-13bb-7863-be2c-eb00c5d811c1",
+        "turnId": "019f7d51-14ad-7461-9199-8d4eecca9ca3",
+        "itemId": "exec-f1c495bd-e025-4c66-b594-145ba6da1ac9",
+        "startedAtMs": 1784513898985,
+        "reason": null,
+        "grantRoot": null
+      }
+    },
+    "serverRequestResolvedNotification": {
+      "method": "serverRequest/resolved",
+      "params": {
+        "threadId": "019f7d52-9e22-79c2-b05d-1aff0bedf507",
+        "requestId": 0
+      }
+    },
+    "turnCompletedInterrupted": {
+      "m": "turn/completed",
+      "status": "interrupted"
+    }
+  },
+  "execJson": {
+    "eventSample": [
+      {
+        "type": "thread.started",
+        "thread_id": "019f7d55-0ed9-7a43-ad5c-cd02be039e0f"
+      },
+      {
+        "type": "turn.started"
+      },
+      {
+        "type": "turn.completed",
+        "usage": {
+          "input_tokens": 53327,
+          "cached_input_tokens": 45056,
+          "output_tokens": 218,
+          "reasoning_output_tokens": 0
+        }
+      },
+      {
+        "type": "item.started",
+        "item": {
+          "id": "item_3",
+          "type": "command_execution",
+          "command": "/bin/zsh -lc 'echo hook-coverage-probe'",
+          "aggregated_output": "",
+          "exit_code": null,
+          "status": "in_progress"
+        }
+      }
+    ]
+  }
+}
