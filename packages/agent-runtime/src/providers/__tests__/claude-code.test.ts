@@ -40,6 +40,10 @@ const script: { current: Scripted } = {
   },
 };
 
+// Records the SDK `options` object of the most recent query() call so tests
+// can assert what the provider assembled (e.g. isolated-mode env injection).
+const captured: { options: Record<string, unknown> | null } = { options: null };
+
 vi.mock("@anthropic-ai/claude-agent-sdk", () => {
   return {
     createSdkMcpServer: (opts: { name: string; tools: unknown[] }) => ({
@@ -54,6 +58,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
       handler: (args: Record<string, unknown>) => Promise<unknown>,
     ) => ({ name, description, handler }),
     query: ({ options }: { prompt: string; options: Record<string, unknown> }) => {
+      captured.options = options;
       const canUseTool = options.canUseTool as
         | ((
             toolName: string,
@@ -145,6 +150,25 @@ function contentToolCalls(
   );
 }
 
+const TOKEN = "test-oauth-token-1234567890";
+
+// Isolated providers create a tmpdir at construction; track + dispose them so
+// the suite doesn't leak.
+const disposables: Array<{ dispose: () => void }> = [];
+function track<T extends { dispose: () => void }>(m: T): T {
+  disposables.push(m);
+  return m;
+}
+
+/**
+ * Default test model — host config mode so the generation-behavior tests
+ * neither require a token nor create isolated tmpdirs. Isolation + fail-closed
+ * are covered by the dedicated tests below and in cc-fail-closed.test.ts.
+ */
+function makeModel(modelId = "sonnet") {
+  return claudeCode(modelId, { config: { mode: "host" } });
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -158,14 +182,17 @@ describe("claudeCode provider", () => {
       outputTokens: 0,
       stopReason: "end_turn",
     };
+    captured.options = null;
   });
 
   afterEach(() => {
+    for (const d of disposables) d.dispose();
+    disposables.length = 0;
     vi.clearAllMocks();
   });
 
   it("factory returns a LanguageModelV2-shaped object", () => {
-    const model = claudeCode("sonnet");
+    const model = makeModel();
     expect(model.specificationVersion).toBe("v2");
     expect(model.provider).toBe("claude-code");
     expect(model.modelId).toBe("sonnet");
@@ -182,7 +209,7 @@ describe("claudeCode provider", () => {
       stopReason: "end_turn",
     };
 
-    const model = claudeCode("sonnet");
+    const model = makeModel();
     const result = await model.doGenerate(
       makeCallOptions([
         { role: "system", content: "You are a math assistant." },
@@ -205,7 +232,7 @@ describe("claudeCode provider", () => {
       stopReason: "tool_use",
     };
 
-    const model = claudeCode("sonnet");
+    const model = makeModel();
     const result = await model.doGenerate(
       makeCallOptions(
         [
@@ -233,7 +260,7 @@ describe("claudeCode provider", () => {
       stopReason: "tool_use",
     };
 
-    const model = claudeCode("sonnet");
+    const model = makeModel();
     const { stream } = await model.doStream(
       makeCallOptions(
         [
@@ -267,7 +294,7 @@ describe("claudeCode provider", () => {
       stopReason: "end_turn",
     };
 
-    const model = claudeCode("sonnet");
+    const model = makeModel();
     const result = await model.doGenerate(
       makeCallOptions([
         { role: "system", content: "Math bot." },
@@ -299,6 +326,55 @@ describe("claudeCode provider", () => {
 
     expect(contentText(result.content)).toBe("45");
     expect(result.finishReason).toBe("stop");
+  });
+
+  // -------------------------------------------------------------------------
+  // Isolated config mode (Axis B) — env injection + host opt-out
+  // -------------------------------------------------------------------------
+
+  it("isolated mode (default) injects CLAUDE_CONFIG_DIR + OAuth token into SDK options.env", async () => {
+    script.current = {
+      toolCalls: [],
+      assistantText: ["ok"],
+      inputTokens: 1,
+      outputTokens: 1,
+      stopReason: "end_turn",
+    };
+
+    // Explicit token → deterministic across platforms (no Keychain probe).
+    const model = track(claudeCode("sonnet", { oauthToken: TOKEN }));
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
+    );
+
+    const env = (captured.options?.env ?? {}) as Record<string, string>;
+    expect(env.CLAUDE_CONFIG_DIR).toContain("ap-cc-cfg-");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe(TOKEN);
+  });
+
+  it("host mode (explicit opt-out) injects no isolated env", async () => {
+    script.current = {
+      toolCalls: [],
+      assistantText: ["ok"],
+      inputTokens: 1,
+      outputTokens: 1,
+      stopReason: "end_turn",
+    };
+
+    const model = makeModel(); // { config: { mode: "host" } }
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
+    );
+
+    const env = captured.options?.env as Record<string, string> | undefined;
+    expect(env?.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(env?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it("dispose() removes the isolated config dir and is idempotent", () => {
+    const model = claudeCode("sonnet", { oauthToken: TOKEN });
+    model.dispose();
+    expect(() => model.dispose()).not.toThrow();
   });
 });
 

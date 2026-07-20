@@ -48,6 +48,15 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
+import {
+  type CCConfigSource,
+  type OAuthTokenSource,
+  applyIsolatedEnv,
+  createIsolatedConfigDir,
+  removeIsolatedConfigDir,
+  resolveOAuthToken,
+} from "../runner/cc-config.js";
+
 // ---------------------------------------------------------------------------
 // Model name mapping
 // ---------------------------------------------------------------------------
@@ -105,7 +114,38 @@ export interface ClaudeCodeProviderOptions {
    * tool call.
    */
   maxTurns?: number;
+  /**
+   * Config source (Axis B). Defaults to `{ mode: "isolated" }`.
+   *
+   * As a plain-model endpoint the provider must NOT inherit the host's
+   * ~/.claude — connectors, plugins, skills, settings, hooks — so isolated
+   * mode is the default. Pass `{ mode: "host" }` to explicitly opt into the
+   * developer's host config. Isolated mode redirects `CLAUDE_CONFIG_DIR` to
+   * a fresh dir (optionally seeded from `profile`) and injects an OAuth token
+   * (see `oauthToken`).
+   */
+  config?: CCConfigSource;
+  /**
+   * OAuth token source for isolated mode. Falls back to the
+   * `CLAUDE_CODE_OAUTH_TOKEN` env var, then the macOS Keychain. In isolated
+   * mode a token from one of those three sources is REQUIRED — construction
+   * fails closed when none resolves (see the constructor).
+   */
+  oauthToken?: OAuthTokenSource;
 }
+
+/**
+ * Thrown at construction when the provider is in isolated config mode but no
+ * OAuth token resolves from any of the three sources. Failing closed here
+ * (rather than silently falling through to the host config) guarantees the
+ * provider never leaks the developer's connectors/plugins into a run that
+ * asked to act as a plain model.
+ */
+const ISOLATED_NO_TOKEN_MESSAGE =
+  "claudeCode provider: isolated config mode requires an OAuth token, but none " +
+  "resolved. Provide one via the `oauthToken` option, the CLAUDE_CODE_OAUTH_TOKEN " +
+  "environment variable, or a Claude Max login in the macOS Keychain. To use the " +
+  'host ~/.claude config instead, pass `config: { mode: "host" }`.';
 
 // ---------------------------------------------------------------------------
 // Prompt flattening
@@ -361,10 +401,49 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   readonly supportedUrls: Record<string, RegExp[]> = {};
 
   private readonly _opts: ClaudeCodeProviderOptions;
+  private readonly _config: CCConfigSource;
+  private readonly _oauthToken: OAuthTokenSource | undefined;
+  /** Isolated CLAUDE_CONFIG_DIR created at construction; null in host mode. */
+  private readonly _isolatedConfigDir: string | null;
+  /** Token resolved once at construction for isolated mode; null in host mode. */
+  private readonly _isolatedToken: string | null;
+  private _disposed = false;
 
   constructor(modelId: string, opts: ClaudeCodeProviderOptions = {}) {
     this.modelId = modelId;
     this._opts = opts;
+    this._config = opts.config ?? { mode: "isolated" };
+    this._oauthToken = opts.oauthToken;
+
+    if (this._config.mode === "isolated") {
+      // Fail closed (D11): resolve the token BEFORE creating the tmpdir so the
+      // throw path leaks nothing. Isolated mode with no resolvable token is a
+      // construction-time error — never a silent fall-through to host config.
+      const token = resolveOAuthToken(this._oauthToken);
+      if (!token) {
+        throw new Error(ISOLATED_NO_TOKEN_MESSAGE);
+      }
+      this._isolatedToken = token;
+      this._isolatedConfigDir = createIsolatedConfigDir(this._config.profile);
+    } else {
+      this._isolatedToken = null;
+      this._isolatedConfigDir = null;
+    }
+  }
+
+  /**
+   * Remove the isolated CLAUDE_CONFIG_DIR created for this provider, if any.
+   * The dir is created once at construction and reused across every
+   * `doGenerate` / `doStream` call, so a provider you no longer need should
+   * be disposed to avoid leaking tmpdirs. Idempotent, and a no-op for
+   * host-mode providers. Mirrors `ClaudeCodeRunner.dispose()`.
+   */
+  dispose(): void {
+    if (this._disposed) return;
+    this._disposed = true;
+    if (this._isolatedConfigDir) {
+      removeIsolatedConfigDir(this._isolatedConfigDir);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -648,6 +727,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
       ];
     }
 
+    // Axis B — isolated config dir + injected OAuth (resolved fail-closed at
+    // construction). Redirects CLAUDE_CONFIG_DIR to strip host connectors /
+    // plugins / skills without breaking auth. Host mode injects nothing.
+    if (this._isolatedConfigDir && this._isolatedToken) {
+      applyIsolatedEnv(sdkOptions, this._isolatedConfigDir, this._isolatedToken);
+    }
+
     return { systemPrompt, promptString, sdkOptions, captured };
   }
 }
@@ -681,13 +767,26 @@ function deriveFinishReason(args: {
 /**
  * Create a `LanguageModelV2` backed by the Claude Agent SDK.
  *
+ * Runs in isolated config mode by default — the provider acts as a plain
+ * model and does NOT inherit the host's ~/.claude connectors/plugins/skills.
+ * Isolated mode requires a resolvable OAuth token (the `oauthToken` option,
+ * the `CLAUDE_CODE_OAUTH_TOKEN` env var, or the macOS Keychain) and fails
+ * closed at construction when none is available. Pass `config: { mode: "host" }`
+ * to opt into the host config instead. Dispose the model when done to remove
+ * the isolated tmpdir.
+ *
  * @example
  * ```ts
  * import { claudeCode } from "@agentic-patterns/runtime/providers";
  * import { AgentRunner } from "@agentic-patterns/runtime";
  *
- * const runner = new AgentRunner(claudeCode("sonnet"));
- * const result = await runner.run(agent, "What is 17 + 28?");
+ * const model = claudeCode("sonnet");
+ * try {
+ *   const runner = new AgentRunner(model);
+ *   const result = await runner.run(agent, "What is 17 + 28?");
+ * } finally {
+ *   model.dispose();
+ * }
  * ```
  */
 export function claudeCode(

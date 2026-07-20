@@ -113,6 +113,18 @@ function setCorrelationEnv(id: string): () => void {
 // ClaudeCodeRunner
 // ---------------------------------------------------------------------------
 
+/**
+ * Thrown from `_buildOptions` when the runner is in isolated config mode but
+ * no OAuth token resolves from any of the three sources. Failing closed here
+ * (rather than silently falling through to the binary's own auth) guarantees
+ * an isolated run never leaks the host's connectors/config.
+ */
+const ISOLATED_NO_TOKEN_MESSAGE =
+  "ClaudeCodeRunner: isolated config mode requires an OAuth token, but none " +
+  "resolved. Provide one via the `oauthToken` option, the CLAUDE_CODE_OAUTH_TOKEN " +
+  "environment variable, or a Claude Max login in the macOS Keychain. To use the " +
+  'host ~/.claude config instead, pass `config: { mode: "host" }`.';
+
 export interface ClaudeCodeRunnerOptions {
   /** Default SDK options applied before per-run overrides. */
   defaults?: Partial<SDKOptions>;
@@ -545,13 +557,16 @@ export class ClaudeCodeRunner implements RunnerProtocol {
 
     // Axis B — isolated config dir + injected OAuth. Strips connectors,
     // settings, plugins, skills, hooks (or seeds a curated profile) without
-    // breaking auth. If no token resolves (e.g. off macOS with none passed)
-    // fall through to the binary's own auth — connectors may leak.
+    // breaking auth.
     if (this._isolatedConfigDir) {
+      // Fail closed (D11): isolated mode with no resolvable token is an error,
+      // never a silent fall-through to the binary's own auth — that would leak
+      // the host's connectors/config into a run that asked for isolation.
       const token = resolveOAuthToken(this._oauthToken);
-      if (token) {
-        applyIsolatedEnv(sdkOpts, this._isolatedConfigDir, token);
+      if (!token) {
+        throw new Error(ISOLATED_NO_TOKEN_MESSAGE);
       }
+      applyIsolatedEnv(sdkOpts, this._isolatedConfigDir, token);
     }
 
     return sdkOpts;
