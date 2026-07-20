@@ -12,6 +12,7 @@
 import { EventProfile } from "../events/event-profiles.js";
 import type {
   ErrorEvent,
+  GateDecisionEvent,
   IterationEndEvent,
   IterationStartEvent,
   LLMCallEndEvent,
@@ -182,7 +183,41 @@ export class OTelExporter extends BaseExporter {
       span.setAttribute("agent.model", event.model);
       span.setAttribute("agent.input_tokens", event.inputTokens);
       span.setAttribute("agent.output_tokens", event.outputTokens);
+      // #324: surface the harness-reported run cost as a span attribute when the
+      // runner supplied one (CC via total_cost_usd). Gen AI semconv has no
+      // standard cost key, so use the `gen_ai.usage.cost` convention.
+      if (event.costUsd !== undefined) {
+        span.setAttribute("gen_ai.usage.cost", event.costUsd);
+      }
       span.end();
     }
+  }
+
+  /**
+   * @internal
+   * Gate-decision audit signal (F-2, #324). A point-in-time record — no
+   * long-lived span to attach to — so emit a self-contained span carrying the
+   * decision, its provenance, and the evaluation trail. Requires
+   * `agent.gate.decision` in the OBSERVABILITY profile (event-profiles.ts).
+   */
+  async _onGateDecision(event: GateDecisionEvent): Promise<void> {
+    const span = this.tracer.startSpan("agent.gate.decision");
+    span.setAttribute("gate.tool_name", event.toolName);
+    span.setAttribute("gate.outcome", event.outcome);
+    span.setAttribute("gate.settled_by", event.settledBy);
+    if (event.decisionKind !== undefined) {
+      span.setAttribute("gate.decision_kind", event.decisionKind);
+    }
+    if (event.blockedBy !== undefined) {
+      span.setAttribute("gate.blocked_by", event.blockedBy);
+    }
+    if (event.reason !== undefined) {
+      span.setAttribute("gate.reason", event.reason);
+    }
+    span.setAttribute("gate.trail", JSON.stringify(event.trail));
+    span.setStatus({
+      code: event.outcome === "block" ? OTelStatusCode.ERROR : OTelStatusCode.OK,
+    });
+    span.end();
   }
 }

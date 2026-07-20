@@ -884,6 +884,67 @@ export function StateGroupPart({ parts }: { parts: StateDelta[] }) {
   );
 }
 
+/* ── gate decision (F-2, #324) ───────────────────────────────────────────────
+ * A compact audit row: outcome + tool + who settled it + the evaluation trail.
+ * Prose is regular UI text (no mono — project convention); only literal payloads
+ * ever use a code font, and a gate decision carries none. */
+function GateDecisionPart({ part }: { part: Extract<Part, { kind: "gate_decision" }> }) {
+  const blocked = part.outcome === "block";
+  const trail = part.trail.map((t) => `${t.gate}: ${t.result}`).join(" → ");
+  return (
+    <div
+      className="chat-gate"
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: "8px",
+        padding: "6px 11px",
+        fontSize: "var(--fz-tiny)",
+        color: "var(--mute)",
+        borderLeft: `2px solid ${blocked ? "var(--danger, #d66)" : "var(--ok, #6a9)"}`,
+      }}
+    >
+      <span aria-hidden>{blocked ? "⊘" : "✓"}</span>
+      <span style={{ fontWeight: 600, color: blocked ? "var(--danger, #d66)" : "inherit" }}>
+        {blocked ? "blocked" : "allowed"}
+      </span>
+      <span>{part.toolName}</span>
+      <span>
+        via {part.settledBy}
+        {part.blockedBy ? ` · ${part.blockedBy}` : ""}
+      </span>
+      {part.reason && <span>· {part.reason}</span>}
+      {trail && <span style={{ opacity: 0.8 }}>· {trail}</span>}
+    </div>
+  );
+}
+
+/* ── harness-native envelope (#323/#324) ─────────────────────────────────────
+ * A collapsed panel carrying a harness-specific event: the name + harness label
+ * in the summary, the raw payload (literal JSON — code font is correct here)
+ * inside. Reuses the tool-card grammar so no new CSS is needed. */
+function HarnessNativePart({ part }: { part: Extract<Part, { kind: "harness_native" }> }) {
+  const body = fmt(part.payload);
+  return (
+    <details className="chat-tool">
+      <summary>
+        <span aria-hidden>⊕</span>
+        <span className="tool-name">{part.name}</span>
+        <span className="step-kind">{part.harness}</span>
+      </summary>
+      <div className="tool-io">
+        {body && (
+          <div>
+            <div className="io-label">payload</div>
+            <CodeBlock text={body} copyable maxHeight={240} />
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 /* ── error ──────────────────────────────────────────────────────────────────*/
 function ErrorPart({ errorType, message }: { errorType: string; message: string }) {
   return (
@@ -920,6 +981,10 @@ export function PartView({
       return <StateDeltaPart part={part} />;
     case "state_group":
       return <StateGroupPart parts={part.parts} />;
+    case "gate_decision":
+      return <GateDecisionPart part={part} />;
+    case "harness_native":
+      return <HarnessNativePart part={part} />;
     case "error":
       return <ErrorPart errorType={part.errorType} message={part.message} />;
     default:

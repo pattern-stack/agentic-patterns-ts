@@ -20,6 +20,9 @@ export type ClientEvent =
         input_tokens: number;
         output_tokens: number;
         model: string;
+        /** #324: total run cost in USD when the harness reports it (CC only). */
+        cost_usd?: number;
+        finish_reason?: string;
       };
     }
   | { name: "message.cancel"; data: { reason: string } }
@@ -174,6 +177,73 @@ export type ClientEvent =
         discarded_keys: string[];
       };
     }
+  // Gate-decision audit signal (F-2, #324) — one post-decision record per intent
+  // (allow or block), carrying provenance + the evaluation trail.
+  | {
+      name: "gate.decision";
+      data: {
+        tool_name: string;
+        outcome: "allow" | "block";
+        settled_by: "gate" | "human" | "timeout";
+        decision_kind?: string;
+        blocked_by?: string;
+        reason?: string;
+        trail: { gate: string; result: "allow" | "block" | "modified" }[];
+      };
+    }
+  // Loop / model-call lifecycle (#286 — previously drifted, dashboard-blind).
+  // `synthetic: true` marks a boundary the CC translator RECONSTRUCTED rather
+  // than observed (D12) — badge it and NEVER treat it as a causal latency anchor.
+  | {
+      name: "iteration.start";
+      data: { iteration: number; max_iterations: number; synthetic?: boolean };
+    }
+  | {
+      name: "iteration.end";
+      data: {
+        iteration: number;
+        tool_calls_count: number;
+        has_more: boolean;
+        synthetic?: boolean;
+      };
+    }
+  | {
+      name: "llm.start";
+      data: { model: string; message_count: number; has_tools: boolean; synthetic?: boolean };
+    }
+  | {
+      name: "llm.end";
+      data: {
+        model: string;
+        input_tokens: number;
+        output_tokens: number;
+        duration_ms: number;
+        finish_reason: string;
+      };
+    }
+  // Claude Code hook passthrough (#286) — SDK hook fired during a CC run.
+  | {
+      name: "claude_code.hook";
+      data: {
+        hook_name: string;
+        session_id?: string;
+        cwd?: string;
+        tool_name?: string;
+        tool_input?: unknown;
+        tool_response?: unknown;
+        tool_use_id?: string;
+        permission_mode?: string;
+        transcript_path?: string;
+        runner_correlation_id?: string;
+        payload?: unknown;
+      };
+    }
+  // Harness-native passthrough envelope (#323/#324) — a harness-specific event
+  // (compaction boundary, subagent progress, rate-limit notice) preserved verbatim.
+  | {
+      name: "harness.native";
+      data: { harness: string; name: string; payload: Record<string, unknown> };
+    }
   | {
       name: "error";
       data: { error_type: string; message: string; recoverable: boolean };
@@ -181,6 +251,61 @@ export type ClientEvent =
   | { name: "done"; data: Record<string, never> };
 
 export type ClientEventName = ClientEvent["name"];
+
+/**
+ * The runtime-enumerable list of every KNOWN wire event name — the value-level
+ * twin of the `ClientEventName` type union (a type can't be iterated). The
+ * drift-check test (`__tests__/sse-events.drift.test.ts`) asserts this set
+ * covers every name in the runtime's committed manifest (#286/#324), so a wire
+ * event the runtime emits can never again silently lack a typed client view.
+ *
+ * The `satisfies` clause proves every entry is a real `ClientEventName`; the
+ * `_MissingClientName` guard below proves none is omitted — together pinning
+ * this array to be EXACTLY the union. Add a name to `ClientEvent` and this file
+ * fails to compile until the array is updated.
+ */
+export const CLIENT_EVENT_NAMES = [
+  "conversation.start",
+  "conversation.end",
+  "message.start",
+  "message.delta",
+  "message.complete",
+  "message.cancel",
+  "input.request",
+  "thinking.start",
+  "thinking",
+  "thinking.complete",
+  "tool.intent",
+  "tool.start",
+  "tool.progress",
+  "tool.end",
+  "tool.rejected",
+  "gate.decision",
+  "step.start",
+  "step.end",
+  "iteration.start",
+  "iteration.end",
+  "llm.start",
+  "llm.end",
+  "backpack.drop",
+  "backpack.read",
+  "backpack.absorb",
+  "scratchpad.write",
+  "scratchpad.read",
+  "scratchpad.fork",
+  "scratchpad.join",
+  "claude_code.hook",
+  "harness.native",
+  "error",
+  "done",
+] as const satisfies readonly ClientEventName[];
+
+// Exhaustiveness guard — see the doc comment above.
+type _MissingClientName = Exclude<ClientEventName, (typeof CLIENT_EVENT_NAMES)[number]>;
+const _clientNamesAreExhaustive: _MissingClientName extends never
+  ? true
+  : ["missing client names"] = true;
+void _clientNamesAreExhaustive;
 
 /**
  * A decoded SSE frame: an event `name` + its JSON `data`, with NO name allowlist.

@@ -58,6 +58,14 @@ export interface TraceStep {
   status?: string;
   /** multi-agent: the sub-agent / pipeline phase this step belongs to (ARM B/C). */
   agent?: string;
+  /**
+   * #324/D12: the boundary that opened this step was SYNTHESIZED by the CC
+   * translator (reconstructed, not observed) rather than a real event. The UI
+   * badges such steps and MUST NOT treat their boundary as a causal latency
+   * anchor. (A model step's `ms` still comes from the OBSERVED `llm.end`, so it
+   * stays trustworthy; only the boundary provenance is synthetic.)
+   */
+  synthetic?: boolean;
 }
 
 export interface RunTrace {
