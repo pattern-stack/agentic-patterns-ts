@@ -10,10 +10,12 @@
  *
  * Event bridging:
  * - PreToolUse hook  → ToolCallIntent (gate chain) + ToolCallStartEvent
- * - PostToolUse hook → ToolCallEndEvent with result
- * - SDKAssistantMessage → MessageStart/Complete, Reasoning
- * - SDKResultMessage → MessageComplete with usage stats
- * - SDKPartialAssistantMessage → MessageChunk (streaming)
+ *                      (start timestamp stamped for durationMs)
+ * - PostToolUse hook → ToolCallEndEvent with result + measured durationMs
+ * - SDK message stream → one shared {@link CCMessageTranslator} consumed by
+ *   both run() and stream() (#323): per-call agent.llm.start/end, synthesized
+ *   iteration.start/end, agent.reasoning, message.chunk, run cost, and
+ *   harness.native envelope events for compaction/subagent/rate-limit richness.
  */
 
 import type { RenderContext, ToolSchema } from "@agentic-patterns/core";
@@ -37,6 +39,7 @@ import {
   removeIsolatedConfigDir,
   resolveOAuthToken,
 } from "./cc-config.js";
+import { CCMessageTranslator } from "./cc-event-translator.js";
 import { type AgentLikeForBridge, buildAgentServers } from "./sdk-bridge.js";
 import type { RunOptions, RunResult, RunnerProtocol } from "./types.js";
 
@@ -274,47 +277,23 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     });
     await this.emit(startEvent);
 
-    const contentParts: string[] = [];
-    let toolCallsMade = 0;
-    let inputTokens = 0;
-    let outputTokens = 0;
     const model = agent.getModel() ?? "";
+    const translator = new CCMessageTranslator({
+      traceId,
+      runId,
+      parentSpanId: options?.parentSpanId,
+      fallbackModel: model,
+      hasTools: agent.getTools().length > 0,
+      maxIterations: options?.maxIterations ?? 10,
+      streaming: false,
+    });
 
     const restoreCorrelation = setCorrelationEnv(correlationId);
 
     try {
       for await (const msg of query({ prompt: message, options: sdkOptions })) {
-        if (msg.type === "assistant" && "message" in msg) {
-          const content = msg.message?.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if ("text" in block && typeof block.text === "string") {
-                contentParts.push(block.text);
-              } else if ("thinking" in block && typeof block.thinking === "string") {
-                await this.emit(
-                  createEvent("agent.reasoning", {
-                    traceId,
-                    runId,
-                    parentSpanId: options?.parentSpanId,
-                    content: block.thinking,
-                    isComplete: true,
-                  }),
-                );
-              } else if ("name" in block) {
-                // ToolUseBlock — count only; event emission handled by hooks
-                toolCallsMade++;
-              }
-            }
-          }
-        } else if (msg.type === "result") {
-          if ("usage" in msg && msg.usage) {
-            const usage = msg.usage as unknown as Record<string, number>;
-            inputTokens = usage.input_tokens ?? 0;
-            outputTokens = usage.output_tokens ?? 0;
-          }
-          if ("result" in msg && typeof msg.result === "string" && contentParts.length === 0) {
-            contentParts.push(msg.result);
-          }
+        for (const event of translator.translate(msg)) {
+          await this.emit(event);
         }
       }
     } catch (err) {
@@ -335,7 +314,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
       restoreCorrelation();
     }
 
-    const content = contentParts.join("");
+    const acc = translator.finalize();
 
     await this.emit(
       createEvent("agent.message.complete", {
@@ -343,20 +322,23 @@ export class ClaudeCodeRunner implements RunnerProtocol {
         runId,
         spanId: startEvent.spanId,
         parentSpanId: startEvent.spanId,
-        content,
-        inputTokens,
-        outputTokens,
+        content: acc.content,
+        inputTokens: acc.inputTokens,
+        outputTokens: acc.outputTokens,
         model,
+        finishReason: acc.finishReason,
+        ...(acc.costUsd !== undefined ? { costUsd: acc.costUsd } : {}),
       }),
     );
 
     return {
-      response: content,
-      inputTokens,
-      outputTokens,
-      toolCallsCount: toolCallsMade,
-      iterations: 1, // Claude Code manages its own loop
-      finishReason: "stop",
+      response: acc.content,
+      inputTokens: acc.inputTokens,
+      outputTokens: acc.outputTokens,
+      toolCallsCount: acc.toolCallsCount,
+      iterations: acc.iterations,
+      finishReason: acc.finishReason,
+      ...(acc.costUsd !== undefined ? { costUsd: acc.costUsd } : {}),
     };
   }
 
@@ -400,71 +382,24 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     await this.emit(startEvent);
     yield startEvent;
 
-    const contentParts: string[] = [];
-    let chunkIndex = 0;
-    let gotChunks = false;
-    let toolCallsMade = 0;
-    let inputTokens = 0;
-    let outputTokens = 0;
     const model = agent.getModel() ?? "";
+    const translator = new CCMessageTranslator({
+      traceId,
+      runId,
+      parentSpanId: options?.parentSpanId,
+      fallbackModel: model,
+      hasTools: agent.getTools().length > 0,
+      maxIterations: options?.maxIterations ?? 10,
+      streaming: true,
+    });
 
     const restoreCorrelation = setCorrelationEnv(correlationId);
 
     try {
       for await (const msg of query({ prompt: message, options: sdkOptions })) {
-        // Partial/streaming messages → MessageChunk events
-        const msgType = msg.type as string;
-        if (msgType === "stream_event" && "event" in msg) {
-          const streamMsg = msg as unknown as { event?: { delta?: { text?: string } } };
-          const text = streamMsg.event?.delta?.text;
-          if (text) {
-            const chunkEvent = createEvent("agent.message.chunk", {
-              traceId,
-              runId,
-              parentSpanId: options?.parentSpanId,
-              delta: text,
-              chunkIndex,
-            });
-            await this.emit(chunkEvent);
-            yield chunkEvent;
-            contentParts.push(text);
-            chunkIndex++;
-            gotChunks = true;
-          }
-        } else if (msg.type === "assistant" && "message" in msg) {
-          const content = msg.message?.content;
-          if (Array.isArray(content)) {
-            for (const block of content) {
-              if ("text" in block && typeof block.text === "string") {
-                // Skip if chunks already captured this text
-                if (!gotChunks) {
-                  contentParts.push(block.text);
-                }
-              } else if ("thinking" in block && typeof block.thinking === "string") {
-                const reasoningEvent = createEvent("agent.reasoning", {
-                  traceId,
-                  runId,
-                  parentSpanId: options?.parentSpanId,
-                  content: block.thinking,
-                  isComplete: true,
-                });
-                await this.emit(reasoningEvent);
-                yield reasoningEvent;
-              } else if ("name" in block) {
-                // Count only; events emitted by hooks
-                toolCallsMade++;
-              }
-            }
-          }
-        } else if (msg.type === "result") {
-          if ("usage" in msg && msg.usage) {
-            const usage = msg.usage as unknown as Record<string, number>;
-            inputTokens = usage.input_tokens ?? 0;
-            outputTokens = usage.output_tokens ?? 0;
-          }
-          if ("result" in msg && typeof msg.result === "string" && contentParts.length === 0) {
-            contentParts.push(msg.result);
-          }
+        for (const event of translator.translate(msg)) {
+          await this.emit(event);
+          yield event;
         }
       }
     } catch (err) {
@@ -484,16 +419,18 @@ export class ClaudeCodeRunner implements RunnerProtocol {
       restoreCorrelation();
     }
 
-    const finalContent = contentParts.join("");
+    const acc = translator.finalize();
     const completeEvent = createEvent("agent.message.complete", {
       traceId,
       runId,
       spanId: startEvent.spanId,
       parentSpanId: startEvent.spanId,
-      content: finalContent,
-      inputTokens,
-      outputTokens,
+      content: acc.content,
+      inputTokens: acc.inputTokens,
+      outputTokens: acc.outputTokens,
       model,
+      finishReason: acc.finishReason,
+      ...(acc.costUsd !== undefined ? { costUsd: acc.costUsd } : {}),
     });
     await this.emit(completeEvent);
     yield completeEvent;
@@ -586,9 +523,10 @@ export class ClaudeCodeRunner implements RunnerProtocol {
     traceId: string,
     parentSpanId: string | undefined,
   ): Partial<Record<string, HookCallbackMatcher[]>> {
-    // Map tool_use_id → span_id so start/end events share the same
-    // span_id (required by exporters like Langfuse to correlate them).
-    const tcSpanIds = new Map<string, string>();
+    // Map tool_use_id → { span_id, startedAt } so start/end events share the
+    // same span_id (required by exporters like Langfuse to correlate them) and
+    // PostToolUse can diff the wall-clock start stamp into `durationMs` (#323).
+    const tcSpanIds = new Map<string, { spanId: string; startedAt: number }>();
 
     const onPreToolUse: HookCallback = async (input, toolUseId, _opts) => {
       const toolName = ((input as Record<string, unknown>).tool_name as string) ?? "";
@@ -630,7 +568,7 @@ export class ClaudeCodeRunner implements RunnerProtocol {
         toolName,
         arguments: args,
       });
-      tcSpanIds.set(tcId, startEvent.spanId);
+      tcSpanIds.set(tcId, { spanId: startEvent.spanId, startedAt: Date.now() });
       await this.emit(startEvent);
       return {};
     };
@@ -645,10 +583,12 @@ export class ClaudeCodeRunner implements RunnerProtocol {
           ? (toolInput as Record<string, unknown>)
           : {};
 
-      // Reuse span_id from the matching start event so exporters
-      // can correlate the pair.
-      const spanId = tcSpanIds.get(tcId);
+      // Reuse span_id from the matching start event so exporters can correlate
+      // the pair, and diff its start stamp for durationMs. `resultTokens` stays
+      // 0 — the SDK hook payload carries no per-tool token count (honest gap).
+      const span = tcSpanIds.get(tcId);
       tcSpanIds.delete(tcId);
+      const durationMs = span ? Math.max(0, Date.now() - span.startedAt) : 0;
 
       const endEvent = createEvent("agent.tool.end", {
         runId,
@@ -658,9 +598,9 @@ export class ClaudeCodeRunner implements RunnerProtocol {
         toolName,
         arguments: args,
         result: toolResponse,
-        durationMs: 0,
+        durationMs,
         resultTokens: 0,
-        ...(spanId ? { spanId } : {}),
+        ...(span ? { spanId: span.spanId } : {}),
       });
       await this.emit(endEvent);
       return {};

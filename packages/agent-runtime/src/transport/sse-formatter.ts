@@ -50,6 +50,7 @@ export type SSEEventName =
   | "scratchpad.join"
   | "error"
   | "claude_code.hook"
+  | "harness.native"
   | "done";
 
 /** Result of mapping an AgentEvent to its canonical SSE shape. */
@@ -241,6 +242,17 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
           payload: event.payload,
         },
       };
+    case "harness.native":
+      // #323: pass the harness-native envelope through verbatim. Canonical
+      // rendering (per-name UI) is #324's concern; the wire keeps full fidelity.
+      return {
+        name: "harness.native",
+        payload: {
+          harness: event.harness,
+          name: event.name,
+          payload: event.payload,
+        },
+      };
     case "agent.step.start":
       return {
         name: "step.start",
@@ -407,6 +419,7 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.scratchpad.join": "scratchpad.join",
   "agent.error": "error",
   "claude_code.hook": "claude_code.hook",
+  "harness.native": "harness.native",
 } as const;
 
 // ---------------------------------------------------------------------------
