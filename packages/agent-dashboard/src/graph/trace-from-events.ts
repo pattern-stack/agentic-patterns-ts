@@ -136,6 +136,11 @@ const planned = (p: Record<string, unknown>): boolean =>
 // carries its `agent` tag — without it `computeFrame`'s chain-mode tool reveal
 // (owns: s.agent === agentLabel) never matches and tools never light.
 const agentNameOf = (p: Record<string, unknown>) => str(p.agentName) ?? str(p.agent_name);
+// #324/D12: a boundary is synthetic when the CC translator reconstructed it.
+// Live SSE carries a top-level `synthetic: true` (stamped by toSSEMapping);
+// persisted camelCase events carry `meta.synthetic`. Read both.
+const isSynthetic = (p: Record<string, unknown>): boolean =>
+  p.synthetic === true || rec(p.meta).synthetic === true;
 
 const bareType = (t: string): string => t.replace(/^(agent|pattern)\./, "");
 
@@ -220,6 +225,10 @@ export function eventsToSteps(
           detail: "Thinking…",
           status: "thinking",
           agent: curAgent,
+          // #324/D12: provenance badge — a run-mode llm.start is synthesized.
+          // The step's ms is filled from the OBSERVED llm.end below, so the
+          // duration stays real; only the boundary is flagged synthetic.
+          ...(isSynthetic(p) ? { synthetic: true } : {}),
         });
         pendingModelIdx = steps.length - 1;
         break;
@@ -335,6 +344,12 @@ export function eventsToSteps(
       case "scratchpad.read":
       case "scratchpad.fork":
       case "scratchpad.join":
+        break;
+      // #324: gate decisions + harness-native envelopes are CHAT-timeline
+      // citizens (rendered by chat/model.ts's applyParts), deliberately NOT
+      // trace steps — pinned as explicit no-ops, not swept into the default.
+      case "gate.decision":
+      case "harness.native":
         break;
       // chunk / iteration.end / tool.intent / tool.progress /
       // reasoning / step.start → no own TraceStep (step.start drives handoff edges,

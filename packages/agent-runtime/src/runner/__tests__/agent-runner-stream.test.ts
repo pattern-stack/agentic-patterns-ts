@@ -610,4 +610,233 @@ describe("AgentRunner.stream()", () => {
     expect((complete as { finishReason?: string }).finishReason).toBe("terminal_tool");
     expect((complete as { content?: string }).content).toBe("done");
   });
+
+  // ---------------------------------------------------------------------------
+  // #341 — RunOptions.abortSignal: stream() wiring. Runner owns cancel
+  // emission (locked D1) — `agent.message.cancel` + `agent.conversation.end
+  // {reason:"cancelled"}` — and RETURNS, never throws.
+  // ---------------------------------------------------------------------------
+  describe("abortSignal (#341)", () => {
+    it("pre-aborted signal: conversation.start, message.start, then the cancel pair — no llm.start, generator returns (never throws)", async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      const model = new MockLanguageModelV2({
+        doStream: async () => {
+          throw new Error("doStream must never be called for a pre-aborted signal");
+        },
+      });
+
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      const events = await collectStream(
+        runner.stream(agent, "Hi", { abortSignal: controller.signal }),
+      );
+      const types = eventTypes(events);
+
+      expect(types).toEqual([
+        "agent.conversation.start",
+        "agent.message.start",
+        "agent.message.cancel",
+        "agent.conversation.end",
+      ]);
+      expect(types).not.toContain("agent.llm.start");
+
+      const cancelEv = events.find((e) => e.type === "agent.message.cancel");
+      expect((cancelEv as { reason?: string }).reason).toBe("cancelled by client");
+
+      const convEnd = events.find((e) => e.type === "agent.conversation.end");
+      expect((convEnd as { reason?: string }).reason).toBe("cancelled");
+    });
+
+    it("aborts between iterations: the tool executor fires controller.abort() during iteration 0's execute — no second llm.start, cancel pair emitted", async () => {
+      const controller = new AbortController();
+      let doStreamCalls = 0;
+
+      const model = new MockLanguageModelV2({
+        doStream: async () => {
+          doStreamCalls++;
+          return streamFrom([
+            toolCallPart("tc-1", "loopy", { x: 1 }),
+            finishPart("tool-calls", 5, 2),
+          ])();
+        },
+      });
+
+      const loopSchema = z.object({ x: z.number() });
+      const tools = [ToolSchema.fromZod("loopy", "Loop tool", loopSchema)];
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent({ getTools: () => tools });
+
+      const events = await collectStream(
+        runner.stream(agent, "loop", {
+          abortSignal: controller.signal,
+          toolExecutor: {
+            execute: async () => {
+              // Fires mid tool-dispatch — the abort lands strictly between
+              // iteration 0's tool call and iteration 1's llm.start.
+              controller.abort();
+              return "ok";
+            },
+          },
+        }),
+      );
+      const types = eventTypes(events);
+
+      // Exactly one llm.start (iteration 0's) — the top-of-iteration guard
+      // stops a second one from ever firing.
+      expect(types.filter((t) => t === "agent.llm.start")).toHaveLength(1);
+      expect(doStreamCalls).toBe(1);
+
+      expect(types).toContain("agent.message.cancel");
+      expect(types).toContain("agent.conversation.end");
+      const convEnd = events.find((e) => e.type === "agent.conversation.end");
+      expect((convEnd as { reason?: string }).reason).toBe("cancelled");
+
+      // Iteration 0 completed normally (its one tool call already ran before
+      // abort fired) — iteration.end for it is expected. What matters is
+      // that iteration 1 never starts at all: no message.complete (only the
+      // cancel pair ends the turn), and exactly one llm.start (asserted
+      // above).
+      expect(types).not.toContain("agent.message.complete");
+    });
+
+    it("aborts mid-provider-stream via ai@5's fullStream 'abort' part (provider forwards abortSignal into its own stream, matching real-provider behavior)", async () => {
+      const controller = new AbortController();
+
+      const model = new MockLanguageModelV2({
+        doStream: async (options: { abortSignal?: AbortSignal }) => ({
+          stream: new ReadableStream({
+            start(c) {
+              c.enqueue({ type: "stream-start", warnings: [] });
+              c.enqueue({ type: "text-start", id: TXT });
+              c.enqueue({ type: "text-delta", id: TXT, delta: "Hel" });
+              // Never closes on its own — a real provider forwards
+              // abortSignal into its own fetch()/HTTP client, so aborting
+              // ends the underlying stream. ai@5's own `pull()` wrapper then
+              // converts the resulting AbortError into a clean
+              // `{type:"abort"}` fullStream part (empirically verified
+              // against ai@5.0.216 — see spec's dossier).
+              options.abortSignal?.addEventListener("abort", () => {
+                c.error(new DOMException("The user aborted a request.", "AbortError"));
+              });
+            },
+          }),
+        }),
+      });
+
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      const events: AgentEvent[] = [];
+      const gen = runner.stream(agent, "Hi", { abortSignal: controller.signal });
+
+      // Drain through the first chunk, then abort mid-stream.
+      for (let i = 0; i < 5; i++) {
+        const { value, done } = await gen.next();
+        if (done) break;
+        events.push(value);
+        if (value.type === "agent.message.chunk") {
+          controller.abort();
+        }
+      }
+      for await (const event of gen) {
+        events.push(event);
+      }
+
+      const types = eventTypes(events);
+      expect(types).toContain("agent.message.cancel");
+      expect(types).toContain("agent.conversation.end");
+      const convEnd = events.find((e) => e.type === "agent.conversation.end");
+      expect((convEnd as { reason?: string }).reason).toBe("cancelled");
+      expect(types).not.toContain("agent.message.complete");
+    });
+
+    it("belt-and-braces: a provider that throws a raw AbortError (not the SDK's synthesized 'abort' part) still routes to the cancel pair, never the error path", async () => {
+      const model = new MockLanguageModelV2({
+        doStream: async () => ({
+          stream: new ReadableStream({
+            start(c) {
+              c.enqueue({ type: "stream-start", warnings: [] });
+              c.enqueue({ type: "text-start", id: TXT });
+              c.enqueue({ type: "text-delta", id: TXT, delta: "Hel" });
+              // Errors immediately with an AbortError-shaped exception,
+              // independent of any RunOptions.abortSignal correlation (ai@5
+              // only synthesizes its own clean 'abort' part when its OWN
+              // abortSignal is already `.aborted` at the moment the error
+              // surfaces — otherwise the raw AbortError propagates to the
+              // consumer, per ai@5.0.216's `pull()` — pinned here).
+              c.error(new DOMException("The user aborted a request.", "AbortError"));
+            },
+          }),
+        }),
+      });
+
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      // No `abortSignal` at all — proves the guard is keyed on the error's
+      // shape (`err.name === "AbortError"`), not solely on our own signal.
+      const events = await collectStream(runner.stream(agent, "Hi"));
+      const types = eventTypes(events);
+
+      expect(types).toContain("agent.message.cancel");
+      expect(types).toContain("agent.conversation.end");
+      const convEnd = events.find((e) => e.type === "agent.conversation.end");
+      expect((convEnd as { reason?: string }).reason).toBe("cancelled");
+      expect(types).not.toContain("agent.error");
+    });
+
+    it("pre-tool-dispatch guard: aborting before a SECOND pending tool call in the same batch skips its dispatch and cancels", async () => {
+      const controller = new AbortController();
+      const dispatched: string[] = [];
+
+      const model = new MockLanguageModelV2({
+        doStream: async () =>
+          streamFrom([
+            toolCallPart("tc-1", "alpha", { x: 1 }),
+            toolCallPart("tc-2", "beta", { x: 2 }),
+            finishPart("tool-calls", 5, 2),
+          ])(),
+      });
+
+      const schema = z.object({ x: z.number() });
+      const tools = [
+        ToolSchema.fromZod("alpha", "Tool A", schema),
+        ToolSchema.fromZod("beta", "Tool B", schema),
+      ];
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent({ getTools: () => tools });
+
+      const events = await collectStream(
+        runner.stream(agent, "go", {
+          abortSignal: controller.signal,
+          toolExecutor: {
+            execute: async (name) => {
+              dispatched.push(name);
+              if (name === "alpha") {
+                // Abort right after the FIRST call in the batch dispatches;
+                // the guard must stop the second from ever running.
+                controller.abort();
+              }
+              return "ok";
+            },
+          },
+        }),
+      );
+      const types = eventTypes(events);
+
+      expect(dispatched).toEqual(["alpha"]);
+      expect(types).toContain("agent.message.cancel");
+      expect(types).toContain("agent.conversation.end");
+      const convEnd = events.find((e) => e.type === "agent.conversation.end");
+      expect((convEnd as { reason?: string }).reason).toBe("cancelled");
+    });
+  });
 });

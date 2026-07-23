@@ -72,6 +72,27 @@ export class ToolCallBlocked extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// RunCancelledError (#341 amendment)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by `runStructured()` when `RunOptions.abortSignal` fires before a
+ * schema-valid `object` exists to return. Unlike `stream()`/`run()` — whose
+ * result shapes have no required "output" field, so they can return an
+ * honest empty/cancelled result — `StructuredRunResult<T>` REQUIRES a
+ * schema-valid `object: T`; there is no honest value to fabricate on abort.
+ * Throwing (rather than the D1 return-never-throw posture) is the only
+ * type-safe option here. `err.name === "RunCancelledError"` (or
+ * `instanceof`) distinguishes this from a genuine schema/model failure.
+ */
+export class RunCancelledError extends Error {
+  constructor(message = "runStructured aborted before a result was available") {
+    super(message);
+    this.name = "RunCancelledError";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Structured-output capability table (DESIGN §9.4 / §9.5)
 // ---------------------------------------------------------------------------
 
@@ -164,6 +185,43 @@ export class AgentRunner implements RunnerProtocol {
   private async emitIntent(event: AgentEvent): Promise<boolean> {
     const evaluation = await this.eventBus.evaluateIntent(event as ToolCallIntent);
     return evaluation.outcome === "allow";
+  }
+
+  /**
+   * Cancel-and-return block (#341, locked D1) — the SINGLE emission path for
+   * every abort guard in `stream()` (top-of-iteration, mid-fullStream-drain,
+   * pre-tool-dispatch). The runner OWNS cancel emission: `agent.message.
+   * cancel` + `agent.conversation.end {reason:"cancelled"}`, so bus,
+   * exporters, and the collector observe it on every transport regardless of
+   * which guard fired. Callers `yield* this.emitCancellation(...); return;`
+   * immediately after — the generator ends here, it never throws. Skips
+   * `agent.iteration.end`/`agent.message.complete` for the aborted iteration
+   * by design (accepted per the human gate's Q2 answer — mirrors the
+   * existing error path's posture).
+   */
+  private async *emitCancellation(params: {
+    traceId: string;
+    runId: string;
+    parentSpanId: string;
+    conversationId: string;
+  }): AsyncGenerator<AgentEvent> {
+    const cancelEv = createEvent("agent.message.cancel", {
+      traceId: params.traceId,
+      runId: params.runId,
+      parentSpanId: params.parentSpanId,
+      reason: "cancelled by client",
+    });
+    await this.emit(cancelEv);
+    yield cancelEv;
+
+    const convEnd = createEvent("agent.conversation.end", {
+      traceId: params.traceId,
+      runId: params.runId,
+      conversationId: params.conversationId,
+      reason: "cancelled" as const,
+    });
+    await this.emit(convEnd);
+    yield convEnd;
   }
 
   /**
@@ -333,8 +391,25 @@ export class AgentRunner implements RunnerProtocol {
     // gets one chance to correct — see the exit check below); the second ends
     // the run as `terminal_tool_error` instead of burning to max_iterations.
     let terminalErrorCount = 0;
+    // #341 amendment: which iteration (if any) observed an already-fired
+    // abortSignal at its top, before this run() bothered to describe it any
+    // further below.
+    let cancelledAtIteration: number | undefined;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      // Cheap cooperative-abort guard (#341 amendment): `run()` shares
+      // `RunOptions` with `stream()` but has no generator to yield a cancel
+      // event through — abortSignal must still never be silently ignored.
+      // Checked at the TOP of every iteration (never mid-iteration) so a
+      // signal that fires between iterations stops the loop before a
+      // redundant `agent.llm.start`, without interrupting an in-flight
+      // `generateText` call. Falls through to the shared post-loop return
+      // below (finishReason: "cancelled") — never throws.
+      if (options?.abortSignal?.aborted) {
+        cancelledAtIteration = iteration;
+        break;
+      }
+
       // Emit iteration start
       const iterStart = createEvent("agent.iteration.start", {
         traceId: effectiveTraceId,
@@ -734,6 +809,37 @@ export class AgentRunner implements RunnerProtocol {
       );
     }
 
+    // #341 amendment: the loop above broke early on an already-fired
+    // abortSignal — return (never throw), matching D1's posture generalized
+    // to run(). No message.cancel/conversation.end pair here (run() has no
+    // conversationId — that pairing is Conversation.stream's / stream()'s
+    // concern) — a `message.complete` with an honest finishReason is enough
+    // for every existing collector/exporter to finalize the run cleanly.
+    if (cancelledAtIteration !== undefined) {
+      await this.emit(
+        createEvent("agent.message.complete", {
+          traceId: effectiveTraceId,
+          runId,
+          spanId: rootSpanId,
+          parentSpanId: rootSpanId,
+          content: "",
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          model: modelName,
+          finishReason: "cancelled",
+        }),
+      );
+
+      return {
+        response: "",
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
+        toolCallsCount: totalToolCalls,
+        iterations: cancelledAtIteration,
+        finishReason: "cancelled",
+      };
+    }
+
     // Max iterations exceeded — #117: emit a terminal message.complete (the
     // loop above only ever emits it on the !hasToolCalls early return; without
     // this, a bus-finish hook like RunStoreExporter has no terminal event to
@@ -880,6 +986,20 @@ export class AgentRunner implements RunnerProtocol {
     // the error to a once-per-schema warning.
     guardOpenObjectSchemas(schema, options?.allowOpenObjectSchemas);
 
+    // Cheap cooperative-abort guard (#341 amendment): checked before any LLM
+    // call — abortSignal must never be silently ignored on any RunOptions
+    // path. runStructured() has no iteration loop of its own outside the
+    // 2-tier fallback's delegate to run() (guarded below, where tier1 can
+    // itself come back cancelled); this is the "top of iteration" check for
+    // everything before that delegate. Unlike run()/stream(), there is no
+    // schema-valid `object` to fabricate on abort, so this throws rather
+    // than returning (see RunCancelledError's doc comment).
+    if (options?.abortSignal?.aborted) {
+      throw new RunCancelledError(
+        "runStructured: aborted before the run started (abortSignal already fired)",
+      );
+    }
+
     if (options?.eventBus) {
       this._eventBus = options.eventBus;
     }
@@ -985,6 +1105,17 @@ export class AgentRunner implements RunnerProtocol {
       totalOutputTokens += tier1.outputTokens;
       toolCallsCount = tier1.toolCallsCount;
       iterations = tier1.iterations;
+
+      // #341 amendment: tier1 delegates to run(), which honors abortSignal
+      // itself (top-of-iteration guard) and comes back with finishReason
+      // "cancelled" rather than throwing. runStructured() has no schema-valid
+      // object to hand back in that case — surface it as a RunCancelledError
+      // instead of feeding an empty/partial tier1.response into tier 2.
+      if (tier1.finishReason === "cancelled") {
+        throw new RunCancelledError(
+          "runStructured: aborted during its tier-1 tool loop (no structured output available)",
+        );
+      }
 
       let acceptedTerminalResult = false;
       if (tier1.finishReason === "terminal_tool") {
@@ -1157,6 +1288,21 @@ export class AgentRunner implements RunnerProtocol {
     yield msgStart;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
+      // Top-of-iteration abort guard (#341): prevents a second `llm.start`
+      // after an abort landed between iterations (e.g. while tool results
+      // were being appended to `messages` below, or while the previous
+      // iteration's tool loop was draining). Runner owns cancel emission —
+      // locked D1 — so bus/exporters/collector see it on every transport.
+      if (options?.abortSignal?.aborted) {
+        yield* this.emitCancellation({
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: rootSpanId,
+          conversationId,
+        });
+        return;
+      }
+
       // Iteration start
       const iterStart = createEvent("agent.iteration.start", {
         traceId: effectiveTraceId,
@@ -1192,6 +1338,12 @@ export class AgentRunner implements RunnerProtocol {
         system,
         messages,
         tools: hasTools ? tools : undefined,
+        // #341: forwarded cooperatively to the provider call. ai@5 either
+        // emits a `type: "abort"` fullStream part (handled below) or, for
+        // providers that don't support that, rejects the in-flight call with
+        // an `AbortError` (caught around the drain loop below) — both routes
+        // land in the same cancel-and-return block.
+        abortSignal: options?.abortSignal,
       });
 
       let iterText = "";
@@ -1205,6 +1357,7 @@ export class AgentRunner implements RunnerProtocol {
       let stepUsage: { inputTokens?: number; outputTokens?: number } | undefined;
       let stepFinishReason = "stop";
       let hadError = false;
+      let aborted = false;
 
       // Reasoning-block tracking. Some models (Claude extended thinking,
       // o-series, Gemini 2.5 thinking, DeepSeek Reasoner) emit one or more
@@ -1216,118 +1369,146 @@ export class AgentRunner implements RunnerProtocol {
       let reasoningActive = false;
       let reasoningText = "";
 
-      for await (const part of streamResult.fullStream) {
-        switch (part.type) {
-          case "text-delta": {
-            // Transition reasoning -> text: close the reasoning block first.
-            if (reasoningActive) {
-              const reasoningCompleteEvent = createEvent("agent.reasoning", {
+      // #341 belt-and-braces: some providers reject the in-flight call with
+      // an `AbortError` instead of emitting a fullStream `type: "abort"`
+      // part (handled in the switch's `case "abort"` below). Either route
+      // sets `aborted` and falls through to the same cancel-and-return block
+      // after the loop — never the error path.
+      try {
+        for await (const part of streamResult.fullStream) {
+          switch (part.type) {
+            case "text-delta": {
+              // Transition reasoning -> text: close the reasoning block first.
+              if (reasoningActive) {
+                const reasoningCompleteEvent = createEvent("agent.reasoning", {
+                  traceId: effectiveTraceId,
+                  runId,
+                  content: reasoningText,
+                  isComplete: true,
+                });
+                await this.emit(reasoningCompleteEvent);
+                yield reasoningCompleteEvent;
+                reasoningActive = false;
+                reasoningText = "";
+              }
+              iterText += part.text;
+              const chunkEvent = createEvent("agent.message.chunk", {
                 traceId: effectiveTraceId,
                 runId,
-                content: reasoningText,
-                isComplete: true,
+                delta: part.text,
+                chunkIndex: chunkIndex++,
               });
-              await this.emit(reasoningCompleteEvent);
-              yield reasoningCompleteEvent;
-              reasoningActive = false;
-              reasoningText = "";
+              await this.emit(chunkEvent);
+              yield chunkEvent;
+              break;
             }
-            iterText += part.text;
-            const chunkEvent = createEvent("agent.message.chunk", {
-              traceId: effectiveTraceId,
-              runId,
-              delta: part.text,
-              chunkIndex: chunkIndex++,
-            });
-            await this.emit(chunkEvent);
-            yield chunkEvent;
-            break;
-          }
-          case "reasoning-delta": {
-            if (!reasoningActive) {
-              reasoningActive = true;
-              reasoningText = "";
-              const startEvent = createEvent("agent.thinking.start", {
+            case "reasoning-delta": {
+              if (!reasoningActive) {
+                reasoningActive = true;
+                reasoningText = "";
+                const startEvent = createEvent("agent.thinking.start", {
+                  traceId: effectiveTraceId,
+                  runId,
+                  parentSpanId: llmSpanId,
+                });
+                await this.emit(startEvent);
+                yield startEvent;
+              }
+              reasoningText += part.text;
+              const deltaEvent = createEvent("agent.reasoning", {
                 traceId: effectiveTraceId,
                 runId,
-                parentSpanId: llmSpanId,
+                content: part.text,
+                isComplete: false,
               });
-              await this.emit(startEvent);
-              yield startEvent;
+              await this.emit(deltaEvent);
+              yield deltaEvent;
+              break;
             }
-            reasoningText += part.text;
-            const deltaEvent = createEvent("agent.reasoning", {
-              traceId: effectiveTraceId,
-              runId,
-              content: part.text,
-              isComplete: false,
-            });
-            await this.emit(deltaEvent);
-            yield deltaEvent;
-            break;
-          }
-          case "tool-call": {
-            // Transition reasoning -> tool-call: close the reasoning block.
-            if (reasoningActive) {
-              const reasoningCompleteEvent = createEvent("agent.reasoning", {
+            case "tool-call": {
+              // Transition reasoning -> tool-call: close the reasoning block.
+              if (reasoningActive) {
+                const reasoningCompleteEvent = createEvent("agent.reasoning", {
+                  traceId: effectiveTraceId,
+                  runId,
+                  content: reasoningText,
+                  isComplete: true,
+                });
+                await this.emit(reasoningCompleteEvent);
+                yield reasoningCompleteEvent;
+                reasoningActive = false;
+                reasoningText = "";
+              }
+              pendingToolCalls.push({
+                toolCallId: part.toolCallId,
+                toolName: part.toolName,
+                args: part.input as Record<string, unknown>,
+              });
+              break;
+            }
+            case "finish-step": {
+              stepUsage = part.usage;
+              stepFinishReason = part.finishReason;
+              break;
+            }
+            case "abort": {
+              // #341: ai@5's fullStream abort signal — the provider call
+              // observed `options.abortSignal` firing. Set the local flag and
+              // break out of the switch; the fullStream drain itself ends
+              // shortly after (the SDK closes the stream on abort), then the
+              // post-loop `aborted` check below routes into the shared
+              // cancel-and-return block.
+              aborted = true;
+              break;
+            }
+            case "error": {
+              hadError = true;
+              const llmDuration = Date.now() - llmStartTime;
+              const llmEndErr = createEvent("agent.llm.end", {
                 traceId: effectiveTraceId,
                 runId,
-                content: reasoningText,
-                isComplete: true,
+                spanId: llmSpanId,
+                parentSpanId: iterSpanId,
+                model: modelName,
+                inputTokens: 0,
+                outputTokens: 0,
+                durationMs: llmDuration,
+                hasToolCalls: false,
+                finishReason: "error",
               });
-              await this.emit(reasoningCompleteEvent);
-              yield reasoningCompleteEvent;
-              reasoningActive = false;
-              reasoningText = "";
-            }
-            pendingToolCalls.push({
-              toolCallId: part.toolCallId,
-              toolName: part.toolName,
-              args: part.input as Record<string, unknown>,
-            });
-            break;
-          }
-          case "finish-step": {
-            stepUsage = part.usage;
-            stepFinishReason = part.finishReason;
-            break;
-          }
-          case "error": {
-            hadError = true;
-            const llmDuration = Date.now() - llmStartTime;
-            const llmEndErr = createEvent("agent.llm.end", {
-              traceId: effectiveTraceId,
-              runId,
-              spanId: llmSpanId,
-              parentSpanId: iterSpanId,
-              model: modelName,
-              inputTokens: 0,
-              outputTokens: 0,
-              durationMs: llmDuration,
-              hasToolCalls: false,
-              finishReason: "error",
-            });
-            await this.emit(llmEndErr);
-            yield llmEndErr;
+              await this.emit(llmEndErr);
+              yield llmEndErr;
 
-            const err = part.error instanceof Error ? part.error : new Error(String(part.error));
-            const errEvent = createEvent("agent.error", {
-              traceId: effectiveTraceId,
-              runId,
-              parentSpanId: iterSpanId,
-              errorType: err.name,
-              message: err.message,
-              recoverable: false,
-              context: {},
-            });
-            await this.emit(errEvent);
-            yield errEvent;
-            break;
+              const err = part.error instanceof Error ? part.error : new Error(String(part.error));
+              const errEvent = createEvent("agent.error", {
+                traceId: effectiveTraceId,
+                runId,
+                parentSpanId: iterSpanId,
+                errorType: err.name,
+                message: err.message,
+                recoverable: false,
+                context: {},
+              });
+              await this.emit(errEvent);
+              yield errEvent;
+              break;
+            }
+            default:
+              // start, start-step, text-start/end, reasoning-start/end,
+              // tool-input-start/delta/end, finish, source, file, raw, etc. — skip
+              break;
           }
-          default:
-            // start, start-step, text-start/end, reasoning-start/end,
-            // tool-input-start/delta/end, finish, source, file, raw, etc. — skip
-            break;
+        }
+      } catch (e: unknown) {
+        // Belt-and-braces (#341): a provider that throws `AbortError` instead
+        // of emitting the `abort` fullStream part routes here — anything else
+        // is a genuine failure and must keep going through the normal error
+        // path (rethrown, unhandled by design; nothing upstream of stream()
+        // wraps this in a way that would silently swallow it).
+        if (e instanceof Error && e.name === "AbortError") {
+          aborted = true;
+        } else {
+          throw e;
         }
       }
 
@@ -1354,6 +1535,20 @@ export class AgentRunner implements RunnerProtocol {
         });
         await this.emit(convEnd);
         yield convEnd;
+        return;
+      }
+
+      // #341: the fullStream drain observed an abort (either the `abort`
+      // part or an `AbortError` caught above) — runner owns cancel emission
+      // (locked D1), skipping this iteration's `iteration.end`/
+      // `message.complete` (accepted per the human gate's Q2 answer).
+      if (aborted) {
+        yield* this.emitCancellation({
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: rootSpanId,
+          conversationId,
+        });
         return;
       }
 
@@ -1430,6 +1625,21 @@ export class AgentRunner implements RunnerProtocol {
       let terminalErrorName: string | undefined;
       let terminalErrorMsg: string | undefined;
       for (const tc of pendingToolCalls) {
+        // Pre-tool-dispatch abort guard (#341): checked at the top of every
+        // per-call iteration, before even signaling intent for it — never
+        // dispatch (or claim intent to dispatch) a tool for an
+        // already-cancelled turn. Any calls already dispatched earlier in
+        // this batch have already run; this only stops the NEXT one.
+        if (options?.abortSignal?.aborted) {
+          yield* this.emitCancellation({
+            traceId: effectiveTraceId,
+            runId,
+            parentSpanId: rootSpanId,
+            conversationId,
+          });
+          return;
+        }
+
         const intent = createEvent("agent.tool.intent", {
           traceId: effectiveTraceId,
           runId,

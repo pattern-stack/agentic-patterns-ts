@@ -24,7 +24,12 @@ import type {
   RunStore,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
-import { Conversation, buildScopeHost, deriveToolboxExecutor } from "@agentic-patterns/runtime";
+import {
+  Conversation,
+  buildScopeHost,
+  createEvent,
+  deriveToolboxExecutor,
+} from "@agentic-patterns/runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
@@ -47,6 +52,13 @@ export interface ConversationEntry {
   context?: Record<string, unknown>;
   /** Top-level `context` keys that were redacted (Decision 3), when any were. */
   contextRedacted?: readonly string[];
+  /**
+   * Set while a `POST …/messages` turn is streaming; cleared in its
+   * `finally` (#341). One turn at a time per conversation — the 409
+   * concurrency guard below keeps this singular/unambiguous, which is what
+   * lets `POST …/cancel` address "the" active turn without a run id.
+   */
+  activeTurn?: { controller: AbortController; runId?: string; startedAt: number };
 }
 
 export function conversationRoutes(
@@ -356,11 +368,26 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
+    // 409 concurrency guard (#341): one turn at a time per conversation —
+    // `entry.activeTurn` is set for the duration of the streamSSE callback
+    // below and cleared in its `finally`. This also keeps `activeTurn`
+    // singular/unambiguous for `POST …/cancel`, which addresses "the" active
+    // turn without needing a run id.
+    if (entry.activeTurn) {
+      return c.json({ error: "a turn is already streaming for this conversation" }, 409);
+    }
+
     // SSE streaming response. We pass the server's shared eventBus so
     // emitted events reach every attached exporter (collector, SSE
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
     return streamSSE(c, async (stream) => {
+      // #341: one AbortController per turn, shared by the explicit cancel
+      // route and the disconnect-hardening `onAbort` wiring below — both
+      // routes converge on the same teardown.
+      const controller = new AbortController();
+      entry.activeTurn = { controller, startedAt: Date.now() };
+
       // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
       // `bus.publish`, so the runner generator (which this loop drains) is
       // parked and can't yield the prompt itself. The gate instead PUBLISHES
@@ -376,6 +403,13 @@ export function conversationRoutes(
       // frame so the client can link straight to this turn's persisted trace
       // (`/run?run=<id>`) without waiting for the session store to round-trip.
       let turnRunId: string | undefined;
+      // The runId off the FIRST event this turn observes at all (conversation
+      // wrapper's own runId, since `conversation.start` always arrives first —
+      // :393 below). Used only to give a synthesized `agent.error` bus publish
+      // a runId to key on when the turn never reaches `agent.message.start`
+      // (pre-token failure ⇒ `turnRunId` stays undefined). Exporters must
+      // tolerate this runId having no run row.
+      let turnBusRunId: string | undefined;
       const pendingForTurn = new Set<string>();
       const onInputRequest = async (ev: BaseEvent): Promise<void> => {
         const e = ev as AgentEvent;
@@ -388,11 +422,46 @@ export function conversationRoutes(
       };
       eventBus.subscribe("agent.input.request", onInputRequest);
 
+      // #341: one teardown function, two triggers — client disconnect
+      // (`stream.onAbort`) and an explicit `POST …/cancel` (the controller's
+      // own "abort" event, fired by that route calling `.abort()`). Denying
+      // pending inputs HERE (not just in `finally`, below) is what actually
+      // fixes the disconnect hang: a gate-blocked run is parked inside
+      // `bus.publish`, so the drain loop this `try` block runs never settles
+      // on its own — nothing else would ever reach the `finally` sweep.
+      // `AbortController.abort()` is a no-op once already aborted, so
+      // whichever trigger fires first "wins"; the other becomes a harmless
+      // second call. `inputRegistry.resolve` is likewise idempotent — a
+      // correlationId already resolved here is simply a no-op in the
+      // `finally` sweep below.
+      const onCancel = (): void => {
+        controller.abort();
+        if (inputRegistry) {
+          for (const correlationId of pendingForTurn) {
+            inputRegistry.resolve(correlationId, { decision: "deny" });
+          }
+        }
+      };
+      stream.onAbort(onCancel);
+      controller.signal.addEventListener("abort", onCancel, { once: true });
+
       try {
-        for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
+        for await (const event of conversation.stream(content, {
+          eventBus,
+          maxIterations,
+          signal: controller.signal,
+        })) {
           turnTraceId ??= event.traceId;
+          turnBusRunId ??= event.runId;
           if (turnRunId === undefined && event.type === "agent.message.start") {
             turnRunId = event.runId;
+            // Mirror the runId onto activeTurn (#341) so `POST …/cancel` can
+            // echo `run_id` back to the caller once it's known — best-effort,
+            // omitted from the 202 response before the first
+            // `agent.message.start` arrives.
+            if (entry.activeTurn) {
+              entry.activeTurn.runId = turnRunId;
+            }
           }
           const msg = agentEventToSSE(event);
           if (msg) {
@@ -404,6 +473,58 @@ export function conversationRoutes(
           event: "done",
           data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
         });
+      } catch (err) {
+        // N5: the drain loop above can throw before yielding a single event
+        // (model-resolution reject, provider construction failure — any
+        // pre-yield setup throw in the runner) or mid-stream. Either way the
+        // stream must be honestly torn on the wire, never silently swallowed
+        // by hono: write the canonical `error` frame (byte-compatible with
+        // `toSSEMapping`'s `agent.error` payload, `sse-formatter.ts:301-309`)
+        // then the `done` terminator, in that order, then swallow. We do NOT
+        // use `streamSSE`'s `onError` callback — it writes its own
+        // `event: error` frame whose data is the raw message STRING, not
+        // JSON, which the dashboard's `parseFrame` drops and the Go parser
+        // can't decode. Owning the frame shape here keeps both happy.
+        const message = err instanceof Error ? err.message : String(err);
+        const errorType = err instanceof Error ? err.name : "Error";
+
+        try {
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({ error_type: errorType, message, recoverable: false }),
+          });
+          await stream.writeSSE({
+            event: "done",
+            data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
+          });
+        } catch {
+          // Client gone — nothing left to tell. Belt-and-braces only: under
+          // hono 4.12.31 `StreamingApi.write` already swallows write errors
+          // (`catch {}` in `dist/utils/stream.js`), so this rarely fires.
+        }
+
+        // Bus visibility (non-load-bearing for the wire fix): a pre-token
+        // throw never reaches the event bus otherwise — no exporter records
+        // anything — so synthesize an `agent.error` for the admin
+        // firehose/collector/exporters. Guarded on turnTraceId: it is set
+        // from the first forwarded event, and `conversation.start` always
+        // arrives first, so this only fails to fire if the wrapper itself
+        // never yielded anything at all.
+        if (turnTraceId !== undefined && turnBusRunId !== undefined) {
+          const errorEvent = createEvent("agent.error", {
+            traceId: turnTraceId,
+            runId: turnBusRunId,
+            errorType,
+            message,
+            recoverable: false,
+            context: {},
+          });
+          try {
+            await eventBus.publish(errorEvent);
+          } catch (publishErr) {
+            console.error("conversations: agent.error bus publish failed:", publishErr);
+          }
+        }
       } finally {
         // Run-metadata stamp (#268) — the redacted effective context this
         // conversation is bound to, written onto the turn's run row. Lives in
@@ -411,8 +532,13 @@ export function conversationRoutes(
         // errors mid-run, `Conversation.stream` yields `conversation.end`
         // then RE-THROWS, so the `for await` above throws too and a
         // try-scoped stamp would never run — exactly the runs an operator
-        // most needs to inspect. Same for a client disconnect
-        // (`stream.writeSSE` rejects mid-loop). `updateRunMetadata` is a
+        // most needs to inspect. A client disconnect is NOT the same kind of
+        // teardown: under hono 4.12.31, `StreamingApi.write` silently
+        // swallows write errors on a closed connection, so the drain loop
+        // above keeps pulling runner events to completion regardless — it
+        // does not throw, and nothing here stops the runner from finishing
+        // its work server-side. #341's `onAbort` wiring is what will
+        // actually short-circuit the runner on disconnect. `updateRunMetadata` is a
         // local DB write independent of the broken stream/generator and
         // status-independent (it stamps a still-`running` row the same as a
         // finalized one, see its doc comment) — it lands on whatever the row
@@ -434,14 +560,46 @@ export function conversationRoutes(
         eventBus.unsubscribe("agent.input.request", onInputRequest);
         // Fail closed: if the client disconnects mid-approval, deny any of THIS
         // turn's still-pending requests so the blocked gate resolves (deny)
-        // instead of hanging the run forever.
+        // instead of hanging the run forever. (Belt-and-braces alongside
+        // `onCancel` above, #341 — idempotent either way.)
         if (inputRegistry) {
           for (const correlationId of pendingForTurn) {
             inputRegistry.resolve(correlationId, { decision: "deny" });
           }
         }
+        // #341: natural-completion belt — a turn that finished on its own
+        // (never cancelled) still needs `activeTurn` cleared so the NEXT
+        // `POST …/messages` isn't 409'd forever and `POST …/cancel` 404s the
+        // way an idle conversation should. Guarded so a stale/already-swapped
+        // reference (e.g. a fresh turn's own set, in a hypothetical future
+        // where two `finally` blocks could interleave) never clobbers it.
+        if (entry.activeTurn?.controller === controller) {
+          entry.activeTurn = undefined;
+        }
       }
     });
+  });
+
+  // POST /conversations/:id/cancel — abort the in-flight turn, if any (#341).
+  // 404 unknown conversation · 409 no active turn · 202 accepted (cancellation
+  // is cooperative/async — the open SSE stream winds down with
+  // `message.cancel … conversation.end{cancelled} … done`, never a server
+  // error). Idempotent while winding down: `AbortController.abort()` is a
+  // no-op once already aborted, so a repeat POST during teardown still gets
+  // a 202; once the messages route's `finally` clears `activeTurn`, a repeat
+  // POST correctly 409s (no active turn left to cancel). No auth — parity
+  // with every other route on this server.
+  app.post("/conversations/:id/cancel", (c) => {
+    const entry = conversations.get(c.req.param("id"));
+    if (!entry) {
+      return c.json({ error: "Conversation not found" }, 404);
+    }
+    const turn = entry.activeTurn;
+    if (!turn) {
+      return c.json({ error: "no active turn" }, 409);
+    }
+    turn.controller.abort();
+    return c.json({ ok: true, ...(turn.runId ? { run_id: turn.runId } : {}) }, 202);
   });
 
   // POST /conversations/:id/input — the return leg of a human-in-the-loop

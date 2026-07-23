@@ -8,11 +8,18 @@ import { Avatar, Dots, RelativeTime } from "./atoms";
 import { type ChatMessage, coalesceStateParts } from "./model";
 import { PartView } from "./parts";
 
+/** Format a USD cost: sub-cent values keep 4 decimals, else 2 (#324). */
+function formatCost(usd: number): string {
+  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+}
+
 function MessageFooter({ message }: { message: ChatMessage }) {
   const bits: string[] = [];
   if (message.model) bits.push(message.model);
   if (message.inputTokens != null) bits.push(`${message.inputTokens.toLocaleString()} in`);
   if (message.outputTokens != null) bits.push(`${message.outputTokens.toLocaleString()} out`);
+  // #324: run cost when the harness reported it (CC runs).
+  if (message.costUsd != null) bits.push(formatCost(message.costUsd));
   if (!bits.length) return null;
   return <div className="chat-footer">{bits.join(" · ")}</div>;
 }

@@ -4,6 +4,7 @@ export { MessagingToolbox } from "./messaging-toolbox.js";
 export {
   SSEFormatter,
   SSE_EVENT_NAMES,
+  SSE_WIRE_EVENT_NAMES,
   formatSSE,
   toSSEMapping,
 } from "./sse-formatter.js";

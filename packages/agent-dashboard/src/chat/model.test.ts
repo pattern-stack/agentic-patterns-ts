@@ -686,3 +686,81 @@ describe("eventsToAssistantMessage", () => {
     expect((msg.parts[0] as Extract<Part, { kind: "text" }>).content).toBe("AB");
   });
 });
+
+describe("applyParts — #324 kinds (gate.decision / harness.native / cost)", () => {
+  test("folds gate.decision into a gate_decision part with trail + provenance", () => {
+    const parts = fold([
+      {
+        type: "gate.decision",
+        tool_name: "deleteFile",
+        outcome: "block",
+        settled_by: "gate",
+        blocked_by: "safety",
+        reason: "destructive path",
+        trail: [
+          { gate: "safety", result: "block" },
+          { gate: "rate-limit", result: "allow" },
+        ],
+      },
+    ]);
+    expect(parts).toEqual([
+      {
+        kind: "gate_decision",
+        toolName: "deleteFile",
+        outcome: "block",
+        settledBy: "gate",
+        blockedBy: "safety",
+        reason: "destructive path",
+        trail: [
+          { gate: "safety", result: "block" },
+          { gate: "rate-limit", result: "allow" },
+        ],
+      },
+    ]);
+  });
+
+  test("folds harness.native into a collapsed envelope part", () => {
+    const parts = fold([
+      {
+        type: "harness.native",
+        harness: "claude-code",
+        name: "compact_boundary",
+        payload: { pre_tokens: 1200, trigger: "auto" },
+      },
+    ]);
+    expect(parts).toEqual([
+      {
+        kind: "harness_native",
+        harness: "claude-code",
+        name: "compact_boundary",
+        payload: { pre_tokens: 1200, trigger: "auto" },
+      },
+    ]);
+  });
+
+  test("message.complete carries costUsd from the wire (cost_usd) into message meta", () => {
+    const msg = eventsToAssistantMessage("a", [
+      {
+        type: "message.complete",
+        model: "opus",
+        input_tokens: 9,
+        output_tokens: 2,
+        cost_usd: 0.0123,
+        seq: 1,
+      },
+    ]);
+    expect(msg.costUsd).toBe(0.0123);
+  });
+
+  test("message.complete reads persisted camelCase costUsd too", () => {
+    const msg = eventsToAssistantMessage("a", [
+      {
+        type: "message.complete",
+        seq: 1,
+        run_id: "r1",
+        payload_json: '{"model":"opus","inputTokens":9,"outputTokens":2,"costUsd":0.5}',
+      },
+    ]);
+    expect(msg.costUsd).toBe(0.5);
+  });
+});

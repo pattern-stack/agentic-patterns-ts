@@ -210,7 +210,7 @@ export class Conversation {
    */
   async *stream(
     message: string,
-    options?: { eventBus?: AgentEventBus; maxIterations?: number },
+    options?: { eventBus?: AgentEventBus; maxIterations?: number; signal?: AbortSignal },
   ): AsyncGenerator<AgentEvent> {
     if (!this.runner.stream) {
       throw new Error("Runner does not support streaming");
@@ -264,6 +264,11 @@ export class Conversation {
         // here joins both event families onto one trace.
         traceId,
         ...(options?.maxIterations != null ? { maxIterations: options.maxIterations } : {}),
+        // #341: forward the caller's AbortSignal into the runner's own
+        // `abortSignal` slot. Omitted entirely (not `undefined`) when absent
+        // so a runner that special-cases "key present" behaves the same as
+        // before this option existed.
+        ...(options?.signal ? { abortSignal: options.signal } : {}),
       })) {
         yield event;
         capturedRunId ??= event.runId;
@@ -287,30 +292,44 @@ export class Conversation {
       error = e instanceof Error ? e : new Error(String(e));
     }
 
-    const exchange: Exchange = {
-      number: this._exchangeCount,
-      invocationId,
-      user: message,
-      assistant: fullResponse,
-      toolCalls: [],
-      inputTokens: totalInput,
-      outputTokens: totalOutput,
-      timestamp: new Date(),
-      runId: capturedRunId,
-    };
+    // D5: a turn that errored with zero output text produced nothing worth
+    // replaying — recording it would feed a phantom empty assistant turn
+    // back into every subsequent `_toMessageHistory()` call. Skip the
+    // Exchange build/push/persist entirely and revert the `_exchangeCount`
+    // bump from above so numbering stays dense. Partial-text errored turns
+    // (fullResponse !== "") keep recording — the user saw those tokens.
+    if (error !== undefined && fullResponse === "") {
+      this._exchangeCount -= 1;
+    } else {
+      const exchange: Exchange = {
+        number: this._exchangeCount,
+        invocationId,
+        user: message,
+        assistant: fullResponse,
+        toolCalls: [],
+        inputTokens: totalInput,
+        outputTokens: totalOutput,
+        timestamp: new Date(),
+        runId: capturedRunId,
+      };
 
-    this._history.push(exchange);
+      this._history.push(exchange);
 
-    if (this._store) {
-      await this._persistExchange(exchange, stateDeltas);
+      if (this._store) {
+        await this._persistExchange(exchange, stateDeltas);
+      }
     }
 
-    // Emit conversation end
+    // Emit conversation end. #341: an aborted signal takes priority over
+    // "completed" — a cancelled turn is the HAPPY path (the runner returns,
+    // never throws, so `error` stays undefined here), matching React's
+    // posture that cancelled != error. `error` still wins if a genuine
+    // failure happened to race the abort.
     const convEndEvent = createEvent("agent.conversation.end", {
       traceId,
       runId,
       conversationId: this.id,
-      reason: error ? "error" : "completed",
+      reason: error ? "error" : options?.signal?.aborted ? "cancelled" : "completed",
     });
     yield convEndEvent;
     await eventBus.publish(convEndEvent);

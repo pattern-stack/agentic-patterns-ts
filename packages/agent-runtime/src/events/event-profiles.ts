@@ -80,6 +80,10 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     "agent.tool.start",
     "agent.tool.end",
     "agent.tool.progress",
+    // Gate-decision audit signal (F-2, #324) — a post-decision record for every
+    // intent (allow or block). Belongs in observability so the otel/langfuse
+    // exporters surface it as a span/generation; see exporter `_onGateDecision`.
+    "agent.gate.decision",
     "agent.error",
   ],
   [EventProfile.DEBUG]: [
@@ -101,6 +105,11 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     "agent.tool.start",
     "agent.tool.end",
     "agent.tool.progress",
+    "agent.gate.decision",
+    // Harness-native passthrough envelope (#323/#324) — compaction boundaries,
+    // subagent/task progress, rate-limit notices. Debug-only: high-volume,
+    // harness-specific detail most consumers never need.
+    "harness.native",
     "agent.error",
   ],
   [EventProfile.TOOLS]: [

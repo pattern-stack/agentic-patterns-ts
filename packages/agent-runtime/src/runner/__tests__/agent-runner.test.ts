@@ -12,7 +12,7 @@ import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent } from "../../events/types.js";
 import { buildScopeHost, readScope } from "../../workflows/scope-host.js";
-import { AgentRunner, ToolCallBlocked } from "../agent-runner.js";
+import { AgentRunner, RunCancelledError, ToolCallBlocked } from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 import type { ToolExecutor } from "../types.js";
 
@@ -1305,6 +1305,152 @@ describe("AgentRunner", () => {
       expect(result.finishReason).toBe("terminal_tool");
       expect(result.response).toBe("done");
       expect(result.iterations).toBe(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // #341 amendment — the human gate's Q1 override: run() and runStructured()
+  // ALSO honor RunOptions.abortSignal (cheap top-of-iteration checks), not
+  // just stream(). abortSignal must never be silently ignored on any
+  // RunOptions path.
+  // ---------------------------------------------------------------------------
+  describe("abortSignal (#341 amendment)", () => {
+    describe("run()", () => {
+      it("pre-aborted signal: returns (never throws) with finishReason 'cancelled' — no LLM call at all", async () => {
+        const controller = new AbortController();
+        controller.abort();
+
+        const model = new MockLanguageModelV2({
+          doGenerate: async () => {
+            throw new Error("doGenerate must never be called for a pre-aborted signal");
+          },
+        });
+
+        const runner = new AgentRunner(model);
+        const agent = makeAgent();
+
+        const result = await runner.run(agent, "Hi", { abortSignal: controller.signal });
+
+        expect(result.finishReason).toBe("cancelled");
+        expect(result.response).toBe("");
+        expect(result.iterations).toBe(0);
+      });
+
+      it("aborts between iterations: the tool executor fires controller.abort() during iteration 0's execute — no second LLM call", async () => {
+        const controller = new AbortController();
+        let llmCalls = 0;
+
+        const model = new MockLanguageModelV2({
+          doGenerate: async () => {
+            llmCalls++;
+            return toolCallResult({ toolCallId: "tc-1", toolName: "loopy", input: {} }, 5, 3);
+          },
+        });
+
+        const loopSchema = z.object({});
+        const tools = [ToolSchema.fromZod("loopy", "Loop tool", loopSchema)];
+        const agent = makeAgent({ getTools: () => tools });
+
+        const executor = makeToolExecutor(async () => {
+          controller.abort();
+          return "ok";
+        });
+
+        const runner = new AgentRunner(model);
+        const result = await runner.run(agent, "loop", {
+          abortSignal: controller.signal,
+          toolExecutor: executor,
+          maxIterations: 10,
+        });
+
+        expect(llmCalls).toBe(1);
+        expect(result.finishReason).toBe("cancelled");
+        expect(result.iterations).toBe(1);
+      });
+
+      it("emits a message.complete with finishReason 'cancelled' — collectors/exporters still see a terminal event", async () => {
+        const controller = new AbortController();
+        controller.abort();
+
+        const model = new MockLanguageModelV2({
+          doGenerate: async () => {
+            throw new Error("doGenerate must never be called for a pre-aborted signal");
+          },
+        });
+
+        const bus = new AgentEventBus();
+        const events = collectEvents(bus);
+        const runner = new AgentRunner(model, bus);
+        const agent = makeAgent();
+
+        await runner.run(agent, "Hi", { abortSignal: controller.signal });
+
+        const complete = events.find((e) => e.type === "agent.message.complete");
+        expect(complete).toBeDefined();
+        expect((complete as { finishReason?: string }).finishReason).toBe("cancelled");
+        // No "cancelled" conversation-level event — run() has no
+        // conversationId (that pairing is stream()'s / Conversation.stream's
+        // concern); message.complete alone is the honest terminal signal here.
+        expect(events.map((e) => e.type)).not.toContain("agent.conversation.end");
+      });
+    });
+
+    describe("runStructured()", () => {
+      it("pre-aborted signal: throws RunCancelledError before any LLM call (no schema-valid object to return)", async () => {
+        const controller = new AbortController();
+        controller.abort();
+
+        const model = new MockLanguageModelV2({
+          doGenerate: async () => {
+            throw new Error("doGenerate must never be called for a pre-aborted signal");
+          },
+        });
+
+        const runner = new AgentRunner(model);
+        const agent = makeAgent();
+        const schema = z.object({ answer: z.string() });
+
+        await expect(
+          runner.runStructured(agent, "Hi", schema, { abortSignal: controller.signal }),
+        ).rejects.toThrow(RunCancelledError);
+      });
+
+      it("tier-1 delegate (tools + incapable model) cancelled mid-loop: throws RunCancelledError rather than feeding an empty tier-1 response into tier 2", async () => {
+        const controller = new AbortController();
+        let llmCalls = 0;
+
+        const model = new MockLanguageModelV2({
+          doGenerate: async () => {
+            llmCalls++;
+            return toolCallResult({ toolCallId: "tc-1", toolName: "loopy", input: {} }, 5, 3);
+          },
+        });
+
+        const loopSchema = z.object({});
+        const tools = [ToolSchema.fromZod("loopy", "Loop tool", loopSchema)];
+        // "test-model" (makeAgent's default) is not in the capable-model
+        // table (modelSupportsToolsWithStructuredOutput) — this always takes
+        // the tools+incapable 2-tier fallback, whose tier 1 IS a run() call.
+        const agent = makeAgent({ getTools: () => tools });
+
+        const executor = makeToolExecutor(async () => {
+          controller.abort();
+          return "ok";
+        });
+
+        const runner = new AgentRunner(model);
+        const schema = z.object({ answer: z.string() });
+
+        await expect(
+          runner.runStructured(agent, "loop", schema, {
+            abortSignal: controller.signal,
+            toolExecutor: executor,
+          }),
+        ).rejects.toThrow(RunCancelledError);
+
+        // Only tier 1's single LLM call happened — tier 2 was never reached.
+        expect(llmCalls).toBe(1);
+      });
     });
   });
 });
