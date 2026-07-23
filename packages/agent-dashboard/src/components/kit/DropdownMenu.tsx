@@ -16,9 +16,23 @@
  * prop) so a menu can dismiss itself on selection instead of hand-rolling its
  * own open/backdrop/panel (see `CopyChatMenu` in ChatPage.tsx, folded back
  * into this primitive now that `close` exists).
+ *
+ * PORTALED overlay (nested-menus fix): the backdrop + panel render into
+ * `document.body` via `createPortal`, positioned `fixed` from the trigger's
+ * rect. Rendering the panel inline (`position:absolute` inside the wrapper)
+ * broke the FIRST nested consumer — ScopeEnumPicker inside the Scope panel's
+ * own DropdownMenu — two ways at once: the parent panel's `overflowY:auto`
+ * CLIPPED the child menu, and the child's full-screen backdrop mounted inside
+ * the parent's stacking context, painting over the parent's own controls
+ * (its Close button became unreachable and the page read as dead). Portaled,
+ * each overlay lives in the root stacking context; a nested menu mounts
+ * later in the body, so its backdrop stacks above and dismissal order is
+ * inner-then-outer by construction. Position re-derives on window scroll
+ * (capture — inner scrollables too) and resize while open.
  */
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { T } from "../../ui/tokens";
 
 /** "auto" (default) opens downward and flips up when the panel would cross
@@ -49,10 +63,32 @@ export function DropdownMenu({
 }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
   const [flip, setFlip] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const toggle = () => setOpen((v) => !v);
   const close = () => setOpen(false);
+
+  // Anchor the fixed overlay to the trigger's viewport rect, and keep it
+  // anchored while open: scroll uses capture so a scrollable ancestor (e.g. a
+  // parent panel's overflowY) re-anchors the child menu too.
+  useLayoutEffect(() => {
+    if (!open) {
+      setAnchor(null);
+      return;
+    }
+    const measure = () => {
+      const wrapperEl = wrapperRef.current;
+      if (wrapperEl) setAnchor(wrapperEl.getBoundingClientRect());
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [open]);
 
   // LD3 — decide up-vs-down before paint (useLayoutEffect, not useEffect) so
   // there's no visible jump: the panel always renders on first frame in its
@@ -61,7 +97,7 @@ export function DropdownMenu({
   // bottom edge (and there's more room above than below); "top"/"bottom"
   // pin the placement outright.
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || !anchor) return;
     if (placement === "top") {
       setFlip(true);
       return;
@@ -70,54 +106,59 @@ export function DropdownMenu({
       setFlip(false);
       return;
     }
-    const wrapperEl = wrapperRef.current;
     const panelEl = panelRef.current;
-    if (!wrapperEl || !panelEl) return;
-    const wrapperRect = wrapperEl.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - wrapperRect.bottom;
-    const spaceAbove = wrapperRect.top;
+    if (!panelEl) return;
+    const spaceBelow = window.innerHeight - anchor.bottom;
+    const spaceAbove = anchor.top;
     setFlip(spaceBelow < panelEl.offsetHeight + 6 && spaceAbove > spaceBelow);
-  }, [open, placement]);
+  }, [open, placement, anchor]);
 
   return (
     <div ref={wrapperRef} style={{ position: "relative", display: "inline-block" }}>
       {trigger({ open, toggle, close })}
-      {open && (
-        <>
-          {/* full-screen transparent backdrop — click anywhere outside the panel to dismiss */}
-          <button
-            type="button"
-            aria-label="Close menu"
-            onClick={close}
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "transparent",
-              border: "none",
-              cursor: "default",
-              zIndex: 25,
-            }}
-          />
-          <div
-            ref={panelRef}
-            style={{
-              position: "absolute",
-              [align]: 0,
-              ...(flip ? { bottom: "calc(100% + 6px)" } : { top: "calc(100% + 6px)" }),
-              width,
-              maxHeight,
-              overflowY: "auto",
-              zIndex: 30,
-              background: "var(--paper)",
-              border: "1px solid var(--line)",
-              borderRadius: T.radius.md,
-              boxShadow: T.shadow.s3,
-            }}
-          >
-            {typeof children === "function" ? children({ close }) : children}
-          </div>
-        </>
-      )}
+      {open &&
+        anchor &&
+        createPortal(
+          <>
+            {/* full-screen transparent backdrop — click anywhere outside the panel to dismiss */}
+            <button
+              type="button"
+              aria-label="Close menu"
+              onClick={close}
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "transparent",
+                border: "none",
+                cursor: "default",
+                zIndex: 25,
+              }}
+            />
+            <div
+              ref={panelRef}
+              style={{
+                position: "fixed",
+                ...(align === "right"
+                  ? { right: Math.max(0, window.innerWidth - anchor.right) }
+                  : { left: Math.max(0, anchor.left) }),
+                ...(flip
+                  ? { bottom: window.innerHeight - anchor.top + 6 }
+                  : { top: anchor.bottom + 6 }),
+                width,
+                maxHeight,
+                overflowY: "auto",
+                zIndex: 30,
+                background: "var(--paper)",
+                border: "1px solid var(--line)",
+                borderRadius: T.radius.md,
+                boxShadow: T.shadow.s3,
+              }}
+            >
+              {typeof children === "function" ? children({ close }) : children}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }

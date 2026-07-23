@@ -353,4 +353,54 @@ describe("ChatPage typed scope form (#308)", () => {
     const editor = getByRole("textbox", { name: "Scope" }) as HTMLTextAreaElement;
     expect(editor.value).toBe(JSON.stringify({ tenant: "acme" }, null, 2));
   });
+
+  // Regression for the portal/nested-menus fix: ScopeEnumPicker is a kit
+  // `DropdownMenu` nested inside the Scope panel's own `DropdownMenu`. Before
+  // the overlay was portaled to `document.body`, the inner picker was clipped
+  // by the panel's `overflowY:auto` and its backdrop mounted inside the panel's
+  // stacking context — shadowing the panel's Close button and locking the page.
+  it("nested enum picker inside the Scope panel stays reachable, dismisses inner-first, and never shadows the panel's Close", async () => {
+    const agent: MockAgent = {
+      id: "a1",
+      name: "Agent One",
+      description: "",
+      instantiation: {
+        available: true,
+        defaults: { workspace: "acme-hq" },
+        schema: WORKSPACE_SCHEMA,
+        presets: null,
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      buildFetchRouter({
+        agents: [agent],
+        createResponse: { id: "c1", agent_id: "a1", context: { workspace: "acme-hq" } },
+      }),
+    );
+
+    const { getByRole, queryByRole } = await mountOnAgent(agent);
+
+    // Open the outer Scope panel, then the inner enum picker nested inside it.
+    fireEvent.click(getByRole("button", { name: "Scope" }));
+    fireEvent.click(getByRole("button", { name: "region" }));
+
+    // (a) The picker's options are in the document and clickable — not clipped
+    //     away inside the parent panel's scroll area.
+    const usOption = getByRole("menuitemradio", { name: "us" });
+    getByRole("menuitemradio", { name: "eu" });
+
+    // (b) Selecting an option closes ONLY the inner picker: its options go
+    //     away and the trigger reflects the pick, while the outer panel's rows
+    //     stay mounted (the panel does not close with the picker).
+    fireEvent.click(usOption);
+    expect(queryByRole("menuitemradio", { name: "us" })).toBeNull();
+    expect(getByRole("button", { name: "region" }).textContent).toContain("us");
+    expect(getByRole("textbox", { name: "workspace" })).toBeTruthy();
+
+    // (c) The panel's own Close button still closes the panel — it was never
+    //     shadowed by the inner menu's backdrop.
+    fireEvent.click(getByRole("button", { name: "Close" }));
+    expect(queryByRole("textbox", { name: "workspace" })).toBeNull();
+  });
 });
