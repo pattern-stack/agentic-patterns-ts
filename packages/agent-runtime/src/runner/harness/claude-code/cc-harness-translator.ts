@@ -81,6 +81,17 @@ const HARNESS_NATIVE_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
   "api_retry",
 ]);
 
+// TODO(#324): map `thinking_tokens` + `tool_progress` into harness.native once
+// the pinned Claude Agent SDK actually surfaces them as observed `system`
+// subtypes. Investigated for #324 and deliberately deferred, NOT a trivial
+// subtype-set addition: (1) neither name appears anywhere in the installed
+// `@anthropic-ai/claude-agent-sdk@0.3.x` type surface, so adding them to the set
+// above would be a dead entry matching an unverified payload shape; (2)
+// `tool_progress` overlaps the first-class `agent.tool.progress` event
+// (`tool.progress` wire name) — surfacing it ALSO as harness.native would
+// double-model the same concept. Revisit when an SDK bump documents these as
+// `system`-typed messages this translator already sees.
+
 export interface CCHarnessTranslatorContext {
   /** Fallback model label (`agent.getModel()`) when a message carries none. */
   readonly fallbackModel: string;
