@@ -287,22 +287,32 @@ export class Conversation {
       error = e instanceof Error ? e : new Error(String(e));
     }
 
-    const exchange: Exchange = {
-      number: this._exchangeCount,
-      invocationId,
-      user: message,
-      assistant: fullResponse,
-      toolCalls: [],
-      inputTokens: totalInput,
-      outputTokens: totalOutput,
-      timestamp: new Date(),
-      runId: capturedRunId,
-    };
+    // D5: a turn that errored with zero output text produced nothing worth
+    // replaying — recording it would feed a phantom empty assistant turn
+    // back into every subsequent `_toMessageHistory()` call. Skip the
+    // Exchange build/push/persist entirely and revert the `_exchangeCount`
+    // bump from above so numbering stays dense. Partial-text errored turns
+    // (fullResponse !== "") keep recording — the user saw those tokens.
+    if (error !== undefined && fullResponse === "") {
+      this._exchangeCount -= 1;
+    } else {
+      const exchange: Exchange = {
+        number: this._exchangeCount,
+        invocationId,
+        user: message,
+        assistant: fullResponse,
+        toolCalls: [],
+        inputTokens: totalInput,
+        outputTokens: totalOutput,
+        timestamp: new Date(),
+        runId: capturedRunId,
+      };
 
-    this._history.push(exchange);
+      this._history.push(exchange);
 
-    if (this._store) {
-      await this._persistExchange(exchange, stateDeltas);
+      if (this._store) {
+        await this._persistExchange(exchange, stateDeltas);
+      }
     }
 
     // Emit conversation end

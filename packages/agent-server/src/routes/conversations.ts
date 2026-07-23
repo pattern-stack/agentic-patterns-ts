@@ -24,7 +24,12 @@ import type {
   RunStore,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
-import { Conversation, buildScopeHost, deriveToolboxExecutor } from "@agentic-patterns/runtime";
+import {
+  Conversation,
+  buildScopeHost,
+  createEvent,
+  deriveToolboxExecutor,
+} from "@agentic-patterns/runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
@@ -376,6 +381,13 @@ export function conversationRoutes(
       // frame so the client can link straight to this turn's persisted trace
       // (`/run?run=<id>`) without waiting for the session store to round-trip.
       let turnRunId: string | undefined;
+      // The runId off the FIRST event this turn observes at all (conversation
+      // wrapper's own runId, since `conversation.start` always arrives first —
+      // :393 below). Used only to give a synthesized `agent.error` bus publish
+      // a runId to key on when the turn never reaches `agent.message.start`
+      // (pre-token failure ⇒ `turnRunId` stays undefined). Exporters must
+      // tolerate this runId having no run row.
+      let turnBusRunId: string | undefined;
       const pendingForTurn = new Set<string>();
       const onInputRequest = async (ev: BaseEvent): Promise<void> => {
         const e = ev as AgentEvent;
@@ -391,6 +403,7 @@ export function conversationRoutes(
       try {
         for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
           turnTraceId ??= event.traceId;
+          turnBusRunId ??= event.runId;
           if (turnRunId === undefined && event.type === "agent.message.start") {
             turnRunId = event.runId;
           }
@@ -404,6 +417,58 @@ export function conversationRoutes(
           event: "done",
           data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
         });
+      } catch (err) {
+        // N5: the drain loop above can throw before yielding a single event
+        // (model-resolution reject, provider construction failure — any
+        // pre-yield setup throw in the runner) or mid-stream. Either way the
+        // stream must be honestly torn on the wire, never silently swallowed
+        // by hono: write the canonical `error` frame (byte-compatible with
+        // `toSSEMapping`'s `agent.error` payload, `sse-formatter.ts:301-309`)
+        // then the `done` terminator, in that order, then swallow. We do NOT
+        // use `streamSSE`'s `onError` callback — it writes its own
+        // `event: error` frame whose data is the raw message STRING, not
+        // JSON, which the dashboard's `parseFrame` drops and the Go parser
+        // can't decode. Owning the frame shape here keeps both happy.
+        const message = err instanceof Error ? err.message : String(err);
+        const errorType = err instanceof Error ? err.name : "Error";
+
+        try {
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({ error_type: errorType, message, recoverable: false }),
+          });
+          await stream.writeSSE({
+            event: "done",
+            data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
+          });
+        } catch {
+          // Client gone — nothing left to tell. Belt-and-braces only: under
+          // hono 4.12.31 `StreamingApi.write` already swallows write errors
+          // (`catch {}` in `dist/utils/stream.js`), so this rarely fires.
+        }
+
+        // Bus visibility (non-load-bearing for the wire fix): a pre-token
+        // throw never reaches the event bus otherwise — no exporter records
+        // anything — so synthesize an `agent.error` for the admin
+        // firehose/collector/exporters. Guarded on turnTraceId: it is set
+        // from the first forwarded event, and `conversation.start` always
+        // arrives first, so this only fails to fire if the wrapper itself
+        // never yielded anything at all.
+        if (turnTraceId !== undefined && turnBusRunId !== undefined) {
+          const errorEvent = createEvent("agent.error", {
+            traceId: turnTraceId,
+            runId: turnBusRunId,
+            errorType,
+            message,
+            recoverable: false,
+            context: {},
+          });
+          try {
+            await eventBus.publish(errorEvent);
+          } catch (publishErr) {
+            console.error("conversations: agent.error bus publish failed:", publishErr);
+          }
+        }
       } finally {
         // Run-metadata stamp (#268) — the redacted effective context this
         // conversation is bound to, written onto the turn's run row. Lives in
@@ -411,8 +476,13 @@ export function conversationRoutes(
         // errors mid-run, `Conversation.stream` yields `conversation.end`
         // then RE-THROWS, so the `for await` above throws too and a
         // try-scoped stamp would never run — exactly the runs an operator
-        // most needs to inspect. Same for a client disconnect
-        // (`stream.writeSSE` rejects mid-loop). `updateRunMetadata` is a
+        // most needs to inspect. A client disconnect is NOT the same kind of
+        // teardown: under hono 4.12.31, `StreamingApi.write` silently
+        // swallows write errors on a closed connection, so the drain loop
+        // above keeps pulling runner events to completion regardless — it
+        // does not throw, and nothing here stops the runner from finishing
+        // its work server-side. #341's `onAbort` wiring is what will
+        // actually short-circuit the runner on disconnect. `updateRunMetadata` is a
         // local DB write independent of the broken stream/generator and
         // status-independent (it stamps a still-`running` row the same as a
         // finalized one, see its doc comment) — it lands on whatever the row
