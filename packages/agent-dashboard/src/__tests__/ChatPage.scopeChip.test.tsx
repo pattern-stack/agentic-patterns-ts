@@ -108,7 +108,7 @@ describe("ChatPage scope chip (#268)", () => {
 
     // Full JSON on click (the popover) — carries BOTH echoed keys.
     fireEvent.click(chip);
-    const pre = container.querySelector("pre");
+    const pre = document.querySelector("pre"); // popover portals to body (nested-menus fix)
     expect(pre?.textContent).toContain('"tenant": "acme"');
     expect(pre?.textContent).toContain('"region": "us"');
   });
@@ -164,7 +164,7 @@ describe("ChatPage scope chip (#268)", () => {
       }),
     );
 
-    const { getByPlaceholderText, getByRole, findByRole, container } = render(<ChatPage />);
+    const { getByPlaceholderText, getByRole, findByRole } = render(<ChatPage />);
     const textarea = await waitFor(() =>
       getByPlaceholderText((text) => text.startsWith("Message Agent One")),
     );
@@ -181,7 +181,7 @@ describe("ChatPage scope chip (#268)", () => {
 
     // Full (untruncated) value is still one click away.
     fireEvent.click(chip);
-    const pre = container.querySelector("pre");
+    const pre = document.querySelector("pre"); // popover portals to body (nested-menus fix)
     expect(pre?.textContent).toContain(`"token": "${longToken}"`);
   });
 
