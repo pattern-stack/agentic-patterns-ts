@@ -135,6 +135,20 @@ export interface RunOptions {
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
   /**
+   * Abort the run cooperatively (#341). `stream()` forwards it to the
+   * provider call (`streamText({ abortSignal })`) and checks it at the top
+   * of each iteration and before each tool dispatch; on abort the runner
+   * emits `agent.message.cancel` + `agent.conversation.end
+   * {reason:"cancelled"}` and returns — it does NOT throw (locked D1).
+   * `run()` and `runStructured()` also check it at the top of each iteration
+   * (cheap cooperative guard — never silently ignored on any `RunOptions`
+   * path) but do not forward it into the underlying `generateText` call:
+   * `run()` returns a `RunResult` with `finishReason: "cancelled"`;
+   * `runStructured()` cannot fabricate a schema-valid `object` on abort, so
+   * it throws a `RunCancelledError` instead.
+   */
+  abortSignal?: AbortSignal;
+  /**
    * Allow open-object nodes (z.record / .passthrough() / .catchall() / z.map)
    * in a `runStructured` schema. Default `false`: the runner THROWS before any
    * LLM call, because schema-subset providers silently decode open objects to
