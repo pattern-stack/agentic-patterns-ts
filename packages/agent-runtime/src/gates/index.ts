@@ -26,6 +26,7 @@ export type {
   PermissionSet,
   HarnessDecision,
   DecisionKind,
+  GateRequirements,
   AskContext,
   GateTrailEntry,
   GateEvaluation,

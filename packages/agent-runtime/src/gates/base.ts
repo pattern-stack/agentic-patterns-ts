@@ -6,7 +6,7 @@
  */
 
 import type { BaseEvent } from "../events/types.js";
-import type { AskContext, GateEvaluation, HarnessDecision } from "./decisions.js";
+import type { AskContext, GateEvaluation, GateRequirements, HarnessDecision } from "./decisions.js";
 
 // ---------------------------------------------------------------------------
 // Gate category — lower values run first
@@ -60,6 +60,15 @@ export interface Gate {
 
   /** Human-readable category name. */
   readonly categoryName: string;
+
+  /**
+   * Optional adapter requirements (§5.2, B-2). A gate that must synchronously
+   * intercept certain operation classes, or rewrite tool input, declares them
+   * here so the {@link CodingAgentRunner} base can fail the run loud at start
+   * on a harness that can't honor them. Absent (every existing gate) → no
+   * requirements. See {@link GateRequirements}.
+   */
+  readonly requires?: GateRequirements;
 
   /**
    * Check an intent event. `ctx` is the optional native ask context (F-2),

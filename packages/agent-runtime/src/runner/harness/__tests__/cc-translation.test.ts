@@ -1,17 +1,21 @@
 /**
- * TRANSITIONAL test suite (#323 → #326).
+ * CC translation contract — SDK message → normalized HarnessEvent → AgentEvent.
  *
- * These tests pin the CC SDK-message → AgentEvent translation contract while it
- * lives inline in `cc-event-translator.ts`. #326 extracts the per-harness
- * adapter and RELOCATES both the translator and this suite behind the adapter
- * seam — expect this file to move (and its imports to change) when that lands.
- * Keep the ASSERTIONS (per-event-kind translation, synthetic provenance,
- * finishReason table, cost passthrough, num_turns reconciliation); they encode
- * the parity guarantee, not the file layout.
+ * RELOCATED from `runner/__tests__/cc-event-translator.test.ts` (B-1 → B-2 / #326).
+ * The translator split into two halves behind the harness seam: the CC-specific
+ * {@link CCHarnessTranslator} (SDK → HarnessEvent) and the harness-agnostic
+ * {@link HarnessEventTranslator} (HarnessEvent → AgentEvent). These tests drive
+ * the two together end-to-end so B-1's parity ASSERTIONS (per-event-kind
+ * translation, synthetic provenance, finishReason table, cost passthrough,
+ * num_turns reconciliation) hold across the new seam.
  *
- * Fixtures are hand-built minimal shapes of the real SDK message types (the
- * exact fields the translator consumes are pinned type-side in
- * `sdk-contract.test.ts`), cast through `unknown` to the SDK union.
+ * NEW in B-2: the multi-assistant-message iteration over-count fix (routed from
+ * the PR #358 B-1 review) — assistant messages sharing one `message.id` open a
+ * single iteration.
+ *
+ * Fixtures are hand-built minimal shapes of the real SDK message types, cast
+ * through `unknown` (the exact fields consumed are pinned type-side in
+ * `sdk-contract.test.ts`).
  */
 
 import type {
@@ -21,22 +25,20 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentEvent } from "../../events/types.js";
-import {
-  CCMessageTranslator,
-  type CCTranslatorContext,
-  mapFinishReason,
-} from "../cc-event-translator.js";
+import type { AgentEvent } from "../../../events/types.js";
+import { CCHarnessTranslator, mapFinishReason } from "../claude-code/cc-harness-translator.js";
+import { HarnessEventTranslator, type HarnessRunAccounting } from "../harness-event-translator.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
-// Fixture builders (minimal shapes of the real SDK messages)
+// Fixture builders
 // ---------------------------------------------------------------------------
 
 function assistantMsg(opts?: {
+  id?: string;
   text?: string;
   thinking?: string;
   toolUse?: boolean;
@@ -55,7 +57,7 @@ function assistantMsg(opts?: {
     uuid: "u-assistant",
     session_id: "sess",
     message: {
-      id: "m1",
+      id: opts?.id ?? "m1",
       type: "message",
       role: "assistant",
       model: opts?.model ?? "claude-sonnet-4-5",
@@ -117,7 +119,7 @@ function resultError(subtype: string): SDKResultMessage {
   } as unknown as SDKResultMessage;
 }
 
-function streamMessageStart(model = "claude-sonnet-4-5"): SDKMessage {
+function streamMessageStart(model = "claude-sonnet-4-5", id = "m1"): SDKMessage {
   return {
     type: "stream_event",
     parent_tool_use_id: null,
@@ -126,7 +128,7 @@ function streamMessageStart(model = "claude-sonnet-4-5"): SDKMessage {
     event: {
       type: "message_start",
       message: {
-        id: "m1",
+        id,
         type: "message",
         role: "assistant",
         model,
@@ -168,25 +170,38 @@ function rateLimitMsg(): SDKMessage {
   } as unknown as SDKMessage;
 }
 
-function makeCtx(overrides?: Partial<CCTranslatorContext>): CCTranslatorContext {
-  return {
+// ---------------------------------------------------------------------------
+// End-to-end driver: SDK messages → HarnessEvents → AgentEvents
+// ---------------------------------------------------------------------------
+
+interface DriveOpts {
+  streaming?: boolean;
+  fallbackModel?: string;
+  hasTools?: boolean;
+  maxIterations?: number;
+}
+
+function drive(msgs: SDKMessage[], opts: DriveOpts = {}) {
+  const streaming = opts.streaming ?? false;
+  const cc = new CCHarnessTranslator({
+    fallbackModel: opts.fallbackModel ?? "fallback-model",
+    streaming,
+  });
+  const base = new HarnessEventTranslator({
     traceId: "trace-1",
     runId: "run-1",
     parentSpanId: "parent-1",
-    fallbackModel: "fallback-model",
-    hasTools: true,
-    maxIterations: 10,
-    streaming: false,
-    ...overrides,
-  };
-}
-
-/** Drive a translator across a message list, collecting every emitted event. */
-function drive(ctx: CCTranslatorContext, msgs: SDKMessage[]): AgentEvent[] {
-  const t = new CCMessageTranslator(ctx);
+    harnessName: "claude-code",
+    fallbackModel: opts.fallbackModel ?? "fallback-model",
+    hasTools: opts.hasTools ?? true,
+    maxIterations: opts.maxIterations ?? 10,
+    streaming,
+  });
   const events: AgentEvent[] = [];
-  for (const m of msgs) events.push(...t.translate(m));
-  return events;
+  for (const m of msgs) {
+    for (const h of cc.translate(m)) events.push(...base.translate(h));
+  }
+  return { events, finalize: (): HarnessRunAccounting => base.finalize() };
 }
 
 const typesOf = (events: AgentEvent[]) => events.map((e) => e.type);
@@ -211,12 +226,12 @@ describe("mapFinishReason (result subtype → canonical finishReason)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-event-kind translation
+// Per-event-kind translation (B-1 parity, across the seam)
 // ---------------------------------------------------------------------------
 
-describe("translator — per SDK message kind", () => {
+describe("translation — per SDK message kind", () => {
   it("assistant message (run mode) → iteration.start, llm.start, llm.end, iteration.end", () => {
-    const events = drive(makeCtx(), [assistantMsg({ text: "hi" })]);
+    const { events } = drive([assistantMsg({ text: "hi" })]);
     expect(typesOf(events)).toEqual([
       "agent.iteration.start",
       "agent.llm.start",
@@ -225,8 +240,8 @@ describe("translator — per SDK message kind", () => {
     ]);
   });
 
-  it("llm.end carries usage/model/stop_reason from the embedded BetaMessage", () => {
-    const events = drive(makeCtx(), [
+  it("llm.end carries usage/model/stop_reason", () => {
+    const { events } = drive([
       assistantMsg({
         text: "hi",
         model: "claude-opus-4",
@@ -247,38 +262,41 @@ describe("translator — per SDK message kind", () => {
   });
 
   it("assistant thinking block → agent.reasoning", () => {
-    const events = drive(makeCtx(), [assistantMsg({ thinking: "let me think" })]);
-    const reasoning = events.find((e) => e.type === "agent.reasoning");
-    expect(reasoning).toMatchObject({ content: "let me think", isComplete: true });
+    const { events } = drive([assistantMsg({ thinking: "let me think" })]);
+    expect(events.find((e) => e.type === "agent.reasoning")).toMatchObject({
+      content: "let me think",
+      isComplete: true,
+    });
   });
 
   it("assistant tool_use block → counted, hasToolCalls true, hasMore on tool_use stop", () => {
-    const events = drive(makeCtx(), [assistantMsg({ toolUse: true, stopReason: "tool_use" })]);
-    const llmEnd = events.find((e) => e.type === "agent.llm.end");
-    expect(llmEnd).toMatchObject({ hasToolCalls: true });
-    const iterEnd = events.find((e) => e.type === "agent.iteration.end");
-    expect(iterEnd).toMatchObject({ hasMore: true, toolCallsCount: 1 });
+    const { events } = drive([assistantMsg({ toolUse: true, stopReason: "tool_use" })]);
+    expect(events.find((e) => e.type === "agent.llm.end")).toMatchObject({ hasToolCalls: true });
+    expect(events.find((e) => e.type === "agent.iteration.end")).toMatchObject({
+      hasMore: true,
+      toolCallsCount: 1,
+    });
   });
 
-  it("falls back to ctx.fallbackModel when the message carries no model", () => {
-    const events = drive(makeCtx({ fallbackModel: "the-fallback" }), [
-      assistantMsg({ text: "hi", model: "" }),
-    ]);
+  it("falls back to the fallback model when the message carries none", () => {
+    const { events } = drive([assistantMsg({ text: "hi", model: "" })], {
+      fallbackModel: "the-fallback",
+    });
     expect(events.find((e) => e.type === "agent.llm.start")).toMatchObject({
       model: "the-fallback",
     });
   });
 
   it("stream message_start → iteration.start + OBSERVED llm.start; delta → message.chunk", () => {
-    const ctx = makeCtx({ streaming: true });
-    const events = drive(ctx, [
-      streamMessageStart("claude-sonnet-4-5"),
-      streamTextDelta("Hel"),
-      streamTextDelta("lo"),
-      assistantMsg({ text: "Hello", stopReason: "end_turn" }),
-    ]);
-    // message_start opens the turn; the later assistant message closes it —
-    // exactly ONE iteration, not two.
+    const { events } = drive(
+      [
+        streamMessageStart("claude-sonnet-4-5"),
+        streamTextDelta("Hel"),
+        streamTextDelta("lo"),
+        assistantMsg({ text: "Hello", stopReason: "end_turn" }),
+      ],
+      { streaming: true },
+    );
     expect(typesOf(events)).toEqual([
       "agent.iteration.start",
       "agent.llm.start",
@@ -293,7 +311,7 @@ describe("translator — per SDK message kind", () => {
   });
 
   it("compaction / task-progress / rate-limit → harness.native envelope", () => {
-    const events = drive(makeCtx(), [
+    const { events } = drive([
       systemMsg("compact_boundary", { compact_metadata: { trigger: "auto", pre_tokens: 1000 } }),
       systemMsg("task_progress", { task_id: "task-1", description: "working" }),
       rateLimitMsg(),
@@ -311,7 +329,7 @@ describe("translator — per SDK message kind", () => {
   });
 
   it("unmapped system subtype (init) is dropped", () => {
-    expect(drive(makeCtx(), [systemMsg("init")])).toEqual([]);
+    expect(drive([systemMsg("init")]).events).toEqual([]);
   });
 });
 
@@ -319,9 +337,9 @@ describe("translator — per SDK message kind", () => {
 // Synthetic provenance (D12)
 // ---------------------------------------------------------------------------
 
-describe("translator — synthetic provenance", () => {
+describe("translation — synthetic provenance", () => {
   it("run mode: iteration.start/end AND llm.start are marked meta.synthetic", () => {
-    const events = drive(makeCtx({ streaming: false }), [assistantMsg({ text: "hi" })]);
+    const { events } = drive([assistantMsg({ text: "hi" })], { streaming: false });
     const byType = (t: string) => events.find((e) => e.type === t);
     expect(byType("agent.iteration.start")?.meta?.synthetic).toBe(true);
     expect(byType("agent.iteration.end")?.meta?.synthetic).toBe(true);
@@ -329,33 +347,67 @@ describe("translator — synthetic provenance", () => {
   });
 
   it("llm.end is observed testimony, NOT marked synthetic", () => {
-    const events = drive(makeCtx(), [assistantMsg({ text: "hi" })]);
+    const { events } = drive([assistantMsg({ text: "hi" })]);
     expect(events.find((e) => e.type === "agent.llm.end")?.meta?.synthetic).toBeUndefined();
   });
 
-  it("stream mode: llm.start from a real message_start is NOT synthetic", () => {
-    const events = drive(makeCtx({ streaming: true }), [
-      streamMessageStart(),
-      assistantMsg({ text: "hi" }),
-    ]);
+  it("stream mode: llm.start from a real message_start is NOT synthetic; iteration still is", () => {
+    const { events } = drive([streamMessageStart(), assistantMsg({ text: "hi" })], {
+      streaming: true,
+    });
     expect(events.find((e) => e.type === "agent.llm.start")?.meta?.synthetic).toBeUndefined();
-    // iteration boundaries are always synthesized regardless of stream provenance
     expect(events.find((e) => e.type === "agent.iteration.start")?.meta?.synthetic).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// finalize() — accounting, cost passthrough, num_turns reconciliation
+// Multi-assistant-message turn de-dup (routed from PR #358 B-1 review)
 // ---------------------------------------------------------------------------
 
-describe("translator — finalize() accounting", () => {
+describe("translation — multi-message turn de-dup (over-count fix)", () => {
+  it("two assistant messages sharing message.id open exactly ONE iteration", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // resumed_from_incomplete_thinking: the SDK emits two assistant messages
+    // for one logical turn, both with message.id "m1".
+    const { events, finalize } = drive([
+      assistantMsg({ id: "m1", thinking: "partial…", stopReason: null }),
+      assistantMsg({ id: "m1", text: "…resumed answer", stopReason: "end_turn" }),
+      resultSuccess({ numTurns: 1 }),
+    ]);
+    const iterStarts = events.filter((e) => e.type === "agent.iteration.start");
+    const iterEnds = events.filter((e) => e.type === "agent.iteration.end");
+    expect(iterStarts).toHaveLength(1);
+    expect(iterEnds).toHaveLength(1);
+    // The continuation still surfaces its content + a second llm.end…
+    expect(events.filter((e) => e.type === "agent.llm.end")).toHaveLength(2);
+    expect(events.find((e) => e.type === "agent.reasoning")).toBeDefined();
+    // …and iterations reconcile against num_turns=1 with NO over-count warning.
+    expect(finalize().iterations).toBe(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("distinct message.ids open distinct iterations (no false merge)", () => {
+    const { events } = drive([
+      assistantMsg({ id: "m1", text: "a", stopReason: "tool_use", toolUse: true }),
+      assistantMsg({ id: "m2", text: "b", stopReason: "end_turn" }),
+    ]);
+    expect(events.filter((e) => e.type === "agent.iteration.start")).toHaveLength(2);
+    expect(events.filter((e) => e.type === "agent.iteration.end")).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// finalize() — accounting, cost, num_turns reconciliation
+// ---------------------------------------------------------------------------
+
+describe("translation — finalize() accounting", () => {
   it("cost passthrough + run totals + finishReason + iterations from num_turns", () => {
-    const t = new CCMessageTranslator(makeCtx());
-    t.translate(assistantMsg({ text: "a", stopReason: "tool_use", toolUse: true }));
-    t.translate(assistantMsg({ text: "b", stopReason: "end_turn" }));
-    t.translate(resultSuccess({ numTurns: 2, cost: 0.42, inputTokens: 200, outputTokens: 80 }));
-    const acc = t.finalize();
-    expect(acc).toMatchObject({
+    const { finalize } = drive([
+      assistantMsg({ id: "a", text: "a", stopReason: "tool_use", toolUse: true }),
+      assistantMsg({ id: "b", text: "b", stopReason: "end_turn" }),
+      resultSuccess({ numTurns: 2, cost: 0.42, inputTokens: 200, outputTokens: 80 }),
+    ]);
+    expect(finalize()).toMatchObject({
       content: "ab",
       inputTokens: 200,
       outputTokens: 80,
@@ -367,27 +419,27 @@ describe("translator — finalize() accounting", () => {
   });
 
   it("result string is the content fallback only when nothing else was captured", () => {
-    const t = new CCMessageTranslator(makeCtx());
-    t.translate(resultSuccess({ result: "fallback text" }));
-    expect(t.finalize().content).toBe("fallback text");
+    const { finalize } = drive([resultSuccess({ result: "fallback text" })]);
+    expect(finalize().content).toBe("fallback text");
   });
 
   it("error result subtype maps finishReason and still carries cost", () => {
-    const t = new CCMessageTranslator(makeCtx());
-    t.translate(assistantMsg({ text: "x", stopReason: "tool_use" }));
-    t.translate(resultError("error_max_turns"));
-    const acc = t.finalize();
+    const { finalize } = drive([
+      assistantMsg({ text: "x", stopReason: "tool_use" }),
+      resultError("error_max_turns"),
+    ]);
+    const acc = finalize();
     expect(acc.finishReason).toBe("max-turns");
     expect(acc.costUsd).toBe(0.5);
   });
 
   it("num_turns mismatch LOGS (console.warn) but never throws; iterations follow num_turns", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const t = new CCMessageTranslator(makeCtx());
-    // Synthesize ONE iteration but the SDK reports three turns.
-    t.translate(assistantMsg({ text: "one", stopReason: "end_turn" }));
-    t.translate(resultSuccess({ numTurns: 3 }));
-    const acc = t.finalize();
+    const { finalize } = drive([
+      assistantMsg({ text: "one", stopReason: "end_turn" }),
+      resultSuccess({ numTurns: 3 }),
+    ]);
+    const acc = finalize();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toContain("num_turns=3");
     expect(acc.iterations).toBe(3);
@@ -395,41 +447,38 @@ describe("translator — finalize() accounting", () => {
 
   it("matching turn count does not warn", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const t = new CCMessageTranslator(makeCtx());
-    t.translate(assistantMsg({ text: "one", stopReason: "end_turn" }));
-    t.translate(resultSuccess({ numTurns: 1 }));
-    t.finalize();
+    const { finalize } = drive([
+      assistantMsg({ text: "one", stopReason: "end_turn" }),
+      resultSuccess({ numTurns: 1 }),
+    ]);
+    finalize();
     expect(warn).not.toHaveBeenCalled();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Representative multi-tool run — the full emission sequence
+// Representative multi-tool run — full emission sequence
 // ---------------------------------------------------------------------------
 
-describe("translator — representative multi-tool run (run mode)", () => {
+describe("translation — representative multi-tool run (run mode)", () => {
   it("emits one iteration+llm pair per assistant turn, harness.native for compaction", () => {
-    const events = drive(makeCtx(), [
-      assistantMsg({ text: "let me add", toolUse: true, stopReason: "tool_use" }),
+    const { events } = drive([
+      assistantMsg({ id: "t1", text: "let me add", toolUse: true, stopReason: "tool_use" }),
       systemMsg("compact_boundary", { compact_metadata: { trigger: "auto", pre_tokens: 5000 } }),
-      assistantMsg({ text: "now multiply", toolUse: true, stopReason: "tool_use" }),
-      assistantMsg({ text: "the answer is 90", stopReason: "end_turn" }),
+      assistantMsg({ id: "t2", text: "now multiply", toolUse: true, stopReason: "tool_use" }),
+      assistantMsg({ id: "t3", text: "the answer is 90", stopReason: "end_turn" }),
       resultSuccess({ numTurns: 3, cost: 0.07 }),
     ]);
     expect(typesOf(events)).toEqual([
-      // turn 1 (tool_use)
       "agent.iteration.start",
       "agent.llm.start",
       "agent.llm.end",
       "agent.iteration.end",
-      // compaction boundary between turns
       "harness.native",
-      // turn 2 (tool_use)
       "agent.iteration.start",
       "agent.llm.start",
       "agent.llm.end",
       "agent.iteration.end",
-      // turn 3 (final)
       "agent.iteration.start",
       "agent.llm.start",
       "agent.llm.end",

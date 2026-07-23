@@ -126,6 +126,38 @@ export type HarnessDecision =
 export type DecisionKind = HarnessDecision["kind"];
 
 // ---------------------------------------------------------------------------
+// Gate requirements (§5.2) — a gate's declared adapter requirements
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional adapter requirements a gate declares (§5.2, design D-B2). A gate that
+ * must synchronously inspect (block/ask before execution) certain operation
+ * classes, or rewrite tool input, declares it here. At run start the
+ * `CodingAgentRunner` base collects these across the configured chain and
+ * compares them against the harness probe's `enforcement` matrix +
+ * `features.inputRewrite`; any gap fails loud, naming the gate and the class.
+ *
+ * Absent (the default for every existing gate) → the gate imposes NO adapter
+ * requirements and is unaffected by the run-start check. Network policy is
+ * explicitly NOT expressible here — it is a run-configuration concern set at
+ * session start against the probe's `sandbox` record, not a gate-compatibility
+ * one (§5.2).
+ */
+export interface GateRequirements {
+  /**
+   * Operation classes this gate must be able to intercept — i.e. the harness
+   * must declare `enforcement: "enforcing"` for each. `"advisory"` or
+   * `"unsupported"` for any listed class fails the run at start.
+   */
+  readonly interceptClasses?: OperationClass[];
+  /**
+   * True when the gate rewrites tool input (modified-intent passthrough). The
+   * harness must declare `features.inputRewrite: true` or the run fails at start.
+   */
+  readonly rewrite?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Ask context — the native ask threaded through evaluation (§5.4, F-2)
 // ---------------------------------------------------------------------------
 
