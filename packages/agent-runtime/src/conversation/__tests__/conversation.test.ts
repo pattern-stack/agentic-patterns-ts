@@ -402,6 +402,154 @@ describe("Conversation", () => {
     });
   });
 
+  describe("stream() options.signal → runner abortSignal + honest end reason (#341)", () => {
+    /**
+     * Mimics AgentRunner's real abort contract (D1): on an aborted signal it
+     * emits its OWN `agent.message.cancel` + `agent.conversation.end
+     * {reason:"cancelled"}` pair and RETURNS — never throws. Its
+     * conversation.end carries a distinct conversationId from Conversation's
+     * own, matching the dossier's "two conversation.start/end pairs, do not
+     * dedupe" contract (B.3-3).
+     */
+    function makeAbortableRunner(partialText: string): RunnerProtocol & {
+      lastStreamOptions: RunOptions | undefined;
+    } {
+      const runner = {
+        lastStreamOptions: undefined as RunOptions | undefined,
+        run: async (): Promise<RunResult> => {
+          throw new Error("run() not used in these tests");
+        },
+        async *stream(
+          _agent: unknown,
+          _message: string,
+          options?: RunOptions,
+        ): AsyncGenerator<AgentEvent> {
+          runner.lastStreamOptions = options;
+          const traceId = options?.traceId ?? RUNNER_RUN_ID;
+          yield createEvent("agent.message.chunk", {
+            traceId,
+            runId: RUNNER_RUN_ID,
+            delta: partialText,
+            chunkIndex: 0,
+          });
+          if (options?.abortSignal?.aborted) {
+            yield createEvent("agent.message.cancel", {
+              traceId,
+              runId: RUNNER_RUN_ID,
+              reason: "cancelled by client",
+            });
+            yield createEvent("agent.conversation.end", {
+              traceId,
+              runId: RUNNER_RUN_ID,
+              conversationId: "runner-own-conversation-id",
+              reason: "cancelled",
+            });
+            return;
+          }
+          yield createEvent("agent.message.complete", {
+            traceId,
+            runId: RUNNER_RUN_ID,
+            content: partialText,
+            inputTokens: 10,
+            outputTokens: 5,
+            model: "test-model",
+          });
+        },
+      };
+      return runner;
+    }
+
+    it("forwards options.signal into the runner call as abortSignal", async () => {
+      const agent = makeAgent();
+      const controller = new AbortController();
+      const runner = makeAbortableRunner("hi");
+      const conv = new Conversation(agent, runner);
+
+      for await (const _e of conv.stream("hello", { signal: controller.signal })) {
+        // drain
+      }
+
+      expect(runner.lastStreamOptions?.abortSignal).toBe(controller.signal);
+    });
+
+    it("omitting signal yields no abortSignal key on the runner call (no accidental default)", async () => {
+      const agent = makeAgent();
+      const runner = makeAbortableRunner("hi");
+      const conv = new Conversation(agent, runner);
+
+      for await (const _e of conv.stream("hello")) {
+        // drain
+      }
+
+      expect(runner.lastStreamOptions?.abortSignal).toBeUndefined();
+    });
+
+    it("a pre-aborted signal: the runner returns (never throws), Conversation's OWN trailing conversation.end reads reason 'cancelled' (not 'completed'), and the partial-text exchange IS recorded (aborted != error)", async () => {
+      const agent = makeAgent("AbortableAgent");
+      const controller = new AbortController();
+      controller.abort();
+      const runner = makeAbortableRunner("partial reply");
+      const store = new InMemoryConversationStore();
+      const conv = new Conversation(agent, runner, { store });
+
+      const events: AgentEvent[] = [];
+      // No `.rejects` — the runner returns cleanly, so this for-await must
+      // complete without throwing (D1's "cancelled ≠ error" posture).
+      for await (const e of conv.stream("hello", { signal: controller.signal })) {
+        events.push(e);
+      }
+
+      // Both conversation.end pairs are on the wire — Conversation's own
+      // (keyed by conv.id) AND the runner's own (a distinct id) — never
+      // deduped (dossier B.3-3).
+      const convEnds = events.filter(
+        (e): e is Extract<AgentEvent, { type: "agent.conversation.end" }> =>
+          e.type === "agent.conversation.end",
+      );
+      expect(convEnds).toHaveLength(2);
+
+      const conversationsOwnEnd = convEnds.find((e) => e.conversationId === conv.id);
+      expect(conversationsOwnEnd).toBeDefined();
+      expect(conversationsOwnEnd?.reason).toBe("cancelled");
+
+      const runnersOwnEnd = convEnds.find((e) => e.conversationId === "runner-own-conversation-id");
+      expect(runnersOwnEnd).toBeDefined();
+      expect(runnersOwnEnd?.reason).toBe("cancelled");
+
+      // message.cancel is on the wire too (yielded straight through).
+      expect(events.map((e) => e.type)).toContain("agent.message.cancel");
+
+      // Cancelled turn takes the happy path: the partial text IS recorded.
+      expect(conv.history).toHaveLength(1);
+      expect(conv.exchangeCount).toBe(1);
+      expect(conv.lastExchange?.assistant).toBe("partial reply");
+
+      const [summary] = await store.listConversations();
+      expect(summary).toBeDefined();
+      const messages = await store.getMessages(summary!.conversationId);
+      expect(messages).toHaveLength(2);
+      expect(messages[1]?.parts[0]?.content).toBe("partial reply");
+    });
+
+    it("a non-aborted signal (never fires): trailing conversation.end reason stays 'completed'", async () => {
+      const agent = makeAgent();
+      const controller = new AbortController(); // never aborted
+      const runner = makeAbortableRunner("all good");
+      const conv = new Conversation(agent, runner);
+
+      const events: AgentEvent[] = [];
+      for await (const e of conv.stream("hello", { signal: controller.signal })) {
+        events.push(e);
+      }
+
+      const conversationsOwnEnd = events.find(
+        (e): e is Extract<AgentEvent, { type: "agent.conversation.end" }> =>
+          e.type === "agent.conversation.end" && e.conversationId === conv.id,
+      );
+      expect(conversationsOwnEnd?.reason).toBe("completed");
+    });
+  });
+
   describe("stream() state-delta persistence (#226)", () => {
     /**
      * A runner whose stream interleaves state-delta events between the message
