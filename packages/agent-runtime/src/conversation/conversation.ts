@@ -210,7 +210,7 @@ export class Conversation {
    */
   async *stream(
     message: string,
-    options?: { eventBus?: AgentEventBus; maxIterations?: number; signal?: AbortSignal },
+    options?: { eventBus?: AgentEventBus; maxIterations?: number },
   ): AsyncGenerator<AgentEvent> {
     if (!this.runner.stream) {
       throw new Error("Runner does not support streaming");
@@ -264,11 +264,6 @@ export class Conversation {
         // here joins both event families onto one trace.
         traceId,
         ...(options?.maxIterations != null ? { maxIterations: options.maxIterations } : {}),
-        // #341: forward the caller's AbortSignal into the runner's own
-        // `abortSignal` slot. Omitted entirely (not `undefined`) when absent
-        // so a runner that special-cases "key present" behaves the same as
-        // before this option existed.
-        ...(options?.signal ? { abortSignal: options.signal } : {}),
       })) {
         yield event;
         capturedRunId ??= event.runId;
@@ -320,16 +315,12 @@ export class Conversation {
       }
     }
 
-    // Emit conversation end. #341: an aborted signal takes priority over
-    // "completed" — a cancelled turn is the HAPPY path (the runner returns,
-    // never throws, so `error` stays undefined here), matching React's
-    // posture that cancelled != error. `error` still wins if a genuine
-    // failure happened to race the abort.
+    // Emit conversation end
     const convEndEvent = createEvent("agent.conversation.end", {
       traceId,
       runId,
       conversationId: this.id,
-      reason: error ? "error" : options?.signal?.aborted ? "cancelled" : "completed",
+      reason: error ? "error" : "completed",
     });
     yield convEndEvent;
     await eventBus.publish(convEndEvent);
