@@ -52,13 +52,6 @@ export interface ConversationEntry {
   context?: Record<string, unknown>;
   /** Top-level `context` keys that were redacted (Decision 3), when any were. */
   contextRedacted?: readonly string[];
-  /**
-   * Set while a `POST …/messages` turn is streaming; cleared in its
-   * `finally` (#341). One turn at a time per conversation — the 409
-   * concurrency guard below keeps this singular/unambiguous, which is what
-   * lets `POST …/cancel` address "the" active turn without a run id.
-   */
-  activeTurn?: { controller: AbortController; runId?: string; startedAt: number };
 }
 
 export function conversationRoutes(
@@ -368,26 +361,11 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
-    // 409 concurrency guard (#341): one turn at a time per conversation —
-    // `entry.activeTurn` is set for the duration of the streamSSE callback
-    // below and cleared in its `finally`. This also keeps `activeTurn`
-    // singular/unambiguous for `POST …/cancel`, which addresses "the" active
-    // turn without needing a run id.
-    if (entry.activeTurn) {
-      return c.json({ error: "a turn is already streaming for this conversation" }, 409);
-    }
-
     // SSE streaming response. We pass the server's shared eventBus so
     // emitted events reach every attached exporter (collector, SSE
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
     return streamSSE(c, async (stream) => {
-      // #341: one AbortController per turn, shared by the explicit cancel
-      // route and the disconnect-hardening `onAbort` wiring below — both
-      // routes converge on the same teardown.
-      const controller = new AbortController();
-      entry.activeTurn = { controller, startedAt: Date.now() };
-
       // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
       // `bus.publish`, so the runner generator (which this loop drains) is
       // parked and can't yield the prompt itself. The gate instead PUBLISHES
@@ -422,46 +400,12 @@ export function conversationRoutes(
       };
       eventBus.subscribe("agent.input.request", onInputRequest);
 
-      // #341: one teardown function, two triggers — client disconnect
-      // (`stream.onAbort`) and an explicit `POST …/cancel` (the controller's
-      // own "abort" event, fired by that route calling `.abort()`). Denying
-      // pending inputs HERE (not just in `finally`, below) is what actually
-      // fixes the disconnect hang: a gate-blocked run is parked inside
-      // `bus.publish`, so the drain loop this `try` block runs never settles
-      // on its own — nothing else would ever reach the `finally` sweep.
-      // `AbortController.abort()` is a no-op once already aborted, so
-      // whichever trigger fires first "wins"; the other becomes a harmless
-      // second call. `inputRegistry.resolve` is likewise idempotent — a
-      // correlationId already resolved here is simply a no-op in the
-      // `finally` sweep below.
-      const onCancel = (): void => {
-        controller.abort();
-        if (inputRegistry) {
-          for (const correlationId of pendingForTurn) {
-            inputRegistry.resolve(correlationId, { decision: "deny" });
-          }
-        }
-      };
-      stream.onAbort(onCancel);
-      controller.signal.addEventListener("abort", onCancel, { once: true });
-
       try {
-        for await (const event of conversation.stream(content, {
-          eventBus,
-          maxIterations,
-          signal: controller.signal,
-        })) {
+        for await (const event of conversation.stream(content, { eventBus, maxIterations })) {
           turnTraceId ??= event.traceId;
           turnBusRunId ??= event.runId;
           if (turnRunId === undefined && event.type === "agent.message.start") {
             turnRunId = event.runId;
-            // Mirror the runId onto activeTurn (#341) so `POST …/cancel` can
-            // echo `run_id` back to the caller once it's known — best-effort,
-            // omitted from the 202 response before the first
-            // `agent.message.start` arrives.
-            if (entry.activeTurn) {
-              entry.activeTurn.runId = turnRunId;
-            }
           }
           const msg = agentEventToSSE(event);
           if (msg) {
@@ -560,46 +504,14 @@ export function conversationRoutes(
         eventBus.unsubscribe("agent.input.request", onInputRequest);
         // Fail closed: if the client disconnects mid-approval, deny any of THIS
         // turn's still-pending requests so the blocked gate resolves (deny)
-        // instead of hanging the run forever. (Belt-and-braces alongside
-        // `onCancel` above, #341 — idempotent either way.)
+        // instead of hanging the run forever.
         if (inputRegistry) {
           for (const correlationId of pendingForTurn) {
             inputRegistry.resolve(correlationId, { decision: "deny" });
           }
         }
-        // #341: natural-completion belt — a turn that finished on its own
-        // (never cancelled) still needs `activeTurn` cleared so the NEXT
-        // `POST …/messages` isn't 409'd forever and `POST …/cancel` 404s the
-        // way an idle conversation should. Guarded so a stale/already-swapped
-        // reference (e.g. a fresh turn's own set, in a hypothetical future
-        // where two `finally` blocks could interleave) never clobbers it.
-        if (entry.activeTurn?.controller === controller) {
-          entry.activeTurn = undefined;
-        }
       }
     });
-  });
-
-  // POST /conversations/:id/cancel — abort the in-flight turn, if any (#341).
-  // 404 unknown conversation · 409 no active turn · 202 accepted (cancellation
-  // is cooperative/async — the open SSE stream winds down with
-  // `message.cancel … conversation.end{cancelled} … done`, never a server
-  // error). Idempotent while winding down: `AbortController.abort()` is a
-  // no-op once already aborted, so a repeat POST during teardown still gets
-  // a 202; once the messages route's `finally` clears `activeTurn`, a repeat
-  // POST correctly 409s (no active turn left to cancel). No auth — parity
-  // with every other route on this server.
-  app.post("/conversations/:id/cancel", (c) => {
-    const entry = conversations.get(c.req.param("id"));
-    if (!entry) {
-      return c.json({ error: "Conversation not found" }, 404);
-    }
-    const turn = entry.activeTurn;
-    if (!turn) {
-      return c.json({ error: "no active turn" }, 409);
-    }
-    turn.controller.abort();
-    return c.json({ ok: true, ...(turn.runId ? { run_id: turn.runId } : {}) }, 202);
   });
 
   // POST /conversations/:id/input — the return leg of a human-in-the-loop
