@@ -135,17 +135,34 @@ export interface RunOptions {
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
   /**
-   * Abort the run cooperatively (#341). `stream()` forwards it to the
-   * provider call (`streamText({ abortSignal })`) and checks it at the top
+   * Abort the run cooperatively (#341). `AgentRunner.stream()` forwards it to
+   * the provider call (`streamText({ abortSignal })`) and checks it at the top
    * of each iteration and before each tool dispatch; on abort the runner
    * emits `agent.message.cancel` + `agent.conversation.end
    * {reason:"cancelled"}` and returns — it does NOT throw (locked D1).
-   * `run()` and `runStructured()` also check it at the top of each iteration
-   * (cheap cooperative guard — never silently ignored on any `RunOptions`
-   * path) but do not forward it into the underlying `generateText` call:
-   * `run()` returns a `RunResult` with `finishReason: "cancelled"`;
-   * `runStructured()` cannot fabricate a schema-valid `object` on abort, so
-   * it throws a `RunCancelledError` instead.
+   * `AgentRunner.run()` and `runStructured()` also check it at the top of each
+   * iteration (cheap cooperative guard — never silently ignored on any
+   * `RunOptions` path) but do not forward it into the underlying
+   * `generateText` call: `run()` returns a `RunResult` with
+   * `finishReason: "cancelled"`; `runStructured()` cannot fabricate a
+   * schema-valid `object` on abort, so it throws a `RunCancelledError` instead.
+   *
+   * `CodingAgentRunner`-based runners (`ClaudeCodeRunner` /
+   * `ClaudeCodeAPIRunner`, #368) honor it too, with a shape suited to owning a
+   * real subprocess rather than a per-call provider request: an already-fired
+   * signal never launches the harness subprocess at all (checked once, right
+   * after `agent.message.start`); a signal firing mid-run races every read of
+   * the harness's event stream (there is no per-LLM-call boundary at that
+   * layer — Claude Code owns its own multi-turn loop inside ONE subprocess) and,
+   * on abort, stops draining and tears the session down via
+   * `HarnessSession.close()` (SDK `interrupt()` then `return()` — closes
+   * the subprocess's stdin and SIGTERMs/SIGKILLs it if it doesn't exit within
+   * the SDK's own grace window). `run()` returns a `RunResult` with
+   * `finishReason: "cancelled"` (partial content/tokens preserved if any
+   * streamed before the abort); `stream()` emits `agent.message.cancel` and
+   * returns — no `message.complete`, no `conversation.end` (this runner never
+   * emits conversation events on any path; `Conversation.stream()` derives
+   * `reason: "cancelled"` independently from `options.signal.aborted`).
    */
   abortSignal?: AbortSignal;
   /**
