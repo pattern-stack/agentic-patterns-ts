@@ -31,6 +31,8 @@ export interface PlayDefinition {
    * future output validation. Omit it and consumers simply get no return shape.
    */
   returns?: ZodTypeAny;
+  /** Optional render hint — see `ToolDefinition.displayType`. */
+  displayType?: string;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -52,7 +54,19 @@ export abstract class Playbook {
   /** Get play definitions as ToolSchema objects. */
   getPlaySchemas(): ToolSchema[] {
     return Object.entries(this.plays).map(([name, def]) =>
-      ToolSchema.fromZod(name, def.description, def.parameters, def.returns),
+      // `terminal` (5th positional) is intentionally NOT threaded here — this
+      // site has always omitted it, and passing `def.terminal` now would newly
+      // declare playbook-sourced schemas terminal (behavioral change). Pass
+      // `undefined` explicitly to reach the 6th (`displayType`) slot while
+      // preserving today's behavior; see spec #352 §3 / PR notes.
+      ToolSchema.fromZod(
+        name,
+        def.description,
+        def.parameters,
+        def.returns,
+        undefined,
+        def.displayType,
+      ),
     );
   }
 

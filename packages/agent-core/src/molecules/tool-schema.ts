@@ -49,6 +49,12 @@ export class ToolSchema {
    * the enclosing raw tool loop on hosts that honor the flag.
    */
   readonly terminal?: boolean;
+  /**
+   * Optional render hint for transports/clients — see
+   * `ToolDefinition.displayType`. Opaque to core; convention:
+   * `"code" | "diff" | "bash"`.
+   */
+  readonly displayType?: string;
 
   /** Optional: original Zod schema, kept for toVercelAI(). */
   private readonly _zodSchema?: ZodTypeAny;
@@ -60,6 +66,7 @@ export class ToolSchema {
     zodSchema?: ZodTypeAny,
     returns?: Record<string, unknown>,
     terminal?: boolean,
+    displayType?: string,
   ) {
     this.name = name;
     this.description = description;
@@ -67,13 +74,15 @@ export class ToolSchema {
     this._zodSchema = zodSchema;
     this.returns = returns;
     this.terminal = terminal;
+    this.displayType = displayType;
     Object.freeze(this);
   }
 
   /**
    * Create ToolSchema from a Zod parameters schema, and optionally a Zod
-   * returns schema (the tool's declared output shape — see ToolDefinition.returns)
-   * and the terminal flag (see ToolDefinition.terminal).
+   * returns schema (the tool's declared output shape — see ToolDefinition.returns),
+   * the terminal flag (see ToolDefinition.terminal), and the render hint
+   * (see ToolDefinition.displayType).
    */
   static fromZod(
     name: string,
@@ -81,6 +90,7 @@ export class ToolSchema {
     schema: ZodTypeAny,
     returnsSchema?: ZodTypeAny,
     terminal?: boolean,
+    displayType?: string,
   ): ToolSchema {
     const jsonSchema = zodToJsonSchema(schema, { target: "openApi3" }) as Record<string, unknown>;
     // Remove $schema and additionalProperties top-level noise
@@ -90,7 +100,7 @@ export class ToolSchema {
       returns = zodToJsonSchema(returnsSchema, { target: "openApi3" }) as Record<string, unknown>;
       returns.$schema = undefined;
     }
-    return new ToolSchema(name, description, jsonSchema, schema, returns, terminal);
+    return new ToolSchema(name, description, jsonSchema, schema, returns, terminal, displayType);
   }
 
   /** Create ToolSchema from OpenAI function calling format. */
@@ -111,6 +121,7 @@ export class ToolSchema {
     parameters: Record<string, unknown>;
     returns?: Record<string, unknown>;
     terminal?: boolean;
+    displayType?: string;
   } {
     return {
       name: this.name,
@@ -119,6 +130,7 @@ export class ToolSchema {
       // only present when declared — keeps the dict byte-identical for params-only tools
       ...(this.returns !== undefined ? { returns: this.returns } : {}),
       ...(this.terminal !== undefined ? { terminal: this.terminal } : {}),
+      ...(this.displayType !== undefined ? { displayType: this.displayType } : {}),
     };
   }
 
