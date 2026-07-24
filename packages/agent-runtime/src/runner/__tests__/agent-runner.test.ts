@@ -417,6 +417,58 @@ describe("AgentRunner", () => {
       expect(eventTypes).toContain("agent.tool.start");
       expect(eventTypes).toContain("agent.tool.end");
     });
+
+    it("stamps displayType on tool.start/end when the schema declares it, omits the key otherwise", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallsResult(
+              [
+                { toolCallId: "tc-1", toolName: "edit_file", input: { path: "a.ts" } },
+                { toolCallId: "tc-2", toolName: "search", input: { q: "x" } },
+              ],
+              10,
+              5,
+            );
+          }
+          return textResult("Done.", 15, 8);
+        },
+      });
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const tools = [
+        ToolSchema.fromZod(
+          "edit_file",
+          "Edit a file",
+          z.object({ path: z.string() }),
+          undefined,
+          undefined,
+          "diff",
+        ),
+        ToolSchema.fromZod("search", "Search", z.object({ q: z.string() })),
+      ];
+      const agent = makeAgent({ getTools: () => tools });
+      const executor = makeToolExecutor(async () => "result");
+      const runner = new AgentRunner(model, bus);
+
+      await runner.run(agent, "Use tools", { toolExecutor: executor });
+
+      const starts = events.filter((e) => e.type === "agent.tool.start");
+      const ends = events.filter((e) => e.type === "agent.tool.end");
+
+      const editStart = starts.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-1");
+      const searchStart = starts.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-2");
+      const editEnd = ends.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-1");
+      const searchEnd = ends.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-2");
+
+      expect((editStart as { displayType?: string }).displayType).toBe("diff");
+      expect((editEnd as { displayType?: string }).displayType).toBe("diff");
+      expect(searchStart).not.toHaveProperty("displayType");
+      expect(searchEnd).not.toHaveProperty("displayType");
+    });
   });
 
   describe("token counting", () => {
@@ -951,6 +1003,48 @@ describe("AgentRunner", () => {
 
       const complete = events.find((e) => e.type === "agent.message.complete");
       expect((complete as { finishReason?: string }).finishReason).toBe("stop");
+    });
+
+    it("stamps displayType on tool.start/end via convertExecutableTools (capable model), omits the key when undeclared", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV2({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-structured-1", toolName: "edit_file", input: { path: "a.ts" } },
+              10,
+              5,
+            );
+          }
+          return textResult(JSON.stringify({ ok: true }), 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod(
+          "edit_file",
+          "Edit a file",
+          z.object({ path: z.string() }),
+          undefined,
+          undefined,
+          "diff",
+        ),
+      ];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const executor: ToolExecutor = { execute: async () => "diff --git a/a.ts b/a.ts" };
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ ok: z.boolean() });
+
+      await runner.runStructured(agent, "edit it", schema, { toolExecutor: executor });
+
+      const start = events.find((e) => e.type === "agent.tool.start");
+      const end = events.find((e) => e.type === "agent.tool.end");
+      expect((start as { displayType?: string }).displayType).toBe("diff");
+      expect((end as { displayType?: string }).displayType).toBe("diff");
     });
   });
 

@@ -214,15 +214,15 @@ function mapEventToSSE(event: AgentEvent): SSEMapping | null {
           arguments: event.arguments,
         },
       };
-    case "agent.tool.start":
-      return {
-        name: "tool.start",
-        payload: {
-          tool_call_id: event.toolCallId,
-          tool_name: event.toolName,
-          arguments: event.arguments,
-        },
+    case "agent.tool.start": {
+      const payload: Record<string, unknown> = {
+        tool_call_id: event.toolCallId,
+        tool_name: event.toolName,
+        arguments: event.arguments,
       };
+      if (event.displayType !== undefined) payload.display_type = event.displayType;
+      return { name: "tool.start", payload };
+    }
     case "agent.tool.progress":
       return {
         name: "tool.progress",
@@ -240,6 +240,7 @@ function mapEventToSSE(event: AgentEvent): SSEMapping | null {
         duration_ms: event.durationMs,
       };
       if (event.error !== undefined) payload.error = event.error;
+      if (event.displayType !== undefined) payload.display_type = event.displayType;
       return { name: "tool.end", payload };
     }
     case "agent.tool.rejected":

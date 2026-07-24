@@ -191,6 +191,25 @@ describe("agentEventToSSE — client-facing canonical vocabulary", () => {
     expect(parsed.duration_ms).toBe(12);
   });
 
+  // #352 — belt-and-braces witness of "zero server changes": the relay
+  // (agentEventToSSE -> runtime's toSSEMapping) carries a NEW runtime payload
+  // key (display_type) through with no server-side allowlist to update.
+  it("relays display_type on tool.end verbatim (zero server changes)", () => {
+    const result = agentEventToSSE({
+      type: "agent.tool.end",
+      toolCallId: "tc-1",
+      toolName: "edit_file",
+      arguments: { path: "a.ts" },
+      result: "diff --git a/a.ts b/a.ts",
+      durationMs: 40,
+      resultTokens: 0,
+      displayType: "diff",
+      ...base,
+    });
+    const parsed = JSON.parse(result!.data);
+    expect(parsed.display_type).toBe("diff");
+  });
+
   it("maps tool.rejected", () => {
     const result = agentEventToSSE({
       type: "agent.tool.rejected",

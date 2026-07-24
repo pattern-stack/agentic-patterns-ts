@@ -355,6 +355,14 @@ export class AgentRunner implements RunnerProtocol {
     // the explicit exit for a raw tool-loop agent (vs the implicit "reply with
     // no tool call"). Resolved once; checked after each iteration's dispatch.
     const terminalTools = new Set(agentTools.filter((t) => t.terminal === true).map((t) => t.name));
+    // #352: name -> declared render hint (ToolSchema.displayType), for the
+    // tool.start/tool.end stamp below. Same resolve-once-by-name precedent as
+    // terminalTools.
+    const displayTypes = new Map(
+      agentTools.flatMap((t) =>
+        t.displayType !== undefined ? [[t.name, t.displayType] as const] : [],
+      ),
+    );
 
     // #117: hoisted above the start event (was after it) so message.start can
     // stamp systemPrompt — renderInitialPrompt() is a pure render, hoisting is safe.
@@ -608,6 +616,9 @@ export class AgentRunner implements RunnerProtocol {
             toolCallId: tc.toolCallId,
             toolName: tc.toolName,
             arguments: tc.input as Record<string, unknown>,
+            ...(displayTypes.has(tc.toolName)
+              ? { displayType: displayTypes.get(tc.toolName) }
+              : {}),
           });
           const tcSpanId = tcStart.spanId;
           await this.emit(tcStart);
@@ -655,6 +666,9 @@ export class AgentRunner implements RunnerProtocol {
               error: errorMsg,
               durationMs,
               resultTokens: 0,
+              ...(displayTypes.has(tc.toolName)
+                ? { displayType: displayTypes.get(tc.toolName) }
+                : {}),
             }),
           );
 
@@ -920,6 +934,7 @@ export class AgentRunner implements RunnerProtocol {
             toolCallId: intent.toolCallId,
             toolName,
             arguments: args,
+            ...(t.displayType !== undefined ? { displayType: t.displayType } : {}),
           });
           const tcSpanId = tcStart.spanId;
           await this.emit(tcStart);
@@ -963,6 +978,7 @@ export class AgentRunner implements RunnerProtocol {
               error: errorMsg,
               durationMs: Date.now() - startTime,
               resultTokens: 0,
+              ...(t.displayType !== undefined ? { displayType: t.displayType } : {}),
             }),
           );
 
@@ -1243,6 +1259,13 @@ export class AgentRunner implements RunnerProtocol {
     const hasTools = agentTools.length > 0;
     // Terminal tools — parity with run(): a successful call ends the loop.
     const terminalTools = new Set(agentTools.filter((t) => t.terminal === true).map((t) => t.name));
+    // #352: parity with run() — name -> declared render hint, for the
+    // tool.start/tool.end stamp below.
+    const displayTypes = new Map(
+      agentTools.flatMap((t) =>
+        t.displayType !== undefined ? [[t.name, t.displayType] as const] : [],
+      ),
+    );
 
     const system = agent.renderInitialPrompt(this._renderCtx(options));
     const messages: ModelMessage[] = [];
@@ -1687,6 +1710,7 @@ export class AgentRunner implements RunnerProtocol {
           toolCallId: tc.toolCallId,
           toolName: tc.toolName,
           arguments: tc.args,
+          ...(displayTypes.has(tc.toolName) ? { displayType: displayTypes.get(tc.toolName) } : {}),
         });
         const tcSpanId = tcStart.spanId;
         await this.emit(tcStart);
@@ -1751,6 +1775,7 @@ export class AgentRunner implements RunnerProtocol {
           error: errorMsg,
           durationMs,
           resultTokens: 0,
+          ...(displayTypes.has(tc.toolName) ? { displayType: displayTypes.get(tc.toolName) } : {}),
         });
         await this.emit(tcEnd);
         yield tcEnd;

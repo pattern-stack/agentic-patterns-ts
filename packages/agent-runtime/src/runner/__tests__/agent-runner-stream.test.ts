@@ -189,6 +189,57 @@ describe("AgentRunner.stream()", () => {
     expect(types).toContain("agent.conversation.end");
   });
 
+  it("stamps displayType on tool.start/end when the schema declares it, omits the key otherwise", async () => {
+    let callCount = 0;
+    const model = new MockLanguageModelV2({
+      doStream: async () => {
+        callCount++;
+        if (callCount === 1) {
+          return streamFrom([
+            toolCallPart("tc-1", "edit_file", { path: "a.ts" }),
+            toolCallPart("tc-2", "search", { q: "x" }),
+            finishPart("tool-calls", 10, 5),
+          ])();
+        }
+        return streamFrom([...textParts("Done."), finishPart("stop", 20, 10)])();
+      },
+    });
+
+    const tools = [
+      ToolSchema.fromZod(
+        "edit_file",
+        "Edit a file",
+        z.object({ path: z.string() }),
+        undefined,
+        undefined,
+        "diff",
+      ),
+      ToolSchema.fromZod("search", "Search", z.object({ q: z.string() })),
+    ];
+    const bus = new AgentEventBus();
+    const runner = new AgentRunner(model, bus);
+    const agent = makeAgent({ getTools: () => tools });
+
+    const events = await collectStream(
+      runner.stream(agent, "Use tools", {
+        toolExecutor: { execute: async () => "result" },
+      }),
+    );
+
+    const starts = events.filter((e) => e.type === "agent.tool.start");
+    const ends = events.filter((e) => e.type === "agent.tool.end");
+
+    const editStart = starts.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-1");
+    const searchStart = starts.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-2");
+    const editEnd = ends.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-1");
+    const searchEnd = ends.find((e) => (e as { toolCallId?: string }).toolCallId === "tc-2");
+
+    expect((editStart as { displayType?: string }).displayType).toBe("diff");
+    expect((editEnd as { displayType?: string }).displayType).toBe("diff");
+    expect(searchStart).not.toHaveProperty("displayType");
+    expect(searchEnd).not.toHaveProperty("displayType");
+  });
+
   it("handles LLM error during streaming", async () => {
     const model = new MockLanguageModelV2({
       doStream: async () => {
