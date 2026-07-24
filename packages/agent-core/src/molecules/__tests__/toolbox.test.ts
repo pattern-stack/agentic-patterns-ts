@@ -96,6 +96,29 @@ describe("Toolbox", () => {
       expect(schemas.find((s) => s.name === "search")!.terminal).toBeUndefined();
       expect(schemas.find((s) => s.name === "finish")!.terminal).toBe(true);
     });
+
+    it("carries a tool's displayType hint through, and omits it otherwise", () => {
+      class RenderToolbox extends Toolbox {
+        readonly name = "Render";
+        readonly description = "Has a tool with a display hint";
+        readonly tools: Record<string, ToolDefinition> = {
+          search: {
+            description: "Ordinary tool",
+            parameters: z.object({ q: z.string() }),
+            execute: async (args) => args,
+          },
+          edit: {
+            description: "Edits a file",
+            parameters: z.object({ path: z.string() }),
+            displayType: "diff",
+            execute: async (args) => args,
+          },
+        };
+      }
+      const schemas = new RenderToolbox().getToolSchemas();
+      expect(schemas.find((s) => s.name === "search")!.displayType).toBeUndefined();
+      expect(schemas.find((s) => s.name === "edit")!.displayType).toBe("diff");
+    });
   });
 
   describe("getToolNames", () => {

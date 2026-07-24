@@ -132,6 +132,8 @@ export interface ToolCallStartEvent extends BaseEvent {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly arguments: Record<string, unknown>;
+  /** Optional render hint from the tool's ToolSchema — see ToolDefinition.displayType. */
+  readonly displayType?: string;
   readonly parentEventId?: string;
 }
 
@@ -142,6 +144,8 @@ export interface ToolCallEndEvent extends BaseEvent {
   readonly arguments: Record<string, unknown>;
   readonly result: unknown;
   readonly error?: string;
+  /** Optional render hint from the tool's ToolSchema — see ToolDefinition.displayType. */
+  readonly displayType?: string;
   readonly durationMs: number;
   readonly resultTokens: number;
 }

@@ -76,6 +76,19 @@ export interface ToolDefinition {
    */
   terminal?: boolean;
   /**
+   * Optional render hint for transports/clients ("code" | "diff" | "bash" today,
+   * by convention — the string is opaque to core). Same philosophy as `terminal`:
+   * core carries the flag, the host/renderer interprets it.
+   *
+   * Producer contract for the conventional values (B-5):
+   *   "diff" — result must be unified-diff TEXT and `arguments.path` names the file;
+   *   "code" — result is the code string; language inferred from `arguments.path`;
+   *   "bash" — result rendered as a bash block.
+   * Renderers rich-render STRING results only — object-returning tools get the
+   * generic render regardless of the hint.
+   */
+  displayType?: string;
+  /**
    * Executes the tool. `ctx` is an optional execution context (event sink +
    * correlation ids) supplied by the host; existing implementations that
    * ignore it remain valid (assignment-compatible trailing optional param).
@@ -125,6 +138,8 @@ export function defineTool<P extends ZodTypeAny, R extends ZodTypeAny>(spec: {
   parameters: P;
   returns: R;
   terminal?: boolean;
+  /** Optional render hint — see `ToolDefinition.displayType`. */
+  displayType?: string;
   /**
    * Parse output through `returns` before returning it.
    * @default true
@@ -158,6 +173,9 @@ export function defineTool<P extends ZodTypeAny, R extends ZodTypeAny>(spec: {
   if (spec.terminal !== undefined) {
     definition.terminal = spec.terminal;
   }
+  if (spec.displayType !== undefined) {
+    definition.displayType = spec.displayType;
+  }
   return definition;
 }
 
@@ -175,7 +193,14 @@ export abstract class Toolbox {
   /** Get tool definitions as ToolSchema objects. */
   getToolSchemas(): ToolSchema[] {
     return Object.entries(this.tools).map(([name, def]) =>
-      ToolSchema.fromZod(name, def.description, def.parameters, def.returns, def.terminal),
+      ToolSchema.fromZod(
+        name,
+        def.description,
+        def.parameters,
+        def.returns,
+        def.terminal,
+        def.displayType,
+      ),
     );
   }
 

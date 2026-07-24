@@ -172,6 +172,27 @@ describe("formatSSE", () => {
     expect(data.arguments).toEqual({ query: "test" });
   });
 
+  it("formats tool.start with display_type only when displayType is declared", () => {
+    const withHint = createEvent("agent.tool.start", {
+      ...baseFields,
+      toolCallId: "tc-1",
+      toolName: "edit_file",
+      arguments: { path: "a.ts" },
+      displayType: "diff",
+    });
+    const { data: dataWithHint } = parseSSE(formatSSE(withHint)!);
+    expect(dataWithHint.display_type).toBe("diff");
+
+    const withoutHint = createEvent("agent.tool.start", {
+      ...baseFields,
+      toolCallId: "tc-2",
+      toolName: "search",
+      arguments: { query: "test" },
+    });
+    const { data: dataWithoutHint } = parseSSE(formatSSE(withoutHint)!);
+    expect(dataWithoutHint).not.toHaveProperty("display_type");
+  });
+
   it("formats tool.end", () => {
     const event = createEvent("agent.tool.end", {
       ...baseFields,
@@ -190,6 +211,33 @@ describe("formatSSE", () => {
     expect(data.tool_name).toBe("search");
     expect(data.result).toEqual({ items: [] });
     expect(data.duration_ms).toBe(150);
+  });
+
+  it("formats tool.end with display_type only when displayType is declared", () => {
+    const withHint = createEvent("agent.tool.end", {
+      ...baseFields,
+      toolCallId: "tc-1",
+      toolName: "edit_file",
+      arguments: { path: "a.ts" },
+      result: "diff --git a/a.ts b/a.ts",
+      durationMs: 50,
+      resultTokens: 0,
+      displayType: "diff",
+    });
+    const { data: dataWithHint } = parseSSE(formatSSE(withHint)!);
+    expect(dataWithHint.display_type).toBe("diff");
+
+    const withoutHint = createEvent("agent.tool.end", {
+      ...baseFields,
+      toolCallId: "tc-2",
+      toolName: "search",
+      arguments: { query: "test" },
+      result: { items: [] },
+      durationMs: 150,
+      resultTokens: 25,
+    });
+    const { data: dataWithoutHint } = parseSSE(formatSSE(withoutHint)!);
+    expect(dataWithoutHint).not.toHaveProperty("display_type");
   });
 
   it("formats tool.end with error", () => {

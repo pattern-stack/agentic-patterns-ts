@@ -183,6 +183,27 @@ describe("SSEFormatter", () => {
       expect(parsed.event).toBe("tool.start");
     });
 
+    it("formats tool.start with display_type only when displayType is declared", () => {
+      const withHint = createEvent("agent.tool.start", {
+        ...makeBase(),
+        toolCallId: "tc-1",
+        toolName: "edit_file",
+        arguments: { path: "a.ts" },
+        displayType: "diff",
+      });
+      const parsedWithHint = parseSSE(formatter.format(withHint)!);
+      expect(parsedWithHint.data.display_type).toBe("diff");
+
+      const withoutHint = createEvent("agent.tool.start", {
+        ...makeBase(),
+        toolCallId: "tc-2",
+        toolName: "search",
+        arguments: { query: "hello" },
+      });
+      const parsedWithoutHint = parseSSE(formatter.format(withoutHint)!);
+      expect(parsedWithoutHint.data).not.toHaveProperty("display_type");
+    });
+
     it("formats tool.progress", () => {
       const event = createEvent("agent.tool.progress", {
         ...makeBase(),
@@ -214,6 +235,33 @@ describe("SSEFormatter", () => {
       const parsed = parseSSE(frame!);
       expect(parsed.event).toBe("tool.end");
       expect(parsed.data.duration_ms).toBe(150);
+    });
+
+    it("formats tool.end with display_type only when displayType is declared", () => {
+      const withHint = createEvent("agent.tool.end", {
+        ...makeBase(),
+        toolCallId: "tc-1",
+        toolName: "edit_file",
+        arguments: { path: "a.ts" },
+        result: "diff --git a/a.ts b/a.ts",
+        durationMs: 50,
+        resultTokens: 0,
+        displayType: "diff",
+      });
+      const parsedWithHint = parseSSE(formatter.format(withHint)!);
+      expect(parsedWithHint.data.display_type).toBe("diff");
+
+      const withoutHint = createEvent("agent.tool.end", {
+        ...makeBase(),
+        toolCallId: "tc-2",
+        toolName: "search",
+        arguments: { query: "hello" },
+        result: { items: [] },
+        durationMs: 150,
+        resultTokens: 0,
+      });
+      const parsedWithoutHint = parseSSE(formatter.format(withoutHint)!);
+      expect(parsedWithoutHint.data).not.toHaveProperty("display_type");
     });
 
     it("formats tool.rejected", () => {

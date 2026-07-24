@@ -186,6 +186,29 @@ describe("defineTool", () => {
     expect(schemas.find((s) => s.name === "plain")!.terminal).toBeUndefined();
   });
 
+  it("passes displayType through and preserves omission", () => {
+    const diff = defineTool({
+      description: "Edits a file",
+      parameters: z.object({ path: z.string() }),
+      returns: z.string(),
+      displayType: "diff",
+      execute: async ({ path }) => path,
+    });
+    const plain = defineTool({
+      description: "Ordinary tool",
+      parameters: z.object({}),
+      returns: z.string(),
+      execute: async () => "ok",
+    });
+
+    expect(diff.displayType).toBe("diff");
+    expect("displayType" in plain).toBe(false);
+
+    const schemas = toolbox("t", "Render", { diff, plain }).getToolSchemas();
+    expect(schemas.find((s) => s.name === "diff")!.displayType).toBe("diff");
+    expect(schemas.find((s) => s.name === "plain")!.displayType).toBeUndefined();
+  });
+
   it("does not rewrap ordinary execution errors", async () => {
     const sentinel = new Error("boom");
     const def = defineTool({

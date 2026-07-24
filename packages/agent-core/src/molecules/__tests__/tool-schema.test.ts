@@ -37,6 +37,22 @@ describe("ToolSchema", () => {
       const ordinary = ToolSchema.fromZod("search", "Search", params);
       expect(ordinary.terminal).toBeUndefined();
     });
+
+    it("carries the displayType hint when set, undefined otherwise", () => {
+      const params = z.object({ path: z.string() });
+      const withHint = ToolSchema.fromZod(
+        "edit",
+        "Edit a file",
+        params,
+        undefined,
+        undefined,
+        "diff",
+      );
+      expect(withHint.displayType).toBe("diff");
+
+      const ordinary = ToolSchema.fromZod("search", "Search", params);
+      expect(ordinary.displayType).toBeUndefined();
+    });
   });
 
   describe("fromOpenAI", () => {
@@ -96,6 +112,22 @@ describe("ToolSchema", () => {
 
       const ordinary = new ToolSchema("t", "T", { type: "object" });
       expect(ordinary.toDict()).not.toHaveProperty("terminal");
+    });
+
+    it("includes displayType only when declared", () => {
+      const withHint = new ToolSchema(
+        "t",
+        "T",
+        { type: "object" },
+        undefined,
+        undefined,
+        undefined,
+        "diff",
+      );
+      expect(withHint.toDict()).toHaveProperty("displayType", "diff");
+
+      const ordinary = new ToolSchema("t", "T", { type: "object" });
+      expect(ordinary.toDict()).not.toHaveProperty("displayType");
     });
   });
 
