@@ -237,6 +237,49 @@ export function conversationRoutes(
     );
   });
 
+  // GET /conversations — bare snake_case summary array for the Go
+  // chat-patterns picker (#351). `httpclient.ListConversations`'s default
+  // path is exactly `/conversations` and decodes a bare top-level array —
+  // zero EndpointConfig override needed (dossier A-4). Deliberate in-route
+  // `getMessages` N+1 per row (A-1, locked): `StoredConversationSummary` has
+  // no kind/token split, and extending it would force a runtime-protocol
+  // change + bump-both for a server-only feature; picker scale is tens of
+  // rows against local SQLite/in-memory. Branch fields (`branched_from_id`/
+  // `branched_at_sequence`) are deliberately omitted — no TS branch concept
+  // yet (plan §7); Go decodes them nil via `omitempty` pointers.
+  app.get("/conversations", async (c) => {
+    if (!store) return notConfigured(c);
+    const agentName = c.req.query("agent_name");
+    const summaries = await store.listConversations();
+    const filtered = agentName ? summaries.filter((s) => s.agentName === agentName) : summaries;
+    const rows: Array<{
+      id: string;
+      agent_name: string;
+      model: string;
+      state: "active" | "completed" | "error";
+      exchange_count: number;
+      total_input_tokens: number;
+      total_output_tokens: number;
+      created_at: string;
+      updated_at: string;
+    }> = [];
+    for (const s of filtered) {
+      const messages = await store.getMessages(s.conversationId);
+      rows.push({
+        id: s.conversationId,
+        agent_name: s.agentName,
+        model: s.model,
+        state: s.status,
+        exchange_count: messages.filter((m) => m.kind === "request").length,
+        total_input_tokens: messages.reduce((n, m) => n + m.inputTokens, 0),
+        total_output_tokens: messages.reduce((n, m) => n + m.outputTokens, 0),
+        created_at: s.startedAt.toISOString(),
+        updated_at: (s.lastMessageAt ?? s.startedAt).toISOString(),
+      });
+    }
+    return c.json(rows);
+  });
+
   // GET /admin/conversations — ConversationSummary[]
   app.get("/admin/conversations", async (c) => {
     if (!store) return notConfigured(c);
@@ -283,6 +326,34 @@ export function conversationRoutes(
       error: null,
       createdAt: conv.createdAt.toISOString(),
       updatedAt: (lastMessage?.createdAt ?? conv.updatedAt).toISOString(),
+      // Additive snake_case aliases + inline `messages[]` for the Go
+      // chat-patterns replay view (#351) — every camelCase key above stays
+      // byte-identical (dashboard regression guard). Zero extra store
+      // calls: `messages` is the fetch above. `total_input_tokens` /
+      // `total_output_tokens` (DELTA-1, deliberate addition over dossier
+      // A.2) mirror the list route's split so Go's `ConversationDetailResponse`
+      // (which declares both) never decodes zeros.
+      agent_name: conv.agentName,
+      state: "active",
+      exchange_count: messages.filter((m) => m.kind === "request").length,
+      total_input_tokens: messages.reduce((n, m) => n + m.inputTokens, 0),
+      total_output_tokens: messages.reduce((n, m) => n + m.outputTokens, 0),
+      created_at: conv.createdAt.toISOString(),
+      updated_at: (lastMessage?.createdAt ?? conv.updatedAt).toISOString(),
+      // `kind` stays verbatim `request|response` (A-2, locked) — the Go
+      // replay renderer owns the user/assistant mapping. `sequence` is the
+      // array index (the store has no sequence column; array order IS the
+      // order). `metadata` is included on parts per A-3.
+      messages: messages.map((m, i) => ({
+        id: m.id,
+        kind: m.kind,
+        sequence: i,
+        parts: m.parts.map((p) => ({
+          type: p.type,
+          content: p.content ?? null,
+          metadata: p.metadata,
+        })),
+      })),
     });
   });
 
