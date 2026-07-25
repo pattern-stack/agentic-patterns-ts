@@ -5,9 +5,11 @@ import { Spinner } from "../components/atoms/Spinner";
 import { AlertIcon } from "../components/atoms/icons";
 import { EventStream } from "../components/organisms/EventStream";
 import { useEventStream } from "../hooks/useEventStream";
+import { useBreakpoint } from "../hooks/useMediaQuery";
 
 export function LivePage() {
   const { events, connected, error, clear } = useEventStream("/admin/events/stream");
+  const { isPhone } = useBreakpoint();
 
   return (
     <div>
@@ -17,6 +19,7 @@ export function LivePage() {
           alignItems: "center",
           justifyContent: "space-between",
           marginBottom: 20,
+          ...(isPhone ? { flexWrap: "wrap" as const, rowGap: 8 } : {}),
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

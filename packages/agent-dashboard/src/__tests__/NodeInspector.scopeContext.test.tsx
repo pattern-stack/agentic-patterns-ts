@@ -63,3 +63,18 @@ describe("NodeInspector Scope context section (#268)", () => {
     expect(queryByText("Scope")).toBeNull();
   });
 });
+
+describe("NodeInspector — panel width clamp (W1-LiveRun)", () => {
+  afterEach(() => cleanup());
+
+  it("clamps the panel width unconditionally so it never exceeds the viewport", () => {
+    const { container } = render(
+      <NodeInspector node={AGENT_NODE} steps={[]} runMeta={{}} onClose={() => {}} />,
+    );
+    const aside = container.querySelector("aside") as HTMLElement | null;
+    // jsdom's CSSOM re-serializes the min() expression (whitespace around the
+    // comma) — assert the clamp's shape/values rather than the exact source string.
+    expect(aside?.style.width).toContain("min(344px");
+    expect(aside?.style.width).toContain("calc(100vw - 24px)");
+  });
+});

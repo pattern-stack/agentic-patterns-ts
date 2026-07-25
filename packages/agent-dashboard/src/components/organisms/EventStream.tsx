@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { StreamEvent } from "../../hooks/useEventStream";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { Badge, type Tone } from "../atoms/Badge";
 
 const TYPE_TONES: Record<string, Tone> = {
@@ -69,6 +70,7 @@ interface EventStreamProps {
 export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStreamProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { isPhone } = useBreakpoint();
 
   // Auto-scroll to the latest event, but only while the user is already
   // near the bottom — scrolling up to inspect older events shouldn't
@@ -157,13 +159,14 @@ export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStr
               <pre
                 style={{
                   margin: 0,
-                  padding: "8px 14px 12px 40px",
+                  padding: isPhone ? "8px 14px 12px 14px" : "8px 14px 12px 40px",
                   background: "var(--background)",
                   color: "var(--ink-2)",
                   fontFamily: "var(--font-mono)",
                   fontSize: 11,
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
+                  overflowWrap: "anywhere",
                   lineHeight: 1.5,
                 }}
               >

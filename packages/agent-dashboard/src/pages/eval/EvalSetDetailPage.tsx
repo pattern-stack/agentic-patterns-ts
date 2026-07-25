@@ -164,7 +164,7 @@ export function EvalSetDetailPage() {
             {set.id}
           </span>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Button size="sm" onClick={() => setModal({ kind: "runEval" })}>
             Run eval
           </Button>
@@ -279,6 +279,7 @@ export function EvalSetDetailPage() {
                       {
                         key: "expected",
                         header: "Expected",
+                        hideBelow: "sm",
                         render: (row) =>
                           row.expected === null || row.expected === undefined ? (
                             <span style={{ color: "var(--ink-3)" }}>—</span>
@@ -289,6 +290,7 @@ export function EvalSetDetailPage() {
                       {
                         key: "tags",
                         header: "Tags",
+                        hideBelow: "md",
                         render: (row) =>
                           row.tags && row.tags.length > 0 ? (
                             <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
@@ -365,11 +367,21 @@ export function EvalSetDetailPage() {
                     </span>
                   ),
                 },
-                { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
-                { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
+                {
+                  key: "targetId",
+                  header: "Target",
+                  render: (row) => row.targetId ?? "—",
+                },
+                {
+                  key: "variant",
+                  header: "Variant",
+                  hideBelow: "md",
+                  render: (row) => row.variant ?? "—",
+                },
                 {
                   key: "split",
                   header: "Split",
+                  hideBelow: "sm",
                   render: (row) => <Badge tone="mute">{row.split ?? "untagged"}</Badge>,
                 },
                 {

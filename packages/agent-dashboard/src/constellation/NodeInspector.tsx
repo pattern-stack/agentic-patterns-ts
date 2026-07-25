@@ -16,7 +16,7 @@ import type { ConstNode } from "../graph/constellation-model";
 import type { TraceStep } from "../graph/types";
 import { T } from "../ui/tokens";
 
-const PANEL_W = 344;
+const PANEL_W = "min(344px, calc(100vw - 24px))";
 
 type Tab = "io" | "tok" | "prov" | "lens";
 const TABS: { value: Tab; label: string }[] = [

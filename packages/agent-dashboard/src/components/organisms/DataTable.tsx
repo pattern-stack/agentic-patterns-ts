@@ -9,13 +9,16 @@
  * port-map §7.1), not a JS `onMouseEnter`/`onMouseLeave` mutation.
  */
 
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, useMemo } from "react";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 
-interface Column<T> {
+export interface Column<T> {
   key: string;
   header: string;
   render?: (row: T) => ReactNode;
   align?: "left" | "right" | "center";
+  /** Drop this column below the breakpoint: "sm" = <640px, "md" = <900px. */
+  hideBelow?: "sm" | "md";
 }
 
 interface DataTableProps<T> {
@@ -35,17 +38,17 @@ interface DataTableProps<T> {
   renderExpanded?: (row: T) => ReactNode;
 }
 
-const cellStyle = (align = "left") =>
+const cellStyle = (align = "left", isPhone = false) =>
   ({
-    padding: "10px 14px",
+    padding: isPhone ? "8px 10px" : "10px 14px",
     textAlign: align as "left" | "right" | "center",
     borderBottom: "1px solid var(--line)",
     fontSize: 14,
   }) as const;
 
-const headerStyle = (align = "left") =>
+const headerStyle = (align = "left", isPhone = false) =>
   ({
-    ...cellStyle(align),
+    ...cellStyle(align, isPhone),
     color: "var(--ink-2)",
     fontWeight: 500,
     fontSize: 12,
@@ -72,9 +75,19 @@ export function DataTable<T>({
   onToggleExpand,
   renderExpanded,
 }: DataTableProps<T>) {
+  const { isPhone, isNarrow } = useBreakpoint();
+  const visibleColumns = useMemo(
+    () =>
+      columns.filter((col) => {
+        if (col.hideBelow === "sm") return !isPhone;
+        if (col.hideBelow === "md") return !isNarrow;
+        return true;
+      }),
+    [columns, isPhone, isNarrow],
+  );
   const expandable = Boolean(onToggleExpand && renderExpanded);
   const interactive = expandable || Boolean(onRowClick);
-  const totalColSpan = columns.length + (expandable ? 1 : 0);
+  const totalColSpan = visibleColumns.length + (expandable ? 1 : 0);
 
   return (
     <div
@@ -83,16 +96,18 @@ export function DataTable<T>({
         border: "1px solid var(--line)",
         borderRadius: "var(--radius-lg)",
         overflow: "hidden",
+        overflowX: "auto",
+        WebkitOverflowScrolling: "touch",
       }}
     >
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            {expandable && <th style={headerStyle()} aria-label="expand" />}
-            {columns.map((col) => (
+            {expandable && <th style={headerStyle(undefined, isPhone)} aria-label="expand" />}
+            {visibleColumns.map((col) => (
               <th
                 key={col.key}
-                style={headerStyle(col.align)}
+                style={headerStyle(col.align, isPhone)}
                 onClick={() => onSort?.(col.key)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") onSort?.(col.key);
@@ -141,7 +156,7 @@ export function DataTable<T>({
                   {expandable && (
                     <td
                       style={{
-                        ...cellStyle(),
+                        ...cellStyle(undefined, isPhone),
                         width: 28,
                         color: "var(--ink-2)",
                         fontFamily: "var(--font-mono)",
@@ -150,8 +165,8 @@ export function DataTable<T>({
                       {isExpanded ? "▾" : "▸"}
                     </td>
                   )}
-                  {columns.map((col) => (
-                    <td key={col.key} style={cellStyle(col.align)}>
+                  {visibleColumns.map((col) => (
+                    <td key={col.key} style={cellStyle(col.align, isPhone)}>
                       {col.render
                         ? col.render(row)
                         : String((row as Record<string, unknown>)[col.key] ?? "")}
@@ -180,7 +195,7 @@ export function DataTable<T>({
               <td
                 colSpan={totalColSpan}
                 style={{
-                  ...cellStyle("center"),
+                  ...cellStyle("center", isPhone),
                   color: "var(--ink-2)",
                   padding: 32,
                 }}

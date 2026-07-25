@@ -13,7 +13,26 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalRunRow, SplitAggregate } from "../api/types";
+import { __resetMediaQueryCacheForTests } from "../hooks/useMediaQuery";
 import { EvalRunsPage } from "../pages/eval/EvalRunsPage";
+
+/**
+ * Stubs `window.matchMedia` so `useBreakpoint` resolves to a phone viewport
+ * (isPhone AND isNarrow true — a real <640px viewport also satisfies the
+ * <900px "narrow" query). Matches both `maxWidthQuery("sm")` (639px) and
+ * `maxWidthQuery("md")` (899px) from `ui/breakpoints.ts`.
+ */
+function stubPhone() {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: /max-width:\s*(639|899)px/.test(query),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
+}
 
 const runs: EvalRunRow[] = [
   {
@@ -128,6 +147,7 @@ describe("EvalRunsPage", () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    __resetMediaQueryCacheForTests();
   });
 
   it("renders seeded runs — target/variant/status visible", async () => {
@@ -318,6 +338,45 @@ describe("EvalRunsPage", () => {
       });
       // The runs table rendered fine despite the aggregates fetch failing.
       expect(within(table!).getByText("baseline")).toBeTruthy();
+    });
+  });
+
+  describe("responsive column pruning (W1-EvalPages)", () => {
+    it("desktop: Target/Variant/Split/Model columns are all present", async () => {
+      stubFetch();
+      renderPage();
+
+      let table: HTMLElement;
+      await waitFor(() => {
+        table = screen.getByRole("table");
+      });
+      const headers = within(table!);
+      expect(headers.getByRole("columnheader", { name: "Target" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: "Variant" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: "Split" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: "Model" })).toBeTruthy();
+    });
+
+    it("phone: low-value columns are pruned; identity/status/outcome columns remain", async () => {
+      stubPhone();
+      stubFetch();
+      renderPage();
+
+      let table: HTMLElement;
+      await waitFor(() => {
+        table = screen.getByRole("table");
+      });
+      const headers = within(table!);
+      expect(headers.getByRole("columnheader", { name: "Run" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: "Set" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: "Status" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: "Passed" })).toBeTruthy();
+      expect(headers.getByRole("columnheader", { name: /Started/ })).toBeTruthy();
+
+      expect(headers.queryByRole("columnheader", { name: "Target" })).toBeNull();
+      expect(headers.queryByRole("columnheader", { name: "Variant" })).toBeNull();
+      expect(headers.queryByRole("columnheader", { name: "Split" })).toBeNull();
+      expect(headers.queryByRole("columnheader", { name: "Model" })).toBeNull();
     });
   });
 });

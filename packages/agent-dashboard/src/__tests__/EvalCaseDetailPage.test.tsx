@@ -4,11 +4,31 @@
  * renders the case body and a history table whose rows expand + link to runs.
  */
 
+import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EvalCaseDetailResponse } from "../api/types";
+import { __resetMediaQueryCacheForTests } from "../hooks/useMediaQuery";
 import { EvalCaseDetailPage } from "../pages/eval/EvalCaseDetailPage";
+
+/**
+ * Stubs `window.matchMedia` so `useBreakpoint` resolves to a phone viewport
+ * (isPhone AND isNarrow true — a real <640px viewport also satisfies the
+ * <900px "narrow" query). Matches both `maxWidthQuery("sm")` (639px) and
+ * `maxWidthQuery("md")` (899px) from `ui/breakpoints.ts`.
+ */
+function stubPhone() {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: /max-width:\s*(639|899)px/.test(query),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
+}
 
 const detail: EvalCaseDetailResponse = {
   case: {
@@ -96,6 +116,7 @@ describe("EvalCaseDetailPage", () => {
     cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    __resetMediaQueryCacheForTests();
   });
 
   it("renders the case, held-out marker, tags, and the cross-run history newest-first", async () => {
@@ -149,6 +170,44 @@ describe("EvalCaseDetailPage", () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("Eval persistence is not configured")).toBeTruthy();
+    });
+  });
+
+  describe("responsive grid collapse (W1-EvalPages)", () => {
+    it("desktop: the Input/Expected grid is two columns", async () => {
+      stubFetch();
+      renderPage();
+
+      await waitFor(() => screen.getByText("case-01"));
+      const inputHeading = screen.getByText("Input");
+      const grid = inputHeading.parentElement?.parentElement as HTMLElement;
+      expect(grid).toHaveStyle({ gridTemplateColumns: "1fr 1fr" });
+    });
+
+    it("phone: the Input/Expected grid collapses to one column", async () => {
+      stubPhone();
+      stubFetch();
+      renderPage();
+
+      await waitFor(() => screen.getByText("case-01"));
+      const inputHeading = screen.getByText("Input");
+      const grid = inputHeading.parentElement?.parentElement as HTMLElement;
+      expect(grid).toHaveStyle({ gridTemplateColumns: "1fr" });
+    });
+
+    it("phone + expanded history row: the Expected/Actual grid also collapses to one column", async () => {
+      stubPhone();
+      stubFetch();
+      renderPage();
+
+      // "Variant" is hideBelow: "md" (pruned on phone) — click the always-kept
+      // "Result" cell ("pass", the newest row) to expand it instead.
+      await waitFor(() => screen.getByText("pass"));
+      fireEvent.click(screen.getByText("pass")); // expand the newest row
+      const expectedHeading = await screen.findAllByText("Expected");
+      // [0] is the case-body Expected heading; [1] is inside the expanded row.
+      const grid = expectedHeading[1]?.parentElement?.parentElement as HTMLElement;
+      expect(grid).toHaveStyle({ gridTemplateColumns: "1fr" });
     });
   });
 });

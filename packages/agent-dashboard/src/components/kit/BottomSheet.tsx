@@ -1,28 +1,28 @@
 /**
- * Modal atom — a portalled, centered dialog over a dimmed backdrop.
- *
- * The dashboard had no modal primitive; this is the minimal one the eval
- * editors (WI-5) need. Closes on Esc and backdrop click, locks body scroll
- * while open, focuses the panel on mount, and stamps `role="dialog"` +
- * `aria-modal`. No new deps — `createPortal` + `Card`/`Button` + CSS vars.
+ * BottomSheet — a portalled, bottom-anchored overlay primitive that mirrors
+ * `Modal`'s overlay discipline (Esc close, backdrop click, body-scroll-lock,
+ * focus-on-mount, `role="dialog"`) but anchors to the bottom edge, full-width,
+ * with top-rounded corners and its own scrolling body. This is the reusable
+ * "rail → sheet" shape: rail-bearing pages render this instead of a
+ * fixed-width aside once the viewport drops below the narrow breakpoint.
+ * `BottomSheet` itself is presentation-only — it does not read
+ * `useBreakpoint()`; callers decide when to render it.
  */
 
 import { type ReactNode, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useBreakpoint } from "../../hooks/useMediaQuery";
-import { Button } from "./Button";
+import { Button } from "../atoms/Button";
 
-interface ModalProps {
+export interface BottomSheetProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
-  /** Optional footer row (e.g. Save/Cancel actions), right-aligned. */
-  footer?: ReactNode;
+  /** Max sheet height as % of viewport height. Default 75. */
+  maxHeightPct?: number;
 }
 
-export function Modal({ title, onClose, children, footer }: ModalProps) {
+export function BottomSheet({ title, onClose, children, maxHeightPct = 75 }: BottomSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const { isPhone } = useBreakpoint();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -49,11 +49,9 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
         inset: 0,
         background: "color-mix(in oklch, var(--ink) 45%, transparent)",
         display: "flex",
-        alignItems: "flex-start",
+        alignItems: "flex-end",
         justifyContent: "center",
-        padding: isPhone ? "12px 12px 12px" : "8vh 16px 16px",
         zIndex: 1000,
-        overflowY: "auto",
       }}
     >
       <div
@@ -64,21 +62,27 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
         aria-label={title}
         tabIndex={-1}
         style={{
+          width: "100%",
+          maxHeight: `${maxHeightPct}vh`,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
           background: "var(--paper)",
           border: "1px solid var(--line)",
-          borderRadius: "var(--radius-lg)",
-          width: "100%",
-          maxWidth: isPhone ? "100%" : 520,
-          outline: "none",
+          borderBottom: "none",
+          borderRadius: "var(--radius-lg) var(--radius-lg) 0 0",
           boxShadow: "var(--shadow-3)",
+          outline: "none",
+          overflow: "hidden",
         }}
       >
-        <div
+        <header
           style={{
+            flex: "none",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            padding: "14px 18px",
+            padding: "10px 14px",
             borderBottom: "1px solid var(--line)",
           }}
         >
@@ -86,23 +90,19 @@ export function Modal({ title, onClose, children, footer }: ModalProps) {
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
             ✕
           </Button>
-        </div>
-        <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+        </header>
+        {/* Own scroll body — the sheet scrolls, not the page. */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
           {children}
         </div>
-        {footer && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 8,
-              padding: "12px 18px",
-              borderTop: "1px solid var(--line)",
-            }}
-          >
-            {footer}
-          </div>
-        )}
       </div>
     </div>,
     document.body,

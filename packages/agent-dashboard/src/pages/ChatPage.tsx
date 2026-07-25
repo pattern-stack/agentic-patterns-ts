@@ -55,6 +55,7 @@ import { Field, inputStyle } from "../components/kit/Field";
 import { JsonBlock } from "../components/kit/JsonBlock";
 import { Segmented } from "../components/kit/Segmented";
 import { useAdminData } from "../hooks/useAdminData";
+import { useBreakpoint } from "../hooks/useMediaQuery";
 import { relTime, shortId, statusTone } from "../lib/format";
 import { sessionsForAgent } from "../lib/sessions";
 import { type ToolParam, foldToolParams } from "../lib/toolParams";
@@ -258,6 +259,21 @@ export function ChatPage({
   const [railOpen, setRailOpen] = useState(true);
   const [railTab, setRailTab] = useState<RailTab>("tools");
   const [density, setDensity] = useState<ScratchpadDensity>("writes"); // #226 default
+
+  // F1 breakpoint flags — below `md` (900px) the Console rail becomes a
+  // BottomSheet (mode="sheet") driven by a header trigger instead of the
+  // always-visible side aside. jsdom (no matchMedia) resolves desktop, so
+  // every existing suite keeps seeing today's side-rail tree unmodified.
+  const { isNarrow } = useBreakpoint();
+
+  // Sheet must not auto-cover the transcript on a phone load / rotation to
+  // narrow — `railOpen` defaults to `true` for the desktop side rail's
+  // "open by default" behavior, which would be wrong for a sheet. Rotating
+  // BACK to desktop leaves `railOpen` as the user last set it (acceptable;
+  // the side rail's own collapse strip handles reopening).
+  useEffect(() => {
+    if (isNarrow) setRailOpen(false);
+  }, [isNarrow]);
 
   // #226: a [#N] cite seek with density Off would scroll to a hidden frame —
   // parts.tsx bubbles `chat:reveal-state-frames` instead, and we honestly flip
@@ -580,10 +596,15 @@ export function ChatPage({
         display: "flex",
         flexDirection: "column",
         gap: 16,
-        // AppShell's <main> has `padding: 24` (24px top + 24px bottom = 48px)
-        // — this fills exactly the remaining viewport height so ChatPanel's
-        // own inner scroll (not an outer page scroll) handles a long thread.
-        height: "calc(100vh - 48px)",
+        // F2 contract: AppShell's <main> publishes `--appbar-h` (0px desktop,
+        // ~48px narrow, where the top app bar appears) and `--shell-pad-y`
+        // (24px desktop, 12px phone). This fills exactly the remaining
+        // viewport height so ChatPanel's own inner scroll (not an outer page
+        // scroll) handles a long thread. The fallbacks reproduce today's
+        // desktop math exactly (0 + 2*24 = the 48px this calc used to hard-
+        // code). 100dvh (not 100vh) so the phone browser chrome collapsing
+        // doesn't push the composer off-screen.
+        height: "calc(100dvh - var(--appbar-h, 0px) - 2 * var(--shell-pad-y, 24px))",
         minHeight: 0,
       }}
     >
@@ -621,6 +642,7 @@ export function ChatPage({
         viewing={viewing}
         contextAvailable={contextAvailable}
         scopeForm={scopeForm}
+        onOpenConsole={isNarrow ? () => setRailOpen(true) : null}
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
@@ -673,6 +695,7 @@ export function ChatPage({
             />
           </div>
           <ConsoleRail
+            mode={isNarrow ? "sheet" : "side"}
             open={railOpen}
             onToggle={() => setRailOpen((v) => !v)}
             tab={railTab}
@@ -789,6 +812,10 @@ interface HeaderProps {
    *  instance (#268) — gates the scope editor + chip's very existence. */
   contextAvailable: boolean;
   scopeForm: ScopeFormBundle;
+  /** Non-null on narrow viewports — renders the "Console" sheet trigger that
+   *  opens the Console rail (rendered as a BottomSheet below `md`). Null on
+   *  desktop, where the side rail is always visible and needs no trigger. */
+  onOpenConsole?: (() => void) | null;
 }
 
 function Header({
@@ -816,6 +843,7 @@ function Header({
   viewing,
   contextAvailable,
   scopeForm,
+  onOpenConsole,
 }: HeaderProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -890,6 +918,11 @@ function Header({
         >
           {description}
         </div>
+        {onOpenConsole && (
+          <Button variant="ghost" size="sm" onClick={onOpenConsole} aria-label="Open console">
+            Console
+          </Button>
+        )}
         <CopyChatMenu
           messages={displayMessages}
           agentName={assistantName}

@@ -27,6 +27,10 @@ import {
 
 const DEFAULT_SCORER_ID = "exact-match";
 
+/** Clamps every control to its host's width — long option text (set ids, agent
+ *  names) otherwise refuses to shrink below its intrinsic width on phone. */
+const controlStyle = { ...inputStyle, width: "100%", minWidth: 0 } as const;
+
 type SetsState =
   | { kind: "loading" }
   | { kind: "unconfigured" }
@@ -185,7 +189,7 @@ export function RunLaunchForm({
       <Field label="Set">
         {presetSetId ? (
           <div
-            style={{ ...inputStyle, color: "var(--mute)", fontFamily: "var(--font-mono)" }}
+            style={{ ...controlStyle, color: "var(--mute)", fontFamily: "var(--font-mono)" }}
             aria-label="Set"
           >
             {presetSetLabel ?? presetSetId}
@@ -194,7 +198,7 @@ export function RunLaunchForm({
           <select
             value={setId}
             onChange={(e) => setSetId(e.target.value)}
-            style={inputStyle}
+            style={controlStyle}
             aria-label="Set"
           >
             <option value="">Select a set…</option>
@@ -214,7 +218,7 @@ export function RunLaunchForm({
       <Field label="Target">
         {presetTargetId ? (
           <div
-            style={{ ...inputStyle, color: "var(--mute)", fontFamily: "var(--font-mono)" }}
+            style={{ ...controlStyle, color: "var(--mute)", fontFamily: "var(--font-mono)" }}
             aria-label="Target"
           >
             {presetTargetLabel ?? presetTargetId}
@@ -223,7 +227,7 @@ export function RunLaunchForm({
           <select
             value={targetId}
             onChange={(e) => setTargetId(e.target.value)}
-            style={inputStyle}
+            style={controlStyle}
             aria-label="Target"
           >
             <option value="">Select a target…</option>
@@ -244,7 +248,7 @@ export function RunLaunchForm({
         <input
           value={variant}
           onChange={(e) => setVariant(e.target.value)}
-          style={inputStyle}
+          style={controlStyle}
           aria-label="Variant"
           placeholder="e.g. candidate"
         />
@@ -254,7 +258,7 @@ export function RunLaunchForm({
         <select
           value={split}
           onChange={(e) => setSplit(e.target.value as "" | EvalSplit)}
-          style={inputStyle}
+          style={controlStyle}
           aria-label="Split"
         >
           {SPLIT_OPTIONS.map((o) => (
@@ -280,7 +284,7 @@ export function RunLaunchForm({
         <select
           value={scorer}
           onChange={(e) => setScorer(e.target.value)}
-          style={inputStyle}
+          style={controlStyle}
           aria-label="Scorer"
         >
           {scorers.map((s) => (

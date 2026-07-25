@@ -12,6 +12,7 @@ import type { EvalSplit, SplitAggregate } from "../../api/types";
 import { Badge } from "../../components/atoms/Badge";
 import { Card } from "../../components/atoms/Card";
 import { Spinner } from "../../components/atoms/Spinner";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { type SplitAggregateFilters, fetchSplitAggregates } from "../../lib/evalApi";
 import { overfitGap } from "../../lib/evalCompare";
 
@@ -149,18 +150,26 @@ export function SplitAggregatesPanel({ filters }: SplitAggregatesPanelProps) {
 }
 
 function SplitBucketRow({ bucket }: { bucket: SplitAggregate }) {
+  const { isPhone } = useBreakpoint();
   const pct = bucket.passRate === null ? null : Math.round(bucket.passRate * 100);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        flexWrap: isPhone ? "wrap" : undefined,
+      }}
+    >
       <Badge tone="mute" style={{ minWidth: 72, justifyContent: "center" }}>
         {bucket.split ?? "untagged"}
       </Badge>
-      <div style={{ fontSize: 12, color: "var(--ink-2)", minWidth: 150 }}>
+      <div style={{ fontSize: 12, color: "var(--ink-2)", minWidth: isPhone ? 0 : 150 }}>
         {bucket.passed}/{bucket.results} passed · {bucket.failed} failed
       </div>
       <div
         style={{
-          flex: 1,
+          flex: isPhone ? "1 1 100%" : 1,
           height: 8,
           background: "var(--background)",
           borderRadius: 999,

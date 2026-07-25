@@ -663,7 +663,7 @@ button.d-key:focus-visible {
   color: var(--violet);
   font-weight: 700;
 }
-@media (max-width: 700px) {
+@media (max-width: 639px) {
   .ba {
     grid-template-columns: 1fr;
   }
@@ -753,6 +753,16 @@ button.d-key:focus-visible {
 .chat-composer textarea:focus {
   outline: none;
   border-color: var(--accent);
+}
+/* touch target — Button renders className "ap-btn"; the md size renders
+   ~35px tall, below the 40px touch target the textarea already meets. */
+.chat-composer .ap-btn {
+  min-height: 40px;
+}
+@media (max-width: 639px) {
+  .chat-composer textarea {
+    font-size: 16px; /* < 16px focus-zooms the page on iOS Safari */
+  }
 }
 
 /* ── scroll-to-bottom affordance ───────────────────────────────────────────*/

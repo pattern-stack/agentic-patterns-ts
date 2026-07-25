@@ -57,6 +57,7 @@ import {
 import { eventsToSteps, persistedToEventLike } from "../graph/trace-from-events";
 import type { CapabilityMeta } from "../graph/types";
 import { useRunReplay } from "../graph/use-run-replay";
+import { useBreakpoint } from "../hooks/useMediaQuery";
 import { relTime, shortId } from "../lib/format";
 import {
   MAX_RUN_CHIPS,
@@ -251,6 +252,7 @@ function RunPickerMenu({
 }
 
 export function RunSurfacePage() {
+  const { isPhone, isNarrow } = useBreakpoint();
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -664,7 +666,7 @@ export function RunSurfacePage() {
           value={selectedId ?? ""}
           onChange={(e) => selectAgent(e.target.value)}
           disabled={!agents.length || streaming}
-          style={{ ...inputStyle, minWidth: 170 }}
+          style={{ ...inputStyle, minWidth: isPhone ? 120 : 170 }}
         >
           {agents.length === 0 && <option value="">No agents registered</option>}
           {agents.map((a) => (
@@ -684,7 +686,7 @@ export function RunSurfacePage() {
           }}
           disabled={!selectedId || streaming}
           placeholder={selectedId ? "Ask the agent something…" : "Select an agent to start."}
-          style={{ ...inputStyle, flex: 1, minWidth: 220, padding: "8px 12px" }}
+          style={{ ...inputStyle, flex: 1, minWidth: isPhone ? 140 : 220, padding: "8px 12px" }}
         />
         <Button onClick={() => void send(input)} disabled={!selectedId || streaming}>
           Send
@@ -697,12 +699,20 @@ export function RunSurfacePage() {
         {error && <span style={{ fontSize: 12, color: "var(--err)" }}>{error}</span>}
       </div>
 
-      <div style={{ display: "flex", gap: 16, minHeight: 540 }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: isNarrow ? "column" : "row",
+          gap: 16,
+          minHeight: isNarrow ? undefined : 540,
+        }}
+      >
         <div
           style={{
             flex: 1,
             position: "relative",
             minWidth: 0,
+            minHeight: isNarrow ? 320 : undefined,
             border: "1px solid var(--line)",
             borderRadius: T.radius.lg,
             overflow: "hidden",
@@ -732,6 +742,7 @@ export function RunSurfacePage() {
           onSeek={replay.seek}
           request={runMeta.request}
           answer={runMeta.answer}
+          layout={isNarrow ? "stacked" : "side"}
         />
       </div>
     </div>

@@ -1,8 +1,19 @@
-import { type ReactNode, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { Menu } from "lucide-react";
+import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { ThemeToggle } from "../ThemeToggle";
+import { MobileNavDrawer } from "./MobileNavDrawer";
 
-const navGroups: { heading: string; items: { to: string; label: string; end?: boolean }[] }[] = [
+// Exported so MobileNavDrawer can render the identical data — sidebar and
+// drawer must provably never drift. This creates a benign module cycle
+// (AppShell imports MobileNavDrawer for rendering; MobileNavDrawer imports
+// this const): `navGroups` is a top-of-module const, initialized before
+// either component's first render, and only read at render time.
+export const navGroups: {
+  heading: string;
+  items: { to: string; label: string; end?: boolean }[];
+}[] = [
   {
     heading: "Build",
     items: [
@@ -63,6 +74,92 @@ export function AppShell({ children }: { children: ReactNode }) {
       return !prev;
     });
   };
+
+  const { isPhone, isNarrow } = useBreakpoint();
+  const { pathname } = useLocation();
+
+  // EPHEMERAL. Never persisted — a rotated tablet must not write a collapsed
+  // desktop pref. NEVER touch NAV_COLLAPSED_KEY from the drawer path.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Close on route change (drawer nav click → navigate → close).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the intentional trigger, not read in the body — the effect must re-run on every navigation.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [pathname]);
+  // Close if the viewport widens past md while open (drawer branch unmounts;
+  // without this, re-narrowing would surprise-reopen it).
+  useEffect(() => {
+    if (!isNarrow) setDrawerOpen(false);
+  }, [isNarrow]);
+
+  const padY = isPhone ? 12 : 24; // --shell-pad-y
+  const padX = isPhone ? 16 : 24; // phone: 16px horizontal
+  const mainStyle = {
+    flex: 1,
+    padding: `${padY}px ${padX}px`,
+    overflow: "auto",
+    "--shell-pad-y": `${padY}px`,
+    "--appbar-h": isNarrow ? "48px" : "0px",
+  } as CSSProperties; // cast: custom props aren't in CSSProperties
+
+  if (isNarrow) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <header
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 20, // above page content, below drawer (1000)
+            height: 48,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "0 12px",
+            background: "var(--fill)",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open navigation"
+            style={{
+              appearance: "none",
+              width: 32,
+              height: 32,
+              border: "none",
+              background: "transparent",
+              color: "var(--ink-2)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Menu size={18} />
+          </button>
+          <span
+            style={{
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--ink)",
+              letterSpacing: "-0.01em",
+            }}
+          >
+            Agentic Patterns
+          </span>
+          <div style={{ marginLeft: "auto" }}>
+            <ThemeToggle />
+          </div>
+        </header>
+        <MobileNavDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+        <main style={mainStyle}>{children}</main>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
@@ -164,7 +261,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </>
         )}
       </nav>
-      <main style={{ flex: 1, padding: 24, overflow: "auto" }}>{children}</main>
+      <main style={mainStyle}>{children}</main>
     </div>
   );
 }

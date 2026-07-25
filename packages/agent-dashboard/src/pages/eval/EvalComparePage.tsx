@@ -28,6 +28,7 @@ import { PageHeader } from "../../components/kit/PageHeader";
 import { sectionMicroHeadingStyle } from "../../components/kit/SectionHeading";
 import { Stat } from "../../components/kit/Stat";
 import { DataTable } from "../../components/organisms/DataTable";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { fetchEvalCases, fetchEvalRunDetail, safeParseAnswer } from "../../lib/evalApi";
 import {
   type ComparisonCaseRow,
@@ -39,6 +40,8 @@ import { statusTone } from "../../lib/format";
 import { TraceSection } from "./CaseDetail";
 
 const mutedStyle = { color: "var(--mute)", fontSize: 13 };
+
+const sideBySide = (isPhone: boolean) => (isPhone ? "1fr" : "1fr 1fr");
 
 function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 7) : "—";
@@ -86,6 +89,7 @@ type CompareState =
 export function EvalComparePage() {
   const { aId, bId } = useParams<{ aId: string; bId: string }>();
   const navigate = useNavigate();
+  const { isPhone } = useBreakpoint();
   const [state, setState] = useState<CompareState>({ kind: "loading" });
   const [casesById, setCasesById] = useState<Map<string, EvalCaseRow>>(new Map());
   const [expandedKey, setExpandedKey] = useState<string | undefined>(undefined);
@@ -208,7 +212,10 @@ export function EvalComparePage() {
         </Card>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div
+        data-testid="compare-summary-grid"
+        style={{ display: "grid", gridTemplateColumns: sideBySide(isPhone), gap: 16 }}
+      >
         <ProvenanceCard label="A · baseline" run={a.run} />
         <ProvenanceCard label="B · candidate" run={b.run} />
       </div>
@@ -252,17 +259,19 @@ export function EvalComparePage() {
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{row.caseId}</span>
               ),
             },
-            { key: "a", header: "A", render: (row) => resultBadge(row.a) },
-            { key: "b", header: "B", render: (row) => resultBadge(row.b) },
+            { key: "a", header: "A", hideBelow: "sm", render: (row) => resultBadge(row.a) },
+            { key: "b", header: "B", hideBelow: "sm", render: (row) => resultBadge(row.b) },
             { key: "delta", header: "Δ", render: (row) => deltaBadge(row.delta) },
             {
               key: "scoresA",
               header: "Scores A",
+              hideBelow: "md",
               render: (row) => scoresSummary(row.a?.scores ?? undefined),
             },
             {
               key: "scoresB",
               header: "Scores B",
+              hideBelow: "md",
               render: (row) => scoresSummary(row.b?.scores ?? undefined),
             },
           ]}
@@ -359,6 +368,8 @@ function CompareCaseExpanded({
   row,
   caseRow,
 }: { row: ComparisonCaseRow; caseRow: EvalCaseRow | undefined }) {
+  const { isPhone } = useBreakpoint();
+  const cols = sideBySide(isPhone);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {caseRow && (
@@ -366,7 +377,10 @@ function CompareCaseExpanded({
           <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--mute)" }}>
             Input / Expected
           </summary>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 6 }}>
+          <div
+            data-testid="expanded-input-grid"
+            style={{ display: "grid", gridTemplateColumns: cols, gap: 12, marginTop: 6 }}
+          >
             <div>
               <div style={sectionMicroHeadingStyle()}>Input</div>
               <JsonBlock value={caseRow.input} />
@@ -379,17 +393,26 @@ function CompareCaseExpanded({
         </details>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div
+        data-testid="expanded-actual-grid"
+        style={{ display: "grid", gridTemplateColumns: cols, gap: 12 }}
+      >
         <SideActualPanel label="A" result={row.a} />
         <SideActualPanel label="B" result={row.b} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div
+        data-testid="expanded-scores-grid"
+        style={{ display: "grid", gridTemplateColumns: cols, gap: 12 }}
+      >
         <SideScoresPanel label="A" result={row.a} />
         <SideScoresPanel label="B" result={row.b} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div
+        data-testid="expanded-trace-grid"
+        style={{ display: "grid", gridTemplateColumns: cols, gap: 12 }}
+      >
         <div>
           <div style={sectionMicroHeadingStyle()}>A · Trace</div>
           <TraceSection traceId={row.a?.traceId ?? null} />
