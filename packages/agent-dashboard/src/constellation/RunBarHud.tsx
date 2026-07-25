@@ -33,6 +33,7 @@ export function RunBarHud({ hud }: { hud: Frame["hud"] }) {
         display: "inline-flex",
         alignItems: "center",
         gap: "var(--space-3)",
+        flexWrap: "wrap",
         padding: "6px 12px",
         background: "var(--paper)",
         border: "1px solid var(--line)",

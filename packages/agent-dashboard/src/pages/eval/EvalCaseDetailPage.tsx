@@ -19,6 +19,7 @@ import { AsyncState } from "../../components/kit/AsyncState";
 import { JsonBlock } from "../../components/kit/JsonBlock";
 import { sectionMicroHeadingStyle } from "../../components/kit/SectionHeading";
 import { DataTable } from "../../components/organisms/DataTable";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { fetchEvalCaseDetail, safeParseAnswer } from "../../lib/evalApi";
 import { formatMs, relTime, shortId } from "../../lib/format";
 import { CaseEditModal } from "./CaseEditModal";
@@ -48,6 +49,7 @@ export function EvalCaseDetailPage() {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [expandedKey, setExpandedKey] = useState<string | undefined>(undefined);
   const [editing, setEditing] = useState(false);
+  const { isPhone } = useBreakpoint();
 
   const load = useCallback(async () => {
     if (!id || !caseId) return;
@@ -152,7 +154,14 @@ export function EvalCaseDetailPage() {
             <span style={{ fontSize: 13, color: "var(--ink-3)" }}>no tags</span>
           )}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr",
+            gap: 12,
+            marginTop: 14,
+          }}
+        >
           <div>
             <div style={sectionMicroHeadingStyle()}>Input</div>
             <JsonBlock value={caseRow.input} />
@@ -189,11 +198,22 @@ export function EvalCaseDetailPage() {
                   ),
                 },
                 { key: "tsStart", header: "Started", render: (row) => relTime(row.tsStart) },
-                { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
-                { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
+                {
+                  key: "targetId",
+                  header: "Target",
+                  hideBelow: "sm",
+                  render: (row) => row.targetId ?? "—",
+                },
+                {
+                  key: "variant",
+                  header: "Variant",
+                  hideBelow: "md",
+                  render: (row) => row.variant ?? "—",
+                },
                 {
                   key: "split",
                   header: "Split",
+                  hideBelow: "md",
                   render: (row) => <Badge tone="mute">{row.split ?? "untagged"}</Badge>,
                 },
                 {
@@ -204,6 +224,7 @@ export function EvalCaseDetailPage() {
                 {
                   key: "runStatus",
                   header: "Run",
+                  hideBelow: "sm",
                   render: (row) =>
                     row.runStatus === "error" ? (
                       <Badge tone="err">error</Badge>
@@ -215,12 +236,14 @@ export function EvalCaseDetailPage() {
                   key: "tokens",
                   header: "Tokens",
                   align: "right",
+                  hideBelow: "sm",
                   render: (row) => `${row.inputTokens ?? 0} / ${row.outputTokens ?? 0}`,
                 },
                 {
                   key: "elapsedMs",
                   header: "Elapsed",
                   align: "right",
+                  hideBelow: "md",
                   render: (row) => formatMs(row.elapsedMs),
                 },
               ]}
@@ -230,7 +253,13 @@ export function EvalCaseDetailPage() {
               onToggleExpand={(key) => setExpandedKey((prev) => (prev === key ? undefined : key))}
               renderExpanded={(row) => (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr",
+                      gap: 12,
+                    }}
+                  >
                     <div>
                       <div style={sectionMicroHeadingStyle()}>Expected</div>
                       {caseRow.expected === null || caseRow.expected === undefined ? (

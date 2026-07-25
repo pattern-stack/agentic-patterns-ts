@@ -8,10 +8,12 @@
 import { useState } from "react";
 import { Button } from "../../components/atoms/Button";
 import { Card } from "../../components/atoms/Card";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { RunLaunchForm } from "./RunLaunchForm";
 
 export function RunLauncher() {
   const [open, setOpen] = useState(false);
+  const { isPhone } = useBreakpoint();
 
   if (!open) {
     return (
@@ -22,7 +24,15 @@ export function RunLauncher() {
   }
 
   return (
-    <Card style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 320 }}>
+    <Card
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        minWidth: isPhone ? 0 : 320,
+        maxWidth: "100%",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontSize: 14, fontWeight: 600 }}>Run eval</div>
         <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>

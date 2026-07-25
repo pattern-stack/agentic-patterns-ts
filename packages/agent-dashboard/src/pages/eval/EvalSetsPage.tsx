@@ -158,11 +158,13 @@ export function EvalSetsPage() {
               {
                 key: "splits",
                 header: "Splits",
+                hideBelow: "sm",
                 render: (row) => <SplitCounts counts={row.splitCounts} />,
               },
               {
                 key: "createdTs",
                 header: "Created",
+                hideBelow: "md",
                 render: (row) => relTime(row.createdTs),
               },
             ]}

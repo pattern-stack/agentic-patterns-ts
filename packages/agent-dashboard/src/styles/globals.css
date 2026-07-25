@@ -63,3 +63,24 @@ tr[tabindex]:focus-visible {
     transform: rotate(360deg);
   }
 }
+
+/* Drawer slide-in — used by components/templates/MobileNavDrawer.tsx. */
+@keyframes apdash-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Phone-only (< sm = 640px — keep in sync with src/ui/breakpoints.ts):
+   iOS Safari zooms the page when a focused form control's font-size is
+   below 16px. Force >=16px so tapping inputs never triggers zoom. */
+@media (max-width: 639px) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}

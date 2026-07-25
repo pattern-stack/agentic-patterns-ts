@@ -224,7 +224,7 @@ export function EvalRunDetailPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         {backLink}
         <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 14 }}>{run.id}</span>
@@ -353,6 +353,7 @@ export function EvalRunDetailPage() {
             {
               key: "runStatus",
               header: "Run",
+              hideBelow: "sm",
               render: (row) =>
                 row.runStatus === "error" ? (
                   <Badge tone="err">error</Badge>
@@ -364,12 +365,14 @@ export function EvalRunDetailPage() {
               key: "tokens",
               header: "Tokens",
               align: "right",
+              hideBelow: "sm",
               render: (row) => `${row.inputTokens ?? 0} / ${row.outputTokens ?? 0}`,
             },
             {
               key: "elapsedMs",
               header: "Elapsed",
               align: "right",
+              hideBelow: "md",
               render: (row) => formatMs(row.elapsedMs),
             },
           ]}

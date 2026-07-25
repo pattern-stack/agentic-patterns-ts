@@ -275,11 +275,22 @@ export function EvalRunsPage() {
                     ),
                   },
                   { key: "setId", header: "Set", render: (row) => row.setId ?? "—" },
-                  { key: "targetId", header: "Target", render: (row) => row.targetId ?? "—" },
-                  { key: "variant", header: "Variant", render: (row) => row.variant ?? "—" },
+                  {
+                    key: "targetId",
+                    header: "Target",
+                    hideBelow: "sm",
+                    render: (row) => row.targetId ?? "—",
+                  },
+                  {
+                    key: "variant",
+                    header: "Variant",
+                    hideBelow: "md",
+                    render: (row) => row.variant ?? "—",
+                  },
                   {
                     key: "split",
                     header: "Split",
+                    hideBelow: "sm",
                     render: (row) => <Badge tone="mute">{row.split ?? "untagged"}</Badge>,
                   },
                   {
@@ -292,7 +303,12 @@ export function EvalRunsPage() {
                     header: "Passed",
                     render: (row) => <PassCell summary={row.summary} />,
                   },
-                  { key: "model", header: "Model", render: (row) => row.model ?? "—" },
+                  {
+                    key: "model",
+                    header: "Model",
+                    hideBelow: "md",
+                    render: (row) => row.model ?? "—",
+                  },
                   {
                     key: "tsStart",
                     header: "Started",

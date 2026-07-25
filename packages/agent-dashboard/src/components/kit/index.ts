@@ -5,6 +5,7 @@
  */
 export { AnswerPanel } from "./AnswerPanel";
 export { AsyncState, type AsyncStateKind, type AsyncStateProps } from "./AsyncState";
+export { BottomSheet, type BottomSheetProps } from "./BottomSheet";
 export { DropdownMenu, type DropdownMenuProps, type DropdownPlacement } from "./DropdownMenu";
 export { Field, inputStyle } from "./Field";
 export { JsonBlock } from "./JsonBlock";

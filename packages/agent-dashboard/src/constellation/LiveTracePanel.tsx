@@ -1,11 +1,16 @@
 /**
- * LiveTracePanel — the right-hand live trace ("the trace IS the scrubber").
- * Adapted from swe-brain's Agent Plane. Rows grouped Setup / Iteration N / Finish;
- * each row is a typed spine dot + label + a waterfall bar (kind-coloured, placed
- * on the run's shared timeline) + mono ms/tokens. Every row is a button that
- * seeks the constellation to that step. The run is framed as chat: request at the
+ * LiveTracePanel — the live trace ("the trace IS the scrubber"). Adapted from
+ * swe-brain's Agent Plane. Rows grouped Setup / Iteration N / Finish; each row
+ * is a typed spine dot + label + a waterfall bar (kind-coloured, placed on the
+ * run's shared timeline) + mono ms/tokens. Every row is a button that seeks
+ * the constellation to that step. The run is framed as chat: request at the
  * top, the final answer at the bottom (revealed only once the cursor reaches the
  * end, so the answer never lands before the graph finishes animating).
+ *
+ * Layout: `layout="side"` (default) is the fixed-width right-hand rail on
+ * desktop; `layout="stacked"` renders full-width beneath the graph (below the
+ * `md` breakpoint, per `RunSurfacePage`'s `isNarrow` switch) with a capped,
+ * inner-scrolling height so it doesn't blow past one phone-screen height.
  *
  * Coexistence with `chat/`: this panel SUPERSEDES the separate chat thread on the
  * Live Run surface (it IS the run's request/answer framing + the scrubber). The
@@ -18,6 +23,7 @@ import type { TraceStep } from "../graph/types";
 import { T } from "../ui/tokens";
 
 const TRACE_WIDTH = 372;
+const STACKED_MAX_H = 420;
 
 function phaseOf(step: TraceStep): string {
   if (step.kind === "finish") return "Finish";
@@ -267,6 +273,7 @@ export function LiveTracePanel({
   onSeek,
   request,
   answer,
+  layout = "side",
 }: {
   steps: TraceStep[];
   cursor: number;
@@ -275,7 +282,11 @@ export function LiveTracePanel({
   request?: string;
   /** the run's final answer (agent turn) — framed below the trace */
   answer?: string;
+  /** "side" (default) = fixed 372px right rail; "stacked" = full-width block
+   *  beneath the graph with a capped, inner-scrolling height. */
+  layout?: "side" | "stacked";
 }) {
+  const stacked = layout === "stacked";
   // shared waterfall timeline: cumulative ms before each step + the run total.
   const totalMs = steps.reduce((m, s) => m + s.ms, 0);
   let acc = 0;
@@ -322,9 +333,11 @@ export function LiveTracePanel({
 
   return (
     <aside
+      data-layout={layout}
       style={{
-        width: TRACE_WIDTH,
+        width: stacked ? "100%" : TRACE_WIDTH,
         flex: "none",
+        maxHeight: stacked ? STACKED_MAX_H : undefined,
         border: "1px solid var(--line)",
         borderRadius: T.radius.lg,
         display: "flex",
