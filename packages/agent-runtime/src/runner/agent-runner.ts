@@ -32,7 +32,7 @@ import {
   type ToolSet,
   generateId,
   generateText,
-  stepCountIs,
+  isStepCount,
   streamText,
   tool,
 } from "ai";
@@ -122,11 +122,10 @@ export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean
   const bare = id.split("/").pop() ?? id;
   return (
     // openai/gpt-4o*  (gpt-4o, gpt-4o-mini, gpt-4o-2024-…)
-    bare.startsWith("gpt-4o") ||
+    (bare.startsWith("gpt-4o") ||
     // openai/gpt-5*
-    bare.startsWith("gpt-5") ||
-    // gemini 3.5 flash (NOT gemini 3.1 / 2.5)
-    bare.includes("gemini-3.5-flash")
+    bare.startsWith("gpt-5") || // gemini 3.5 flash (NOT gemini 3.1 / 2.5)
+    bare.includes("gemini-3.5-flash"))
   );
 }
 
@@ -464,7 +463,7 @@ export class AgentRunner implements RunnerProtocol {
         // dispatch through the gate chain + toolExecutor below.
         result = await generateText({
           model,
-          system,
+          instructions,
           messages,
           tools: hasTools ? tools : undefined,
         });
@@ -1106,14 +1105,14 @@ export class AgentRunner implements RunnerProtocol {
       // No tools → single Output.object call. Works on every model.
       const result = await generateText({
         model,
-        system,
+        instructions,
         messages,
-        experimental_output: Output.object({ schema }),
+        output: Output.object({ schema }),
       });
       totalInputTokens = result.usage?.inputTokens ?? 0;
       totalOutputTokens = result.usage?.outputTokens ?? 0;
       finishReason = result.finishReason ?? "stop";
-      rawObject = result.experimental_output;
+      rawObject = result.output;
     } else if (modelSupportsToolsWithStructuredOutput(modelName)) {
       // Tools + capable model → single experimental_output + tools call. The
       // SDK drives the loop; execute-bearing tools keep gate interception.
@@ -1126,11 +1125,11 @@ export class AgentRunner implements RunnerProtocol {
       });
       const result = await generateText({
         model,
-        system,
+        instructions,
         messages,
         tools,
-        stopWhen: stepCountIs(options?.maxIterations ?? 10),
-        experimental_output: Output.object({ schema }),
+        stopWhen: isStepCount(options?.maxIterations ?? 10),
+        output: Output.object({ schema }),
       });
       const steps = result.steps ?? [];
       // Prefer totalUsage (the whole multi-step loop). If a provider omits it,
@@ -1149,7 +1148,7 @@ export class AgentRunner implements RunnerProtocol {
       finishReason = result.finishReason ?? "stop";
       toolCallsCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
       iterations = Math.max(1, steps.length);
-      rawObject = result.experimental_output;
+      rawObject = result.output;
     } else {
       // Tools + incapable/UNKNOWN model → 2-tier (model-safe). Tier 1: the
       // normal gate-respecting tool loop to text. Tier 2: a no-tools
@@ -1212,20 +1211,20 @@ export class AgentRunner implements RunnerProtocol {
 
         const tier2 = await generateText({
           model,
-          system,
+          instructions,
           messages: [
             {
               role: "user" as const,
               content: `From the following, produce the structured object.\n\n${tier1.response}`,
             },
           ],
-          experimental_output: Output.object({ schema }),
+          output: Output.object({ schema }),
         });
         totalInputTokens += tier2.usage?.inputTokens ?? 0;
         totalOutputTokens += tier2.usage?.outputTokens ?? 0;
         iterations += 1;
         finishReason = tier2.finishReason ?? "stop";
-        rawObject = tier2.experimental_output;
+        rawObject = tier2.output;
       }
     }
 
@@ -1402,7 +1401,7 @@ export class AgentRunner implements RunnerProtocol {
       // tools `execute`-less — the SDK won't run/loop tools; we dispatch below.
       const streamResult = streamText({
         model,
-        system,
+        instructions,
         messages,
         tools: hasTools ? tools : undefined,
         // #341: forwarded cooperatively to the provider call. ai@5 either
@@ -1442,7 +1441,7 @@ export class AgentRunner implements RunnerProtocol {
       // sets `aborted` and falls through to the same cancel-and-return block
       // after the loop — never the error path.
       try {
-        for await (const part of streamResult.fullStream) {
+        for await (const part of streamResult.stream) {
           switch (part.type) {
             case "text-delta": {
               // Transition reasoning -> text: close the reasoning block first.

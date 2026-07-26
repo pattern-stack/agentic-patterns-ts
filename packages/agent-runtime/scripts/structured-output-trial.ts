@@ -27,7 +27,7 @@
  * NOTE: v5 spelling is `experimental_output`. On AI SDK v6 rename to `output`.
  */
 
-import { Output, generateText, stepCountIs, tool } from "ai";
+import { Output, generateText, isStepCount, tool } from "ai";
 import { z } from "zod";
 
 // Deliberately avoids Anthropic-unsupported JSON-schema keywords (no .min/.max/.email/.regex)
@@ -64,8 +64,8 @@ async function runCase(route: string, model: unknown, withTools: boolean): Promi
     const result = await generateText({
       // biome-ignore lint/suspicious/noExplicitAny: trial harness, providers vary
       model: model as any,
-      stopWhen: stepCountIs(6), // room for tool turn(s) + the structured finish
-      experimental_output: Output.object({ schema: Profile }),
+      stopWhen: isStepCount(6), // room for tool turn(s) + the structured finish
+      output: Output.object({ schema: Profile }),
       ...(withTools ? { tools: { lookup: lookupTool } } : {}),
       prompt: withTools
         ? "Use the lookup tool for 'Dana Lee', then return her profile as the structured object."
@@ -73,7 +73,7 @@ async function runCase(route: string, model: unknown, withTools: boolean): Promi
     });
 
     // biome-ignore lint/suspicious/noExplicitAny: experimental_output is loosely typed in v5
-    const obj = (result as any).experimental_output as Profile | undefined;
+    const obj = (result as any).output as Profile | undefined;
     // biome-ignore lint/suspicious/noExplicitAny: step shape varies
     const toolCalled = ((result as any).steps ?? []).some(
       // biome-ignore lint/suspicious/noExplicitAny: step shape varies

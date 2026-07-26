@@ -15,7 +15,7 @@
  *   export BIFROST_MODEL="gemini/gemini-3.1-flash-lite"
  *   bun run packages/agent-runtime/scripts/two-tier-fallback-trial.ts
  */
-import { Output, generateText, stepCountIs, tool } from "ai";
+import { Output, generateText, isStepCount, tool } from "ai";
 import { z } from "zod";
 
 const Profile = z.object({
@@ -73,7 +73,7 @@ async function main() {
   // Tier 1 — tool loop, plain text out (this is what the runner's `run` already does)
   const t1 = await generateText({
     model,
-    stopWhen: stepCountIs(6),
+    stopWhen: isStepCount(6),
     tools: { lookup },
     prompt:
       "Use the lookup tool for 'Dana Lee', then write a short plain-text summary of her record.",
@@ -86,11 +86,11 @@ async function main() {
   // Tier 2 — NO tools, structured over tier-1 text (this is `runStructured`'s no-tools path)
   const t2 = await generateText({
     model,
-    experimental_output: Output.object({ schema: Profile }),
+    output: Output.object({ schema: Profile }),
     prompt: `From this employee record summary, produce the structured profile object.\n\n${t1.text}`,
   });
   // biome-ignore lint/suspicious/noExplicitAny: experimental_output loosely typed in v5
-  const obj = (t2 as any).experimental_output;
+  const obj = (t2 as any).output;
   const parsed = obj ? Profile.safeParse(obj) : { success: false as const };
   console.log(`Tier 2 (no-tools structured): object = ${JSON.stringify(obj)}`);
 
