@@ -160,6 +160,41 @@ describe("ConsoleExporter", () => {
     expect(logger.messages.some((m) => m.includes("100"))).toBe(true);
   });
 
+  it("#388: renders a cache/reasoning breakdown when usageDetails is present", async () => {
+    const logger = makeMockLogger();
+    const exporter = new ConsoleExporter({ verbose: true, logger });
+    await exporter.handleEvent(
+      createEvent("agent.message.complete", {
+        traceId: "t1",
+        runId: "r1",
+        content: "Done",
+        inputTokens: 12000,
+        outputTokens: 320,
+        model: "test-model",
+        usageDetails: { cacheReadTokens: 11900, cacheWriteTokens: 500, reasoningTokens: 140 },
+      }),
+    );
+    expect(
+      logger.messages.some((m) => m.includes("cache 11900 read · 500 write · reasoning 140")),
+    ).toBe(true);
+  });
+
+  it("#388: renders the byte-identical token line when usageDetails is absent (no breakdown)", async () => {
+    const logger = makeMockLogger();
+    const exporter = new ConsoleExporter({ verbose: true, logger });
+    await exporter.handleEvent(
+      createEvent("agent.message.complete", {
+        traceId: "t1",
+        runId: "r1",
+        content: "Done",
+        inputTokens: 100,
+        outputTokens: 50,
+        model: "test-model",
+      }),
+    );
+    expect(logger.messages).toContain("Tokens: 100 in / 50 out | Model: test-model");
+  });
+
   it("should log tool start and end", async () => {
     const logger = makeMockLogger();
     const exporter = new ConsoleExporter({ verbose: true, logger });
@@ -410,6 +445,118 @@ describe("LangfuseExporter", () => {
       expect.objectContaining({ cost_details: { total: 0.0123 } }),
     );
   });
+
+  describe("usageDetails (#388)", () => {
+    it("maps cache/reasoning detail into usage_details as the non-cached input/output (avoids double-billing)", async () => {
+      const { mockClient, mockObservation } = makeMockLangfuse();
+      const exporter = new LangfuseExporter({ client: mockClient });
+
+      await exporter.handleEvent(
+        createEvent("agent.message.start", { traceId: "t1", runId: "r1", agentName: "Test" }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.llm.start", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: "gen-1",
+          model: "claude",
+          messageCount: 1,
+          hasTools: false,
+        }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.llm.end", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: "gen-1",
+          model: "claude",
+          inputTokens: 12000,
+          outputTokens: 320,
+          durationMs: 100,
+          hasToolCalls: false,
+          finishReason: "stop",
+          usageDetails: { cacheReadTokens: 11900, cacheWriteTokens: 0, reasoningTokens: 140 },
+        }),
+      );
+
+      expect(mockObservation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          usage_details: {
+            input: 100, // 12000 - 11900 - 0 (exclusive, non-cached)
+            output: 180, // 320 - 140 (exclusive, non-reasoning)
+            cache_read_input_tokens: 11900,
+            cache_creation_input_tokens: 0,
+            output_reasoning_tokens: 140,
+          },
+        }),
+      );
+    });
+
+    it("sends the byte-identical {input, output} shape when usageDetails is absent", async () => {
+      const { mockClient, mockObservation } = makeMockLangfuse();
+      const exporter = new LangfuseExporter({ client: mockClient });
+
+      await exporter.handleEvent(
+        createEvent("agent.message.start", { traceId: "t1", runId: "r1", agentName: "Test" }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.llm.start", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: "gen-2",
+          model: "claude",
+          messageCount: 1,
+          hasTools: false,
+        }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.llm.end", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: "gen-2",
+          model: "claude",
+          inputTokens: 10,
+          outputTokens: 5,
+          durationMs: 10,
+          hasToolCalls: false,
+          finishReason: "stop",
+        }),
+      );
+
+      expect(mockObservation.update).toHaveBeenCalledWith(
+        expect.objectContaining({ usage_details: { input: 10, output: 5 } }),
+      );
+    });
+
+    it("adds defined detail members to the trace metadata on message.complete", async () => {
+      const { mockClient, mockSpan } = makeMockLangfuse();
+      const exporter = new LangfuseExporter({ client: mockClient });
+
+      await exporter.handleEvent(
+        createEvent("agent.message.start", { traceId: "t1", runId: "r1", agentName: "Test" }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.message.complete", {
+          traceId: "t1",
+          runId: "r1",
+          content: "done",
+          inputTokens: 12000,
+          outputTokens: 320,
+          model: "claude",
+          usageDetails: { cacheReadTokens: 11900, reasoningTokens: 140 },
+        }),
+      );
+
+      expect(mockSpan.updateTrace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            cache_read_input_tokens: 11900,
+            output_reasoning_tokens: 140,
+          }),
+        }),
+      );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -609,5 +756,116 @@ describe("OTelExporter", () => {
 
     const rootSpan = spans.get("agent.run");
     expect(rootSpan?.setAttribute).toHaveBeenCalledWith("gen_ai.usage.cost", 0.0123);
+  });
+
+  describe("usageDetails (#388) — THE OTEL DECISION: inclusive totals + informational sub-attributes", () => {
+    it("keeps gen_ai.usage.input_tokens/output_tokens INCLUSIVE and adds cache/reasoning as separate informational attributes", async () => {
+      const { tracer, spans } = makeMockTracer();
+      const exporter = new OTelExporter({ tracer });
+
+      const startEvent = createEvent("agent.llm.start", {
+        traceId: "t1",
+        runId: "r1",
+        model: "claude-sonnet",
+        messageCount: 1,
+        hasTools: false,
+      });
+      await exporter.handleEvent(startEvent);
+      await exporter.handleEvent(
+        createEvent("agent.llm.end", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: startEvent.spanId,
+          model: "claude-sonnet",
+          inputTokens: 12000,
+          outputTokens: 320,
+          durationMs: 100,
+          hasToolCalls: false,
+          finishReason: "stop",
+          usageDetails: { cacheReadTokens: 11900, cacheWriteTokens: 0, reasoningTokens: 140 },
+        }),
+      );
+
+      const llmSpan = spans.get("gen_ai.chat");
+      // Inclusive totals — unchanged from the pre-#388 shape.
+      expect(llmSpan?.setAttribute).toHaveBeenCalledWith("gen_ai.usage.input_tokens", 12000);
+      expect(llmSpan?.setAttribute).toHaveBeenCalledWith("gen_ai.usage.output_tokens", 320);
+      // Official (dotted) semconv attribute names, informational sub-counts.
+      expect(llmSpan?.setAttribute).toHaveBeenCalledWith(
+        "gen_ai.usage.cache_read.input_tokens",
+        11900,
+      );
+      expect(llmSpan?.setAttribute).toHaveBeenCalledWith(
+        "gen_ai.usage.cache_creation.input_tokens",
+        0,
+      );
+      expect(llmSpan?.setAttribute).toHaveBeenCalledWith(
+        "gen_ai.usage.reasoning.output_tokens",
+        140,
+      );
+    });
+
+    it("sets no cache_*/reasoning.* attribute on a detail-free event (absent ≠ zero)", async () => {
+      const { tracer, spans } = makeMockTracer();
+      const exporter = new OTelExporter({ tracer });
+
+      const startEvent = createEvent("agent.llm.start", {
+        traceId: "t1",
+        runId: "r1",
+        model: "claude-sonnet",
+        messageCount: 1,
+        hasTools: false,
+      });
+      await exporter.handleEvent(startEvent);
+      await exporter.handleEvent(
+        createEvent("agent.llm.end", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: startEvent.spanId,
+          model: "claude-sonnet",
+          inputTokens: 10,
+          outputTokens: 5,
+          durationMs: 10,
+          hasToolCalls: false,
+          finishReason: "stop",
+        }),
+      );
+
+      const llmSpan = spans.get("gen_ai.chat");
+      const calledAttrs = (llmSpan?.setAttribute as ReturnType<typeof vi.fn>).mock.calls.map(
+        (c: unknown[]) => c[0],
+      );
+      expect(calledAttrs).not.toContain("gen_ai.usage.cache_read.input_tokens");
+      expect(calledAttrs).not.toContain("gen_ai.usage.cache_creation.input_tokens");
+      expect(calledAttrs).not.toContain("gen_ai.usage.reasoning.output_tokens");
+    });
+
+    it("mirrors the same detail under the agent.* namespace on message.complete", async () => {
+      const { tracer, spans } = makeMockTracer();
+      const exporter = new OTelExporter({ tracer });
+
+      const startEvent = createEvent("agent.message.start", {
+        traceId: "t1",
+        runId: "r1",
+        agentName: "TestAgent",
+      });
+      await exporter.handleEvent(startEvent);
+      await exporter.handleEvent(
+        createEvent("agent.message.complete", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: startEvent.spanId,
+          content: "done",
+          inputTokens: 12000,
+          outputTokens: 320,
+          model: "test-model",
+          usageDetails: { cacheReadTokens: 11900, reasoningTokens: 140 },
+        }),
+      );
+
+      const rootSpan = spans.get("agent.run");
+      expect(rootSpan?.setAttribute).toHaveBeenCalledWith("agent.cache_read_input_tokens", 11900);
+      expect(rootSpan?.setAttribute).toHaveBeenCalledWith("agent.reasoning_output_tokens", 140);
+    });
   });
 });

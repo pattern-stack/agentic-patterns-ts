@@ -125,8 +125,37 @@ export class OTelExporter extends BaseExporter {
     const span = this._spans.get(event.spanId);
     this._spans.delete(event.spanId);
     if (span) {
+      // #388 — THE OTEL DECISION. `gen_ai.usage.input_tokens`/`.output_tokens`
+      // stay INCLUSIVE (unchanged) — this is the official OTel Gen AI semconv
+      // contract (verified against both the (deprecated) `open-telemetry/
+      // semantic-conventions` registry and its successor `open-telemetry/
+      // semantic-conventions-genai` registry, `docs/registry/attributes/
+      // gen-ai.md`, `gen_ai.usage.input_tokens` note: "This value SHOULD
+      // include all types of input tokens, including cached tokens";
+      // `gen_ai.usage.cache_read.input_tokens` / `.cache_creation.input_tokens`
+      // / `gen_ai.usage.reasoning.output_tokens` notes: "The value SHOULD be
+      // included in gen_ai.usage.input_tokens/output_tokens"). The cache/
+      // reasoning attributes below are therefore INFORMATIONAL SUB-COUNTS
+      // already folded into the parent totals — do NOT sum them onto
+      // input_tokens/output_tokens, that would double the tokens they already
+      // contribute. This is the deliberate opposite of the Langfuse exporter
+      // below, which must send an EXCLUSIVE non-cached `input` bucket per
+      // Langfuse's own ingestion contract (its docs' "usage details are
+      // mutually exclusive buckets" rule) — the two platforms define their
+      // usage-breakdown contracts oppositely, and each exporter here is
+      // correct for its own target platform's semantics, not for the other's.
       span.setAttribute("gen_ai.usage.input_tokens", event.inputTokens);
       span.setAttribute("gen_ai.usage.output_tokens", event.outputTokens);
+      const details = event.usageDetails;
+      if (details?.cacheReadTokens !== undefined) {
+        span.setAttribute("gen_ai.usage.cache_read.input_tokens", details.cacheReadTokens);
+      }
+      if (details?.cacheWriteTokens !== undefined) {
+        span.setAttribute("gen_ai.usage.cache_creation.input_tokens", details.cacheWriteTokens);
+      }
+      if (details?.reasoningTokens !== undefined) {
+        span.setAttribute("gen_ai.usage.reasoning.output_tokens", details.reasoningTokens);
+      }
       span.setAttribute("gen_ai.response.finish_reason", event.finishReason);
       span.setAttribute("gen_ai.response.duration_ms", event.durationMs);
       span.end();
@@ -183,6 +212,19 @@ export class OTelExporter extends BaseExporter {
       span.setAttribute("agent.model", event.model);
       span.setAttribute("agent.input_tokens", event.inputTokens);
       span.setAttribute("agent.output_tokens", event.outputTokens);
+      // #388: run-total detail, same inclusive/informational posture as
+      // `_onLlmEnd` above — mirrors the `gen_ai.usage.*` naming under this
+      // handler's existing `agent.*` namespace.
+      const details = event.usageDetails;
+      if (details?.cacheReadTokens !== undefined) {
+        span.setAttribute("agent.cache_read_input_tokens", details.cacheReadTokens);
+      }
+      if (details?.cacheWriteTokens !== undefined) {
+        span.setAttribute("agent.cache_creation_input_tokens", details.cacheWriteTokens);
+      }
+      if (details?.reasoningTokens !== undefined) {
+        span.setAttribute("agent.reasoning_output_tokens", details.reasoningTokens);
+      }
       // #324: surface the harness-reported run cost as a span attribute when the
       // runner supplied one (CC via total_cost_usd). Gen AI semconv has no
       // standard cost key, so use the `gen_ai.usage.cost` convention.
