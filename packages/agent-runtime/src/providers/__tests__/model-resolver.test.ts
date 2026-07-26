@@ -9,7 +9,6 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LanguageModelV2 } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -35,12 +34,17 @@ import {
   loadModelProfiles,
   toGatewayModelId,
 } from "../model-resolver.js";
+import type { ResolvedLanguageModel } from "../types.js";
 
 // --- fixtures ---------------------------------------------------------------
 
-/** A stand-in LanguageModelV2 — enough for routing assertions (never dispatched). */
-function fakeModel(modelId: string): LanguageModelV2 {
-  return { modelId, provider: "test", specificationVersion: "v2" } as unknown as LanguageModelV2;
+/** A stand-in ResolvedLanguageModel — enough for routing assertions (never dispatched). */
+function fakeModel(modelId: string): ResolvedLanguageModel {
+  return {
+    modelId,
+    provider: "test",
+    specificationVersion: "v2",
+  } as unknown as ResolvedLanguageModel;
 }
 
 function makeAgent(getModel: () => string): AgentLike {
@@ -56,8 +60,11 @@ function textModel(text: string): MockLanguageModelV3 {
   return new MockLanguageModelV3({
     doGenerate: async () => ({
       content: [{ type: "text", text }],
-      finishReason: "stop",
-      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      finishReason: { unified: "stop", raw: "stop" },
+      usage: {
+        inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 1, text: 1, reasoning: undefined },
+      },
       warnings: [],
     }),
   });
@@ -199,7 +206,7 @@ describe("HybridModelResolver", () => {
     // Reproduces the identity-guard race: build A (failing, in-flight) is
     // displaced by register()+build B (good); A's late rejection must NOT evict B.
     let rejectA!: (e: Error) => void;
-    const aHangs = new Promise<LanguageModelV2>((_, rej) => {
+    const aHangs = new Promise<ResolvedLanguageModel>((_, rej) => {
       rejectA = rej;
     });
     const spy = vi
@@ -519,7 +526,7 @@ describe("AgentRunner × ModelResolver", () => {
     expect(result.response).toBe("ok");
   });
 
-  it("constant (LanguageModelV2) runner keeps working and ignores the agent's id (back-compat)", async () => {
+  it("constant (ResolvedLanguageModel) runner keeps working and ignores the agent's id (back-compat)", async () => {
     const runner = new AgentRunner(textModel("pinned"));
     const result = await runner.run(
       makeAgent(() => "whatever-the-agent-says"),

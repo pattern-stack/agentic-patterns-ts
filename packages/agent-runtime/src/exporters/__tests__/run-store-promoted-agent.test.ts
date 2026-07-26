@@ -27,7 +27,7 @@
  * yielded shape (which was already correct).
  */
 
-import type { LanguageModelV2StreamPart } from "@ai-sdk/provider";
+import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -61,7 +61,7 @@ function makeStreamingMockModel(text: string): MockLanguageModelV3 {
   return new MockLanguageModelV3({
     modelId: "mock-model",
     doStream: async () => ({
-      stream: new ReadableStream<LanguageModelV2StreamPart>({
+      stream: new ReadableStream<LanguageModelV3StreamPart>({
         start(controller) {
           controller.enqueue({ type: "stream-start", warnings: [] });
           controller.enqueue({ type: "text-start", id: "t0" });
@@ -69,8 +69,11 @@ function makeStreamingMockModel(text: string): MockLanguageModelV3 {
           controller.enqueue({ type: "text-end", id: "t0" });
           controller.enqueue({
             type: "finish",
-            finishReason: "stop",
-            usage: { inputTokens: 3, outputTokens: 2, totalTokens: 5 },
+            finishReason: { unified: "stop", raw: "stop" },
+            usage: {
+              inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 2, text: 2, reasoning: undefined },
+            },
           });
           controller.close();
         },

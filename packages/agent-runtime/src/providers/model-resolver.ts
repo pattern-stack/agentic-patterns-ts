@@ -1,6 +1,6 @@
 /**
  * ModelResolver — maps an agent's *declared* model id (`agent.getModel()`) to a
- * live `LanguageModelV2` at run time.
+ * live {@link ResolvedLanguageModel} at run time.
  *
  * ARCHITECTURE: the model belongs to the **agent**, not the runner. `AgentRunner`
  * is model-agnostic — it "just runs an agent" and asks the resolver to turn that
@@ -8,10 +8,10 @@
  * (`agent.withModel(id)` / `buildAgentFromConfig` `modelOverride`) therefore change
  * what the runner dispatches, with no per-runner / per-step-runner plumbing.
  *
- * Back-compat: `new AgentRunner(model)` still works — a concrete `LanguageModelV2`
- * is wrapped in a {@link constantModelResolver} that ignores `agent.getModel()`
- * and always returns that model (the pre-resolver behaviour, and the path tests
- * use with `MockLanguageModelV2`).
+ * Back-compat: `new AgentRunner(model)` still works — a concrete
+ * {@link ResolvedLanguageModel} is wrapped in a {@link constantModelResolver}
+ * that ignores `agent.getModel()` and always returns that model (the
+ * pre-resolver behaviour, and the path tests use with `MockLanguageModelV3`).
  *
  * {@link HybridModelResolver} resolution precedence (first match wins):
  *   1. an explicit {@link ModelProfile} — registered in-code or loaded from a
@@ -27,10 +27,10 @@
  *   4. a helpful error listing the known families + registered profiles.
  */
 
-import type { LanguageModelV2 } from "@ai-sdk/provider";
 import { z } from "zod";
 
 import { PROVIDERS, type SupportedProvider, resolveTierAlias } from "./index.js";
+import type { ResolvedLanguageModel } from "./types.js";
 
 /**
  * Dynamically import an optional package, throwing an accurate,
@@ -54,24 +54,25 @@ async function importOptional(pkg: string, feature: string): Promise<any> {
 // ModelResolver
 // ---------------------------------------------------------------------------
 
-/** Turns a declared model id into a live `LanguageModelV2`. `modelId` may be
- *  `undefined` when an agent pins no model; a pinned/constant resolver ignores
- *  it, while an id-driven resolver rejects with a clear error. */
+/** Turns a declared model id into a live {@link ResolvedLanguageModel}. `modelId`
+ *  may be `undefined` when an agent pins no model; a pinned/constant resolver
+ *  ignores it, while an id-driven resolver rejects with a clear error. */
 export interface ModelResolver {
-  resolve(modelId: string | undefined): Promise<LanguageModelV2>;
+  resolve(modelId: string | undefined): Promise<ResolvedLanguageModel>;
 }
 
-/** Narrow a constructor arg to a {@link ModelResolver} (vs a `LanguageModelV2`). */
-export function isModelResolver(x: LanguageModelV2 | ModelResolver): x is ModelResolver {
+/** Narrow a constructor arg to a {@link ModelResolver} (vs a {@link ResolvedLanguageModel}). */
+export function isModelResolver(x: ResolvedLanguageModel | ModelResolver): x is ModelResolver {
   return typeof (x as ModelResolver).resolve === "function";
 }
 
 /**
  * A resolver that ignores the id and always returns `model`. Wraps a concrete
- * `LanguageModelV2` so `new AgentRunner(model)` keeps the pre-resolver
- * (model-pinned) behaviour — used by tests/mocks and single-model apps.
+ * {@link ResolvedLanguageModel} so `new AgentRunner(model)` keeps the
+ * pre-resolver (model-pinned) behaviour — used by tests/mocks and single-model
+ * apps.
  */
-export function constantModelResolver(model: LanguageModelV2): ModelResolver {
+export function constantModelResolver(model: ResolvedLanguageModel): ModelResolver {
   return { resolve: () => Promise.resolve(model) };
 }
 
@@ -241,7 +242,7 @@ export interface HybridModelResolverOptions {
  */
 export class HybridModelResolver implements ModelResolver {
   private readonly _profiles = new Map<string, ModelProfile>();
-  private readonly _cache = new Map<string, Promise<LanguageModelV2>>();
+  private readonly _cache = new Map<string, Promise<ResolvedLanguageModel>>();
   private readonly _gateway: GatewayConfig | undefined;
 
   constructor(opts: HybridModelResolverOptions = {}) {
@@ -263,7 +264,7 @@ export class HybridModelResolver implements ModelResolver {
     return this._profiles.has(id);
   }
 
-  resolve(modelId: string | undefined): Promise<LanguageModelV2> {
+  resolve(modelId: string | undefined): Promise<ResolvedLanguageModel> {
     if (!modelId) {
       return Promise.reject(
         new Error(
@@ -287,7 +288,7 @@ export class HybridModelResolver implements ModelResolver {
     return built;
   }
 
-  private async _build(modelId: string): Promise<LanguageModelV2> {
+  private async _build(modelId: string): Promise<ResolvedLanguageModel> {
     const profile = this._profiles.get(modelId);
     if (profile) return buildFromProfile(modelId, profile);
 
@@ -315,10 +316,10 @@ export class HybridModelResolver implements ModelResolver {
 }
 
 // ---------------------------------------------------------------------------
-// Profile → LanguageModelV2
+// Profile → ResolvedLanguageModel
 // ---------------------------------------------------------------------------
 
-function buildFromProfile(id: string, profile: ModelProfile): Promise<LanguageModelV2> {
+function buildFromProfile(id: string, profile: ModelProfile): Promise<ResolvedLanguageModel> {
   // A profile aliases/pins an id to a named provider; that provider's loader
   // authenticates from its own env vars and takes only a model id.
   const upstreamId = profile.model ?? id;
@@ -408,10 +409,13 @@ function untranslatableGatewayIdError(
 }
 
 // ---------------------------------------------------------------------------
-// Gateway → LanguageModelV2
+// Gateway → ResolvedLanguageModel
 // ---------------------------------------------------------------------------
 
-async function buildFromGateway(modelId: string, gw: GatewayConfig): Promise<LanguageModelV2> {
+async function buildFromGateway(
+  modelId: string,
+  gw: GatewayConfig,
+): Promise<ResolvedLanguageModel> {
   // Translate BEFORE loading the adapter: an untranslatable id is a config error
   // the caller should hear about whether or not the optional package is installed.
   const gatewayId = toGatewayModelId(modelId, gw);

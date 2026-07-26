@@ -38,7 +38,10 @@ const delegatedBranchSlot = slot<string>({
   init: () => "initial",
 });
 
-const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 } as const;
+const usage = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 1, text: 1, reasoning: undefined },
+} as const;
 
 function agentWithToolbox(name: string, toolbox: Toolbox): Agent {
   const role = new RoleBuilder(name)
@@ -208,14 +211,14 @@ describe("delegateTo scratchpad sharing (#269)", () => {
                 input: JSON.stringify({ task: "add the child note" }),
               },
             ],
-            finishReason: "tool-calls" as const,
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
             usage,
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "coordinator done" }],
-          finishReason: "stop" as const,
+          finishReason: { unified: "stop" as const, raw: "stop" },
           usage,
           warnings: [],
         };

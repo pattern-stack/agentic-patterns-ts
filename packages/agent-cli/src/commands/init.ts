@@ -294,8 +294,8 @@ function renderPackageJson(name: string, provider: Provider, link: boolean): str
       "@agentic-patterns/core": apVersion,
       "@agentic-patterns/runtime": apVersion,
       "@agentic-patterns/cli": apVersion,
-      ai: "^4.0.0",
-      [providerDep]: "^1.0.0",
+      ai: "^7.0.0",
+      [providerDep]: providerSdkVersion(provider),
       zod: "^3.23.0",
     },
     devDependencies: {
@@ -488,7 +488,21 @@ function providerSdkPackage(provider: Provider): string {
     case "openai":
       return "@ai-sdk/openai";
     case "ollama":
-      return "ollama-ai-provider";
+      // The runtime itself uses -v2 (providers/ollama.ts) — the v1 package is dead.
+      return "ollama-ai-provider-v2";
+  }
+}
+
+/** Scaffold version for each provider's `@ai-sdk/*` (or equivalent) package, ai@7-era. */
+function providerSdkVersion(provider: Provider): string {
+  switch (provider) {
+    case "anthropic":
+      return "^4.0.0";
+    case "openai":
+      return "^4.0.0";
+    case "ollama":
+      // ollama-ai-provider-v2 stays V2-spec (accepted; ai@7 accepts V2 models).
+      return "^1.0.0";
   }
 }
 

@@ -254,15 +254,21 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
                 input: JSON.stringify({ task: "go" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "outer done" }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
           warnings: [],
         };
       },
@@ -283,15 +289,21 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
                 input: JSON.stringify({}),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 3, outputTokens: 3, totalTokens: 6 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 3, text: 3, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "child done" }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 3, outputTokens: 3, totalTokens: 6 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 3, text: 3, reasoning: undefined },
+          },
           warnings: [],
         };
       },

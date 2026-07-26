@@ -11,7 +11,7 @@
  *
  * Harnesses mirror the sibling suites: `MockRunner` + `FunctionStep` for the
  * pure-node topologies (loop/retry/fan-out/node-tool), a real `AgentRunner`
- * driven by a `MockLanguageModelV2` for the tool-dispatch seams (node-tool.test
+ * driven by a `MockLanguageModelV3` for the tool-dispatch seams (node-tool.test
  * / host-propagation.test / sequential-agents.test patterns).
  */
 
@@ -91,7 +91,10 @@ function makeSpec(
 
 const r = (id: string | undefined, text: string, score = 0): Raw => ({ id, text, score });
 
-const USAGE = { inputTokens: 1, outputTokens: 1, totalTokens: 2 } as const;
+const USAGE = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 1, text: 1, reasoning: undefined },
+} as const;
 
 /** An AgentLike leaf whose model id routes through a {@link ModelResolver}. */
 function makeAgent(name: string, model: string, tools: ToolSchema[] = []): AgentLike {
@@ -122,14 +125,14 @@ function gatherToolModel(): MockLanguageModelV3 {
               input: JSON.stringify({}),
             },
           ],
-          finishReason: "tool-calls" as const,
+          finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
           usage: USAGE,
           warnings: [],
         };
       }
       return {
         content: [{ type: "text" as const, text: "gathered" }],
-        finishReason: "stop" as const,
+        finishReason: { unified: "stop" as const, raw: "stop" },
         usage: USAGE,
         warnings: [],
       };
@@ -142,7 +145,7 @@ function textModel(text: string): MockLanguageModelV3 {
   return new MockLanguageModelV3({
     doGenerate: async () => ({
       content: [{ type: "text" as const, text }],
-      finishReason: "stop" as const,
+      finishReason: { unified: "stop" as const, raw: "stop" },
       usage: USAGE,
       warnings: [],
     }),

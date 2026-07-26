@@ -9,7 +9,7 @@ import type { ModelMessage } from "ai";
 import type { CanonicalMessage } from "./types.js";
 
 /**
- * Coerce an arbitrary tool result into a valid AI SDK v5 JSON value before it is
+ * Coerce an arbitrary tool result into a valid AI SDK JSON value before it is
  * embedded in a `tool-result` part's `output: { type: "json", value }`. The SDK
  * validates that value against `jsonValueSchema`, which rejects `undefined`,
  * non-finite numbers (`NaN`/`Infinity`), `bigint`, and functions — none of which
@@ -44,7 +44,7 @@ export function toJsonValue(value: unknown): JSONValue {
  *     { type: "tool_return", tool_name: "...", tool_call_id: "...", content: "..." },
  *   ]}
  *
- * Vercel AI SDK v5 (ModelMessage) format:
+ * Vercel AI SDK (ModelMessage) format:
  *   { role: "user", content: "..." }
  *   { role: "assistant", content: [{ type: "text", text: "..." }, { type: "tool-call", input, ... }] }
  *   { role: "tool", content: [{ type: "tool-result", output: { type: "text", value }, ... }] }
@@ -54,7 +54,7 @@ export function toJsonValue(value: unknown): JSONValue {
  * prompt. The runner re-pushes them VERBATIM to preserve provider metadata for multi-turn
  * continuity (Gemini's `thoughtSignature`, Anthropic thinking blocks). But Gemini 3.x can emit
  * a `reasoning` or `text` part whose payload is ONLY the signature (in `providerOptions`) with
- * no `text` — and AI SDK v5's `modelMessageSchema` requires `text: string` on both — so
+ * no `text` — and the AI SDK's `modelMessageSchema` requires `text: string` on both — so
  * re-sending it throws "messages must be a ModelMessage[]" and aborts the run mid-loop. Coerce
  * a missing / non-string `text` to "" on reasoning and text parts — which preserves
  * `providerOptions`/`thoughtSignature` (so Gemini multi-turn keeps working) while satisfying
@@ -124,8 +124,9 @@ export function convertHistory(history: CanonicalMessage[]): ModelMessage[] {
             content: textParts.join(""),
           });
         } else {
-          // Mixed text + tool calls — use content array format. v5's
-          // ToolCallPart carries the call payload under `input` (was `args`).
+          // Mixed text + tool calls — use content array format. ToolCallPart
+          // carries the call payload under `input` (renamed from `args` at v5;
+          // unchanged through v7).
           const contentParts: Array<
             | { type: "text"; text: string }
             | {
@@ -155,9 +156,10 @@ export function convertHistory(history: CanonicalMessage[]): ModelMessage[] {
         }
       }
 
-      // Tool results as separate tool messages. v5's ToolResultPart carries the
-      // result under `output` as a typed union; the canonical format only has a
-      // string, so we wrap it as `{ type: "text", value }`.
+      // Tool results as separate tool messages. ToolResultPart carries the
+      // result under `output` as a typed union (since v5; unchanged through
+      // v7); the canonical format only has a string, so we wrap it as
+      // `{ type: "text", value }`.
       if (toolReturns.length > 0) {
         const toolResultParts = toolReturns.map((tr) => ({
           type: "tool-result" as const,

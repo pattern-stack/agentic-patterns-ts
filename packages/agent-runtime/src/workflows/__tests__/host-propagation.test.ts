@@ -105,23 +105,32 @@ describe("host propagation — coordinator → subagent, run-scoped slot (full r
                 input: JSON.stringify({ task: "go" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         if (outerCalls === 2) {
           return {
             content: [{ type: "text" as const, text: "outer done" }],
-            finishReason: "stop" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ title: "ok" }) }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
           warnings: [],
         };
       },
@@ -447,15 +456,21 @@ describe("host propagation — event bus crosses the seam", () => {
                 input: JSON.stringify({ member: "sam" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "sam owes 42" }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
           warnings: [],
         };
       },
@@ -496,23 +511,32 @@ describe("host propagation — event bus crosses the seam", () => {
                 input: JSON.stringify({ task: "balances please" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         if (outerCalls === 2) {
           return {
             content: [{ type: "text" as const, text: "outer done" }],
-            finishReason: "stop" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ title: "ok" }) }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
           warnings: [],
         };
       },
@@ -631,23 +655,32 @@ describe("host propagation — scope crosses the seam (#308)", () => {
                 input: JSON.stringify({ task: "go" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         if (outerCalls === 2) {
           return {
             content: [{ type: "text" as const, text: "outer done" }],
-            finishReason: "stop" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: JSON.stringify({ title: "ok" }) }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
           warnings: [],
         };
       },

@@ -443,8 +443,11 @@ describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
     const model = new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: "text" as const, text: "inner done" }],
-        finishReason: "stop" as const,
-        usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage: {
+          inputTokens: { total: 4, noCache: 4, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 4, text: 4, reasoning: undefined },
+        },
         warnings: [],
       }),
     });
@@ -488,8 +491,11 @@ describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
     const model = new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: "text" as const, text: "inner done" }],
-        finishReason: "stop" as const,
-        usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage: {
+          inputTokens: { total: 4, noCache: 4, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 4, text: 4, reasoning: undefined },
+        },
         warnings: [],
       }),
     });

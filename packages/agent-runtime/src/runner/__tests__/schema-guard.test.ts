@@ -37,8 +37,11 @@ function makeAgent(overrides: Partial<AgentLike> = {}): AgentLike {
 function structuredTextResult(object: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(object) }],
-    finishReason: "stop" as const,
-    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    finishReason: { unified: "stop" as const, raw: "stop" },
+    usage: {
+      inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: 5, text: 5, reasoning: undefined },
+    },
     warnings: [],
   };
 }

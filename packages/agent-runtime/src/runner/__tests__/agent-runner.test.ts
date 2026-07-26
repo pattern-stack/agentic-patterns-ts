@@ -1,10 +1,10 @@
 /**
- * Tests for AgentRunner using MockLanguageModelV2.
+ * Tests for AgentRunner using MockLanguageModelV3.
  */
 
 import { ToolSchema } from "@agentic-patterns/core";
 import type { ToolExecutionContext } from "@agentic-patterns/core";
-import type { LanguageModelV2Content } from "@ai-sdk/provider";
+import type { LanguageModelV3Content, LanguageModelV3Usage } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -17,17 +17,30 @@ import type { AgentLike } from "../agent-runner.js";
 import type { ToolExecutor } from "../types.js";
 
 // ---------------------------------------------------------------------------
-// v5 mock fixture helpers — build a doGenerate result from content parts.
+// mock fixture helpers — build a doGenerate result from content parts.
 // ---------------------------------------------------------------------------
 
-type V2Result = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
+type V3Result = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
+
+/** V3 provider usage — nested input/output token detail (unlike v5's flat shape). */
+function usageV3(inputTokens: number, outputTokens: number): LanguageModelV3Usage {
+  return {
+    inputTokens: {
+      total: inputTokens,
+      noCache: inputTokens,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: { total: outputTokens, text: outputTokens, reasoning: undefined },
+  };
+}
 
 /** A text-only doGenerate result. */
-function textResult(text: string, inputTokens: number, outputTokens: number): V2Result {
+function textResult(text: string, inputTokens: number, outputTokens: number): V3Result {
   return {
     content: [{ type: "text", text }],
-    finishReason: "stop",
-    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    finishReason: { unified: "stop", raw: "stop" },
+    usage: usageV3(inputTokens, outputTokens),
     warnings: [],
   };
 }
@@ -37,7 +50,7 @@ function toolCallResult(
   call: { toolCallId: string; toolName: string; input: Record<string, unknown> },
   inputTokens: number,
   outputTokens: number,
-): V2Result {
+): V3Result {
   return {
     content: [
       {
@@ -47,8 +60,8 @@ function toolCallResult(
         input: JSON.stringify(call.input),
       },
     ],
-    finishReason: "tool-calls",
-    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    finishReason: { unified: "tool-calls", raw: "tool-calls" },
+    usage: usageV3(inputTokens, outputTokens),
     warnings: [],
   };
 }
@@ -58,8 +71,8 @@ function toolCallsResult(
   calls: Array<{ toolCallId: string; toolName: string; input: Record<string, unknown> }>,
   inputTokens: number,
   outputTokens: number,
-): V2Result {
-  const content: LanguageModelV2Content[] = calls.map((c) => ({
+): V3Result {
+  const content: LanguageModelV3Content[] = calls.map((c) => ({
     type: "tool-call",
     toolCallId: c.toolCallId,
     toolName: c.toolName,
@@ -67,8 +80,8 @@ function toolCallsResult(
   }));
   return {
     content,
-    finishReason: "tool-calls",
-    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    finishReason: { unified: "tool-calls", raw: "tool-calls" },
+    usage: usageV3(inputTokens, outputTokens),
     warnings: [],
   };
 }

@@ -12,7 +12,14 @@
  * to grow — `createRunner()` reads the registry in `providers/index.ts`.
  */
 
-import type { LanguageModelV2 } from "@ai-sdk/provider";
+import type { LanguageModelV2, LanguageModelV3, LanguageModelV4 } from "@ai-sdk/provider";
+
+/**
+ * A live, instance-form language model — any provider-spec version ai@7
+ * accepts. Mirrors ai's `LanguageModel` union minus the string
+ * (global-provider-id) arm: our resolvers hand out instances, never ids.
+ */
+export type ResolvedLanguageModel = LanguageModelV2 | LanguageModelV3 | LanguageModelV4;
 
 /** Supported provider identifiers. Matches directory / file names below. */
 export type SupportedProvider =
@@ -49,10 +56,10 @@ export interface ProviderProtocol {
   readonly envVars: readonly string[];
   /**
    * Dynamically import the provider's `@ai-sdk/*` (or equivalent) package
-   * and return a `LanguageModelV2` for the given model id. Throws a helpful
-   * error if the package isn't installed.
+   * and return a `ResolvedLanguageModel` for the given model id. Throws a
+   * helpful error if the package isn't installed.
    */
-  load(modelId: string): Promise<LanguageModelV2>;
+  load(modelId: string): Promise<ResolvedLanguageModel>;
 }
 
 // ---------------------------------------------------------------------------

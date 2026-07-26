@@ -1,9 +1,13 @@
 /**
- * Tests for AgentRunner.stream() using MockLanguageModelV2.
+ * Tests for AgentRunner.stream() using MockLanguageModelV3.
  */
 
 import { ToolSchema } from "@agentic-patterns/core";
-import type { LanguageModelV2FinishReason, LanguageModelV2StreamPart } from "@ai-sdk/provider";
+import type {
+  LanguageModelV3FinishReason,
+  LanguageModelV3StreamPart,
+  LanguageModelV3Usage,
+} from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -15,18 +19,18 @@ import { AgentRunner } from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 
 // ---------------------------------------------------------------------------
-// v5 mock stream helpers — emit PROVIDER-level LanguageModelV2 stream parts.
-// The AI SDK transforms these into the higher-level fullStream parts the
-// runner consumes (e.g. provider `text-delta {delta}` -> SDK `text-delta {text}`).
+// Mock stream helpers — emit PROVIDER-level LanguageModelV3 stream parts. The
+// AI SDK transforms these into the higher-level `.stream` parts the runner
+// consumes (e.g. provider `text-delta {delta}` -> SDK `text-delta {text}`).
 // ---------------------------------------------------------------------------
 
 const TXT = "txt-0";
 const RSN = "rsn-0";
 
 /** Wrap a list of provider stream parts in a doStream return (with stream-start). */
-function streamFrom(parts: LanguageModelV2StreamPart[]) {
+function streamFrom(parts: LanguageModelV3StreamPart[]) {
   return async () => ({
-    stream: new ReadableStream<LanguageModelV2StreamPart>({
+    stream: new ReadableStream<LanguageModelV3StreamPart>({
       start(controller) {
         controller.enqueue({ type: "stream-start", warnings: [] });
         for (const p of parts) controller.enqueue(p);
@@ -36,34 +40,54 @@ function streamFrom(parts: LanguageModelV2StreamPart[]) {
   });
 }
 
-/** A provider `finish` part with v5 usage shape. */
+/** V3 provider usage — nested input/output token detail (unlike v5's flat shape). */
+function usageV3(inputTokens: number, outputTokens: number): LanguageModelV3Usage {
+  return {
+    inputTokens: {
+      total: inputTokens,
+      noCache: inputTokens,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: { total: outputTokens, text: outputTokens, reasoning: undefined },
+  };
+}
+
+/** V3 provider finish reason — `{ unified, raw }` (unlike v5's bare string). */
+function finishReasonV3(
+  unified: LanguageModelV3FinishReason["unified"],
+): LanguageModelV3FinishReason {
+  return { unified, raw: unified };
+}
+
+/** A provider `finish` part with V3 usage + finishReason shape. */
 function finishPart(
-  finishReason: LanguageModelV2FinishReason,
+  finishReason: LanguageModelV3FinishReason["unified"],
   inputTokens: number,
   outputTokens: number,
-): LanguageModelV2StreamPart {
+): LanguageModelV3StreamPart {
   return {
     type: "finish",
-    finishReason,
-    usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    finishReason: finishReasonV3(finishReason),
+    usage: usageV3(inputTokens, outputTokens),
   };
 }
 
 /** Text deltas grouped by a stable id (text-start/delta…/text-end). */
-function textParts(...deltas: string[]): LanguageModelV2StreamPart[] {
+function textParts(...deltas: string[]): LanguageModelV3StreamPart[] {
   return [
     { type: "text-start", id: TXT },
-    ...deltas.map((delta): LanguageModelV2StreamPart => ({ type: "text-delta", id: TXT, delta })),
+    ...deltas.map((delta): LanguageModelV3StreamPart => ({ type: "text-delta", id: TXT, delta })),
     { type: "text-end", id: TXT },
   ];
 }
 
 /** Reasoning deltas grouped by a stable id (reasoning-start/delta…/end). */
-function reasoningParts(...deltas: string[]): LanguageModelV2StreamPart[] {
+function reasoningParts(...deltas: string[]): LanguageModelV3StreamPart[] {
   return [
     { type: "reasoning-start", id: RSN },
     ...deltas.map(
-      (delta): LanguageModelV2StreamPart => ({ type: "reasoning-delta", id: RSN, delta }),
+      (delta): LanguageModelV3StreamPart => ({ type: "reasoning-delta", id: RSN, delta }),
     ),
     { type: "reasoning-end", id: RSN },
   ];
@@ -74,7 +98,7 @@ function toolCallPart(
   toolCallId: string,
   toolName: string,
   input: Record<string, unknown>,
-): LanguageModelV2StreamPart {
+): LanguageModelV3StreamPart {
   return { type: "tool-call", toolCallId, toolName, input: JSON.stringify(input) };
 }
 
