@@ -12,7 +12,25 @@ import {
   type RenderArtifact,
   artifactMarker,
 } from "@agentic-patterns/core";
-import type { AgentEvent, AgentEventType } from "../events/types.js";
+import type { AgentEvent, AgentEventType, TokenUsageDetails } from "../events/types.js";
+
+/**
+ * #388 — snake_case, defined-members-only wire shape for `TokenUsageDetails`.
+ * Returns `undefined` when `details` itself is absent, so callers can do
+ * `if (usageDetailsPayload) payload.usage_details = usageDetailsPayload`.
+ */
+function toSnakeUsageDetails(
+  details: TokenUsageDetails | undefined,
+): Record<string, number> | undefined {
+  if (!details) return undefined;
+  const out: Record<string, number> = {};
+  if (details.noCacheTokens !== undefined) out.no_cache_tokens = details.noCacheTokens;
+  if (details.cacheReadTokens !== undefined) out.cache_read_tokens = details.cacheReadTokens;
+  if (details.cacheWriteTokens !== undefined) out.cache_write_tokens = details.cacheWriteTokens;
+  if (details.textTokens !== undefined) out.text_tokens = details.textTokens;
+  if (details.reasoningTokens !== undefined) out.reasoning_tokens = details.reasoningTokens;
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Render-artifact wire mapping (ADR-0006)
@@ -267,6 +285,9 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
       if (event.artifacts !== undefined && event.artifacts.length > 0) {
         payload.artifacts = sanitizeArtifacts(event.artifacts, artifactByteCeiling);
       }
+      // #388: additive, defined-only run-total detail — absent ≠ zero.
+      const usageDetails = toSnakeUsageDetails(event.usageDetails);
+      if (usageDetails) payload.usage_details = usageDetails;
       return { name: "message.complete", payload };
     }
     case "agent.message.cancel":
@@ -377,7 +398,11 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
           has_tools: event.hasTools,
         },
       };
-    case "agent.llm.end":
+    case "agent.llm.end": {
+      // #388: additive `usage_details` key via spread (not a mutable-record
+      // edit, per Gate 1.5's nit) — same conditional-key discipline as
+      // `message.complete` above.
+      const llmEndUsageDetails = toSnakeUsageDetails(event.usageDetails);
       return {
         name: "llm.end",
         payload: {
@@ -386,8 +411,10 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
           output_tokens: event.outputTokens,
           duration_ms: event.durationMs,
           finish_reason: event.finishReason,
+          ...(llmEndUsageDetails ? { usage_details: llmEndUsageDetails } : {}),
         },
       };
+    }
     case "agent.error":
       return {
         name: "error",

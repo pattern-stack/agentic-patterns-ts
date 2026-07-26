@@ -9,7 +9,7 @@
  * the flatten path.
  */
 
-import type { LanguageModelV2CallOptions, LanguageModelV2Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV4CallOptions, LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ---------------------------------------------------------------------------
@@ -126,17 +126,17 @@ const TOOLS = [
   },
 ];
 
-function callOptions(prompt: LanguageModelV2Prompt): LanguageModelV2CallOptions {
+function callOptions(prompt: LanguageModelV4Prompt): LanguageModelV4CallOptions {
   return { tools: TOOLS, prompt };
 }
 
-const TURN1: LanguageModelV2Prompt = [
+const TURN1: LanguageModelV4Prompt = [
   { role: "system", content: "Math bot." },
   { role: "user", content: [{ type: "text", text: "17 + 28?" }] },
 ];
 
 /** Turn-2 prompt: turn 1 + the deferred tool call + its result. */
-function turn2(deferredId: string): LanguageModelV2Prompt {
+function turn2(deferredId: string): LanguageModelV4Prompt {
   return [
     ...TURN1,
     {

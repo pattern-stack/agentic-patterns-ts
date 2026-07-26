@@ -90,6 +90,20 @@ function barFill(kind: TraceStepKind): string {
 const NARROW_INDENT = 30;
 
 /**
+ * #388 — minimal cache/reasoning breakdown chip: `12,400 ctx (11,900 cached) ·
+ * 320 out (140 rsn)`. Byte-identical to the pre-#388 string when
+ * `tokenDetails` is absent — parentheticals appear only for defined members
+ * (absent ≠ zero; no `(0 cached)` for a step that simply didn't report it).
+ */
+function formatTokenChip(step: TraceStep): string {
+  const ctxPart = step.ctxTokens
+    ? `${step.ctxTokens.toLocaleString()}${step.tokenDetails?.cacheRead !== undefined ? ` (${step.tokenDetails.cacheRead.toLocaleString()} cached)` : ""} ctx · `
+    : "";
+  const outPart = `${step.outTokens?.toLocaleString()}${step.tokenDetails?.reasoning !== undefined ? ` (${step.tokenDetails.reasoning.toLocaleString()} rsn)` : ""} out`;
+  return `${ctxPart}${outPart}`;
+}
+
+/**
  * `layout="narrow"` step row — spec's "Narrow step anatomy": stacked full-width
  * rows (header · meta · detail · bar) instead of the wide 4-column grid. Same
  * `toggle`/`open` state, same `barFill`/`maxMs` math, same test hooks — only
@@ -125,10 +139,7 @@ function NarrowStepRow({
     });
   }
   if (step.kind === "model" && step.outTokens != null) {
-    metaNodes.push({
-      key: "tokens",
-      node: `${step.ctxTokens ? `${step.ctxTokens.toLocaleString()} ctx · ` : ""}${step.outTokens} out`,
-    });
+    metaNodes.push({ key: "tokens", node: formatTokenChip(step) });
   }
   if (step.kind === "tool_call" && step.capability) {
     metaNodes.push({ key: "capability", node: `via ${step.capability}` });
@@ -548,8 +559,7 @@ export function TraceWaterfall({
                         color: "var(--mute)",
                       }}
                     >
-                      {step.ctxTokens ? `${step.ctxTokens.toLocaleString()} ctx · ` : ""}
-                      {step.outTokens} out
+                      {formatTokenChip(step)}
                     </span>
                   )}
                 </div>

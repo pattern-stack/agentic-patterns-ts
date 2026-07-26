@@ -1,5 +1,5 @@
 /**
- * Tests for the Claude Code LanguageModelV2 provider.
+ * Tests for the Claude Code LanguageModelV4 provider.
  *
  * Unit tests mock `@anthropic-ai/claude-agent-sdk` so they run offline.
  * The integration test is skipped unless the `claude` CLI is installed
@@ -10,9 +10,9 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ToolSchema } from "@agentic-patterns/core";
 import type {
-  LanguageModelV2CallOptions,
-  LanguageModelV2Content,
-  LanguageModelV2Prompt,
+  LanguageModelV4CallOptions,
+  LanguageModelV4Content,
+  LanguageModelV4Prompt,
 } from "@ai-sdk/provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -29,6 +29,9 @@ type Scripted = {
   outputTokens: number;
   stopReason: string | null;
   sessionId?: string;
+  /** Optional cache token fields (BetaUsage-shaped) for the cache-mapping test. */
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
 };
 
 const script: { current: Scripted } = {
@@ -110,6 +113,12 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           usage: {
             input_tokens: pending.inputTokens,
             output_tokens: pending.outputTokens,
+            ...(pending.cacheCreationInputTokens !== undefined
+              ? { cache_creation_input_tokens: pending.cacheCreationInputTokens }
+              : {}),
+            ...(pending.cacheReadInputTokens !== undefined
+              ? { cache_read_input_tokens: pending.cacheReadInputTokens }
+              : {}),
           },
           stop_reason: first ? "tool_deferred" : pending.stopReason,
           terminal_reason: first ? "tool_deferred" : "completed",
@@ -131,11 +140,13 @@ import { claudeCode } from "../claude-code.js";
 // ---------------------------------------------------------------------------
 
 function makeCallOptions(
-  prompt: LanguageModelV2Prompt,
+  prompt: LanguageModelV4Prompt,
   tools: Array<{ name: string; description?: string }> = [],
-): LanguageModelV2CallOptions {
+  overlay: Partial<LanguageModelV4CallOptions> = {},
+): LanguageModelV4CallOptions {
   return {
-    // v5 lifts tools to a top-level array; the schema field is `inputSchema`.
+    // ai package's v5+ shape lifts tools to a top-level array; the schema
+    // field is `inputSchema` (unrelated to the V2→V4 spec axis under test).
     tools: tools.map((t) => ({
       type: "function" as const,
       name: t.name,
@@ -143,23 +154,24 @@ function makeCallOptions(
       inputSchema: { type: "object", properties: {}, additionalProperties: true } as const,
     })),
     prompt,
+    ...overlay,
   };
 }
 
-/** Extract the joined text from a v5 doGenerate `content` array. */
-function contentText(content: LanguageModelV2Content[]): string {
+/** Extract the joined text from a doGenerate `content` array. */
+function contentText(content: LanguageModelV4Content[]): string {
   return content
-    .filter((c): c is Extract<LanguageModelV2Content, { type: "text" }> => c.type === "text")
+    .filter((c): c is Extract<LanguageModelV4Content, { type: "text" }> => c.type === "text")
     .map((c) => c.text)
     .join("");
 }
 
-/** Extract the tool-call parts from a v5 doGenerate `content` array. */
+/** Extract the tool-call parts from a doGenerate `content` array. */
 function contentToolCalls(
-  content: LanguageModelV2Content[],
-): Array<Extract<LanguageModelV2Content, { type: "tool-call" }>> {
+  content: LanguageModelV4Content[],
+): Array<Extract<LanguageModelV4Content, { type: "tool-call" }>> {
   return content.filter(
-    (c): c is Extract<LanguageModelV2Content, { type: "tool-call" }> => c.type === "tool-call",
+    (c): c is Extract<LanguageModelV4Content, { type: "tool-call" }> => c.type === "tool-call",
   );
 }
 
@@ -208,9 +220,9 @@ describe("claudeCode provider", () => {
     vi.clearAllMocks();
   });
 
-  it("factory returns a LanguageModelV2-shaped object", () => {
+  it("factory returns a LanguageModelV4-shaped object", () => {
     const model = makeModel();
-    expect(model.specificationVersion).toBe("v2");
+    expect(model.specificationVersion).toBe("v4");
     expect(model.provider).toBe("claude-code");
     expect(model.modelId).toBe("sonnet");
     expect(typeof model.doGenerate).toBe("function");
@@ -236,8 +248,40 @@ describe("claudeCode provider", () => {
 
     expect(contentText(result.content)).toBe("The answer is 45.");
     expect(contentToolCalls(result.content)).toHaveLength(0);
-    expect(result.finishReason).toBe("stop");
-    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 7, totalTokens: 19 });
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "end_turn" });
+    expect(result.usage).toEqual({
+      inputTokens: { total: 12, noCache: 12, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 7, text: undefined, reasoning: undefined },
+      raw: { input_tokens: 12, output_tokens: 7 },
+    });
+  });
+
+  it("doGenerate surfaces cache read/write token numbers (anthropic-parity formula)", async () => {
+    script.current = {
+      toolCalls: [],
+      assistantText: ["cached"],
+      inputTokens: 12,
+      outputTokens: 7,
+      stopReason: "end_turn",
+      cacheCreationInputTokens: 100,
+      cacheReadInputTokens: 50,
+    };
+
+    const model = makeModel();
+    const result = await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
+    );
+
+    expect(result.usage).toEqual({
+      inputTokens: { total: 12 + 100 + 50, noCache: 12, cacheRead: 50, cacheWrite: 100 },
+      outputTokens: { total: 7, text: undefined, reasoning: undefined },
+      raw: {
+        input_tokens: 12,
+        output_tokens: 7,
+        cache_creation_input_tokens: 100,
+        cache_read_input_tokens: 50,
+      },
+    });
   });
 
   it("doGenerate surfaces tool calls captured by canUseTool", async () => {
@@ -265,7 +309,7 @@ describe("claudeCode provider", () => {
     const tc = toolCalls[0];
     expect(tc?.toolName).toBe("add");
     expect(JSON.parse(tc?.input ?? "{}")).toEqual({ a: 17, b: 28 });
-    expect(result.finishReason).toBe("tool-calls");
+    expect(result.finishReason).toEqual({ unified: "tool-calls", raw: "tool_deferred" });
   });
 
   it("doStream emits text-delta, tool-call, and finish parts", async () => {
@@ -342,7 +386,7 @@ describe("claudeCode provider", () => {
     );
 
     expect(contentText(result.content)).toBe("45");
-    expect(result.finishReason).toBe("stop");
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "end_turn" });
   });
 
   // -------------------------------------------------------------------------
@@ -392,6 +436,72 @@ describe("claudeCode provider", () => {
     const model = claudeCode("sonnet", { oauthToken: TOKEN });
     model.dispose();
     expect(() => model.dispose()).not.toThrow();
+  });
+
+  // -------------------------------------------------------------------------
+  // Reasoning CallOption mapping (V4 `reasoning` → harness effort/thinking)
+  // -------------------------------------------------------------------------
+
+  it("maps reasoning: 'high' to captured SDK options.effort", async () => {
+    const model = makeModel();
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "high",
+      }),
+    );
+    expect(captured.options?.effort).toBe("high");
+  });
+
+  it("maps reasoning: 'none' to captured SDK options.thinking = { type: 'disabled' }", async () => {
+    const model = makeModel();
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "none",
+      }),
+    );
+    expect(captured.options?.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("reasoning: 'none' clears a caller-configured defaults.effort so the disable is total", async () => {
+    const model = claudeCode("sonnet", {
+      config: { mode: "host" },
+      sessionStrategy: "flatten",
+      defaults: { effort: "high" },
+    });
+    disposables.push(model);
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "none",
+      }),
+    );
+    expect(captured.options?.thinking).toEqual({ type: "disabled" });
+    expect(captured.options?.effort).toBeUndefined();
+  });
+
+  it("maps reasoning: 'minimal' to effort 'low' with a compatibility warning", async () => {
+    const model = makeModel();
+    const result = await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "minimal",
+      }),
+    );
+    expect(captured.options?.effort).toBe("low");
+    expect(result.warnings).toEqual([
+      {
+        type: "compatibility",
+        feature: "reasoning",
+        details: "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
+      },
+    ]);
+  });
+
+  it("leaves SDK options untouched for reasoning: 'provider-default' / unset", async () => {
+    const model = makeModel();
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
+    );
+    expect(captured.options?.effort).toBeUndefined();
+    expect(captured.options?.thinking).toBeUndefined();
   });
 });
 

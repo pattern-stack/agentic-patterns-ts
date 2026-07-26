@@ -20,10 +20,68 @@ import type {
   MessageCompleteEvent,
   MessageStartEvent,
   ReasoningEvent,
+  TokenUsageDetails,
   ToolCallEndEvent,
   ToolCallStartEvent,
 } from "../events/types.js";
 import { BaseExporter } from "./base.js";
+
+/**
+ * #388 — builds the Langfuse `usage_details` dict, applying Langfuse's own
+ * ingestion contract: usage-detail keys are MUTUALLY EXCLUSIVE buckets (each
+ * token counted in exactly one key); the UI/cost-inference then sums every
+ * key containing "input"/"output" back into the displayed totals (verified
+ * against Langfuse's `token-and-cost-tracking` docs, "Usage types are
+ * mutually exclusive buckets" section, and its own worked example converting
+ * inclusive provider counts into exclusive stored buckets).
+ *
+ * `@ai-sdk/anthropic@4` reports `inputTokens` INCLUSIVE of cache read+write
+ * (verified: `total = input_tokens + cacheCreationTokens + cacheReadTokens`),
+ * so sending `event.inputTokens` as `input` while ALSO sending
+ * `cache_read_input_tokens`/`cache_creation_input_tokens` would double-bill —
+ * this computes the true exclusive `input` (= `noCacheTokens`) instead. The
+ * same exclusivity applies symmetrically on the output side: `outputTokens`
+ * is inclusive of reasoning tokens, so `output` here is the exclusive
+ * non-reasoning (`textTokens`) count, with `output_reasoning_tokens` as its
+ * own bucket — both "input"-substring and "output"-substring keys still
+ * aggregate correctly in Langfuse's UI/cost display.
+ *
+ * When `details` is absent, this is byte-identical to the pre-#388 shape
+ * (`{ input, output }`) — non-reporting providers are untouched.
+ */
+export function buildLangfuseUsageDetails(
+  inputTokens: number,
+  outputTokens: number,
+  details: TokenUsageDetails | undefined,
+): Record<string, number> {
+  if (!details) {
+    return { input: inputTokens, output: outputTokens };
+  }
+
+  // Math.max(0, …) guard: a partial-reporting provider may hand us an
+  // `inputTokens`/`outputTokens` that is ALREADY exclusive (not inclusive of
+  // cache/reasoning) while still populating the detail members — subtracting
+  // would then go negative. Clamp so a negative bucket never reaches
+  // Langfuse's cost inference.
+  const input =
+    details.noCacheTokens ??
+    Math.max(0, inputTokens - (details.cacheReadTokens ?? 0) - (details.cacheWriteTokens ?? 0));
+  const output = details.textTokens ?? Math.max(0, outputTokens - (details.reasoningTokens ?? 0));
+
+  return {
+    input,
+    output,
+    ...(details.cacheReadTokens !== undefined
+      ? { cache_read_input_tokens: details.cacheReadTokens }
+      : {}),
+    ...(details.cacheWriteTokens !== undefined
+      ? { cache_creation_input_tokens: details.cacheWriteTokens }
+      : {}),
+    ...(details.reasoningTokens !== undefined
+      ? { output_reasoning_tokens: details.reasoningTokens }
+      : {}),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Langfuse client interface (minimal shape)
@@ -214,10 +272,11 @@ export class LangfuseExporter extends BaseExporter {
 
     if (generation) {
       generation.update({
-        usage_details: {
-          input: event.inputTokens,
-          output: event.outputTokens,
-        },
+        usage_details: buildLangfuseUsageDetails(
+          event.inputTokens,
+          event.outputTokens,
+          event.usageDetails,
+        ),
         metadata: { finish_reason: event.finishReason },
       });
       generation.end();
@@ -324,6 +383,7 @@ export class LangfuseExporter extends BaseExporter {
         update.cost_details = { total: event.costUsd };
       }
       rootSpan.update(update);
+      const d = event.usageDetails;
       rootSpan.updateTrace({
         output: this.captureContent ? event.content : undefined,
         metadata: {
@@ -331,6 +391,20 @@ export class LangfuseExporter extends BaseExporter {
           output_tokens: event.outputTokens,
           model: event.model,
           ...(event.costUsd !== undefined ? { cost_usd: event.costUsd } : {}),
+          // #388: run-total detail — plain informational trace metadata (not
+          // the `usage_details` cost-inference bucket, so no exclusivity
+          // arithmetic needed here, unlike `_onLlmEnd` above).
+          ...(d?.noCacheTokens !== undefined ? { no_cache_tokens: d.noCacheTokens } : {}),
+          ...(d?.cacheReadTokens !== undefined
+            ? { cache_read_input_tokens: d.cacheReadTokens }
+            : {}),
+          ...(d?.cacheWriteTokens !== undefined
+            ? { cache_creation_input_tokens: d.cacheWriteTokens }
+            : {}),
+          ...(d?.textTokens !== undefined ? { text_tokens: d.textTokens } : {}),
+          ...(d?.reasoningTokens !== undefined
+            ? { output_reasoning_tokens: d.reasoningTokens }
+            : {}),
         },
       });
       rootSpan.end();

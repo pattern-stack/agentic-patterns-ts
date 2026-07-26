@@ -7,7 +7,7 @@
 import type { RenderContext, ToolExecutionContext } from "@agentic-patterns/core";
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
-import type { AgentEvent } from "../events/types.js";
+import type { AgentEvent, TokenUsageDetails } from "../events/types.js";
 
 // ---------------------------------------------------------------------------
 // AgentLike — canonical minimal agent shape at the runner protocol boundary
@@ -56,6 +56,12 @@ export interface RunResult {
    * runners with no cost signal (e.g. `AgentRunner`). Optional and additive.
    */
   readonly costUsd?: number;
+  /**
+   * Cache/reasoning token detail for this run's totals (#388). Absent when
+   * the provider reported no detail members at all — never zero-filled. See
+   * {@link TokenUsageDetails}.
+   */
+  readonly usageDetails?: TokenUsageDetails;
 }
 
 /**

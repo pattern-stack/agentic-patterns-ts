@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 
-import type { LanguageModelV2FunctionTool } from "@ai-sdk/provider";
+import type { LanguageModelV4FunctionTool } from "@ai-sdk/provider";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -29,7 +29,7 @@ afterEach(() => {
   created.length = 0;
 });
 
-const TOOLS: LanguageModelV2FunctionTool[] = [
+const TOOLS: LanguageModelV4FunctionTool[] = [
   {
     type: "function",
     name: "add",
@@ -91,7 +91,7 @@ describe("writeShimSchemas", () => {
   it("defaults a missing inputSchema to an empty object schema", () => {
     const shim = createShim([], {});
     created.push(shim.storeDir);
-    const tool: LanguageModelV2FunctionTool = {
+    const tool: LanguageModelV4FunctionTool = {
       type: "function",
       name: "noargs",
       description: "",

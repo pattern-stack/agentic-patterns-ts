@@ -35,6 +35,42 @@ function usageV3(inputTokens: number, outputTokens: number): LanguageModelV3Usag
   };
 }
 
+/**
+ * #388 — V3 provider usage carrying cache/reasoning detail (anthropic-shaped:
+ * `total = noCache + cacheRead + cacheWrite`, mirrors `convertAnthropicUsage`).
+ */
+function usageV3WithDetails(
+  noCache: number,
+  cacheRead: number,
+  cacheWrite: number,
+  text: number,
+  reasoning: number,
+): LanguageModelV3Usage {
+  return {
+    inputTokens: { total: noCache + cacheRead + cacheWrite, noCache, cacheRead, cacheWrite },
+    outputTokens: { total: text + reasoning, text, reasoning },
+  };
+}
+
+/**
+ * #388 — V3 usage with EVERY detail member undefined (only the totals are
+ * known) — the shape our still-V2 `ClaudeCodeLanguageModel` produces after
+ * ai@7's V2→V3 shim. Distinct from the shared `usageV3` fixture above, which
+ * legitimately populates `noCache`/`text` (defined members) — this one is
+ * for absent ≠ zero proofs specifically.
+ */
+function usageV3NoDetails(inputTokens: number, outputTokens: number): LanguageModelV3Usage {
+  return {
+    inputTokens: {
+      total: inputTokens,
+      noCache: undefined,
+      cacheRead: undefined,
+      cacheWrite: undefined,
+    },
+    outputTokens: { total: outputTokens, text: undefined, reasoning: undefined },
+  };
+}
+
 /** A text-only doGenerate result. */
 function textResult(text: string, inputTokens: number, outputTokens: number): V3Result {
   return {
@@ -1714,6 +1750,149 @@ describe("AgentRunner", () => {
 
         const complete = events.find((e) => e.type === "agent.message.complete");
         expect(complete).not.toHaveProperty("structuredContent");
+      });
+    });
+  });
+
+  describe("usageDetails (#388) — absent ≠ zero", () => {
+    it("run(): a provider reporting cache/reasoning detail carries usageDetails on llm.end, message.complete, and RunResult", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => ({
+          content: [{ type: "text", text: "done" }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usageV3WithDetails(500, 11900, 0, 320, 140),
+          warnings: [],
+        }),
+      });
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      const result = await runner.run(agent, "Hi");
+
+      expect(result.usageDetails).toEqual({
+        noCacheTokens: 500,
+        cacheReadTokens: 11900,
+        cacheWriteTokens: 0,
+        textTokens: 320,
+        reasoningTokens: 140,
+      });
+
+      const llmEnd = events.find((e) => e.type === "agent.llm.end") as unknown as {
+        usageDetails?: unknown;
+      };
+      expect(llmEnd.usageDetails).toEqual(result.usageDetails);
+
+      const complete = events.find((e) => e.type === "agent.message.complete") as unknown as {
+        usageDetails?: unknown;
+      };
+      expect(complete.usageDetails).toEqual(result.usageDetails);
+    });
+
+    it("run(): a provider reporting only flat totals (no detail members) omits usageDetails entirely — not a zero-filled object", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => ({
+          content: [{ type: "text" as const, text: "done" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: usageV3NoDetails(10, 5),
+          warnings: [],
+        }),
+      });
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      const result = await runner.run(agent, "Hi");
+
+      expect("usageDetails" in result).toBe(false);
+
+      const llmEnd = events.find((e) => e.type === "agent.llm.end");
+      expect(llmEnd && "usageDetails" in llmEnd).toBe(false);
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect(complete && "usageDetails" in complete).toBe(false);
+    });
+
+    it("runStructured() capable path (tools + gpt-4o): merges detail across a multi-step tool call into the final RunResult", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return {
+              content: [
+                {
+                  type: "tool-call" as const,
+                  toolCallId: "tc-usage-1",
+                  toolName: "get_weather",
+                  input: JSON.stringify({ city: "NYC" }),
+                },
+              ],
+              finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+              usage: usageV3WithDetails(50, 100, 0, 20, 0),
+              warnings: [],
+            };
+          }
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify({ weather: "sunny" }) }],
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: usageV3WithDetails(30, 0, 0, 15, 10),
+            warnings: [],
+          };
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+      const schema = z.object({ weather: z.string() });
+      const executor = makeToolExecutor(async () => ({ weather: "sunny" }));
+
+      const runner = new AgentRunner(model);
+      const result = await runner.runStructured(agent, "weather?", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ weather: "sunny" });
+      // Aggregated across both steps: v7's own result.usage total covers this
+      // (the primary branch, not the reduce fallback) — either way the merge
+      // semantics land on the same summed detail.
+      expect(result.usageDetails).toEqual({
+        noCacheTokens: 80,
+        cacheReadTokens: 100,
+        cacheWriteTokens: 0,
+        textTokens: 35,
+        reasoningTokens: 10,
+      });
+    });
+
+    it("runStructured() no-tools path: carries usageDetails straight from result.usage when the provider reports it", async () => {
+      const schema = z.object({ answer: z.string() });
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => ({
+          content: [{ type: "text", text: JSON.stringify({ answer: "42" }) }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usageV3WithDetails(100, 200, 0, 50, 0),
+          warnings: [],
+        }),
+      });
+      const runner = new AgentRunner(model);
+      const agent = makeAgent();
+
+      const result = await runner.runStructured(agent, "Answer", schema);
+
+      expect(result.object).toEqual({ answer: "42" });
+      expect(result.usageDetails).toEqual({
+        noCacheTokens: 100,
+        cacheReadTokens: 200,
+        cacheWriteTokens: 0,
+        textTokens: 50,
+        reasoningTokens: 0,
       });
     });
   });

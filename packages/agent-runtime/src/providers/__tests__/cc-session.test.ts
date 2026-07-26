@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { LanguageModelV2Prompt } from "@ai-sdk/provider";
+import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -53,7 +53,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("conversationIdentity", () => {
-  const opening: LanguageModelV2Prompt = [
+  const opening: LanguageModelV4Prompt = [
     { role: "system", content: "You are a math bot." },
     { role: "user", content: [{ type: "text", text: "17 + 28?" }] },
   ];
@@ -66,7 +66,7 @@ describe("conversationIdentity", () => {
 
   it("is stable as later turns are appended (uses only the run-invariant prefix)", () => {
     const base = conversationIdentity("You are a math bot.", opening, ["add"]);
-    const grown: LanguageModelV2Prompt = [
+    const grown: LanguageModelV4Prompt = [
       ...opening,
       {
         role: "assistant",
@@ -97,7 +97,7 @@ describe("conversationIdentity", () => {
 
   it("differs when the system prompt, opening turn, or tool set differ", () => {
     const base = conversationIdentity("s", opening, ["add"]);
-    const otherOpening: LanguageModelV2Prompt = [
+    const otherOpening: LanguageModelV4Prompt = [
       { role: "system", content: "You are a math bot." },
       { role: "user", content: [{ type: "text", text: "99 * 2?" }] },
     ];
@@ -112,7 +112,7 @@ describe("conversationIdentity", () => {
 // ---------------------------------------------------------------------------
 
 describe("findPendingToolResult", () => {
-  const prompt: LanguageModelV2Prompt = [
+  const prompt: LanguageModelV4Prompt = [
     { role: "user", content: [{ type: "text", text: "add" }] },
     {
       role: "assistant",

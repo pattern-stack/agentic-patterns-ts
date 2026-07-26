@@ -40,16 +40,29 @@ function streamFrom(parts: LanguageModelV3StreamPart[]) {
   });
 }
 
-/** V3 provider usage — nested input/output token detail (unlike v5's flat shape). */
-function usageV3(inputTokens: number, outputTokens: number): LanguageModelV3Usage {
+/**
+ * V3 provider usage — nested input/output token detail (unlike v5's flat
+ * shape). `details` (#388) optionally overrides cache/reasoning members;
+ * omitted members default to the flat totals (defined, not absent) —
+ * matching this fixture's pre-#388 shape exactly when `details` is omitted.
+ */
+function usageV3(
+  inputTokens: number,
+  outputTokens: number,
+  details?: { cacheRead?: number; cacheWrite?: number; reasoning?: number },
+): LanguageModelV3Usage {
   return {
     inputTokens: {
       total: inputTokens,
       noCache: inputTokens,
-      cacheRead: undefined,
-      cacheWrite: undefined,
+      cacheRead: details?.cacheRead,
+      cacheWrite: details?.cacheWrite,
     },
-    outputTokens: { total: outputTokens, text: outputTokens, reasoning: undefined },
+    outputTokens: {
+      total: outputTokens,
+      text: outputTokens,
+      reasoning: details?.reasoning,
+    },
   };
 }
 
@@ -65,11 +78,12 @@ function finishPart(
   finishReason: LanguageModelV3FinishReason["unified"],
   inputTokens: number,
   outputTokens: number,
+  details?: { cacheRead?: number; cacheWrite?: number; reasoning?: number },
 ): LanguageModelV3StreamPart {
   return {
     type: "finish",
     finishReason: finishReasonV3(finishReason),
-    usage: usageV3(inputTokens, outputTokens),
+    usage: usageV3(inputTokens, outputTokens, details),
   };
 }
 
@@ -1044,6 +1058,78 @@ describe("AgentRunner.stream()", () => {
         expect((complete as { content?: string }).content).toBe("all facets covered");
         expect(complete).not.toHaveProperty("structuredContent");
       });
+    });
+  });
+
+  describe("usageDetails (#388) — absent ≠ zero", () => {
+    it("a finish part carrying cache/reasoning detail surfaces usageDetails on llm.end and message.complete", async () => {
+      const model = new MockLanguageModelV3({
+        doStream: streamFrom([
+          ...textParts("Hello ", "world!"),
+          finishPart("stop", 12000, 320, { cacheRead: 11900, cacheWrite: 0, reasoning: 140 }),
+        ]),
+      });
+
+      const runner = new AgentRunner(model);
+      const agent = makeAgent();
+
+      const events = await collectStream(runner.stream(agent, "Hi"));
+
+      const llmEnd = events.find((e) => e.type === "agent.llm.end") as unknown as {
+        usageDetails?: unknown;
+      };
+      expect(llmEnd.usageDetails).toEqual({
+        noCacheTokens: 12000,
+        cacheReadTokens: 11900,
+        cacheWriteTokens: 0,
+        textTokens: 320,
+        reasoningTokens: 140,
+      });
+
+      const complete = events.find((e) => e.type === "agent.message.complete") as unknown as {
+        usageDetails?: unknown;
+      };
+      expect(complete.usageDetails).toEqual(llmEnd.usageDetails);
+    });
+
+    it("a finish part with no detail members (only totals) omits usageDetails entirely on both events", async () => {
+      const model = new MockLanguageModelV3({
+        doStream: async () => ({
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({ type: "text-start", id: TXT });
+              controller.enqueue({ type: "text-delta", id: TXT, delta: "hi" });
+              controller.enqueue({ type: "text-end", id: TXT });
+              controller.enqueue({
+                type: "finish",
+                finishReason: finishReasonV3("stop"),
+                usage: {
+                  inputTokens: {
+                    total: 10,
+                    noCache: undefined,
+                    cacheRead: undefined,
+                    cacheWrite: undefined,
+                  },
+                  outputTokens: { total: 5, text: undefined, reasoning: undefined },
+                },
+              });
+              controller.close();
+            },
+          }),
+        }),
+      });
+
+      const runner = new AgentRunner(model);
+      const agent = makeAgent();
+
+      const events = await collectStream(runner.stream(agent, "Hi"));
+
+      const llmEnd = events.find((e) => e.type === "agent.llm.end");
+      expect(llmEnd && "usageDetails" in llmEnd).toBe(false);
+
+      const complete = events.find((e) => e.type === "agent.message.complete");
+      expect(complete && "usageDetails" in complete).toBe(false);
     });
   });
 });

@@ -8,6 +8,20 @@
  * added to the runtime vocabulary, update the union here to match.
  */
 
+/**
+ * #388 — cache/reasoning token detail, snake_case wire shape (mirrors the
+ * runtime's `TokenUsageDetails` via `toSnakeUsageDetails`). Every member is
+ * independently optional; present only when the provider reported it —
+ * absent means unreported, never zero.
+ */
+export type UsageDetailsWire = {
+  no_cache_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  text_tokens?: number;
+  reasoning_tokens?: number;
+};
+
 export type ClientEvent =
   | { name: "conversation.start"; data: { conversation_id: string; agent_name: string } }
   | { name: "conversation.end"; data: { conversation_id: string; reason: string } }
@@ -23,6 +37,8 @@ export type ClientEvent =
         /** #324: total run cost in USD when the harness reports it (CC only). */
         cost_usd?: number;
         finish_reason?: string;
+        /** #388: run-total cache/reasoning detail — absent ≠ zero. */
+        usage_details?: UsageDetailsWire;
       };
     }
   | { name: "message.cancel"; data: { reason: string } }
@@ -219,6 +235,8 @@ export type ClientEvent =
         output_tokens: number;
         duration_ms: number;
         finish_reason: string;
+        /** #388: per-call cache/reasoning detail — absent ≠ zero. */
+        usage_details?: UsageDetailsWire;
       };
     }
   // Claude Code hook passthrough (#286) — SDK hook fired during a CC run.

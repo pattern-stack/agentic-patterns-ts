@@ -14,10 +14,31 @@ import type {
   MessageCompleteEvent,
   MessageStartEvent,
   ReasoningEvent,
+  TokenUsageDetails,
   ToolCallEndEvent,
   ToolCallStartEvent,
 } from "../events/types.js";
 import { BaseExporter } from "./base.js";
+
+/**
+ * #388 — renders only defined detail members, e.g.
+ * ` (cache 11900 read · 500 write · reasoning 140)`. Empty string when
+ * `details` is absent (absent ≠ zero — never render a "0" for an unreported
+ * member).
+ */
+function formatUsageDetailsSuffix(details: TokenUsageDetails | undefined): string {
+  if (!details) return "";
+
+  const cacheParts: string[] = [];
+  if (details.cacheReadTokens !== undefined) cacheParts.push(`${details.cacheReadTokens} read`);
+  if (details.cacheWriteTokens !== undefined) cacheParts.push(`${details.cacheWriteTokens} write`);
+
+  const segments: string[] = [];
+  if (cacheParts.length > 0) segments.push(`cache ${cacheParts.join(" · ")}`);
+  if (details.reasoningTokens !== undefined) segments.push(`reasoning ${details.reasoningTokens}`);
+
+  return segments.length > 0 ? ` (${segments.join(" · ")})` : "";
+}
 
 /** Logger interface for console output. */
 export interface ConsoleLogger {
@@ -81,7 +102,7 @@ export class ConsoleExporter extends BaseExporter {
 
     if (this._verbose) {
       this._logger.log(
-        `Tokens: ${event.inputTokens} in / ${event.outputTokens} out | Model: ${event.model}`,
+        `Tokens: ${event.inputTokens} in / ${event.outputTokens} out${formatUsageDetailsSuffix(event.usageDetails)} | Model: ${event.model}`,
       );
     }
 

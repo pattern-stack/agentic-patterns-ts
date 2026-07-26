@@ -116,3 +116,48 @@ describe("TraceWaterfall — expand/collapse (seq-keyed, args wins)", () => {
     expect(screen.queryByText(/▸/)).toBeNull();
   });
 });
+
+describe("TraceWaterfall — token chip breakdown (#388)", () => {
+  it("shows the cache/reasoning breakdown parentheticals when tokenDetails is present", () => {
+    const step = mkStep({
+      seq: 1,
+      iter: 1,
+      kind: "model",
+      label: "Model call · iteration 1",
+      ms: 100,
+      ctxTokens: 12400,
+      outTokens: 320,
+      tokenDetails: { cacheRead: 11900, reasoning: 140 },
+    });
+    render(<TraceWaterfall steps={[step]} />);
+    expect(screen.getByText("12,400 (11,900 cached) ctx · 320 (140 rsn) out")).toBeTruthy();
+  });
+
+  it("renders the byte-identical string (no parentheticals) when tokenDetails is absent", () => {
+    const step = mkStep({
+      seq: 1,
+      iter: 1,
+      kind: "model",
+      label: "Model call · iteration 1",
+      ms: 100,
+      ctxTokens: 100,
+      outTokens: 20,
+    });
+    render(<TraceWaterfall steps={[step]} />);
+    expect(screen.getByText("100 ctx · 20 out")).toBeTruthy();
+  });
+
+  it("formats outTokens with .toLocaleString() (thousands separator) like ctxTokens", () => {
+    const step = mkStep({
+      seq: 1,
+      iter: 1,
+      kind: "model",
+      label: "Model call · iteration 1",
+      ms: 100,
+      ctxTokens: 1000,
+      outTokens: 4200,
+    });
+    render(<TraceWaterfall steps={[step]} />);
+    expect(screen.getByText("1,000 ctx · 4,200 out")).toBeTruthy();
+  });
+});

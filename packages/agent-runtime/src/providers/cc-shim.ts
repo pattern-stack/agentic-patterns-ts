@@ -39,8 +39,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 
 import type {
-  LanguageModelV2FunctionTool,
-  LanguageModelV2ToolResultOutput,
+  LanguageModelV4FunctionTool,
+  LanguageModelV4ToolResultOutput,
 } from "@ai-sdk/provider";
 import type { McpStdioServerConfig } from "@anthropic-ai/claude-agent-sdk";
 
@@ -168,7 +168,7 @@ export interface ShimHandle {
  * deferred state is consumed as `tool_deferred_unavailable`.
  */
 export function createShim(
-  tools: ReadonlyArray<LanguageModelV2FunctionTool>,
+  tools: ReadonlyArray<LanguageModelV4FunctionTool>,
   env: Record<string, string>,
 ): ShimHandle {
   const modules = resolveMcpSdkModules();
@@ -209,7 +209,7 @@ export function createShim(
 /** Serialize the framework tools' name/description/JSON-Schema for the shim. */
 export function writeShimSchemas(
   schemasFile: string,
-  tools: ReadonlyArray<LanguageModelV2FunctionTool>,
+  tools: ReadonlyArray<LanguageModelV4FunctionTool>,
 ): void {
   const schemas = tools.map((t) => ({
     name: t.name,
@@ -224,12 +224,12 @@ export function writeShimSchemas(
  * resume. Written as `{ text }` so the shim returns it verbatim as the tool's
  * text content (matching the shape F-3 verified reaches the model).
  */
-export function parkResult(resultFile: string, output: LanguageModelV2ToolResultOutput): void {
+export function parkResult(resultFile: string, output: LanguageModelV4ToolResultOutput): void {
   writeFileSync(resultFile, JSON.stringify({ text: renderToolResultText(output) }), "utf8");
 }
 
-/** Flatten a v5 tool-result `output` union into the text the shim serves. */
-function renderToolResultText(output: LanguageModelV2ToolResultOutput): string {
+/** Flatten a V4 tool-result `output` union into the text the shim serves. */
+function renderToolResultText(output: LanguageModelV4ToolResultOutput): string {
   switch (output.type) {
     case "text":
     case "error-text":
@@ -237,12 +237,33 @@ function renderToolResultText(output: LanguageModelV2ToolResultOutput): string {
     case "json":
     case "error-json":
       return safeStringify(output.value);
+    case "execution-denied":
+      return `[tool execution denied${output.reason ? `: ${output.reason}` : ""}]`;
     case "content":
       return output.value
-        .map((c) => (c.type === "text" ? c.text : `[media ${c.mediaType}]`))
+        .map((c) => {
+          switch (c.type) {
+            case "text":
+              return c.text;
+            case "file":
+              return `[file ${c.mediaType}]`;
+            case "custom":
+              return "[custom content]";
+            default: {
+              const _exhaustive: never = c;
+              void _exhaustive;
+              return "[custom content]";
+            }
+          }
+        })
         .join("\n");
-    default:
+    default: {
+      // Exhaustiveness check — a future V5 ToolResultOutput variant will fail
+      // typecheck here instead of silently falling through to "".
+      const _exhaustive: never = output;
+      void _exhaustive;
       return "";
+    }
   }
 }
 
