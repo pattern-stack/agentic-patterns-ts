@@ -10,7 +10,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LanguageModelV2 } from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunner } from "../../runner/agent-runner.js";
@@ -52,8 +52,8 @@ function makeAgent(getModel: () => string): AgentLike {
   };
 }
 
-function textModel(text: string): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function textModel(text: string): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     doGenerate: async () => ({
       content: [{ type: "text", text }],
       finishReason: "stop",

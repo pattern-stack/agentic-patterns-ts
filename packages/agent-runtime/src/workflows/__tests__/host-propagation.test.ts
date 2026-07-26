@@ -9,7 +9,7 @@
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -92,7 +92,7 @@ describe("host propagation — coordinator → subagent, run-scoped slot (full r
     // mock model id doesn't match the tools+structured-output allowlist),
     // then a 3rd call for tier 2's structured finish.
     let outerCalls = 0;
-    const outerModel = new MockLanguageModelV2({
+    const outerModel = new MockLanguageModelV3({
       doGenerate: async () => {
         outerCalls++;
         if (outerCalls === 1) {
@@ -434,7 +434,7 @@ describe("host propagation — event bus crosses the seam", () => {
     // tool call then answers — run on a runner with NO constructor bus (the
     // production trap: it would fall back to the global default bus).
     let childCalls = 0;
-    const childModel = new MockLanguageModelV2({
+    const childModel = new MockLanguageModelV3({
       doGenerate: async () => {
         childCalls++;
         if (childCalls === 1) {
@@ -483,7 +483,7 @@ describe("host propagation — event bus crosses the seam", () => {
     // The outer coordinator's LLM: delegate to "child", then answer, then
     // tier 2's structured finish (same 3-call script as Test 1).
     let outerCalls = 0;
-    const outerModel = new MockLanguageModelV2({
+    const outerModel = new MockLanguageModelV3({
       doGenerate: async () => {
         outerCalls++;
         if (outerCalls === 1) {
@@ -618,7 +618,7 @@ describe("host propagation — scope crosses the seam (#308)", () => {
     // Same 3-call outer script as Test 1: delegate to "child", answer, then
     // tier 2's structured finish.
     let outerCalls = 0;
-    const outerModel = new MockLanguageModelV2({
+    const outerModel = new MockLanguageModelV3({
       doGenerate: async () => {
         outerCalls++;
         if (outerCalls === 1) {

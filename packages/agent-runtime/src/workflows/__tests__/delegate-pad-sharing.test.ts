@@ -6,7 +6,7 @@
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -195,7 +195,7 @@ describe("delegateTo scratchpad sharing (#269)", () => {
 
   it("T4 — AgentRunner shares the backpack through delegateTo on the live rail", async () => {
     let outerCalls = 0;
-    const outerModel = new MockLanguageModelV2({
+    const outerModel = new MockLanguageModelV3({
       doGenerate: async () => {
         outerCalls++;
         if (outerCalls === 1) {

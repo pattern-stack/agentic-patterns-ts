@@ -5,7 +5,7 @@
 import { ToolSchema } from "@agentic-patterns/core";
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import type { LanguageModelV2Content } from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -20,7 +20,7 @@ import type { ToolExecutor } from "../types.js";
 // v5 mock fixture helpers — build a doGenerate result from content parts.
 // ---------------------------------------------------------------------------
 
-type V2Result = Awaited<ReturnType<MockLanguageModelV2["doGenerate"]>>;
+type V2Result = Awaited<ReturnType<MockLanguageModelV3["doGenerate"]>>;
 
 /** A text-only doGenerate result. */
 function textResult(text: string, inputTokens: number, outputTokens: number): V2Result {
@@ -135,7 +135,7 @@ function collectEvents(bus: AgentEventBus): AgentEvent[] {
 describe("AgentRunner", () => {
   describe("single-turn no tools", () => {
     it("should return response directly when no tools are available", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult("Hello! How can I help?", 10, 5),
       });
 
@@ -156,7 +156,7 @@ describe("AgentRunner", () => {
   describe("single-turn with tools", () => {
     it("should execute tool and return final response", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -197,7 +197,7 @@ describe("AgentRunner", () => {
   describe("multi-iteration tool loop", () => {
     it("should handle tool -> response -> tool -> response chain", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -241,7 +241,7 @@ describe("AgentRunner", () => {
 
   describe("max iterations", () => {
     it("should return gracefully with finishReason max_iterations", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult({ toolCallId: "tc-loop", toolName: "infinite_tool", input: {} }, 5, 3),
       });
@@ -268,7 +268,7 @@ describe("AgentRunner", () => {
     // (previously silent) — a bus-finish hook has nothing to finalize on
     // otherwise and the run row would stay 'running' forever.
     it("should emit a terminal message.complete with finishReason max_iterations", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult({ toolCallId: "tc-loop", toolName: "infinite_tool", input: {} }, 5, 3),
       });
@@ -296,7 +296,7 @@ describe("AgentRunner", () => {
   describe("parallel tool execution", () => {
     it("should execute multiple tools concurrently", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -340,7 +340,7 @@ describe("AgentRunner", () => {
 
   describe("event emission", () => {
     it("should emit events in correct order for simple run", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult("Done!", 10, 5),
       });
 
@@ -365,7 +365,7 @@ describe("AgentRunner", () => {
     // #117: message.start now carries the rendered system prompt (no other
     // event does), and message.complete carries the authoritative finishReason.
     it("should stamp systemPrompt on message.start and finishReason on message.complete", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult("Done!", 10, 5),
       });
 
@@ -387,7 +387,7 @@ describe("AgentRunner", () => {
 
     it("should emit tool events for tool calls", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -420,7 +420,7 @@ describe("AgentRunner", () => {
 
     it("stamps displayType on tool.start/end when the schema declares it, omits the key otherwise", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -474,7 +474,7 @@ describe("AgentRunner", () => {
   describe("token counting", () => {
     it("should accumulate tokens across iterations", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -501,7 +501,7 @@ describe("AgentRunner", () => {
   describe("tool executor error handling", () => {
     it("should handle tool execution errors gracefully", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -533,7 +533,7 @@ describe("AgentRunner", () => {
 
     it("should handle missing tool executor", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -558,7 +558,7 @@ describe("AgentRunner", () => {
 
   describe("gate integration", () => {
     it("should throw ToolCallBlocked when gate blocks", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-blocked", toolName: "dangerous_tool", input: {} },
@@ -593,7 +593,7 @@ describe("AgentRunner", () => {
       // collectEvents() here: it subscribes to agent.tool.intent and would mask
       // the bug by making publish() return a non-empty handler list.
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -650,7 +650,7 @@ describe("AgentRunner", () => {
   describe("ToolExecutionContext threading (#102, m.a)", () => {
     it("builds a correlated ctx for each dispatched tool call", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -704,7 +704,7 @@ describe("AgentRunner", () => {
 
     it("execute(name, args) with no toolExecutor ctx support still works (backward compat)", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -743,7 +743,7 @@ describe("AgentRunner", () => {
   describe("RunOptions.host relay (#124)", () => {
     it("run(): ctx.host === options.host on the dispatched tool call", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -779,7 +779,7 @@ describe("AgentRunner", () => {
 
     it("run(): omitting options.host yields ctx.host === undefined (no accidental default)", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -814,7 +814,7 @@ describe("AgentRunner", () => {
 
     it("run(): readScope(ctx) reads a session scope value relayed via RunOptions.host.scope (#308)", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           callCount++;
           if (callCount === 1) {
@@ -853,7 +853,7 @@ describe("AgentRunner", () => {
 
     it("runStructured() (capable model → convertExecutableTools): ctx.host === options.host on the dispatched tool call", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         modelId: "gpt-4o",
         doGenerate: async () => {
           callCount++;
@@ -904,7 +904,7 @@ describe("AgentRunner", () => {
   // #124 block above, which spies on ToolExecutionContext.host).
   describe("renderInitialPrompt render-ctx relay (#308)", () => {
     it("run(): delivers {scope} to renderInitialPrompt when RunOptions.host carries one", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult("hi there", 5, 5),
       });
       const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
@@ -923,7 +923,7 @@ describe("AgentRunner", () => {
     });
 
     it("run(): delivers undefined to renderInitialPrompt when RunOptions.host carries no scope", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult("hi there", 5, 5),
       });
       const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
@@ -941,7 +941,7 @@ describe("AgentRunner", () => {
     });
 
     it("runStructured(): delivers {scope} to renderInitialPrompt when RunOptions.host carries one", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
       });
       const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
@@ -961,7 +961,7 @@ describe("AgentRunner", () => {
     });
 
     it("runStructured(): delivers undefined to renderInitialPrompt when RunOptions.host carries no scope", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
       });
       const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
@@ -984,7 +984,7 @@ describe("AgentRunner", () => {
   // message.complete carries the authoritative finishReason.
   describe("runStructured() event stamping (#117)", () => {
     it("stamps systemPrompt on message.start and finishReason on message.complete", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
       });
 
@@ -1007,7 +1007,7 @@ describe("AgentRunner", () => {
 
     it("stamps displayType on tool.start/end via convertExecutableTools (capable model), omits the key when undeclared", async () => {
       let callCount = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         modelId: "gpt-4o",
         doGenerate: async () => {
           callCount++;
@@ -1058,7 +1058,7 @@ describe("AgentRunner", () => {
     it("ends the loop on a successful terminal call — the tool result is the response", async () => {
       // The model tool-calls on EVERY iteration: without the terminal exit this
       // run would burn maxIterations and finish as "max_iterations".
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "finish", input: { summary: "covered 3 facets" } },
@@ -1082,7 +1082,7 @@ describe("AgentRunner", () => {
     });
 
     it("serializes a non-string terminal result as JSON", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
@@ -1110,7 +1110,7 @@ describe("AgentRunner", () => {
         citationKeys: z.array(z.string()),
       });
       let llmCalls = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           llmCalls++;
           return toolCallResult(
@@ -1140,7 +1140,7 @@ describe("AgentRunner", () => {
       const tier2Result = { summary: "normalized by tier 2" };
       const outputSchema = z.object({ summary: z.string() });
       let llmCalls = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           llmCalls++;
           if (llmCalls === 1) {
@@ -1170,7 +1170,7 @@ describe("AgentRunner", () => {
 
     it("T8a — accepts a JSON-looking terminal string as the raw candidate", async () => {
       let llmCalls = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           llmCalls++;
           return toolCallResult(
@@ -1198,7 +1198,7 @@ describe("AgentRunner", () => {
     it("T8b — accepts a stringified object through the parsed candidate", async () => {
       const terminalResult = { summary: "done" };
       let llmCalls = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           llmCalls++;
           return toolCallResult(
@@ -1223,7 +1223,7 @@ describe("AgentRunner", () => {
 
     it("does NOT terminate on an errored terminal call — the model sees the error and corrects", async () => {
       let llmCalls = 0;
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () => {
           llmCalls++;
           if (llmCalls === 1) {
@@ -1254,7 +1254,7 @@ describe("AgentRunner", () => {
 
     it("executes the whole batch before exiting when ordinary + terminal calls mix", async () => {
       const executed: string[] = [];
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallsResult(
             [
@@ -1286,7 +1286,7 @@ describe("AgentRunner", () => {
     });
 
     it("emits iteration.end (hasMore=false) and message.complete (terminal_tool)", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
@@ -1315,7 +1315,7 @@ describe("AgentRunner", () => {
     // remaining iteration and return an empty "max_iterations" response.
     it("ends as terminal_tool_error on the SECOND errored terminal call — does not burn to max_iterations", async () => {
       // The model tool-calls finish on every iteration; the tool always throws.
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "finish", input: { summary: "done?" } },
@@ -1343,7 +1343,7 @@ describe("AgentRunner", () => {
     });
 
     it("emits message.complete (terminal_tool_error) with the error text as content", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "finish", input: { summary: "done?" } },
@@ -1374,7 +1374,7 @@ describe("AgentRunner", () => {
     });
 
     it("terminal errors ONCE then succeeds — clean terminal_tool exit (correct-and-retry still works)", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
@@ -1414,7 +1414,7 @@ describe("AgentRunner", () => {
         const controller = new AbortController();
         controller.abort();
 
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () => {
             throw new Error("doGenerate must never be called for a pre-aborted signal");
           },
@@ -1434,7 +1434,7 @@ describe("AgentRunner", () => {
         const controller = new AbortController();
         let llmCalls = 0;
 
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () => {
             llmCalls++;
             return toolCallResult({ toolCallId: "tc-1", toolName: "loopy", input: {} }, 5, 3);
@@ -1466,7 +1466,7 @@ describe("AgentRunner", () => {
         const controller = new AbortController();
         controller.abort();
 
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () => {
             throw new Error("doGenerate must never be called for a pre-aborted signal");
           },
@@ -1494,7 +1494,7 @@ describe("AgentRunner", () => {
         const controller = new AbortController();
         controller.abort();
 
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () => {
             throw new Error("doGenerate must never be called for a pre-aborted signal");
           },
@@ -1513,7 +1513,7 @@ describe("AgentRunner", () => {
         const controller = new AbortController();
         let llmCalls = 0;
 
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () => {
             llmCalls++;
             return toolCallResult({ toolCallId: "tc-1", toolName: "loopy", input: {} }, 5, 3);
@@ -1558,7 +1558,7 @@ describe("AgentRunner", () => {
     const weatherSchema = z.object({ city: z.string() });
 
     it("publishArtifacts: true — ctx.publishArtifact is wired, and published artifacts land on that call's tool.end", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "get_weather", input: { city: "NYC" } },
@@ -1594,7 +1594,7 @@ describe("AgentRunner", () => {
     });
 
     it("publishArtifacts: false (default) — ctx.publishArtifact is undefined, and tool.end carries no artifacts key", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "get_weather", input: { city: "NYC" } },
@@ -1627,7 +1627,7 @@ describe("AgentRunner", () => {
     });
 
     it("does not attach artifacts to a call that never publishes, even with the gate on", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doGenerate: async () =>
           toolCallResult(
             { toolCallId: "tc-1", toolName: "get_weather", input: { city: "NYC" } },
@@ -1654,7 +1654,7 @@ describe("AgentRunner", () => {
 
       it("attaches structuredContent to message.complete for a structured terminal result, content stays JSON-stringified", async () => {
         const structured = { facets: 3, gaps: 0 };
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () =>
             toolCallResult(
               { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
@@ -1681,7 +1681,7 @@ describe("AgentRunner", () => {
       });
 
       it("omits structuredContent entirely for a string terminal result — byte-identical content", async () => {
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doGenerate: async () =>
             toolCallResult(
               { toolCallId: "tc-1", toolName: "finish", input: { summary: "covered 3 facets" } },

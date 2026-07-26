@@ -8,7 +8,7 @@
 
 declare function setTimeout(callback: () => void, ms: number): number;
 
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -146,7 +146,7 @@ describe("integration: single-agent end-to-end", () => {
 
     // 4. Run with mock model (tool call then final response)
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {

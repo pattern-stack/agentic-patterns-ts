@@ -17,7 +17,7 @@
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { ToolSchema } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -108,8 +108,8 @@ function makeAgent(name: string, model: string, tools: ToolSchema[] = []): Agent
  * text once the tool result has landed. Decides by INSPECTING the transcript
  * (not a call counter) so a single instance drives many stages/runs correctly.
  */
-function gatherToolModel(): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function gatherToolModel(): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     doGenerate: async ({ prompt }) => {
       const toolRan = (prompt as ReadonlyArray<{ role: string }>).some((m) => m.role === "tool");
       if (!toolRan) {
@@ -138,8 +138,8 @@ function gatherToolModel(): MockLanguageModelV2 {
 }
 
 /** A model that just emits one line of text (a downstream reader/curator stage). */
-function textModel(text: string): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function textModel(text: string): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     doGenerate: async () => ({
       content: [{ type: "text" as const, text }],
       finishReason: "stop" as const,

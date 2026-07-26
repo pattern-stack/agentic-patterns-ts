@@ -4,7 +4,7 @@
 
 import { ToolSchema } from "@agentic-patterns/core";
 import type { LanguageModelV2FinishReason, LanguageModelV2StreamPart } from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -110,7 +110,7 @@ function eventTypes(events: AgentEvent[]): string[] {
 
 describe("AgentRunner.stream()", () => {
   it("streams a simple response with no tools", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: streamFrom([...textParts("Hello ", "world!"), finishPart("stop", 10, 5)]),
     });
 
@@ -148,7 +148,7 @@ describe("AgentRunner.stream()", () => {
 
   it("handles tool calls and continues iteration", async () => {
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () => {
         callCount++;
         if (callCount === 1) {
@@ -191,7 +191,7 @@ describe("AgentRunner.stream()", () => {
 
   it("stamps displayType on tool.start/end when the schema declares it, omits the key otherwise", async () => {
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () => {
         callCount++;
         if (callCount === 1) {
@@ -241,7 +241,7 @@ describe("AgentRunner.stream()", () => {
   });
 
   it("handles LLM error during streaming", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () => {
         throw new Error("LLM connection failed");
       },
@@ -263,7 +263,7 @@ describe("AgentRunner.stream()", () => {
   });
 
   it("emits events to the event bus as well as yielding them", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: streamFrom([...textParts("Hi"), finishPart("stop", 5, 2)]),
     });
 
@@ -286,7 +286,7 @@ describe("AgentRunner.stream()", () => {
   });
 
   it("emits thinking.start + reasoning deltas + reasoning complete around text", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: streamFrom([
         ...reasoningParts("Let me think", " about this"),
         ...textParts("The answer", " is 42"),
@@ -344,7 +344,7 @@ describe("AgentRunner.stream()", () => {
 
   it("closes reasoning block before tool call, then opens a new block after", async () => {
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () => {
         callCount++;
         if (callCount === 1) {
@@ -401,7 +401,7 @@ describe("AgentRunner.stream()", () => {
     const calcSchema = z.object({ x: z.number() });
     const tools = [ToolSchema.fromZod("loopy", "Loop tool", calcSchema)];
 
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () =>
         streamFrom([
           toolCallPart(`tc-${Date.now()}`, "loopy", { x: 1 }),
@@ -441,7 +441,7 @@ describe("AgentRunner.stream()", () => {
   // #117: message.start now carries systemPrompt + agentConfig on stream(),
   // for parity with run()/runStructured() (previously agentName only).
   it("stamps systemPrompt + agentConfig on message.start", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: streamFrom([...textParts("Hi"), finishPart("stop", 5, 2)]),
     });
 
@@ -462,7 +462,7 @@ describe("AgentRunner.stream()", () => {
   // ---------------------------------------------------------------------------
   it("relays RunOptions.host onto the dispatched tool call's ToolExecutionContext (#124)", async () => {
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () => {
         callCount++;
         if (callCount === 1) {
@@ -505,7 +505,7 @@ describe("AgentRunner.stream()", () => {
   // RenderContext for renderInitialPrompt(), the 3rd of 3 call sites.
   // ---------------------------------------------------------------------------
   it("delivers {scope} to renderInitialPrompt when RunOptions.host carries one (#308)", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: streamFrom([...textParts("Hello"), finishPart("stop", 10, 5)]),
     });
     const parsedScope = { workspace: "acme", user: "sam@acme.dev" };
@@ -524,7 +524,7 @@ describe("AgentRunner.stream()", () => {
   });
 
   it("delivers undefined to renderInitialPrompt when RunOptions.host carries no scope (#308)", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: streamFrom([...textParts("Hello"), finishPart("stop", 10, 5)]),
     });
     const capturedCtx: Array<{ scope?: Record<string, unknown> } | undefined> = [];
@@ -546,7 +546,7 @@ describe("AgentRunner.stream()", () => {
   it("ends the stream after a successful terminal call with finishReason terminal_tool", async () => {
     // The model tool-calls on EVERY iteration: without the terminal exit this
     // stream would burn maxIterations.
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () =>
         streamFrom([
           toolCallPart("tc-1", "finish", { summary: "all facets covered" }),
@@ -585,7 +585,7 @@ describe("AgentRunner.stream()", () => {
   // ends the stream as terminal_tool_error on the SECOND failure rather than
   // burning to max_iterations.
   it("ends the stream as terminal_tool_error on the SECOND errored terminal call", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () =>
         streamFrom([
           toolCallPart("tc-1", "finish", { summary: "done?" }),
@@ -626,7 +626,7 @@ describe("AgentRunner.stream()", () => {
   });
 
   it("stream: terminal errors ONCE then succeeds — clean terminal_tool exit", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doStream: async () =>
         streamFrom([
           toolCallPart("tc-1", "finish", { summary: "done" }),
@@ -672,7 +672,7 @@ describe("AgentRunner.stream()", () => {
       const controller = new AbortController();
       controller.abort();
 
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async () => {
           throw new Error("doStream must never be called for a pre-aborted signal");
         },
@@ -706,7 +706,7 @@ describe("AgentRunner.stream()", () => {
       const controller = new AbortController();
       let doStreamCalls = 0;
 
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async () => {
           doStreamCalls++;
           return streamFrom([
@@ -758,7 +758,7 @@ describe("AgentRunner.stream()", () => {
     it("aborts mid-provider-stream via ai@5's fullStream 'abort' part (provider forwards abortSignal into its own stream, matching real-provider behavior)", async () => {
       const controller = new AbortController();
 
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async (options: { abortSignal?: AbortSignal }) => ({
           stream: new ReadableStream({
             start(c) {
@@ -808,7 +808,7 @@ describe("AgentRunner.stream()", () => {
     });
 
     it("belt-and-braces: a provider that throws a raw AbortError (not the SDK's synthesized 'abort' part) still routes to the cancel pair, never the error path", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async () => ({
           stream: new ReadableStream({
             start(c) {
@@ -847,7 +847,7 @@ describe("AgentRunner.stream()", () => {
       const controller = new AbortController();
       const dispatched: string[] = [];
 
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async () =>
           streamFrom([
             toolCallPart("tc-1", "alpha", { x: 1 }),
@@ -898,7 +898,7 @@ describe("AgentRunner.stream()", () => {
   // ---------------------------------------------------------------------------
   describe("render artifacts (ADR-0006)", () => {
     it("publishArtifacts: true — published artifacts land on that call's tool.end", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async () =>
           streamFrom([
             toolCallPart("tc-1", "weather", { city: "SF" }),
@@ -936,7 +936,7 @@ describe("AgentRunner.stream()", () => {
     });
 
     it("publishArtifacts: false (default) — ctx.publishArtifact is undefined, tool.end carries no artifacts key", async () => {
-      const model = new MockLanguageModelV2({
+      const model = new MockLanguageModelV3({
         doStream: async () =>
           streamFrom([
             toolCallPart("tc-1", "weather", { city: "SF" }),
@@ -969,7 +969,7 @@ describe("AgentRunner.stream()", () => {
     describe("preserved structured terminal output (ADR §9, parity with run())", () => {
       it("attaches structuredContent to message.complete for a structured terminal result, content stays JSON-stringified", async () => {
         const structured = { facets: 3, gaps: 0 };
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doStream: async () =>
             streamFrom([
               toolCallPart("tc-1", "finish", { summary: "done" }),
@@ -997,7 +997,7 @@ describe("AgentRunner.stream()", () => {
       });
 
       it("omits structuredContent entirely for a string terminal result — byte-identical content", async () => {
-        const model = new MockLanguageModelV2({
+        const model = new MockLanguageModelV3({
           doStream: async () =>
             streamFrom([
               toolCallPart("tc-1", "finish", { summary: "all facets covered" }),

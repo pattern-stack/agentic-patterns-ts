@@ -28,7 +28,7 @@
  */
 
 import type { LanguageModelV2StreamPart } from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Conversation } from "../../conversation/conversation.js";
@@ -57,8 +57,8 @@ function makePlainAgent(name: string): AgentLike {
   };
 }
 
-function makeStreamingMockModel(text: string): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function makeStreamingMockModel(text: string): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     modelId: "mock-model",
     doStream: async () => ({
       stream: new ReadableStream<LanguageModelV2StreamPart>({

@@ -8,7 +8,7 @@
  */
 
 import type { LanguageModelV2StreamPart } from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { AgentEvent } from "../../events/types.js";
@@ -28,8 +28,8 @@ function makeAgent(): AgentLike {
   };
 }
 
-function makeMockModel(): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function makeMockModel(): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     modelId: RUNTIME_MODEL_ID,
     doStream: async () => ({
       stream: new ReadableStream<LanguageModelV2StreamPart>({
