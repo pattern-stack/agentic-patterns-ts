@@ -29,6 +29,9 @@ type Scripted = {
   outputTokens: number;
   stopReason: string | null;
   sessionId?: string;
+  /** Optional cache token fields (BetaUsage-shaped) for the cache-mapping test. */
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
 };
 
 const script: { current: Scripted } = {
@@ -110,6 +113,12 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => {
           usage: {
             input_tokens: pending.inputTokens,
             output_tokens: pending.outputTokens,
+            ...(pending.cacheCreationInputTokens !== undefined
+              ? { cache_creation_input_tokens: pending.cacheCreationInputTokens }
+              : {}),
+            ...(pending.cacheReadInputTokens !== undefined
+              ? { cache_read_input_tokens: pending.cacheReadInputTokens }
+              : {}),
           },
           stop_reason: first ? "tool_deferred" : pending.stopReason,
           terminal_reason: first ? "tool_deferred" : "completed",
@@ -208,9 +217,9 @@ describe("claudeCode provider", () => {
     vi.clearAllMocks();
   });
 
-  it("factory returns a LanguageModelV2-shaped object", () => {
+  it("factory returns a LanguageModelV4-shaped object", () => {
     const model = makeModel();
-    expect(model.specificationVersion).toBe("v2");
+    expect(model.specificationVersion).toBe("v4");
     expect(model.provider).toBe("claude-code");
     expect(model.modelId).toBe("sonnet");
     expect(typeof model.doGenerate).toBe("function");
@@ -236,8 +245,40 @@ describe("claudeCode provider", () => {
 
     expect(contentText(result.content)).toBe("The answer is 45.");
     expect(contentToolCalls(result.content)).toHaveLength(0);
-    expect(result.finishReason).toBe("stop");
-    expect(result.usage).toEqual({ inputTokens: 12, outputTokens: 7, totalTokens: 19 });
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "end_turn" });
+    expect(result.usage).toEqual({
+      inputTokens: { total: 12, noCache: 12, cacheRead: 0, cacheWrite: 0 },
+      outputTokens: { total: 7, text: undefined, reasoning: undefined },
+      raw: { input_tokens: 12, output_tokens: 7 },
+    });
+  });
+
+  it("doGenerate surfaces cache read/write token numbers (anthropic-parity formula)", async () => {
+    script.current = {
+      toolCalls: [],
+      assistantText: ["cached"],
+      inputTokens: 12,
+      outputTokens: 7,
+      stopReason: "end_turn",
+      cacheCreationInputTokens: 100,
+      cacheReadInputTokens: 50,
+    };
+
+    const model = makeModel();
+    const result = await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
+    );
+
+    expect(result.usage).toEqual({
+      inputTokens: { total: 12 + 100 + 50, noCache: 12, cacheRead: 50, cacheWrite: 100 },
+      outputTokens: { total: 7, text: undefined, reasoning: undefined },
+      raw: {
+        input_tokens: 12,
+        output_tokens: 7,
+        cache_creation_input_tokens: 100,
+        cache_read_input_tokens: 50,
+      },
+    });
   });
 
   it("doGenerate surfaces tool calls captured by canUseTool", async () => {
@@ -265,7 +306,7 @@ describe("claudeCode provider", () => {
     const tc = toolCalls[0];
     expect(tc?.toolName).toBe("add");
     expect(JSON.parse(tc?.input ?? "{}")).toEqual({ a: 17, b: 28 });
-    expect(result.finishReason).toBe("tool-calls");
+    expect(result.finishReason).toEqual({ unified: "tool-calls", raw: "tool_deferred" });
   });
 
   it("doStream emits text-delta, tool-call, and finish parts", async () => {
@@ -342,7 +383,7 @@ describe("claudeCode provider", () => {
     );
 
     expect(contentText(result.content)).toBe("45");
-    expect(result.finishReason).toBe("stop");
+    expect(result.finishReason).toEqual({ unified: "stop", raw: "end_turn" });
   });
 
   // -------------------------------------------------------------------------

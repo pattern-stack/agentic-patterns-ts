@@ -50,6 +50,7 @@ import type {
   LanguageModelV4FunctionTool,
   LanguageModelV4Prompt,
   LanguageModelV4StreamPart,
+  LanguageModelV4Usage,
   SharedV4Warning,
 } from "@ai-sdk/provider";
 import {
@@ -534,8 +535,12 @@ interface QueryOutcome {
   readonly isError: boolean;
   readonly stopReason: string | null;
   readonly terminalReason: string | null;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+  /**
+   * The raw SDK result usage object, captured whole (not just
+   * `input_tokens`/`output_tokens`) so cache — and any future — fields
+   * survive to {@link buildUsage}. `null` when a result carried no usage.
+   */
+  readonly usage: Record<string, number> | null;
 }
 
 /**
@@ -553,8 +558,7 @@ async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<Q
   let isError = false;
   let stopReason: string | null = null;
   let terminalReason: string | null = null;
-  let inputTokens = 0;
-  let outputTokens = 0;
+  let usage: Record<string, number> | null = null;
 
   const q = query({ prompt: promptString, options: sdkOptions });
   try {
@@ -579,10 +583,8 @@ async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<Q
         }
       } else if (type === "result") {
         if (typeof m.session_id === "string") sessionId = m.session_id;
-        const usage = m.usage as Record<string, number> | undefined;
-        if (usage) {
-          inputTokens = usage.input_tokens ?? 0;
-          outputTokens = usage.output_tokens ?? 0;
+        if (m.usage && typeof m.usage === "object") {
+          usage = m.usage as Record<string, number>;
         }
         if (typeof m.stop_reason === "string") stopReason = m.stop_reason;
         if (typeof m.terminal_reason === "string") terminalReason = m.terminal_reason;
@@ -619,14 +621,52 @@ async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<Q
     isError,
     stopReason,
     terminalReason,
-    inputTokens,
-    outputTokens,
+    usage,
   };
 }
 
-/** Translate a `QueryOutcome` into a v5 `doGenerate` return value. */
+/**
+ * Map the CLI's raw result usage (`NonNullableUsage`-shaped `BetaUsage`) into
+ * a V4 nested `LanguageModelV4Usage`. Formula mirrors `@ai-sdk/anthropic@4`
+ * for cross-provider consistency: `total = input_tokens + cache_creation +
+ * cache_read`, `noCache = input_tokens`. Absent cache fields (a degraded CLI
+ * path, or a test mock that omits them) coalesce to `0` — matching
+ * `NonNullableUsage`'s all-present contract. A wholly-absent `raw` (no usage
+ * on the result at all) yields all-`undefined` nested fields instead of
+ * fabricating zeros.
+ */
+function buildUsage(raw: Record<string, number> | null): LanguageModelV4Usage {
+  if (!raw) {
+    return {
+      inputTokens: { total: undefined, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+      raw: undefined,
+    };
+  }
+  const inputTokens = raw.input_tokens ?? 0;
+  const outputTokens = raw.output_tokens ?? 0;
+  const cacheWrite = raw.cache_creation_input_tokens ?? 0;
+  const cacheRead = raw.cache_read_input_tokens ?? 0;
+  return {
+    inputTokens: {
+      total: inputTokens + cacheWrite + cacheRead,
+      noCache: inputTokens,
+      cacheRead,
+      cacheWrite,
+    },
+    outputTokens: {
+      total: outputTokens,
+      text: undefined,
+      reasoning: undefined,
+    },
+    raw,
+  };
+}
+
+/** Translate a `QueryOutcome` into a V4 `doGenerate` return value. */
 function buildGenerateResult(
   out: QueryOutcome,
+  warnings: SharedV4Warning[],
 ): Awaited<ReturnType<LanguageModelV4["doGenerate"]>> {
   const content: LanguageModelV4Content[] = [];
   if (out.text.length > 0) content.push({ type: "text", text: out.text });
@@ -644,12 +684,8 @@ function buildGenerateResult(
       hasToolCalls: out.deferred !== null,
       sdkStopReason: out.stopReason,
     }),
-    usage: {
-      inputTokens: out.inputTokens,
-      outputTokens: out.outputTokens,
-      totalTokens: out.inputTokens + out.outputTokens,
-    },
-    warnings: [],
+    usage: buildUsage(out.usage),
+    warnings,
   };
 }
 
@@ -803,7 +839,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       // Never learned a session id — cannot resume later; drop the shim and
       // treat this turn's output as-is (flatten will run next turn).
       disposeShim(shim.storeDir);
-      return buildGenerateResult(out);
+      return buildGenerateResult(out, []);
     }
 
     const entry: SessionEntry = {
@@ -819,7 +855,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       resumeOf: null,
       deferredId: out.deferred?.id ?? null,
     });
-    return buildGenerateResult(out);
+    return buildGenerateResult(out, []);
   }
 
   /** Later turn: park the tool result and resume the live session. */
@@ -865,7 +901,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       resumeOf: session.sessionId,
       deferredId: out.deferred?.id ?? null,
     });
-    return buildGenerateResult(out);
+    return buildGenerateResult(out, []);
   }
 
   // -------------------------------------------------------------------------
@@ -898,7 +934,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       resumeOf: null,
       deferredId: out.deferred?.id ?? null,
     });
-    return buildGenerateResult(out);
+    return buildGenerateResult(out, []);
   }
 
   private _emitDebug(event: CCSessionDebugEvent): void {
@@ -941,8 +977,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
     const textId = "text-0";
     const stream = new ReadableStream<LanguageModelV4StreamPart>({
       start: async (controller) => {
-        let inputTokens = 0;
-        let outputTokens = 0;
+        let usage: Record<string, number> | null = null;
         let sdkStopReason: string | null = null;
         let deferred: DeferredCall | null = null;
         const emittedTextChunks = new Set<number>();
@@ -997,10 +1032,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
                 }
               }
             } else if (type === "result") {
-              const usage = m.usage as Record<string, number> | undefined;
-              if (usage) {
-                inputTokens = usage.input_tokens ?? 0;
-                outputTokens = usage.output_tokens ?? 0;
+              if (m.usage && typeof m.usage === "object") {
+                usage = m.usage as Record<string, number>;
               }
               if (typeof m.stop_reason === "string") sdkStopReason = m.stop_reason;
               const dtu = m.deferred_tool_use as
@@ -1046,7 +1079,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
         controller.enqueue({
           type: "finish",
           finishReason: deriveFinishReason({ hasToolCalls: deferred !== null, sdkStopReason }),
-          usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+          usage: buildUsage(usage),
         });
         controller.close();
       },
@@ -1131,19 +1164,28 @@ function deriveFinishReason(args: {
   hasToolCalls: boolean;
   sdkStopReason: string | null;
 }): LanguageModelV4FinishReason {
-  if (args.hasToolCalls) return "tool-calls";
-  switch (args.sdkStopReason) {
-    case "end_turn":
-    case "stop_sequence":
-      return "stop";
-    case "max_tokens":
-      return "length";
-    case "tool_use":
-    case "tool_deferred":
-      return "tool-calls";
-    default:
-      return "stop";
-  }
+  const raw = args.sdkStopReason ?? undefined;
+  const unified = ((): LanguageModelV4FinishReason["unified"] => {
+    if (args.hasToolCalls) return "tool-calls";
+    switch (args.sdkStopReason) {
+      case null:
+        // No stop reason at all reads as a successful completion.
+        return "stop";
+      case "end_turn":
+      case "stop_sequence":
+        return "stop";
+      case "max_tokens":
+        return "length";
+      case "tool_use":
+      case "tool_deferred":
+        return "tool-calls";
+      default:
+        // Any unrecognized non-null stop reason — V4 has a slot for this;
+        // V2 forced it to "stop".
+        return "other";
+    }
+  })();
+  return { unified, raw };
 }
 
 // ---------------------------------------------------------------------------
