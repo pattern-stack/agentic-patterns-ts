@@ -13,8 +13,8 @@ import {
   Persona,
   Responsibility,
   RoleBuilder,
-  type ToolDefinition,
-  Toolbox,
+  defineTool,
+  toolbox,
 } from "@agentic-patterns/core";
 import { AgentEventBus, ClaudeCodeRunner, ConsoleExporter } from "@agentic-patterns/runtime";
 import { z } from "zod";
@@ -33,35 +33,28 @@ const logger = {
 // Math toolbox
 // ---------------------------------------------------------------------------
 
-class MathToolbox extends Toolbox {
-  readonly name = "math_operations";
-  readonly description = "Basic math operations";
+const NumericResult = z.object({ result: z.number().describe("Computed value") });
 
-  readonly tools: Record<string, ToolDefinition> = {
-    add: {
-      description: "Add two numbers together",
-      parameters: z.object({
-        a: z.number().describe("First number"),
-        b: z.number().describe("Second number"),
-      }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
-        return { result: a + b };
-      },
-    },
-    multiply: {
-      description: "Multiply two numbers together",
-      parameters: z.object({
-        a: z.number().describe("First number"),
-        b: z.number().describe("Second number"),
-      }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
-        return { result: a * b };
-      },
-    },
-  };
-}
+const mathTools = toolbox("math_operations", "Basic math operations", {
+  add: defineTool({
+    description: "Add two numbers together",
+    parameters: z.object({
+      a: z.number().describe("First number"),
+      b: z.number().describe("Second number"),
+    }),
+    returns: NumericResult,
+    execute: async ({ a, b }) => ({ result: a + b }),
+  }),
+  multiply: defineTool({
+    description: "Multiply two numbers together",
+    parameters: z.object({
+      a: z.number().describe("First number"),
+      b: z.number().describe("Second number"),
+    }),
+    returns: NumericResult,
+    execute: async ({ a, b }) => ({ result: a * b }),
+  }),
+});
 
 // ---------------------------------------------------------------------------
 // Build agent
@@ -82,7 +75,7 @@ const judgment = new Judgment({
 const mathCapability = new Capability(
   "math_operations",
   "Basic math operations for arithmetic",
-  new MathToolbox(),
+  mathTools,
 );
 
 const responsibility = new Responsibility({

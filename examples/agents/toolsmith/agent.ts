@@ -46,8 +46,9 @@ import {
   Responsibility,
   RoleBuilder,
   SimpleManual,
-  type ToolDefinition,
-  Toolbox,
+  type Toolbox,
+  defineTool,
+  toolbox,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 
@@ -55,12 +56,14 @@ import { z } from "zod";
 // Toolbox — 3 pure, deterministic tools
 // ---------------------------------------------------------------------------
 
-class ToolsmithToolbox extends Toolbox {
-  readonly name = "toolsmith_utilities";
-  readonly description = "Small string/date/vector utilities — deterministic, no side effects.";
+const Slug = z.object({ slug: z.string().describe("URL-safe slug") });
+const DaySpan = z.object({ days: z.number().describe("Whole days between the two dates") });
 
-  readonly tools: Record<string, ToolDefinition> = {
-    slugify: {
+const toolsmithTools = toolbox(
+  "toolsmith_utilities",
+  "Small string/date/vector utilities — deterministic, no side effects.",
+  {
+    slugify: defineTool({
       description: "Turn text into a URL-safe slug",
       parameters: z.object({
         text: z.string().describe("Text to slugify"),
@@ -69,9 +72,8 @@ class ToolsmithToolbox extends Toolbox {
           .optional()
           .describe("Emit SCREAMING-KEBAB-CASE instead of kebab-case"),
       }),
-      returns: z.object({ slug: z.string() }),
-      execute: async (args) => {
-        const { text, uppercase } = args as { text: string; uppercase?: boolean };
+      returns: Slug,
+      execute: async ({ text, uppercase }) => {
         const slug = text
           .trim()
           .toLowerCase()
@@ -79,16 +81,15 @@ class ToolsmithToolbox extends Toolbox {
           .replace(/^-+|-+$/g, "");
         return { slug: uppercase ? slug.toUpperCase() : slug };
       },
-    },
-    date_diff: {
+    }),
+    date_diff: defineTool({
       description: "Count whole days between two ISO dates (to minus from)",
       parameters: z.object({
         from: z.string().describe("ISO date, e.g. 2026-01-01"),
         to: z.string().describe("ISO date, e.g. 2026-01-15"),
       }),
-      returns: z.object({ days: z.number() }),
-      execute: async (args) => {
-        const { from, to } = args as { from: string; to: string };
+      returns: DaySpan,
+      execute: async ({ from, to }) => {
         const a = new Date(from);
         const b = new Date(to);
         if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) {
@@ -97,21 +98,21 @@ class ToolsmithToolbox extends Toolbox {
         const days = Math.round((b.getTime() - a.getTime()) / 86_400_000);
         return { days };
       },
-    },
-    vector_add: {
+    }),
+    vector_add: defineTool({
       description: "Add two 2D vectors",
       parameters: z.object({
         a: z.object({ x: z.number(), y: z.number() }).describe("First vector"),
         b: z.object({ x: z.number(), y: z.number() }).describe("Second vector"),
       }),
-      returns: z.object({ x: z.number(), y: z.number() }),
-      execute: async (args) => {
-        const { a, b } = args as { a: { x: number; y: number }; b: { x: number; y: number } };
-        return { x: a.x + b.x, y: a.y + b.y };
-      },
-    },
-  };
-}
+      returns: z.object({
+        x: z.number().describe("Summed x component"),
+        y: z.number().describe("Summed y component"),
+      }),
+      execute: async ({ a, b }) => ({ x: a.x + b.x, y: a.y + b.y }),
+    }),
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Manual — 3 sections, so the capability detail page's TOC + progressive-
@@ -164,7 +165,13 @@ class ToolsmithPlaybook extends Playbook {
   readonly description = "Named recipes that stitch the toolsmith utilities together.";
   readonly plays: Record<string, PlayDefinition>;
 
-  constructor(toolbox: ToolsmithToolbox) {
+  // NOTE: plays still hand-cast both their args and the results of
+  // `tools.execute(...)` — `PlayDefinition.execute` takes
+  // `Record<string, unknown>` and its `returns` is unvalidated. That is exactly
+  // the debt `defineTool` retired for tools; #266 tracks the play-side parity
+  // (`definePlay` + a `playbook()` literal). Left verbose on purpose so the
+  // before/after stays visible until #266 lands.
+  constructor(tools: Toolbox) {
     super();
     this.plays = {
       slug_and_span: {
@@ -174,11 +181,12 @@ class ToolsmithPlaybook extends Playbook {
           from: z.string().describe("ISO date to measure from"),
           to: z.string().describe("ISO date to measure to"),
         }),
+        returns: Slug.merge(DaySpan),
         execute: async (args) => {
           const { title, from, to } = args as { title: string; from: string; to: string };
           const [{ slug }, { days }] = (await Promise.all([
-            toolbox.execute("slugify", { text: title }),
-            toolbox.execute("date_diff", { from, to }),
+            tools.execute("slugify", { text: title }),
+            tools.execute("date_diff", { from, to }),
           ])) as [{ slug: string }, { days: number }];
           return { slug, days };
         },
@@ -193,7 +201,6 @@ class ToolsmithPlaybook extends Playbook {
 // ---------------------------------------------------------------------------
 
 function buildToolsmithAgent() {
-  const toolbox = new ToolsmithToolbox();
   const role = new RoleBuilder("toolsmith")
     .withPersona(
       new Persona({
@@ -213,9 +220,9 @@ function buildToolsmithAgent() {
       new Capability(
         "toolsmith-utilities",
         "Deterministic string, date, and vector utilities — no network, no clock, no randomness.",
-        toolbox,
+        toolsmithTools,
         toolsmithManual,
-        new ToolsmithPlaybook(toolbox),
+        new ToolsmithPlaybook(toolsmithTools),
       ),
     )
     .withResponsibility(

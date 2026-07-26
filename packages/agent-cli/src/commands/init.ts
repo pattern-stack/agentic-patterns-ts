@@ -382,32 +382,33 @@ import {
   Persona,
   Responsibility,
   RoleBuilder,
-  type ToolDefinition,
-  Toolbox,
+  defineTool,
+  toolbox,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // A tiny toolbox so the agent has something concrete to do.
+//
+// \`defineTool\` types \`execute\`'s args from \`parameters\` (no casting) and
+// checks the return value against \`returns\` — at compile time AND at runtime.
 // ---------------------------------------------------------------------------
 
-class GreetingToolbox extends Toolbox {
-  readonly name = "greeting_tools";
-  readonly description = "Friendly greeting helpers";
-
-  readonly tools: Record<string, ToolDefinition> = {
-    greet: {
-      description: "Produce a friendly greeting for a person",
-      parameters: z.object({
-        name: z.string().describe("Person's name"),
-      }),
-      execute: async (args) => {
-        const { name } = args as { name: string };
-        return { greeting: \`Hello, \${name}! Welcome to agentic-patterns.\` };
-      },
-    },
-  };
-}
+const greetingTools = toolbox("greeting_tools", "Friendly greeting helpers", {
+  greet: defineTool({
+    description: "Produce a friendly greeting for a person",
+    parameters: z.object({
+      name: z.string().describe("Person's name"),
+    }),
+    returns: z.object({
+      greeting: z.string().describe("The greeting to say back"),
+    }),
+    // \`name\` is inferred as \`string\` from \`parameters\` — no \`args as { … }\`.
+    execute: async ({ name }) => ({
+      greeting: \`Hello, \${name}! Welcome to agentic-patterns.\`,
+    }),
+  }),
+});
 
 // ---------------------------------------------------------------------------
 // Build the agent.
@@ -430,7 +431,7 @@ const role = new RoleBuilder("demo-assistant")
     }),
   )
   .withCapability(
-    new Capability("greeting_tools", "Friendly greeting helpers", new GreetingToolbox()),
+    new Capability("greeting_tools", "Friendly greeting helpers", greetingTools),
   )
   .withResponsibility(
     new Responsibility({

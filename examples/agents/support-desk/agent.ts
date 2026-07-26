@@ -44,12 +44,11 @@ import {
   type ScopeValue,
   SessionScope,
   SimpleManual,
-  type ToolDefinition,
-  type ToolExecutionContext,
-  Toolbox,
+  defineTool,
   scopeItem,
+  toolbox,
 } from "@agentic-patterns/core";
-import { requireScope } from "@agentic-patterns/runtime";
+import { requireScopeAs } from "@agentic-patterns/runtime";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -107,44 +106,53 @@ const supportDeskAwareness = Awareness.fromScope(
 // Toolbox — ambient support context, scoped to the CALL-TIME operator/tier
 // ---------------------------------------------------------------------------
 
+const TierEnum = z.enum(["free", "pro", "enterprise"]).describe("Bound plan tier");
+
 /**
  * Unlike `workspace`'s `WorkspaceAmbientToolbox` (scope injected once via a
  * constructor closure, from an `instantiate` hook), this toolbox holds no
  * scope at all — there is no hook to close it over. Each tool reads the
  * live, per-call scope off `ToolExecutionContext.host.scope` via
- * `requireScope` (the framework's fail-loud default read path). That scope
- * is still the SAME parsed/redacted value for the conversation's whole
- * lifetime (Conversation forwards one fixed `_host` to every turn) — the
- * only thing that moved is WHEN the tool reads it: dispatch time instead of
- * build time.
+ * `requireScopeAs` (fail-loud read + typed cast in one call). That scope is
+ * still the SAME parsed/redacted value for the conversation's whole lifetime
+ * (Conversation forwards one fixed `_host` to every turn) — the only thing
+ * that moved is WHEN the tool reads it: dispatch time instead of build time.
  */
-class SupportAmbientToolbox extends Toolbox {
-  readonly name = "support-ambient";
-  readonly description =
-    "Read-only ambient context about the operator's support queue — tickets, escalation policy, and who they're acting as.";
-
-  readonly tools: Record<string, ToolDefinition> = {
-    whoami: {
+const supportAmbientTools = toolbox(
+  "support-ambient",
+  "Read-only ambient context about the operator's support queue — tickets, escalation policy, and who they're acting as.",
+  {
+    whoami: defineTool({
       description: "Who this run is acting on behalf of, and under what plan tier.",
       parameters: z.object({}),
       returns: z.object({
-        operator: z.string(),
-        tier: z.enum(["free", "pro", "enterprise"]),
-        sandbox: z.boolean(),
+        operator: z.string().describe("Who the run acts for"),
+        tier: TierEnum,
+        sandbox: z.boolean().describe("True when running against sandbox data"),
       }),
-      execute: async (_args, ctx?: ToolExecutionContext) => {
-        const scope = requireScope(ctx) as SupportDeskScope;
+      // `requireScopeAs<T>` = fail-loud read + typed cast in one call. Before it
+      // existed this line read `requireScope(ctx) as SupportDeskScope`.
+      execute: async (_args, ctx) => {
+        const scope = requireScopeAs<SupportDeskScope>(ctx);
         return { operator: scope.operator, tier: scope.tier, sandbox: scope.sandbox };
       },
-    },
-    list_open_tickets: {
+    }),
+    list_open_tickets: defineTool({
       description: "Open tickets in the operator's queue, SLA-tagged by the bound plan tier.",
       parameters: z.object({}),
       returns: z.object({
-        tickets: z.array(z.object({ id: z.string(), subject: z.string(), sla: z.string() })),
+        tickets: z
+          .array(
+            z.object({
+              id: z.string().describe("Ticket ID"),
+              subject: z.string().describe("Ticket subject line"),
+              sla: z.string().describe("SLA implied by the bound tier"),
+            }),
+          )
+          .describe("Open tickets in the operator's queue"),
       }),
-      execute: async (_args, ctx?: ToolExecutionContext) => {
-        const scope = requireScope(ctx) as SupportDeskScope;
+      execute: async (_args, ctx) => {
+        const scope = requireScopeAs<SupportDeskScope>(ctx);
         const sla = SLA_BY_TIER[scope.tier];
         const tag = scope.sandbox ? "[sandbox] " : "";
         return {
@@ -154,18 +162,21 @@ class SupportAmbientToolbox extends Toolbox {
           ],
         };
       },
-    },
-    escalation_policy: {
+    }),
+    escalation_policy: defineTool({
       description: "Who to escalate to for the bound plan tier.",
       parameters: z.object({}),
-      returns: z.object({ tier: z.enum(["free", "pro", "enterprise"]), contact: z.string() }),
-      execute: async (_args, ctx?: ToolExecutionContext) => {
-        const scope = requireScope(ctx) as SupportDeskScope;
+      returns: z.object({
+        tier: TierEnum,
+        contact: z.string().describe("Escalation contact for that tier"),
+      }),
+      execute: async (_args, ctx) => {
+        const scope = requireScopeAs<SupportDeskScope>(ctx);
         return { tier: scope.tier, contact: ESCALATION_BY_TIER[scope.tier] };
       },
-    },
-  };
-}
+    }),
+  },
+);
 
 const SLA_BY_TIER: Record<SupportDeskScope["tier"], string> = {
   free: "best-effort",
@@ -233,7 +244,7 @@ function buildSupportDeskAgent() {
       new Capability(
         "support-ambient",
         "Read-only ambient context about the operator's support queue — tickets, escalation policy, and who they're acting as.",
-        new SupportAmbientToolbox(),
+        supportAmbientTools,
         ambientManual,
       ),
     )

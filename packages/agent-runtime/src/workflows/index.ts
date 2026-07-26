@@ -48,6 +48,7 @@ export {
   readScope,
   requireScope,
   readScopeAs,
+  requireScopeAs,
   ScopeUnavailableError,
 } from "./scope-host.js";
 
