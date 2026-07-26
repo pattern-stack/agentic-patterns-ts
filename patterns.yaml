@@ -1,0 +1,14 @@
+# pts (Pattern Stack CLI) project config.
+#
+# This repo is a TS library monorepo, not a pattern-stack app — the only thing
+# configured here is the secret backend, so `pts secrets` works in this
+# directory. No services/apps blocks on purpose.
+project: agentic-patterns-ts
+
+secrets:
+  backend: 1password
+  onepassword:
+    vault: agentic-patterns-ts
+    # Pin the account so `op` doesn't fall back to its default when more than
+    # one is signed in. Change to whichever account holds the vault.
+    account: my.1password.com
