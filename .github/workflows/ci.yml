@@ -31,6 +31,14 @@ jobs:
       - name: Build
         run: bun run build
 
+      # Loads every built entry in BOTH formats. Cheap (no pack/install/network),
+      # so it can gate every PR. Exists because the cjs `import.meta` bug shipped
+      # behind a green `check` for ~6 merges — nothing here ever imported its own
+      # build output; only the publish-job tarball smoke did, and that runs after
+      # merge. Packaging-level checks stay in that smoke.
+      - name: Dist contract (ESM + CJS load)
+        run: bun run check:dist-contract
+
       - name: Typecheck
         run: bun run typecheck
 
@@ -39,6 +47,12 @@ jobs:
 
       - name: Test
         run: SKIP_SDK_TESTS=true bun run test
+
+      # Was in the root `check` script but never in CI — the #265 schema linter
+      # was effectively unenforced on PRs. Keeps local `bun run check` and the
+      # required status in agreement.
+      - name: Model-facing schema lint
+        run: bun run check:model-facing-schemas
 
   # Publish to npm on every merge to main, gated on a green `check`. Packs each
   # public package (core/runtime/server/cli) and publishes it IFF its version
