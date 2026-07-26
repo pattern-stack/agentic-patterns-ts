@@ -33,9 +33,9 @@ import {
   type ScopeValue,
   SessionScope,
   SimpleManual,
-  type ToolDefinition,
-  Toolbox,
+  defineTool,
   scopeItem,
+  toolbox,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 
@@ -78,88 +78,114 @@ const workspaceAwareness = Awareness.fromScope(
 // Toolbox 1 — ambient workspace context (read-only), scoped to `scope.user`
 // ---------------------------------------------------------------------------
 
-class WorkspaceAmbientToolbox extends Toolbox {
-  readonly name = "workspace-ambient";
-  readonly description =
-    "Read-only ambient context about the operator's workspace — meetings, mail, and open action items.";
-
-  constructor(private readonly scope: WorkspaceScope) {
-    super();
-  }
-
-  readonly tools: Record<string, ToolDefinition> = {
-    list_meetings: {
-      description: "Upcoming meetings on the operator's calendar.",
-      parameters: z.object({}),
-      returns: z.object({ meetings: z.array(z.object({ title: z.string(), when: z.string() })) }),
-      execute: async () => ({
-        meetings: [
-          { title: `Pipeline review (${this.scope.user})`, when: "Mon 10:00" },
-          { title: "Renewal call — Northwind", when: "Tue 14:00" },
-        ],
+/**
+ * Dependency injection without a class: the scope is a plain function
+ * parameter, and each `execute` closes over it. A `toolbox()` literal handles
+ * constructor-injected state exactly as well as `class X extends Toolbox` did —
+ * the closure IS the constructor.
+ */
+const workspaceAmbientTools = (scope: WorkspaceScope) =>
+  toolbox(
+    "workspace-ambient",
+    "Read-only ambient context about the operator's workspace — meetings, mail, and open action items.",
+    {
+      list_meetings: defineTool({
+        description: "Upcoming meetings on the operator's calendar.",
+        parameters: z.object({}),
+        returns: z.object({
+          meetings: z
+            .array(
+              z.object({
+                title: z.string().describe("Meeting title"),
+                when: z.string().describe("Human-readable start time"),
+              }),
+            )
+            .describe("Upcoming meetings"),
+        }),
+        execute: async () => ({
+          meetings: [
+            { title: `Pipeline review (${scope.user})`, when: "Mon 10:00" },
+            { title: "Renewal call — Northwind", when: "Tue 14:00" },
+          ],
+        }),
+      }),
+      list_emails: defineTool({
+        description: "Recent email threads in the operator's inbox.",
+        parameters: z.object({}),
+        returns: z.object({
+          threads: z
+            .array(
+              z.object({
+                subject: z.string().describe("Thread subject"),
+                from: z.string().describe("Sender address"),
+              }),
+            )
+            .describe("Recent threads"),
+        }),
+        execute: async () => ({
+          threads: [
+            { subject: "Re: pricing", from: "buyer@northwind.io" },
+            { subject: "Contract redlines", from: "legal@acme.dev" },
+          ],
+        }),
+      }),
+      list_action_items: defineTool({
+        description: "Open action items assigned to the operator.",
+        parameters: z.object({}),
+        returns: z.object({
+          items: z.array(z.string()).describe("Open action items"),
+        }),
+        execute: async () => ({
+          items: ["Send Northwind the security packet", "Confirm renewal date with legal"],
+        }),
       }),
     },
-    list_emails: {
-      description: "Recent email threads in the operator's inbox.",
-      parameters: z.object({}),
-      returns: z.object({ threads: z.array(z.object({ subject: z.string(), from: z.string() })) }),
-      execute: async () => ({
-        threads: [
-          { subject: "Re: pricing", from: "buyer@northwind.io" },
-          { subject: "Contract redlines", from: "legal@acme.dev" },
-        ],
-      }),
-    },
-    list_action_items: {
-      description: "Open action items assigned to the operator.",
-      parameters: z.object({}),
-      returns: z.object({ items: z.array(z.string()) }),
-      execute: async () => ({
-        items: ["Send Northwind the security packet", "Confirm renewal date with legal"],
-      }),
-    },
-  };
-}
+  );
 
 // ---------------------------------------------------------------------------
 // Toolbox 2 — deal resolution (fuzzy reference → concrete record)
 // ---------------------------------------------------------------------------
 
-class DealResolutionToolbox extends Toolbox {
-  readonly name = "deal-resolution";
-  readonly description =
-    "Resolve a fuzzy reference — a name, a participant, or an org — to a concrete deal record.";
-
-  readonly tools: Record<string, ToolDefinition> = {
-    resolve_by_name: {
+const dealResolutionTools = toolbox(
+  "deal-resolution",
+  "Resolve a fuzzy reference — a name, a participant, or an org — to a concrete deal record.",
+  {
+    resolve_by_name: defineTool({
       description: "Resolve a deal by its name or a close match.",
       parameters: z.object({ query: z.string().describe("Deal name or fragment") }),
-      returns: z.object({ dealId: z.string(), name: z.string(), confidence: z.number() }),
-      execute: async (args) => {
-        const { query } = args as { query: string };
-        return { dealId: "deal_northwind", name: `Northwind — ${query}`, confidence: 0.82 };
-      },
-    },
-    resolve_by_participant: {
+      returns: z.object({
+        dealId: z.string().describe("Resolved deal ID"),
+        name: z.string().describe("Resolved deal name"),
+        confidence: z.number().describe("Match confidence, 0-1"),
+      }),
+      execute: async ({ query }) => ({
+        dealId: "deal_northwind",
+        name: `Northwind — ${query}`,
+        confidence: 0.82,
+      }),
+    }),
+    resolve_by_participant: defineTool({
       description: "Find deals a given participant is on.",
       parameters: z.object({ email: z.string().describe("Participant email") }),
-      returns: z.object({ deals: z.array(z.string()) }),
-      execute: async (args) => {
-        const { email } = args as { email: string };
-        return { deals: email.includes("northwind") ? ["deal_northwind"] : [] };
-      },
-    },
-    resolve_org: {
+      returns: z.object({ deals: z.array(z.string()).describe("Matching deal IDs") }),
+      execute: async ({ email }) => ({
+        deals: email.includes("northwind") ? ["deal_northwind"] : [],
+      }),
+    }),
+    resolve_org: defineTool({
       description: "Resolve an organization to its deals.",
       parameters: z.object({ org: z.string().describe("Organization name") }),
-      returns: z.object({ org: z.string(), deals: z.array(z.string()) }),
-      execute: async (args) => {
-        const { org } = args as { org: string };
-        return { org, deals: ["deal_northwind", "deal_northwind_expansion"] };
-      },
-    },
-  };
-}
+      returns: z.object({
+        org: z.string().describe("Echoed organization name"),
+        deals: z.array(z.string()).describe("Deal IDs for that org"),
+      }),
+      execute: async ({ org }) => ({
+        org,
+        deals: ["deal_northwind", "deal_northwind_expansion"],
+      }),
+    }),
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Manual for the ambient capability (so its Capabilities detail page is rich)
@@ -210,7 +236,7 @@ function buildWorkspaceAgent(scope: WorkspaceScope) {
       new Capability(
         "workspace-ambient",
         "Read-only ambient context about the operator's workspace — meetings, mail, and open action items.",
-        new WorkspaceAmbientToolbox(scope),
+        workspaceAmbientTools(scope),
         ambientManual,
       ),
     )
@@ -218,7 +244,7 @@ function buildWorkspaceAgent(scope: WorkspaceScope) {
       new Capability(
         "deal-resolution",
         "Resolve a fuzzy reference — a name, a participant, or an org — to a concrete deal record.",
-        new DealResolutionToolbox(),
+        dealResolutionTools,
       ),
     )
     .withResponsibility(

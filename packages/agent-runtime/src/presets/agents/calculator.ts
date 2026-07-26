@@ -18,6 +18,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
+  defineTool,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 
@@ -25,104 +26,99 @@ import { z } from "zod";
 // Toolbox
 // ---------------------------------------------------------------------------
 
+/** Every operation resolves to a single number under `result`. */
+const NumericResult = z.object({ result: z.number() });
+
+// `CalculatorToolbox` stays a class: it is exported from the package barrel, so
+// collapsing it into a `toolbox()` literal would be a breaking API change. The
+// tools inside it use `defineTool` — typed args, no hand-casts, and `returns`
+// validated on the way out.
 export class CalculatorToolbox extends Toolbox {
   readonly name = "calculator_operations";
   readonly description = "Arithmetic and algebraic calculator operations";
 
   readonly tools: Record<string, ToolDefinition> = {
-    add: {
+    add: defineTool({
       description: "Add two numbers together",
       parameters: z.object({
         a: z.number().describe("First number"),
         b: z.number().describe("Second number"),
       }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
-        return { result: a + b };
-      },
-    },
-    subtract: {
+      returns: NumericResult,
+      execute: async ({ a, b }) => ({ result: a + b }),
+    }),
+    subtract: defineTool({
       description: "Subtract the second number from the first",
       parameters: z.object({
         a: z.number().describe("First number"),
         b: z.number().describe("Second number"),
       }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
-        return { result: a - b };
-      },
-    },
-    multiply: {
+      returns: NumericResult,
+      execute: async ({ a, b }) => ({ result: a - b }),
+    }),
+    multiply: defineTool({
       description: "Multiply two numbers together",
       parameters: z.object({
         a: z.number().describe("First number"),
         b: z.number().describe("Second number"),
       }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
-        return { result: a * b };
-      },
-    },
-    divide: {
+      returns: NumericResult,
+      execute: async ({ a, b }) => ({ result: a * b }),
+    }),
+    divide: defineTool({
       description: "Divide the first number by the second",
       parameters: z.object({
         a: z.number().describe("Dividend"),
         b: z.number().describe("Divisor"),
       }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
+      returns: NumericResult,
+      execute: async ({ a, b }) => {
         if (b === 0) {
           throw new Error("Division by zero is undefined");
         }
         return { result: a / b };
       },
-    },
-    power: {
+    }),
+    power: defineTool({
       description: "Raise a base to an exponent",
       parameters: z.object({
         base: z.number().describe("Base number"),
         exponent: z.number().describe("Exponent"),
       }),
-      execute: async (args) => {
-        const { base, exponent } = args as { base: number; exponent: number };
-        return { result: base ** exponent };
-      },
-    },
-    sqrt: {
+      returns: NumericResult,
+      execute: async ({ base, exponent }) => ({ result: base ** exponent }),
+    }),
+    sqrt: defineTool({
       description: "Compute the square root of a number",
       parameters: z.object({
         n: z.number().describe("Number to take the square root of"),
       }),
-      execute: async (args) => {
-        const { n } = args as { n: number };
+      returns: NumericResult,
+      execute: async ({ n }) => {
         if (n < 0) {
           throw new Error("Square root of a negative number is undefined");
         }
         return { result: Math.sqrt(n) };
       },
-    },
-    percentage: {
+    }),
+    percentage: defineTool({
       description: "Calculate what percent% of value is",
       parameters: z.object({
         value: z.number().describe("The base value"),
         percent: z.number().describe("The percentage to compute"),
       }),
-      execute: async (args) => {
-        const { value, percent } = args as { value: number; percent: number };
-        return { result: (value * percent) / 100 };
-      },
-    },
-    modulo: {
+      returns: NumericResult,
+      execute: async ({ value, percent }) => ({ result: (value * percent) / 100 }),
+    }),
+    modulo: defineTool({
       description: "Compute the remainder of dividing a by b",
       parameters: z.object({
         a: z.number().describe("Dividend"),
         b: z.number().describe("Divisor"),
       }),
-      execute: async (args) => {
-        const { a, b } = args as { a: number; b: number };
-        return { result: a % b };
-      },
-    },
+      returns: NumericResult,
+      execute: async ({ a, b }) => ({ result: a % b }),
+    }),
   };
 }
 

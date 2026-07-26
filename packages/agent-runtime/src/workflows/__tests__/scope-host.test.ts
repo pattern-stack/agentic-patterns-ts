@@ -12,6 +12,7 @@ import {
   readScope,
   readScopeAs,
   requireScope,
+  requireScopeAs,
 } from "../scope-host.js";
 
 describe("buildScopeHost", () => {
@@ -96,6 +97,31 @@ describe("readScopeAs — typed cast sugar", () => {
 
   it("undefined when no scope is present", () => {
     expect(readScopeAs<WorkspaceScope>(undefined)).toBeUndefined();
+  });
+});
+
+describe("requireScopeAs — typed + fail-loud", () => {
+  interface WorkspaceScope {
+    readonly workspace: string;
+    readonly user: string;
+  }
+
+  it("casts the raw scope bag to T without re-parsing", () => {
+    const parsed: Record<string, unknown> = { workspace: "acme", user: "sam@acme.dev" };
+    const ctx = { host: buildScopeHost(parsed) } as ToolExecutionContext;
+    const typed = requireScopeAs<WorkspaceScope>(ctx);
+    expect(typed).toEqual(parsed);
+    expect(typed).toBe(readScope(ctx)); // identity with the host bag — a cast, not a copy
+  });
+
+  it("throws ScopeUnavailableError when scope is absent, unlike readScopeAs", () => {
+    expect(readScopeAs<WorkspaceScope>(undefined)).toBeUndefined();
+    expect(() => requireScopeAs<WorkspaceScope>(undefined)).toThrow(ScopeUnavailableError);
+  });
+
+  it("accepts a node context (scope at ctx.scope) like the untyped accessors", () => {
+    const parsed = { workspace: "acme", user: "sam@acme.dev" };
+    expect(requireScopeAs<WorkspaceScope>({ scope: parsed })).toBe(parsed);
   });
 });
 

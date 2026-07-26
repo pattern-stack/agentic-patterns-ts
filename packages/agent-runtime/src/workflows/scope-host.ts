@@ -105,3 +105,17 @@ export function readScopeAs<T>(
 ): T | undefined {
   return readScope(ctx) as T | undefined;
 }
+
+/**
+ * Typed + fail-loud — {@link requireScope} with the {@link readScopeAs} cast
+ * folded in, so a tool that requires scope reads one call instead of
+ * `requireScope(ctx) as MyScope`. Throws {@link ScopeUnavailableError} when the
+ * run carries no scope.
+ *
+ * Same honesty caveat as {@link readScopeAs}: this is a CAST, not a validation.
+ * It trusts the server-side `scope.parse()` (decisions.md D10) rather than
+ * re-parsing per tool call.
+ */
+export function requireScopeAs<T>(ctx: ToolExecutionContext | ScopeCarrier | undefined): T {
+  return requireScope(ctx) as T;
+}

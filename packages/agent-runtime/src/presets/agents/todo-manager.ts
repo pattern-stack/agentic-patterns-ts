@@ -19,6 +19,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
+  defineTool,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 
@@ -36,31 +37,43 @@ interface Task {
 const tasks = new Map<string, Task>();
 let nextId = 1;
 
+/** Wire shape of a task — the `returns` contract for the mutating tools. */
+const TaskShape = z.object({
+  id: z.string().describe("Task ID"),
+  title: z.string().describe("Task title"),
+  description: z.string().optional().describe("Optional task description"),
+  status: z.enum(["pending", "done"]).describe("Current status"),
+});
+
 // ---------------------------------------------------------------------------
 // TodoToolbox
 // ---------------------------------------------------------------------------
 
+// `TodoToolbox` stays a class: it is exported from the package barrel, so
+// collapsing it into a `toolbox()` literal would be a breaking API change. The
+// tools inside it use `defineTool` — typed args, no hand-casts, and `returns`
+// validated on the way out.
 export class TodoToolbox extends Toolbox {
   readonly name = "task_management";
   readonly description = "In-memory task list management";
 
   readonly tools: Record<string, ToolDefinition> = {
-    create_task: {
+    create_task: defineTool({
       description: "Create a new task",
       parameters: z.object({
         title: z.string().describe("Task title"),
         description: z.string().optional().describe("Optional task description"),
       }),
-      execute: async (args) => {
-        const { title, description } = args as { title: string; description?: string };
+      returns: TaskShape.pick({ id: true, title: true, status: true }),
+      execute: async ({ title, description }) => {
         const id = `task-${nextId++}`;
         const task: Task = { id, title, description, status: "pending" };
         tasks.set(id, task);
         return { id: task.id, title: task.title, status: task.status };
       },
-    },
+    }),
 
-    list_tasks: {
+    list_tasks: defineTool({
       description: "List tasks, optionally filtered by status",
       parameters: z.object({
         status: z
@@ -68,21 +81,21 @@ export class TodoToolbox extends Toolbox {
           .optional()
           .describe("Filter by status (pending or done)"),
       }),
-      execute: async (args) => {
-        const { status } = args as { status?: "pending" | "done" };
+      returns: z.object({ tasks: z.array(TaskShape).describe("Matching tasks") }),
+      execute: async ({ status }) => {
         const all = Array.from(tasks.values());
         const filtered = status ? all.filter((t) => t.status === status) : all;
         return { tasks: filtered };
       },
-    },
+    }),
 
-    complete_task: {
+    complete_task: defineTool({
       description: "Mark a task as done",
       parameters: z.object({
         id: z.string().describe("Task ID to complete"),
       }),
-      execute: async (args) => {
-        const { id } = args as { id: string };
+      returns: TaskShape,
+      execute: async ({ id }) => {
         const task = tasks.get(id);
         if (!task) {
           throw new Error(`Task not found: ${id}`);
@@ -90,36 +103,32 @@ export class TodoToolbox extends Toolbox {
         task.status = "done";
         return { ...task };
       },
-    },
+    }),
 
-    delete_task: {
+    delete_task: defineTool({
       description: "Delete a task",
       parameters: z.object({
         id: z.string().describe("Task ID to delete"),
       }),
-      execute: async (args) => {
-        const { id } = args as { id: string };
+      returns: z.object({ deleted: z.boolean().describe("True when the task was removed") }),
+      execute: async ({ id }) => {
         if (!tasks.has(id)) {
           throw new Error(`Task not found: ${id}`);
         }
         tasks.delete(id);
         return { deleted: true };
       },
-    },
+    }),
 
-    update_task: {
+    update_task: defineTool({
       description: "Update a task's title or description",
       parameters: z.object({
         id: z.string().describe("Task ID to update"),
         title: z.string().optional().describe("New title"),
         description: z.string().optional().describe("New description"),
       }),
-      execute: async (args) => {
-        const { id, title, description } = args as {
-          id: string;
-          title?: string;
-          description?: string;
-        };
+      returns: TaskShape,
+      execute: async ({ id, title, description }) => {
         const task = tasks.get(id);
         if (!task) {
           throw new Error(`Task not found: ${id}`);
@@ -132,7 +141,7 @@ export class TodoToolbox extends Toolbox {
         }
         return { ...task };
       },
-    },
+    }),
   };
 }
 
