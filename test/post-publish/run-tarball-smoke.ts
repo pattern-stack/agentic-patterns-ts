@@ -7,13 +7,13 @@
  * as a real publish would), installs the tarballs into a throwaway project via
  * npm, and verifies the consumer contract:
  *
- *   - core / runtime / server import cleanly in BOTH ESM and CJS, expose a
- *     non-empty namespace, and ship their .d.ts + .d.cts type entries.
+ *   - core / runtime / server import cleanly as ESM, expose a non-empty
+ *     namespace, ship their .d.ts type entry, and carry no CJS artifacts.
  *   - cli installs its `ap` bin and the bin file parses (it is bin-only — no
  *     library `exports`, so it is checked, not imported).
  *
  * This catches the broken-tarball class the registry never can: unrewritten
- * workspace pins, missing dist files, broken `exports` maps, dual-format
+ * workspace pins, missing dist files, broken `exports` maps, packaging
  * regressions. `scripts/publish.sh ci` runs it as a gate BEFORE upload, so a
  * bad tarball aborts the release instead of reaching npm and breaking
  * downstream installs (the 0.1.5 / 0.1.6 class — see scripts/publish.sh).
@@ -35,7 +35,7 @@ import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "../..");
 
-// Importable dual-format libraries.
+// Importable ESM libraries.
 const LIB_PKGS = [
   { dir: "agent-core", name: "@agentic-patterns/core" },
   { dir: "agent-runtime", name: "@agentic-patterns/runtime" },
@@ -115,7 +115,7 @@ try {
 }
 ok("installed");
 
-// ── 3. Library contract: ESM + CJS import, non-empty namespace ────────────────
+// ── 3. Library contract: ESM import, non-empty namespace ──────────────────────
 console.log(bold("\nconsumer contract — import"));
 const esmChecks = LIB_PKGS.map(
   (p) => `
@@ -128,37 +128,25 @@ const esmChecks = LIB_PKGS.map(
 ).join("\n");
 writeFileSync(join(consumer, "esm-check.mjs"), `${esmChecks}\n`);
 
-const cjsChecks = LIB_PKGS.map(
-  (p) => `
-{
-  const m = require(${JSON.stringify(p.name)});
-  if (typeof m !== "object" || Object.keys(m).length === 0)
-    throw new Error("${p.name}: CJS require exposed no exports");
-  console.log("  cjs ${p.name}: " + Object.keys(m).length + " exports");
-}`,
-).join("\n");
-writeFileSync(join(consumer, "cjs-check.cjs"), `${cjsChecks}\n`);
-
 try {
   execFileSync("node", ["esm-check.mjs"], { cwd: consumer, stdio: "inherit" });
 } catch {
   fail("ESM import contract failed");
 }
-try {
-  execFileSync("node", ["cjs-check.cjs"], { cwd: consumer, stdio: "inherit" });
-} catch {
-  fail("CJS require contract failed");
-}
-ok("ESM + CJS imports resolve with non-empty namespaces");
+ok("ESM imports resolve with non-empty namespaces");
 
-// ── 4. Type contract: .d.ts + .d.cts shipped ─────────────────────────────────
+// ── 4. Type contract: .d.ts shipped, no CJS artifacts ──────────────────────────
 console.log(bold("\nconsumer contract — types"));
 for (const pkg of LIB_PKGS) {
   const base = join(consumer, "node_modules", pkg.name, "dist");
-  for (const f of ["index.d.ts", "index.d.cts"]) {
+  for (const f of ["index.d.ts"]) {
     if (!existsSync(join(base, f))) fail(`${pkg.name}: missing type entry dist/${f}`);
   }
-  ok(`${pkg.name} ships .d.ts + .d.cts`);
+  const cjsArtifacts = readdirSync(base).filter((f) => /\.cjs(\.map)?$|\.d\.cts$/.test(f));
+  if (cjsArtifacts.length > 0) {
+    fail(`${pkg.name}: found CJS artifacts in installed dist/ — ${cjsArtifacts.join(", ")}`);
+  }
+  ok(`${pkg.name} ships .d.ts; no CJS artifacts`);
 }
 
 // ── 5. CLI contract: bin installed + parses ──────────────────────────────────
