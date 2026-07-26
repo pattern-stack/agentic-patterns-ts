@@ -410,3 +410,103 @@ Rewritten to separate the two directions and state the real finding: the toolbox
 ### Not changed
 
 Nothing was rejected. The reviewer reported no unverifiable claims, and every anchor outside the four drifted ones was confirmed exact.
+
+---
+
+## Spec Review — Gate 1.5 re-check
+<!-- written by: reviewer · gate 1.5 · /sdlc:critique · lens=mixed · rerun -->
+
+**Target:** `.ai-docs/specs/playbook-authoring-parity.md` @ `395e551` (was `aa34c15`)
+**Against:** cited code (re-verified @ `2411fc8`) + `git diff aa34c15..395e551`
+**Verdict: PASS_WITH_NOTES**
+
+**Both blockers are genuinely fixed, not waved at.** Every note and nit was actioned with a
+real edit to a static section. The revision introduced four small defects of its own — one
+factual, one omission, one stale cross-reference, one fresh citation drift — none gate-blocking.
+
+### B1 — resolved
+
+Correction #3 now separates the directions correctly and the mechanics check out.
+`toolbox.ts:250-257` is exact and does what the spec says: it catches the tagged violation and
+rethrows `new Error(…, { cause: err.cause })` with **no** marker property, so
+`isReturnsViolation` is false at a calling play's catch. The tool-mediated sub-case is
+therefore genuinely safe; the direct-`.execute()` sub-case is genuinely unsafe; the spec now
+says exactly that. The "accept and document" decision is explicit and its rationale holds —
+provenance on the tag would change the tool-side mechanism too, and direct `.execute()` also
+bypasses parameter validation (`Toolbox.execute` parses at `:246`; `defineTool`'s wrapper does
+not), so it is already off the supported path.
+
+Both new test bullets are real and assert the right thing. I traced the first one: a play
+calling `someToolbox.execute("x", …)` on a violating tool receives the untagged, tool-named
+error, falls to the generic branch, and yields `{ error: "tool 'x' output violated its returns
+schema: …" }` — tool-named, not play-named, as claimed.
+
+### B2 — resolved
+
+`playbook.ts:26-32` is now an explicit line item in the file plan with the `toolbox.ts:76-79`
+mirror named. Verified `:76-79` is the tool-side sentence pair it points to.
+
+### Notes/nits from pass 1 — all real
+
+Release rhythm: **`0.14.0` confirmed** as core's current version on `origin/main` and in the
+worktree, so `0.14.0 → 0.15.0` is right; `ci.yml:57-65` confirms the consequence verbatim
+("publishes it IFF its version isn't already on npm — so merges without a version bump are
+fast no-ops"). All four corrected anchors verified exact: `toolbox-executor.test.ts:118-122`,
+`:146-159`, `toolsmith/agent.ts:163`, `sdk-bridge.ts:80-81`. `RETURNS_VIOLATION_PHRASE` is a
+real hoist (module API + two file-plan rows + "all four construction sites compose from it").
+The `authoring-a-toolbox.md` edit is narrowed with the three surviving non-goals named. Both
+added tests are specific. `returnDate` reuse and the toolsmith attribution are corrected.
+`tools/check-model-facing-schemas.ts` is in the inventory and its "wired into the root `check`
+script" claim is confirmed at `package.json:20`.
+
+New anchors introduced by the revision, verified: `toolbox.ts:250-257` ✅, `:76-79` ✅,
+`agent.ts:157-161` ✅, `sdk-bridge.ts:79-84` ✅, `playbook.test.ts:31-35` ✅,
+`tool-authoring-sugar.md:747` ✅.
+
+**Blockers (0):** _None._
+
+**Notes (4):**
+
+- [`§ Scope and PR slicing` (spec:19)] The new justification contains a new factual error:
+  "#332/#355 are **lockstep** release issues (runtime/server/cli) and **do not apply to
+  core**." #332 is lockstep-only ✅, but **#355 is titled "release: TS lockstep+core bump for
+  the cockpit arc (bump-both)"** and its body reads "`just bump-both` (core floats for
+  `display`; runtime/server/cli lockstep carries n5/cancel/shim)" — it explicitly covers core.
+  The *decision* is unaffected (the `175f59a`/`3d1a3a5` precedent carries it independently and
+  both were verified), but the paragraph that fixed a wrong claim shipped another one. Drop
+  the "do not apply to core" clause or restate it as "those are release-only PRs; a
+  feature PR still carries its own core bump."
+
+- [`§ File-by-file change plan` (spec:166+)] `bun.lock` is missing. Both cited precedents
+  touched it in the same commit as the bump (`175f59a` and `3d1a3a5`, 4 lines each), and #355
+  — the issue this spec now cites — states it as a **HARD RULE**: "`rm bun.lock && bun install`
+  in the SAME commit as the version bump." The revision took on the bump without its
+  companion; a `package.json`-only bump risks a lockfile-drift CI failure.
+
+- [`§ Playbook.execute` (spec:162)] Stale cross-reference — the one place the revision did
+  *not* update. It still reads "the untagged-rethrow concern from Correction #3 is satisfied
+  structurally — nothing propagates." Correction #3 no longer raises an untagged-rethrow
+  concern; it documents an **accepted, unmitigated** inbound residual, and the code block
+  immediately above (`:154-157`) is precisely the branch that misattributes. A reader arriving
+  at the code section concludes the issue is closed. Reword to name the outbound half only and
+  point at Correction #3's accepted limitation.
+
+- [`§ Corrections #3`, inbound sub-case 1] Fresh citation drift, introduced by the B1 fix:
+  "This is the toolsmith pattern (`examples/agents/toolsmith/agent.ts:180-186`)". `:180-186`
+  is the `parameters` object literal plus the `execute:` line and the args hand-cast; the
+  `tools.execute(...)` calls that make it "the toolsmith pattern" are at **`:187-190`**
+  (inside `Promise.all`, `:187-190`). Same class of error as the four just corrected.
+
+**Nits (2):**
+
+- [`§ Playbook.execute` (spec:156)] The illustrated code still hardcodes
+  `` `play '${name}' output violated its returns schema: ${detail}` `` while § API design
+  declares `RETURNS_VIOLATION_PHRASE` "the one copy of the user-facing phrase" and states all
+  four sites compose from it. Compose it in the snippet too, or the implementer copies what
+  they see.
+
+- [`§ Scope and PR slicing` (spec:9-15)] The PR-slicing table wasn't updated alongside the file
+  plan: `packages/agent-core/package.json` and `CHANGELOG.md` (and `bun.lock`, per above)
+  appear in no row. Row 5 still lists only the three doc/comment files.
+
+**Reviewed by:** reviewer agent · 2026-07-26 (re-check)
