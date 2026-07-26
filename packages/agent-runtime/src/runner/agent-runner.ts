@@ -26,6 +26,7 @@ import type {
   ToolSchema,
 } from "@agentic-patterns/core";
 import {
+  type LanguageModelUsage,
   type ModelMessage,
   Output,
   type ToolSet,
@@ -38,7 +39,12 @@ import {
 import type { ZodType } from "zod";
 
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
-import { type AgentEvent, type ToolCallIntent, createEvent } from "../events/types.js";
+import {
+  type AgentEvent,
+  type TokenUsageDetails,
+  type ToolCallIntent,
+  createEvent,
+} from "../events/types.js";
 import {
   type ModelResolver,
   constantModelResolver,
@@ -55,6 +61,7 @@ import type {
   StructuredRunResult,
   ToolExecutor,
 } from "./types.js";
+import { detailsFromUsage, mergeUsageDetails } from "./usage-details.js";
 
 // Re-export AgentLike here so existing consumers importing from "./agent-runner"
 // (including the public barrel and workflow modules) continue to work.
@@ -407,6 +414,9 @@ export class AgentRunner implements RunnerProtocol {
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    // #388: run-level cache/reasoning detail accumulator — absent ≠ zero,
+    // see mergeUsageDetails.
+    let totalUsageDetails: TokenUsageDetails | undefined;
     let totalToolCalls = 0;
     // BOUNDED COMPLETION: how many iterations have ended with an ERRORED
     // terminal call. The first one CONTINUES (the model sees the error and
@@ -511,6 +521,10 @@ export class AgentRunner implements RunnerProtocol {
       const iterOutputTokens = result.usage?.outputTokens ?? 0;
       totalInputTokens += iterInputTokens;
       totalOutputTokens += iterOutputTokens;
+      // #388: absent ≠ zero — omit the field entirely when the provider
+      // reported no detail members this iteration.
+      const iterUsageDetails = detailsFromUsage(result.usage);
+      totalUsageDetails = mergeUsageDetails(totalUsageDetails, iterUsageDetails);
 
       const resultToolCalls = result.toolCalls ?? [];
       const hasToolCalls = resultToolCalls.length > 0;
@@ -553,6 +567,7 @@ export class AgentRunner implements RunnerProtocol {
           durationMs: llmDuration,
           hasToolCalls,
           finishReason: hasToolCalls ? "tool_calls" : (result.finishReason ?? "stop"),
+          ...(iterUsageDetails ? { usageDetails: iterUsageDetails } : {}),
         }),
       );
 
@@ -585,6 +600,7 @@ export class AgentRunner implements RunnerProtocol {
             outputTokens: totalOutputTokens,
             model: modelName,
             finishReason: result.finishReason ?? "stop",
+            ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
           }),
         );
 
@@ -595,6 +611,7 @@ export class AgentRunner implements RunnerProtocol {
           toolCallsCount: totalToolCalls,
           iterations: iteration + 1,
           finishReason: result.finishReason ?? "stop",
+          ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         };
       }
 
@@ -755,6 +772,7 @@ export class AgentRunner implements RunnerProtocol {
             model: modelName,
             finishReason: "terminal_tool",
             ...(structuredContent !== undefined ? { structuredContent } : {}),
+            ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
           }),
         );
 
@@ -765,6 +783,7 @@ export class AgentRunner implements RunnerProtocol {
           toolCallsCount: totalToolCalls,
           iterations: iteration + 1,
           finishReason: "terminal_tool",
+          ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         };
       }
 
@@ -808,6 +827,7 @@ export class AgentRunner implements RunnerProtocol {
               outputTokens: totalOutputTokens,
               model: modelName,
               finishReason: "terminal_tool_error",
+              ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
             }),
           );
 
@@ -818,6 +838,7 @@ export class AgentRunner implements RunnerProtocol {
             toolCallsCount: totalToolCalls,
             iterations: iteration + 1,
             finishReason: "terminal_tool_error",
+            ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
           };
         }
       }
@@ -878,6 +899,7 @@ export class AgentRunner implements RunnerProtocol {
           outputTokens: totalOutputTokens,
           model: modelName,
           finishReason: "cancelled",
+          ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         }),
       );
 
@@ -888,6 +910,7 @@ export class AgentRunner implements RunnerProtocol {
         toolCallsCount: totalToolCalls,
         iterations: cancelledAtIteration,
         finishReason: "cancelled",
+        ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
       };
     }
 
@@ -906,6 +929,7 @@ export class AgentRunner implements RunnerProtocol {
         outputTokens: totalOutputTokens,
         model: modelName,
         finishReason: "max_iterations",
+        ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
       }),
     );
 
@@ -916,6 +940,7 @@ export class AgentRunner implements RunnerProtocol {
       toolCallsCount: totalToolCalls,
       iterations: maxIterations,
       finishReason: "max_iterations",
+      ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
     };
   }
 
@@ -1101,6 +1126,8 @@ export class AgentRunner implements RunnerProtocol {
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    // #388: run-level cache/reasoning detail accumulator — absent ≠ zero.
+    let totalUsageDetails: TokenUsageDetails | undefined;
     let toolCallsCount = 0;
     let iterations = 1;
     let finishReason = "stop";
@@ -1116,6 +1143,7 @@ export class AgentRunner implements RunnerProtocol {
       });
       totalInputTokens = result.usage?.inputTokens ?? 0;
       totalOutputTokens = result.usage?.outputTokens ?? 0;
+      totalUsageDetails = detailsFromUsage(result.usage);
       finishReason = result.finishReason ?? "stop";
       rawObject = result.output;
     } else if (modelSupportsToolsWithStructuredOutput(modelName)) {
@@ -1152,6 +1180,15 @@ export class AgentRunner implements RunnerProtocol {
         );
       totalInputTokens = usage?.inputTokens ?? 0;
       totalOutputTokens = usage?.outputTokens ?? 0;
+      // #388: mirror the belt-and-braces fallback above — when result.usage is
+      // present, take detail straight from it; otherwise fold detail across
+      // steps the same way the flat reduce does.
+      totalUsageDetails = result.usage
+        ? detailsFromUsage(result.usage)
+        : steps.reduce<TokenUsageDetails | undefined>(
+            (acc, s) => mergeUsageDetails(acc, detailsFromUsage(s.usage)),
+            undefined,
+          );
       finishReason = result.finishReason ?? "stop";
       toolCallsCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
       iterations = Math.max(1, steps.length);
@@ -1169,6 +1206,7 @@ export class AgentRunner implements RunnerProtocol {
       });
       totalInputTokens += tier1.inputTokens;
       totalOutputTokens += tier1.outputTokens;
+      totalUsageDetails = mergeUsageDetails(totalUsageDetails, tier1.usageDetails);
       toolCallsCount = tier1.toolCallsCount;
       iterations = tier1.iterations;
 
@@ -1229,6 +1267,7 @@ export class AgentRunner implements RunnerProtocol {
         });
         totalInputTokens += tier2.usage?.inputTokens ?? 0;
         totalOutputTokens += tier2.usage?.outputTokens ?? 0;
+        totalUsageDetails = mergeUsageDetails(totalUsageDetails, detailsFromUsage(tier2.usage));
         iterations += 1;
         finishReason = tier2.finishReason ?? "stop";
         rawObject = tier2.output;
@@ -1266,6 +1305,7 @@ export class AgentRunner implements RunnerProtocol {
         outputTokens: totalOutputTokens,
         model: modelName,
         finishReason,
+        ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
       }),
     );
 
@@ -1277,6 +1317,7 @@ export class AgentRunner implements RunnerProtocol {
       iterations,
       finishReason,
       object: parsed.data,
+      ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
     };
   }
 
@@ -1326,6 +1367,8 @@ export class AgentRunner implements RunnerProtocol {
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    // #388: stream-scope cache/reasoning detail accumulator — absent ≠ zero.
+    let totalUsageDetails: TokenUsageDetails | undefined;
     let totalToolCalls = 0;
     let fullText = "";
     // BOUNDED COMPLETION (parity with run()): errored-terminal attempt tally.
@@ -1427,7 +1470,10 @@ export class AgentRunner implements RunnerProtocol {
         args: Record<string, unknown>;
         result?: unknown;
       }> = [];
-      let stepUsage: { inputTokens?: number; outputTokens?: number } | undefined;
+      // #388: widened to the full v7 LanguageModelUsage (was a narrow
+      // hand-written {inputTokens?, outputTokens?} type that silently
+      // discarded the detail members already arriving on `part.usage`).
+      let stepUsage: LanguageModelUsage | undefined;
       let stepFinishReason = "stop";
       let hadError = false;
       let aborted = false;
@@ -1632,6 +1678,10 @@ export class AgentRunner implements RunnerProtocol {
       const iterOutputTokens = stepUsage?.outputTokens ?? 0;
       totalInputTokens += iterInputTokens;
       totalOutputTokens += iterOutputTokens;
+      // #388: absent ≠ zero — omit the field entirely when the provider
+      // reported no detail members this step.
+      const iterUsageDetails = detailsFromUsage(stepUsage);
+      totalUsageDetails = mergeUsageDetails(totalUsageDetails, iterUsageDetails);
 
       const hasToolCalls = pendingToolCalls.length > 0;
       const llmDuration = Date.now() - llmStartTime;
@@ -1648,6 +1698,7 @@ export class AgentRunner implements RunnerProtocol {
         durationMs: llmDuration,
         hasToolCalls,
         finishReason: hasToolCalls ? "tool_calls" : stepFinishReason,
+        ...(iterUsageDetails ? { usageDetails: iterUsageDetails } : {}),
       });
       await this.emit(llmEnd);
       yield llmEnd;
@@ -1676,6 +1727,7 @@ export class AgentRunner implements RunnerProtocol {
           outputTokens: totalOutputTokens,
           model: modelName,
           finishReason: stepFinishReason,
+          ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         });
         await this.emit(msgComplete);
         yield msgComplete;
@@ -1874,6 +1926,7 @@ export class AgentRunner implements RunnerProtocol {
           model: modelName,
           finishReason: "terminal_tool",
           ...(structuredContent !== undefined ? { structuredContent } : {}),
+          ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         });
         await this.emit(msgComplete);
         yield msgComplete;
@@ -1921,6 +1974,7 @@ export class AgentRunner implements RunnerProtocol {
             outputTokens: totalOutputTokens,
             model: modelName,
             finishReason: "terminal_tool_error",
+            ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
           });
           await this.emit(msgComplete);
           yield msgComplete;
@@ -1989,6 +2043,7 @@ export class AgentRunner implements RunnerProtocol {
       outputTokens: totalOutputTokens,
       model: modelName,
       finishReason: "max_iterations",
+      ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
     });
     await this.emit(msgComplete);
     yield msgComplete;

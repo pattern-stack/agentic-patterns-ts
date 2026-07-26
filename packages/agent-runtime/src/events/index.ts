@@ -24,6 +24,7 @@ export type {
   IterationEndEvent,
   LLMCallStartEvent,
   LLMCallEndEvent,
+  TokenUsageDetails,
   ErrorEvent,
   StateOrigin,
   StateEventBase,

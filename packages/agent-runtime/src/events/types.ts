@@ -45,6 +45,27 @@ export interface BaseEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Token usage detail (#388)
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional cache/reasoning token detail (#388). Populated ONLY from what the
+ * provider reported — every member is independently optional and the carrying
+ * event omits the whole object when the provider reported nothing.
+ * ABSENT MEANS UNREPORTED, NEVER ZERO. Input-side members partition
+ * `inputTokens` when all three are present (v4-spec providers, e.g.
+ * @ai-sdk/anthropic: total = noCache + cacheRead + cacheWrite); output-side
+ * members partition `outputTokens` likewise (text + reasoning).
+ */
+export interface TokenUsageDetails {
+  readonly noCacheTokens?: number;
+  readonly cacheReadTokens?: number;
+  readonly cacheWriteTokens?: number;
+  readonly textTokens?: number;
+  readonly reasoningTokens?: number;
+}
+
+// ---------------------------------------------------------------------------
 // Message events
 // ---------------------------------------------------------------------------
 
@@ -76,6 +97,12 @@ export interface MessageCompleteEvent extends BaseEvent {
    * cost signal (e.g. `AgentRunner`). Optional and additive — non-breaking.
    */
   readonly costUsd?: number;
+  /**
+   * Cache/reasoning token detail for this run's totals (#388). Absent when the
+   * provider reported no detail members at all — never zero-filled. See
+   * {@link TokenUsageDetails}.
+   */
+  readonly usageDetails?: TokenUsageDetails;
   /**
    * Render artifacts attached to this message
    * ([ADR-0006](../../../../docs/adr/0006-render-artifacts.md) §3). Optional —
@@ -242,6 +269,12 @@ export interface LLMCallEndEvent extends BaseEvent {
   readonly durationMs: number;
   readonly hasToolCalls: boolean;
   readonly finishReason: string;
+  /**
+   * Cache/reasoning token detail for this call (#388). Absent when the
+   * provider reported no detail members at all — never zero-filled. See
+   * {@link TokenUsageDetails}.
+   */
+  readonly usageDetails?: TokenUsageDetails;
 }
 
 // ---------------------------------------------------------------------------
