@@ -3,7 +3,7 @@ repo: pattern-stack/agentic-patterns-ts
 
 language: typescript
 runtime: node              # Node.js >= 20, bun monorepo
-bundler: tsup              # ESM + CJS dual output
+bundler: tsup              # ESM-only output
 test_runner: vitest
 linter: biome              # Format + lint in one tool
 schema_lib: zod            # Schema validation and type inference

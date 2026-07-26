@@ -43,7 +43,7 @@ Capability = Toolbox + Manual
 
 - **Zod schemas** for all data models — define schema, then `z.infer<>` for types
 - **Immutability** — `Object.freeze()` + `Readonly<>` types on atom data
-- **ESM-first** — tsup produces both ESM and CJS outputs
+- **ESM-first** — tsup produces ESM output (ESM-only as of v0.31)
 - **Strict TypeScript** — `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
 - **Async throughout** — all protocol methods return `Promise<T>`
 - **Fluent builders** — `.with*()` methods return `this` for chaining
@@ -77,7 +77,7 @@ bun run --filter=@agentic-patterns/runtime typecheck
 - **bun** — workspace-aware package management + test runner + script runner
 - **zod** — schema validation and type inference
 - **ai** (Vercel AI SDK) — LLM provider abstraction for AgentRunner
-- **tsup** — bundler (ESM + CJS dual output)
+- **tsup** — bundler (ESM-only)
 - **vitest** — test runner
 - **biome** — format + lint (double quotes, semicolons, 2-space indent, 100 char line width)
 
