@@ -1,6 +1,8 @@
 # ADR 0006 — Render artifacts: a second data channel on the response envelope
 
-- **Status:** Proposed (2026-07-26)
+- **Status:** Accepted (2026-07-26) — open questions resolved in review:
+  attachment optional on both events, no framework capping, artifacts not
+  persisted (run-state persistence tracked as a follow-up). Not yet implemented.
 - **Date:** 2026-07-26
 - **Context owner:** Doug
 - **Scope:** `@agentic-patterns/core` (`molecules/tool-schema.ts` — the
@@ -133,23 +135,48 @@ tool's return value to the model.**
    bytes and may carry data a given surface should not receive, so it is opt-in
    at the seam that knows the deployment, not baked into the tool.
 
-3. **The agent is not involved.** Artifacts ride alongside the agent's response.
+3. **Attachment is optional on both `tool.end` and `message.complete`;
+   neither is mandatory.** `tool.end` is the natural producer and arrives
+   first, so it is the usual home and lets a client render progressively.
+   `message.complete` may also carry artifacts — for answer-scoped output, or
+   for artifacts with no single producing tool. A message-scoped block may
+   carry data inline **or** reference ids already emitted on `tool.end`;
+   emitting the same payload in both places is wasteful, not illegal. The
+   framework does not require artifacts anywhere: a run with none is the
+   normal case.
+
+4. **Size is entirely the producer's concern. The framework never truncates,
+   caps, or paginates artifacts.** `truncated` is an advisory flag the
+   *producer* sets to tell a client that it shortened the data; nothing in the
+   framework inspects `data` or acts on the flag. This follows §1 — the
+   framework has no opinion about a tool's data — and avoids the framework
+   corrupting a structured payload it cannot parse. The operational
+   consequence is accepted and named under Consequences.
+
+5. **Artifacts are not persisted.** They are live-stream render output, not
+   system-of-record data, and storing a derived view alongside the source it
+   was derived from invites drift. The durable path is **run state persisted
+   alongside a run**, from which artifacts can be *recreated* — see Follow-ups;
+   that state layer does not exist yet, so the v1 limitation is named under
+   Consequences.
+
+6. **The agent is not involved.** Artifacts ride alongside the agent's response.
    No prompt change, no output-schema change, no cooperation from the model —
    consistent with the observation that this is a data-return decision
    *alongside* an agent call, not part of it.
 
-4. **Envelope extension is additive.** Artifacts attach to the existing
+7. **Envelope extension is additive.** Artifacts attach to the existing
    envelope as an optional block, following the precedent set by #324, which
    added `cost_usd` / `finish_reason` to `message.complete` as
    "additive, non-breaking". Clients that ignore the block behave exactly as
    they do today.
 
-5. **Refs and artifacts compose.** An agent may still write a bare ref in its
+8. **Refs and artifacts compose.** An agent may still write a bare ref in its
    prose. A client that receives a matching artifact `id` may expand it inline;
    a client that does not simply shows the text. `[#N]` cites keep working
    unchanged. This makes §3 useful without requiring it.
 
-6. **Preserve structured terminal output.** The runner stops discarding the
+9. **Preserve structured terminal output.** The runner stops discarding the
    structure of a terminal tool's result. The structured value is carried on
    the envelope so a client can render prose + data properly, instead of
    receiving a stringified blob.
@@ -170,8 +197,19 @@ tool's return value to the model.**
 
 **Costs / risks**
 
-- **Payload size.** Artifacts can be large. Producers must be able to cap and
-  mark `truncated`; the opt-in default keeps streams lean when unused.
+- **Unbounded payloads are a real failure mode, by design.** Because the
+  framework never caps (§2b), a tool that publishes a very large artifact can
+  produce an SSE frame big enough to stall the connection or exhaust client
+  memory. This is accepted: the alternative — the framework mangling a
+  structured payload it cannot parse — is worse, and capping belongs where the
+  semantics live. It does mean the failure is operational (a wedged stream)
+  rather than graceful (a truncation notice). Producers publishing unbounded
+  result sets should cap and set `truncated`.
+- **Reload loses artifacts (v1).** Since artifacts are not persisted (§2c) and
+  run state is not yet durable, replaying a stored conversation shows the prose
+  without its tables — the same degraded view we have today. Acceptable only
+  because it is no worse than the status quo; run-state persistence is the fix
+  (Follow-ups).
 - **A second source of truth.** An artifact can drift from what the model was
   told. Mitigated by the correlation `id` and by artifacts being derived from
   the same tool execution.
@@ -200,12 +238,21 @@ tool's return value to the model.**
   primary fix: guesswork against a shape the framework discarded. May still be
   worth a narrow, conservative fallback for agents that never adopt artifacts.
 
-## Open questions
+## Follow-ups
 
-- Does an artifact attach to `tool.end`, to `message.complete`, or to both?
-  Tool-scoped is the natural producer; message-scoped is what a chat bubble
-  renders. Likely both, with the message block referencing tool-produced ids.
-- Should artifact publication be capped/paginated at the framework level, or
-  left to the producer with only the `truncated` flag as the contract?
-- Do artifacts persist? `ConversationStore` currently stores message parts;
-  replaying a stored conversation with artifacts is unspecified.
+- **Run-state persistence (the real fix for replay).** Artifacts are
+  deliberately not persisted (§2c), so today a reload loses them. The durable
+  answer is to persist the **state alongside a run** — the backpack pools and
+  scratchpad slots a run actually produced — so a stored conversation can be
+  *recreated*, artifacts included, from the source of truth rather than from a
+  cached render. Nothing persists that state today: `backpack.drop` carries
+  counts only and `scratchpad.*` carries byte-capped previews, so the events
+  are not a sufficient record. This deserves its own ADR; it is a larger change
+  than artifacts and is not a prerequisite for them.
+- **Extending prose refs beyond `[#N]`.** `linkifyCites` recognizes only
+  backpack indexes. Recognizing artifact `id`s in prose would let an agent
+  write a bare ref and have a capable client expand it inline (§3). Purely
+  client-side once artifacts exist.
+- **A conservative fallback for JSON-shaped answers.** Agents that never adopt
+  artifacts will still stringify structured output. A narrow client-side
+  unwrap may be worth it, but only as a fallback — not as the primary fix.
