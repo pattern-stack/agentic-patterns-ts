@@ -6,7 +6,7 @@
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -38,7 +38,10 @@ const delegatedBranchSlot = slot<string>({
   init: () => "initial",
 });
 
-const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 } as const;
+const usage = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 1, text: 1, reasoning: undefined },
+} as const;
 
 function agentWithToolbox(name: string, toolbox: Toolbox): Agent {
   const role = new RoleBuilder(name)
@@ -195,7 +198,7 @@ describe("delegateTo scratchpad sharing (#269)", () => {
 
   it("T4 — AgentRunner shares the backpack through delegateTo on the live rail", async () => {
     let outerCalls = 0;
-    const outerModel = new MockLanguageModelV2({
+    const outerModel = new MockLanguageModelV3({
       doGenerate: async () => {
         outerCalls++;
         if (outerCalls === 1) {
@@ -208,14 +211,14 @@ describe("delegateTo scratchpad sharing (#269)", () => {
                 input: JSON.stringify({ task: "add the child note" }),
               },
             ],
-            finishReason: "tool-calls" as const,
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
             usage,
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "coordinator done" }],
-          finishReason: "stop" as const,
+          finishReason: { unified: "stop" as const, raw: "stop" },
           usage,
           warnings: [],
         };

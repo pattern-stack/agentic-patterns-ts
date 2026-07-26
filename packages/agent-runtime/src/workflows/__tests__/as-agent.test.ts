@@ -8,7 +8,7 @@ import {
   Tone,
   Toolbox,
 } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -440,11 +440,14 @@ describe("asAgent", () => {
 
 describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
   it("forwards options.traceId/parentSpanId into the inner AgentStep's events", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: "text" as const, text: "inner done" }],
-        finishReason: "stop" as const,
-        usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage: {
+          inputTokens: { total: 4, noCache: 4, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 4, text: 4, reasoning: undefined },
+        },
         warnings: [],
       }),
     });
@@ -485,11 +488,14 @@ describe("asAgent + NodeBackedRunner — trace/span propagation (#102)", () => {
   });
 
   it("without options.traceId/parentSpanId, the inner run behaves as before (no forced nesting)", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => ({
         content: [{ type: "text" as const, text: "inner done" }],
-        finishReason: "stop" as const,
-        usage: { inputTokens: 4, outputTokens: 4, totalTokens: 8 },
+        finishReason: { unified: "stop" as const, raw: "stop" },
+        usage: {
+          inputTokens: { total: 4, noCache: 4, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 4, text: 4, reasoning: undefined },
+        },
         warnings: [],
       }),
     });

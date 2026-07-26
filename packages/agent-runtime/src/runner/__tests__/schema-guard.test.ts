@@ -7,7 +7,7 @@
  * guard makes that hazard LOUD before any LLM call.
  */
 
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -37,8 +37,11 @@ function makeAgent(overrides: Partial<AgentLike> = {}): AgentLike {
 function structuredTextResult(object: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(object) }],
-    finishReason: "stop" as const,
-    usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    finishReason: { unified: "stop" as const, raw: "stop" },
+    usage: {
+      inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
+      outputTokens: { total: 5, text: 5, reasoning: undefined },
+    },
     warnings: [],
   };
 }
@@ -176,7 +179,7 @@ describe("guardOpenObjectSchemas", () => {
 describe("AgentRunner.runStructured open-object guard", () => {
   it("throws before any LLM call when the schema has an open-object node", async () => {
     let llmCalled = false;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => {
         llmCalled = true;
         return structuredTextResult({ body: {} });
@@ -192,7 +195,7 @@ describe("AgentRunner.runStructured open-object guard", () => {
 
   it("with allowOpenObjectSchemas: true warns and proceeds to a structured result", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => structuredTextResult({ body: { anything: "goes" } }),
     });
     const runner = new AgentRunner(model);
@@ -211,7 +214,7 @@ describe("AgentRunner.runStructured open-object guard", () => {
   });
 
   it("runs closed schemas untouched", async () => {
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => structuredTextResult({ title: "ok" }),
     });
     const runner = new AgentRunner(model);

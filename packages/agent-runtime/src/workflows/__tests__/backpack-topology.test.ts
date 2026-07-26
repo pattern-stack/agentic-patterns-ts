@@ -11,13 +11,13 @@
  *
  * Harnesses mirror the sibling suites: `MockRunner` + `FunctionStep` for the
  * pure-node topologies (loop/retry/fan-out/node-tool), a real `AgentRunner`
- * driven by a `MockLanguageModelV2` for the tool-dispatch seams (node-tool.test
+ * driven by a `MockLanguageModelV3` for the tool-dispatch seams (node-tool.test
  * / host-propagation.test / sequential-agents.test patterns).
  */
 
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { ToolSchema } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -91,7 +91,10 @@ function makeSpec(
 
 const r = (id: string | undefined, text: string, score = 0): Raw => ({ id, text, score });
 
-const USAGE = { inputTokens: 1, outputTokens: 1, totalTokens: 2 } as const;
+const USAGE = {
+  inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 1, text: 1, reasoning: undefined },
+} as const;
 
 /** An AgentLike leaf whose model id routes through a {@link ModelResolver}. */
 function makeAgent(name: string, model: string, tools: ToolSchema[] = []): AgentLike {
@@ -108,8 +111,8 @@ function makeAgent(name: string, model: string, tools: ToolSchema[] = []): Agent
  * text once the tool result has landed. Decides by INSPECTING the transcript
  * (not a call counter) so a single instance drives many stages/runs correctly.
  */
-function gatherToolModel(): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function gatherToolModel(): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     doGenerate: async ({ prompt }) => {
       const toolRan = (prompt as ReadonlyArray<{ role: string }>).some((m) => m.role === "tool");
       if (!toolRan) {
@@ -122,14 +125,14 @@ function gatherToolModel(): MockLanguageModelV2 {
               input: JSON.stringify({}),
             },
           ],
-          finishReason: "tool-calls" as const,
+          finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
           usage: USAGE,
           warnings: [],
         };
       }
       return {
         content: [{ type: "text" as const, text: "gathered" }],
-        finishReason: "stop" as const,
+        finishReason: { unified: "stop" as const, raw: "stop" },
         usage: USAGE,
         warnings: [],
       };
@@ -138,11 +141,11 @@ function gatherToolModel(): MockLanguageModelV2 {
 }
 
 /** A model that just emits one line of text (a downstream reader/curator stage). */
-function textModel(text: string): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function textModel(text: string): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     doGenerate: async () => ({
       content: [{ type: "text" as const, text }],
-      finishReason: "stop" as const,
+      finishReason: { unified: "stop" as const, raw: "stop" },
       usage: USAGE,
       warnings: [],
     }),

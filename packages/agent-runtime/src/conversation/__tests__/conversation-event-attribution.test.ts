@@ -1,14 +1,14 @@
 /**
  * Verifies that agent.message.complete events emitted via
  * `Conversation.stream()` -> `AgentRunner.stream()` carry the runtime
- * model id (from the bound LanguageModelV2) rather than the agent's
+ * model id (from the bound ResolvedLanguageModel) rather than the agent's
  * declared model. Discovered while smoke-testing AP-13: footers showed
  * the agent's default ("claude-sonnet-4-20250514") even though Ollama
  * was actually servicing the call.
  */
 
-import type { LanguageModelV2StreamPart } from "@ai-sdk/provider";
-import { MockLanguageModelV2 } from "ai/test";
+import type { LanguageModelV3StreamPart } from "@ai-sdk/provider";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import type { AgentEvent } from "../../events/types.js";
@@ -28,11 +28,11 @@ function makeAgent(): AgentLike {
   };
 }
 
-function makeMockModel(): MockLanguageModelV2 {
-  return new MockLanguageModelV2({
+function makeMockModel(): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
     modelId: RUNTIME_MODEL_ID,
     doStream: async () => ({
-      stream: new ReadableStream<LanguageModelV2StreamPart>({
+      stream: new ReadableStream<LanguageModelV3StreamPart>({
         start(controller) {
           controller.enqueue({ type: "stream-start", warnings: [] });
           controller.enqueue({ type: "text-start", id: "t0" });
@@ -40,8 +40,11 @@ function makeMockModel(): MockLanguageModelV2 {
           controller.enqueue({ type: "text-end", id: "t0" });
           controller.enqueue({
             type: "finish",
-            finishReason: "stop",
-            usage: { inputTokens: 5, outputTokens: 1, totalTokens: 6 },
+            finishReason: { unified: "stop", raw: "stop" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 1, text: 1, reasoning: undefined },
+            },
           });
           controller.close();
         },

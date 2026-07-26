@@ -49,10 +49,10 @@ function restoreEnv(saved: Record<string, string | undefined>) {
 function stubProviderLoad(provider: ProviderProtocol, cannedModelId?: string) {
   return vi.spyOn(provider, "load").mockImplementation(async (modelId) => {
     return {
-      specificationVersion: "v2",
+      specificationVersion: "v4",
       provider: provider.name,
       modelId: cannedModelId ?? modelId,
-      // biome-ignore lint/suspicious/noExplicitAny: test stub for LanguageModelV2
+      // biome-ignore lint/suspicious/noExplicitAny: test stub for ResolvedLanguageModel
     } as any;
   });
 }
@@ -79,7 +79,7 @@ describe("createRunner", () => {
 
   it("wraps options.model in AgentRunner", async () => {
     const fakeModel = {
-      specificationVersion: "v1",
+      specificationVersion: "v4",
       provider: "stub",
       modelId: "stub-1",
       // biome-ignore lint/suspicious/noExplicitAny: test stub
@@ -274,7 +274,7 @@ describe("createRunner", () => {
 
   it("passes eventBus through to AgentRunner", async () => {
     const fakeModel = {
-      specificationVersion: "v1",
+      specificationVersion: "v4",
       provider: "stub",
       modelId: "stub-1",
       // biome-ignore lint/suspicious/noExplicitAny: test stub

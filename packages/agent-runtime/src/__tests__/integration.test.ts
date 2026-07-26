@@ -8,7 +8,7 @@
 
 declare function setTimeout(callback: () => void, ms: number): number;
 
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -146,7 +146,7 @@ describe("integration: single-agent end-to-end", () => {
 
     // 4. Run with mock model (tool call then final response)
     let callCount = 0;
-    const model = new MockLanguageModelV2({
+    const model = new MockLanguageModelV3({
       doGenerate: async () => {
         callCount++;
         if (callCount === 1) {
@@ -159,8 +159,16 @@ describe("integration: single-agent end-to-end", () => {
                 input: JSON.stringify({ query: "revenue data" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: {
+                total: 100,
+                noCache: 100,
+                cacheRead: undefined,
+                cacheWrite: undefined,
+              },
+              outputTokens: { total: 20, text: 20, reasoning: undefined },
+            },
             warnings: [],
           };
         }
@@ -168,8 +176,11 @@ describe("integration: single-agent end-to-end", () => {
           content: [
             { type: "text" as const, text: "Based on the data, Q4 revenue increased by 15%." },
           ],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 150, outputTokens: 30, totalTokens: 180 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 150, noCache: 150, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 30, text: 30, reasoning: undefined },
+          },
           warnings: [],
         };
       },

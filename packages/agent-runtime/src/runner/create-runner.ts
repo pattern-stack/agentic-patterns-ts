@@ -3,7 +3,7 @@
  *
  * Selection priority (first match wins):
  *   1. options.runner                → use it verbatim
- *   2. options.model (LanguageModelV2) → new AgentRunner(model)
+ *   2. options.model (ResolvedLanguageModel) → new AgentRunner(model)
  *   2.5 resolveAgentModel/profiles/modelsPath → new AgentRunner(resolver)  (per-agent model)
  *   3. options.provider + tier/modelId → new AgentRunner(provider.load(...))
  *   4. explicit modelId/AGENT_MODEL → inferProvider(id) picks the provider (the
@@ -17,7 +17,6 @@
  */
 
 import { spawn } from "node:child_process";
-import type { LanguageModelV2 } from "@ai-sdk/provider";
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import {
@@ -34,6 +33,7 @@ import {
   createModelResolver,
   inferProvider,
 } from "../providers/model-resolver.js";
+import type { ResolvedLanguageModel } from "../providers/types.js";
 import { AgentRunner } from "./agent-runner.js";
 import { ClaudeCodeAPIRunner } from "./claude-code-api-runner.js";
 import { MockRunner } from "./mock-runner.js";
@@ -81,10 +81,10 @@ export interface CreateRunnerOptions {
    */
   tier?: ProviderTier;
   /**
-   * Pre-constructed `LanguageModelV2`. Short-circuits provider resolution;
-   * the factory wraps it in `AgentRunner`.
+   * Pre-constructed {@link ResolvedLanguageModel}. Short-circuits provider
+   * resolution; the factory wraps it in `AgentRunner`.
    */
-  model?: LanguageModelV2;
+  model?: ResolvedLanguageModel;
   /** Optional event bus. Passed through to the constructed runner. */
   eventBus?: AgentEventBus;
   /** Log the selection decision to console. Defaults to true. */
@@ -206,11 +206,11 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     });
   }
 
-  // 2. Explicit LanguageModelV2 → AgentRunner.
+  // 2. Explicit ResolvedLanguageModel → AgentRunner.
   if (opts.model) {
     return log(verbose, {
       runner: new AgentRunner(opts.model, opts.eventBus),
-      reason: "using caller-provided LanguageModelV2 via AgentRunner",
+      reason: "using caller-provided language model (V2/V3/V4 spec) via AgentRunner",
       source: "explicit-model",
     });
   }
@@ -322,7 +322,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
       "createRunner: no runnable configuration found.",
       "Provide one of:",
       "  • options.runner (a RunnerProtocol instance)",
-      "  • options.model (a LanguageModelV2)",
+      "  • options.model (a language model, V2/V3/V4 spec)",
       "  • options.provider + the matching @ai-sdk/* package installed",
       "  • an env var: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY,",
       "    GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY, DEEPSEEK_API_KEY,",

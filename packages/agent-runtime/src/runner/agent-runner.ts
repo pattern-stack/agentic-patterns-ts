@@ -6,15 +6,15 @@
  * Key differences from Python:
  * - Parallel tool execution via Promise.all (Python is sequential)
  * - Vercel AI SDK handles tool schema conversion (Python manually builds OpenAI JSON)
- * - One generateText/streamText call per iteration (v5 single-step default) for
+ * - One generateText/streamText call per iteration (v7 single-step default) for
  *   gate interception control (see GATE-CHAIN INVARIANT below)
- * - MockLanguageModelV2 for testing (replaces Python's MockRunner)
+ * - MockLanguageModelV3 for testing (replaces Python's MockRunner)
  *
  * GATE-CHAIN INVARIANT (do not break): the SDK must NOT auto-run or loop tools.
  * We deliberately (a) pass tools WITHOUT an `execute` function and (b) rely on
- * v5's single-step default (we removed v4's `maxSteps: 1`). Tool dispatch goes
+ * v7's single-step default (we removed v4's `maxSteps: 1`). Tool dispatch goes
  * through the gate chain + `toolExecutor` here, NOT the SDK. If you ever give a
- * tool an `execute`, or add `stopWhen` / `maxSteps`/`stepCountIs(>1)`, the SDK
+ * tool an `execute`, or add `stopWhen` / `maxSteps`/`isStepCount(>1)`, the SDK
  * will run and loop tools itself and the gate interception (and the T0-1
  * gate-allow regression test in agent-runner.test.ts) will be bypassed.
  */
@@ -25,14 +25,13 @@ import type {
   ToolExecutionContext,
   ToolSchema,
 } from "@agentic-patterns/core";
-import type { LanguageModelV2 } from "@ai-sdk/provider";
 import {
   type ModelMessage,
   Output,
   type ToolSet,
   generateId,
   generateText,
-  stepCountIs,
+  isStepCount,
   streamText,
   tool,
 } from "ai";
@@ -45,6 +44,7 @@ import {
   constantModelResolver,
   isModelResolver,
 } from "../providers/model-resolver.js";
+import type { ResolvedLanguageModel } from "../providers/types.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
 import { guardOpenObjectSchemas } from "./schema-guard.js";
 import type {
@@ -124,8 +124,7 @@ export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean
     // openai/gpt-4o*  (gpt-4o, gpt-4o-mini, gpt-4o-2024-…)
     bare.startsWith("gpt-4o") ||
     // openai/gpt-5*
-    bare.startsWith("gpt-5") ||
-    // gemini 3.5 flash (NOT gemini 3.1 / 2.5)
+    bare.startsWith("gpt-5") || // gemini 3.5 flash (NOT gemini 3.1 / 2.5)
     bare.includes("gemini-3.5-flash")
   );
 }
@@ -152,11 +151,11 @@ export class AgentRunner implements RunnerProtocol {
   /**
    * @param model A {@link ModelResolver} — the runner resolves `agent.getModel()`
    *   per run, so the model belongs to the agent (overridable per-agent). OR a
-   *   concrete `LanguageModelV2`, which is wrapped in a
+   *   concrete {@link ResolvedLanguageModel}, which is wrapped in a
    *   {@link constantModelResolver} so the model is pinned regardless of what the
-   *   agent declares (back-compat; the path tests use with `MockLanguageModelV2`).
+   *   agent declares (back-compat; the path tests use with `MockLanguageModelV3`).
    */
-  constructor(model: LanguageModelV2 | ModelResolver, eventBus?: AgentEventBus) {
+  constructor(model: ResolvedLanguageModel | ModelResolver, eventBus?: AgentEventBus) {
     this._resolver = isModelResolver(model) ? model : constantModelResolver(model);
     this._eventBus = eventBus;
   }
@@ -315,11 +314,12 @@ export class AgentRunner implements RunnerProtocol {
   }
 
   /**
-   * Convert agent tools to the Vercel AI SDK v5 tool format.
+   * Convert agent tools to the Vercel AI SDK tool format.
    *
-   * v5 renamed the tool's schema field `parameters → inputSchema`. Core's
-   * `ToolSchema.toVercelAI()` still returns `{ description, parameters }`, so we
-   * do the rename here at the runner boundary (core stays `ai`-free).
+   * The SDK's tool schema field is `inputSchema` (renamed from `parameters` at
+   * v5; unchanged through v7). Core's `ToolSchema.toVercelAI()` still returns
+   * `{ description, parameters }`, so we do the rename here at the runner
+   * boundary (core stays `ai`-free).
    *
    * NOTE (gate-chain invariant): tools are intentionally `execute`-less — the
    * SDK never runs them; dispatch goes through the gate chain + `toolExecutor`.
@@ -335,7 +335,7 @@ export class AgentRunner implements RunnerProtocol {
       const vercel = t.toVercelAI();
       // Build via `tool()` WITHOUT an `execute` (gate-chain invariant): the SDK
       // exposes the schema to the model but never runs the tool. core's
-      // `toVercelAI().parameters` is a Zod schema → a valid v5 `inputSchema`.
+      // `toVercelAI().parameters` is a Zod schema → a valid `inputSchema`.
       tools[t.name] = tool({
         description: vercel.description,
         inputSchema: vercel.parameters,
@@ -380,7 +380,7 @@ export class AgentRunner implements RunnerProtocol {
 
     // #117: hoisted above the start event (was after it) so message.start can
     // stamp systemPrompt — renderInitialPrompt() is a pure render, hoisting is safe.
-    const system = agent.renderInitialPrompt(this._renderCtx(options));
+    const instructions = agent.renderInitialPrompt(this._renderCtx(options));
 
     // Emit message start event (root of the trace)
     const startEvent = createEvent("agent.message.start", {
@@ -393,7 +393,7 @@ export class AgentRunner implements RunnerProtocol {
         model: modelName,
         tools: agentTools.map((t) => t.name),
       },
-      systemPrompt: system,
+      systemPrompt: instructions,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -449,7 +449,7 @@ export class AgentRunner implements RunnerProtocol {
         runId,
         parentSpanId: iterSpanId,
         model: modelName,
-        messageCount: messages.length + 1, // +1 for system
+        messageCount: messages.length + 1, // +1 for instructions
         hasTools,
       });
       const llmSpanId = llmStart.spanId;
@@ -459,12 +459,12 @@ export class AgentRunner implements RunnerProtocol {
 
       let result: Awaited<ReturnType<typeof generateText>>;
       try {
-        // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` — v5 single-step is the
+        // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` — v7 single-step is the
         // default. Tools are `execute`-less so the SDK can't run/loop them; we
         // dispatch through the gate chain + toolExecutor below.
         result = await generateText({
           model,
-          system,
+          instructions,
           messages,
           tools: hasTools ? tools : undefined,
         });
@@ -501,11 +501,12 @@ export class AgentRunner implements RunnerProtocol {
 
       const llmDuration = Date.now() - llmStartTime;
 
-      // Track token usage. v5 renamed usage fields (promptTokens→inputTokens,
-      // completionTokens→outputTokens) and each is `number | undefined`. Each
-      // iteration is a single step, so `result.usage` (last-step usage) is this
-      // iteration's usage; the run-level total the events report is the
-      // accumulation below (equivalent to summing result.totalUsage per step).
+      // Track token usage. Usage fields are `inputTokens`/`outputTokens` (renamed
+      // from promptTokens/completionTokens at v5; unchanged through v7), each
+      // `number | undefined`. Each iteration is a single step, so `result.usage`
+      // (last-step usage) is this iteration's usage; the run-level total the
+      // events report is the accumulation below (equivalent to summing
+      // result.usage per step).
       const iterInputTokens = result.usage?.inputTokens ?? 0;
       const iterOutputTokens = result.usage?.outputTokens ?? 0;
       totalInputTokens += iterInputTokens;
@@ -517,8 +518,9 @@ export class AgentRunner implements RunnerProtocol {
       // If the model produced reasoning (extended-thinking, o-series, etc.),
       // emit a single thinking.start + completed agent.reasoning pair. The
       // non-streaming path can't expose per-delta events, so one summary is
-      // the faithful best-effort mapping. v5 exposes the joined reasoning as
-      // `result.reasoningText` (was `result.reasoning`).
+      // the faithful best-effort mapping. The SDK exposes the joined reasoning
+      // as `result.reasoningText` (renamed from `result.reasoning` at v5;
+      // unchanged through v7).
       const reasoningContent = result.reasoningText;
       if (reasoningContent && reasoningContent.length > 0) {
         await this.emit(
@@ -596,8 +598,9 @@ export class AgentRunner implements RunnerProtocol {
         };
       }
 
-      // Has tool calls — execute them in parallel. v5's TypedToolCall carries
-      // the call payload under `.input` (was `.args` in v4).
+      // Has tool calls — execute them in parallel. TypedToolCall carries the
+      // call payload under `.input` (renamed from `.args` at v5; unchanged
+      // through v7).
       for (const tc of resultToolCalls) {
         const intent = createEvent("agent.tool.intent", {
           traceId: effectiveTraceId,
@@ -830,8 +833,9 @@ export class AgentRunner implements RunnerProtocol {
       // thought_signature". This is the whole point of the v5 migration.
       messages.push(...sanitizeResponseMessages(result.response.messages));
 
-      // Our own tool results (we ran the tools, not the SDK). v5's
-      // ToolResultPart carries the result under `output` as a typed union.
+      // Our own tool results (we ran the tools, not the SDK). ToolResultPart
+      // carries the result under `output` as a typed union (since v5;
+      // unchanged through v7).
       messages.push({
         role: "tool" as const,
         content: toolResults.map((tr) => ({
@@ -1071,7 +1075,7 @@ export class AgentRunner implements RunnerProtocol {
     const modelName = model.modelId;
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
-    const system = agent.renderInitialPrompt(this._renderCtx(options));
+    const instructions = agent.renderInitialPrompt(this._renderCtx(options));
 
     // Emit message start event (root of the trace), mirroring run().
     const startEvent = createEvent("agent.message.start", {
@@ -1084,7 +1088,7 @@ export class AgentRunner implements RunnerProtocol {
         model: modelName,
         tools: agentTools.map((t) => t.name),
       },
-      systemPrompt: system,
+      systemPrompt: instructions,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -1106,14 +1110,14 @@ export class AgentRunner implements RunnerProtocol {
       // No tools → single Output.object call. Works on every model.
       const result = await generateText({
         model,
-        system,
+        instructions,
         messages,
-        experimental_output: Output.object({ schema }),
+        output: Output.object({ schema }),
       });
       totalInputTokens = result.usage?.inputTokens ?? 0;
       totalOutputTokens = result.usage?.outputTokens ?? 0;
       finishReason = result.finishReason ?? "stop";
-      rawObject = result.experimental_output;
+      rawObject = result.output;
     } else if (modelSupportsToolsWithStructuredOutput(modelName)) {
       // Tools + capable model → single experimental_output + tools call. The
       // SDK drives the loop; execute-bearing tools keep gate interception.
@@ -1126,17 +1130,19 @@ export class AgentRunner implements RunnerProtocol {
       });
       const result = await generateText({
         model,
-        system,
+        instructions,
         messages,
         tools,
-        stopWhen: stepCountIs(options?.maxIterations ?? 10),
-        experimental_output: Output.object({ schema }),
+        stopWhen: isStepCount(options?.maxIterations ?? 10),
+        output: Output.object({ schema }),
       });
       const steps = result.steps ?? [];
-      // Prefer totalUsage (the whole multi-step loop). If a provider omits it,
-      // result.usage is LAST-step only — sum per-step usage to avoid undercounting.
+      // v7: result.usage aggregates ALL steps (totalUsage is now a deprecated
+      // alias for the same value), so on this multi-step capable path it IS the
+      // loop total. Keep the per-step reduce fallback belt-and-braces — it
+      // guards providers that omit usage entirely.
       const usage =
-        result.totalUsage ??
+        result.usage ??
         steps.reduce(
           (a, s) => ({
             inputTokens: (a.inputTokens ?? 0) + (s.usage?.inputTokens ?? 0),
@@ -1149,7 +1155,7 @@ export class AgentRunner implements RunnerProtocol {
       finishReason = result.finishReason ?? "stop";
       toolCallsCount = steps.reduce((n, s) => n + (s.toolCalls?.length ?? 0), 0);
       iterations = Math.max(1, steps.length);
-      rawObject = result.experimental_output;
+      rawObject = result.output;
     } else {
       // Tools + incapable/UNKNOWN model → 2-tier (model-safe). Tier 1: the
       // normal gate-respecting tool loop to text. Tier 2: a no-tools
@@ -1212,20 +1218,20 @@ export class AgentRunner implements RunnerProtocol {
 
         const tier2 = await generateText({
           model,
-          system,
+          instructions,
           messages: [
             {
               role: "user" as const,
               content: `From the following, produce the structured object.\n\n${tier1.response}`,
             },
           ],
-          experimental_output: Output.object({ schema }),
+          output: Output.object({ schema }),
         });
         totalInputTokens += tier2.usage?.inputTokens ?? 0;
         totalOutputTokens += tier2.usage?.outputTokens ?? 0;
         iterations += 1;
         finishReason = tier2.finishReason ?? "stop";
-        rawObject = tier2.experimental_output;
+        rawObject = tier2.output;
       }
     }
 
@@ -1311,7 +1317,7 @@ export class AgentRunner implements RunnerProtocol {
       ),
     );
 
-    const system = agent.renderInitialPrompt(this._renderCtx(options));
+    const instructions = agent.renderInitialPrompt(this._renderCtx(options));
     const messages: ModelMessage[] = [];
     if (options?.messageHistory) {
       messages.push(...convertHistory(options.messageHistory));
@@ -1348,7 +1354,7 @@ export class AgentRunner implements RunnerProtocol {
         model: modelName,
         tools: agentTools.map((t) => t.name),
       },
-      systemPrompt: system,
+      systemPrompt: instructions,
     });
     const rootSpanId = msgStart.spanId;
     await this.emit(msgStart);
@@ -1397,16 +1403,16 @@ export class AgentRunner implements RunnerProtocol {
 
       const llmStartTime = Date.now();
 
-      // Use fullStream to get text + tool calls + errors in one pass.
-      // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` (v5 single-step default),
+      // Use .stream to get text + tool calls + errors in one pass.
+      // GATE-CHAIN INVARIANT: no `maxSteps`/`stopWhen` (v7 single-step default),
       // tools `execute`-less — the SDK won't run/loop tools; we dispatch below.
       const streamResult = streamText({
         model,
-        system,
+        instructions,
         messages,
         tools: hasTools ? tools : undefined,
-        // #341: forwarded cooperatively to the provider call. ai@5 either
-        // emits a `type: "abort"` fullStream part (handled below) or, for
+        // #341: forwarded cooperatively to the provider call. ai@7 either
+        // emits a `type: "abort"` stream part (handled below) or, for
         // providers that don't support that, rejects the in-flight call with
         // an `AbortError` (caught around the drain loop below) — both routes
         // land in the same cancel-and-return block.
@@ -1437,12 +1443,12 @@ export class AgentRunner implements RunnerProtocol {
       let reasoningText = "";
 
       // #341 belt-and-braces: some providers reject the in-flight call with
-      // an `AbortError` instead of emitting a fullStream `type: "abort"`
+      // an `AbortError` instead of emitting a `.stream` `type: "abort"`
       // part (handled in the switch's `case "abort"` below). Either route
       // sets `aborted` and falls through to the same cancel-and-return block
       // after the loop — never the error path.
       try {
-        for await (const part of streamResult.fullStream) {
+        for await (const part of streamResult.stream) {
           switch (part.type) {
             case "text-delta": {
               // Transition reasoning -> text: close the reasoning block first.
@@ -1519,9 +1525,9 @@ export class AgentRunner implements RunnerProtocol {
               break;
             }
             case "abort": {
-              // #341: ai@5's fullStream abort signal — the provider call
+              // #341: the SDK's `.stream` abort signal — the provider call
               // observed `options.abortSignal` firing. Set the local flag and
-              // break out of the switch; the fullStream drain itself ends
+              // break out of the switch; the stream drain itself ends
               // shortly after (the SDK closes the stream on abort), then the
               // post-loop `aborted` check below routes into the shared
               // cancel-and-return block.
@@ -1568,7 +1574,7 @@ export class AgentRunner implements RunnerProtocol {
         }
       } catch (e: unknown) {
         // Belt-and-braces (#341): a provider that throws `AbortError` instead
-        // of emitting the `abort` fullStream part routes here — anything else
+        // of emitting the `abort` stream part routes here — anything else
         // is a genuine failure and must keep going through the normal error
         // path (rethrown, unhandled by design; nothing upstream of stream()
         // wraps this in a way that would silently swallow it).
@@ -1621,7 +1627,7 @@ export class AgentRunner implements RunnerProtocol {
 
       fullText += iterText;
 
-      // Update token tracking (v5 usage field names; each is number|undefined).
+      // Update token tracking (usage field names since v5; each is number|undefined).
       const iterInputTokens = stepUsage?.inputTokens ?? 0;
       const iterOutputTokens = stepUsage?.outputTokens ?? 0;
       totalInputTokens += iterInputTokens;
@@ -1942,8 +1948,9 @@ export class AgentRunner implements RunnerProtocol {
       const streamResponse = await streamResult.response;
       messages.push(...sanitizeResponseMessages(streamResponse.messages));
 
-      // Our own tool results (we ran the tools, not the SDK). v5's
-      // ToolResultPart carries the result under `output` as a typed union.
+      // Our own tool results (we ran the tools, not the SDK). ToolResultPart
+      // carries the result under `output` as a typed union (since v5;
+      // unchanged through v7).
       messages.push({
         role: "tool" as const,
         content: pendingToolCalls.map((tc) => ({

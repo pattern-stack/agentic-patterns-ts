@@ -7,7 +7,7 @@ import {
   ToolSchema,
   Toolbox,
 } from "@agentic-patterns/core";
-import { MockLanguageModelV2 } from "ai/test";
+import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
@@ -241,7 +241,7 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
   it("nests the child sub-agent's tool events under the invoking tool call", async () => {
     // Outer agent's LLM: one turn calling the "child" node-tool, then a final answer.
     let outerCalls = 0;
-    const outerModel = new MockLanguageModelV2({
+    const outerModel = new MockLanguageModelV3({
       doGenerate: async () => {
         outerCalls++;
         if (outerCalls === 1) {
@@ -254,15 +254,21 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
                 input: JSON.stringify({ task: "go" }),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "outer done" }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 5, outputTokens: 5, totalTokens: 10 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
           warnings: [],
         };
       },
@@ -270,7 +276,7 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
 
     // Child (nested sub-agent)'s LLM: makes its OWN tool call, then finishes.
     let childCalls = 0;
-    const childModel = new MockLanguageModelV2({
+    const childModel = new MockLanguageModelV3({
       doGenerate: async () => {
         childCalls++;
         if (childCalls === 1) {
@@ -283,15 +289,21 @@ describe("NodeToolbox — child→parent bus propagation (#102, m.b headline tes
                 input: JSON.stringify({}),
               },
             ],
-            finishReason: "tool-calls" as const,
-            usage: { inputTokens: 3, outputTokens: 3, totalTokens: 6 },
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" },
+            usage: {
+              inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 3, text: 3, reasoning: undefined },
+            },
             warnings: [],
           };
         }
         return {
           content: [{ type: "text" as const, text: "child done" }],
-          finishReason: "stop" as const,
-          usage: { inputTokens: 3, outputTokens: 3, totalTokens: 6 },
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 3, text: 3, reasoning: undefined },
+          },
           warnings: [],
         };
       },
