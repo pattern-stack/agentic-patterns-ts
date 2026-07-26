@@ -17,6 +17,7 @@ import { FamilyTabs } from "../../components/molecules/FamilyTabs";
 import { DetailPageShell, Labeled } from "../../components/organisms/DetailPageShell";
 import { SlotStack } from "../../components/organisms/SlotStack";
 import { useAdminData } from "../../hooks/useAdminData";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 
 export function RolesPage() {
   const { id } = useParams();
@@ -124,8 +125,16 @@ function instanceRows(agents: RoleInstance[]) {
 }
 
 function InstantiationMatrix({ agents }: { agents: RoleInstance[] }) {
+  const { isPhone } = useBreakpoint();
   const rows = instanceRows(agents);
-  const headers = ["Agent", "Model", "Background", "Awareness", "Mission"];
+  // Background/Awareness are the least load-bearing columns — drop them on phone
+  // so Agent/Model/Mission (the ones worth reading in a cramped viewport) don't
+  // get squeezed into wrapped, multi-line cells. The Card's `overflowX: "auto"`
+  // (below) is still a fallback, but a phone-width table shrinks columns by
+  // wrapping text before it ever grows wide enough to trigger that scroll.
+  const headers = isPhone
+    ? ["Agent", "Model", "Mission"]
+    : ["Agent", "Model", "Background", "Awareness", "Mission"];
   const headerCell = {
     padding: "8px 12px",
     textAlign: "left" as const,
@@ -179,12 +188,16 @@ function InstantiationMatrix({ agents }: { agents: RoleInstance[] }) {
                 <td style={bodyCell}>
                   <Chip tone="mono">{row.model}</Chip>
                 </td>
-                <td style={bodyCell}>
-                  <MatrixCell>{row.background}</MatrixCell>
-                </td>
-                <td style={bodyCell}>
-                  <MatrixCell>{row.awareness}</MatrixCell>
-                </td>
+                {!isPhone && (
+                  <>
+                    <td style={bodyCell}>
+                      <MatrixCell>{row.background}</MatrixCell>
+                    </td>
+                    <td style={bodyCell}>
+                      <MatrixCell>{row.awareness}</MatrixCell>
+                    </td>
+                  </>
+                )}
                 <td style={bodyCell}>
                   <MatrixCell>{row.mission}</MatrixCell>
                 </td>

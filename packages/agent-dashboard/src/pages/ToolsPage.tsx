@@ -141,6 +141,7 @@ export function ToolsPage() {
               key: "totalErrors",
               header: "Errors",
               align: "right",
+              hideBelow: "sm",
               render: (row) => (
                 <Badge tone={row.totalErrors > 0 ? "err" : "mute"}>{row.totalErrors}</Badge>
               ),
@@ -159,6 +160,7 @@ export function ToolsPage() {
               key: "avgDurationMs",
               header: "Avg Duration",
               align: "right",
+              hideBelow: "md",
               render: (row) => `${row.avgDurationMs.toFixed(0)}ms`,
             },
           ]}

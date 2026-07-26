@@ -37,6 +37,7 @@ import { SAMPLE_EVENTS, SAMPLE_REQUEST } from "../../graph/sample-run-trace";
 import { eventsToSteps, persistedToEventLike } from "../../graph/trace-from-events";
 import type { TraceStep } from "../../graph/types";
 import { useAdminData } from "../../hooks/useAdminData";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { relTime, shortId } from "../../lib/format";
 import { sortRunsNewestFirst } from "../../lib/runPicker";
 import { fetchRun, fetchRunEvents, fetchRuns } from "../../lib/runsApi";
@@ -138,6 +139,7 @@ const PAGE_LENS_OPTIONS: { value: PageLens; label: string; title: string }[] = [
 
 export function AgentLensPage() {
   const { id = "" } = useParams();
+  const { isNarrow } = useBreakpoint();
   const { data, loading, error } = useAdminData<AgentComposition>(
     `/agents/${encodeURIComponent(id)}/composition`,
     0,
@@ -262,9 +264,10 @@ export function AgentLensPage() {
         <>
           {/* two columns: instance delta (owned here) | inherited identity + prompt */}
           <div
+            data-testid="agent-lens-grid"
             style={{
               display: "grid",
-              gridTemplateColumns: "minmax(0, 5fr) minmax(0, 7fr)",
+              gridTemplateColumns: isNarrow ? "1fr" : "minmax(0, 5fr) minmax(0, 7fr)",
               gap: 16,
               alignItems: "start",
             }}
@@ -422,12 +425,14 @@ function RunStatStrip({
   model,
   sample,
   stats,
+  isPhone,
 }: {
   runId: string;
   request: string;
   model?: string;
   sample: boolean;
   stats: RunStats;
+  isPhone: boolean;
 }) {
   const items: { n: string; l: string }[] = [
     { n: String(stats.iterations), l: "iterations" },
@@ -437,6 +442,11 @@ function RunStatStrip({
     { n: `${(stats.totalMs / 1000).toFixed(2)}s`, l: "total" },
     { n: stats.finishReason, l: "finish" },
   ];
+  // Phone: two rows of 3 (auto-sized, same per-cell sizing logic as desktop —
+  // just fewer columns) rather than 6 fixed-content columns squeezed into
+  // ~360px or a scroll-hidden overflow (see spec §3b: these are primary
+  // at-a-glance stats, not secondary detail).
+  const columns = isPhone ? 3 : 6;
   return (
     <Card padded={false}>
       <div
@@ -468,13 +478,17 @@ function RunStatStrip({
           "{request}"
         </span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(6, auto)" }}>
+      <div
+        data-testid="run-stat-grid"
+        style={{ display: "grid", gridTemplateColumns: `repeat(${columns}, auto)` }}
+      >
         {items.map((it, i) => (
           <div
             key={it.l}
             style={{
               padding: "11px 18px",
-              borderRight: i === items.length - 1 ? "none" : "1px solid var(--line-2)",
+              borderRight: (i + 1) % columns === 0 ? "none" : "1px solid var(--line-2)",
+              borderBottom: isPhone && i < columns ? "1px solid var(--line-2)" : undefined,
             }}
           >
             <div
@@ -525,6 +539,7 @@ type RunsFetchState =
  * RunTrace fixture). Unconfigured persistence -> the standard unconfigured card.
  */
 function RunsLens({ agentName }: { agentName: string }) {
+  const { isPhone } = useBreakpoint();
   const [runsState, setRunsState] = useState<RunsFetchState>({ kind: "loading" });
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [traceLens, setTraceLens] = useState<TraceLensMode>("waterfall");
@@ -630,7 +645,11 @@ function RunsLens({ agentName }: { agentName: string }) {
           <select
             value={effectiveRunId ?? ""}
             onChange={(e) => setSelectedRunId(e.target.value)}
-            style={{ ...inputStyle, minWidth: 260 }}
+            style={{
+              ...inputStyle,
+              minWidth: isPhone ? 0 : 260,
+              flex: isPhone ? 1 : undefined,
+            }}
           >
             {runs.map((r) => (
               <option key={r.runId} value={r.runId}>
@@ -645,7 +664,14 @@ function RunsLens({ agentName }: { agentName: string }) {
         <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>{detailError}</div>
       )}
       {stats && (
-        <RunStatStrip runId={runId} request={request} model={model} sample={sample} stats={stats} />
+        <RunStatStrip
+          runId={runId}
+          request={request}
+          model={model}
+          sample={sample}
+          stats={stats}
+          isPhone={isPhone}
+        />
       )}
       {(sample || detail) && (
         <>
