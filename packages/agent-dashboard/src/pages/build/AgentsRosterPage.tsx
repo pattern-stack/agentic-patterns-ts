@@ -108,6 +108,7 @@ export function AgentsRosterPage() {
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
+                    flexWrap: "wrap",
                     gap: 10,
                     width: "100%",
                     padding: "14px 16px",

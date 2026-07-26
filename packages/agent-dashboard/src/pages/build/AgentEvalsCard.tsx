@@ -45,7 +45,18 @@ function LatestRunLine({ state }: { state: LatestRunState }) {
   }
   const run = state.run;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+    <span
+      data-testid="eval-latest-run-line"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        fontSize: 12,
+        // Unconditional — inert on desktop (fits on one line today), folds
+        // to multiple lines on a narrow card instead of overflowing it.
+        flexWrap: "wrap",
+      }}
+    >
       {/* The local statusTone (neutral|accent|warn, Chip-only) folded into
           lib/format's canonical statusTone (ok|run|err|mute, port-map §7.2) —
           rendered via Badge to match every other status pill in the app
@@ -133,6 +144,12 @@ export function AgentEvalsCard({
                   color: "var(--accent)",
                   textDecoration: "none",
                   flex: 1,
+                  // Unconditional — a long setId elides instead of pushing
+                  // the step chip / Run button off a narrow card.
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
                 }}
               >
                 {ref.setId}

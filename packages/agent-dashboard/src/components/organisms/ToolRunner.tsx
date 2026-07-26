@@ -12,6 +12,7 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { type ToolDef, type ToolRunResult, compositionApi } from "../../api/composition";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { foldToolParams } from "../../lib/toolParams";
 import { T } from "../../ui/tokens";
 import { Button } from "../atoms/Button";
@@ -77,6 +78,7 @@ function rowSummary(result: unknown): string | null {
 }
 
 export function ToolRunner({ capId, tool }: { capId: string; tool: ToolDef }) {
+  const { isPhone } = useBreakpoint();
   const params = foldToolParams(tool.parameters);
   const [values, setValues] = useState<Record<string, string | boolean>>({});
   const [running, setRunning] = useState(false);
@@ -94,7 +96,7 @@ export function ToolRunner({ capId, tool }: { capId: string; tool: ToolDef }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
       {params.length === 0 ? (
         <span style={{ fontSize: T.fz.tiny, color: "var(--mute)" }}>No parameters.</span>
       ) : (
@@ -107,7 +109,7 @@ export function ToolRunner({ capId, tool }: { capId: string; tool: ToolDef }) {
                 htmlFor={fieldId}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "minmax(7rem, 10rem) 1fr",
+                  gridTemplateColumns: isPhone ? "1fr" : "minmax(7rem, 10rem) 1fr",
                   gap: 12,
                   alignItems: "start",
                 }}
@@ -150,7 +152,7 @@ export function ToolRunner({ capId, tool }: { capId: string; tool: ToolDef }) {
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Button variant="primary" onClick={run} disabled={running}>
+        <Button variant="primary" onClick={run} disabled={running} style={{ minHeight: 40 }}>
           {running ? "Running…" : "Run tool"}
         </Button>
         {result && (
@@ -179,7 +181,7 @@ export function ToolRunner({ capId, tool }: { capId: string; tool: ToolDef }) {
         <JsonBlock
           value={result.result}
           maxHeight={RESULT_MAX_H}
-          style={{ background: "var(--fill)" }}
+          style={{ background: "var(--fill)", overflowWrap: "anywhere" }}
         />
       )}
     </div>
