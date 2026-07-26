@@ -99,7 +99,7 @@ function formatTokenChip(step: TraceStep): string {
   const ctxPart = step.ctxTokens
     ? `${step.ctxTokens.toLocaleString()}${step.tokenDetails?.cacheRead !== undefined ? ` (${step.tokenDetails.cacheRead.toLocaleString()} cached)` : ""} ctx · `
     : "";
-  const outPart = `${step.outTokens}${step.tokenDetails?.reasoning !== undefined ? ` (${step.tokenDetails.reasoning.toLocaleString()} rsn)` : ""} out`;
+  const outPart = `${step.outTokens?.toLocaleString()}${step.tokenDetails?.reasoning !== undefined ? ` (${step.tokenDetails.reasoning.toLocaleString()} rsn)` : ""} out`;
   return `${ctxPart}${outPart}`;
 }
 

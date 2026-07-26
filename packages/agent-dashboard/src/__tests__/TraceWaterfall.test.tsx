@@ -146,4 +146,18 @@ describe("TraceWaterfall — token chip breakdown (#388)", () => {
     render(<TraceWaterfall steps={[step]} />);
     expect(screen.getByText("100 ctx · 20 out")).toBeTruthy();
   });
+
+  it("formats outTokens with .toLocaleString() (thousands separator) like ctxTokens", () => {
+    const step = mkStep({
+      seq: 1,
+      iter: 1,
+      kind: "model",
+      label: "Model call · iteration 1",
+      ms: 100,
+      ctxTokens: 1000,
+      outTokens: 4200,
+    });
+    render(<TraceWaterfall steps={[step]} />);
+    expect(screen.getByText("1,000 ctx · 4,200 out")).toBeTruthy();
+  });
 });
