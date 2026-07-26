@@ -212,3 +212,135 @@ New/extended in `packages/agent-core/src/molecules/__tests__/`.
 | Docs | `authoring-a-toolbox.md` play section + README |
 
 **Non-goals:** threading `ToolExecutionContext` into plays (#99/#308 territory); changing the JSON round-trip; adding `terminal` to plays (deliberately absent, `playbook.ts:57-61`); an `errorKind` discriminant field (deferred, see D1).
+
+## Spec Review
+<!-- written by: reviewer · gate 1.5 · /sdlc:critique · lens=mixed -->
+
+**Target:** `.ai-docs/specs/playbook-authoring-parity.md`
+**Against:** cited code (verified @ `2411fc8`)
+**Verdict: REVISE**
+
+The design is sound and the central invariant holds — I traced it and could not find a path
+where a plain `PlayDefinition`'s `returns` becomes validated. Correction #4 (the phantom
+"ADR 0002 D3" citation) is **confirmed**: ADR 0002 contains zero occurrences of `play`,
+`playbook`, or `D3` (its only hit is "playground" at `:121`). The producer-adoption census is
+exact. Two blockers: a self-contradictory Correction #3, and a doc-parity omission the spec's
+own thesis depends on.
+
+### Citations — verified correct
+
+`playbook.ts:23-37` (PlayDefinition), `:26-32` ("future output validation"), `:57-61`
+(terminal deliberately omitted), `:62-69` (`displayType` forwarded — Correction #2 valid),
+`:85`, `:85-98`, `:87-89`, `:93`, `:94-97` ✅ — every playbook.ts anchor is exact.
+`toolbox.ts:114-129` (symbol + guard), `:114-119` (dual-core rationale), `:178-183`
+(violation construction), `:185` (`return result.data`), `:191-193` (displayType passthrough),
+`:241-258`, `:246` (parse outside the try), `:252` (fresh untagged `Error` — **Correction #3's
+premise confirmed**), `:262-273` (`LiteralToolbox`), `:275-282` ✅.
+`playbook.test.ts:18-23` — `greet` declares `returns: z.object({greeting})` and resolves the
+string `` `Hello, ${name}!` `` ✅, the metadata-only proof stands.
+`toolbox-executor.ts:16-19`, `:17` (the ADR 0002 D3 comment), `:110-139`, `:133-135` ✅.
+`sdk-bridge.ts:79` — `await playbook.execute(...)` inside an `sdkTool` handler with no
+try/catch ✅. `capability.ts:43-49` ✅. `composition.ts:318-340` ✅.
+`0005-session-scope.md:163-168` — "half-wiring it would be worse than the uniform absence" ✅.
+`authoring-a-toolbox.md:224-226` ✅. `README.md:109-137` ✅. `tool-authoring-sugar.md:743` ✅.
+
+Also verified independently: **7** `extends Playbook` (README:117, playbook.test.ts:14 + :129,
+tool-authoring.test.ts:318, composition.test.ts:55 + :116, toolsmith agent) — 1 docs + 5 test
+fixtures + 1 example, exactly as claimed; **zero** shipped agents/presets declare a playbook.
+`RETURNS_VIOLATION`/`isReturnsViolation` are module-private in `toolbox.ts` with no external
+importers → the hoist is safe, and the single tool-side violation test
+(`tool-authoring.test.ts:67-87`) is unaffected. Only two sites ever execute a play
+(`toolbox-executor.ts:138`, `sdk-bridge.ts:79`), both through `Playbook.execute` → the
+never-throw guarantee has no shipped bypass. `agent-core/src/index.ts:5` is `export *`, so
+adding to `molecules/index.ts` is sufficient. The parameter `.parse()` is already inside the
+try today, so the proposed rewrite is byte-identical for unknown-play and param-validation
+paths.
+
+**Blockers (2):**
+
+- [`§ Corrections #3` (spec:79) vs `§ Playbook.execute` (spec:141)] Correction #3 states
+  "`Playbook.execute` must do the same [construct a fresh untagged error] **so a nested
+  tool-in-play violation isn't re-attributed to the outer play**," then spec:141 dismisses it
+  with "the violation branch returns a plain object … nothing propagates." That is a
+  non-sequitur — it answers an *outbound* re-tagging concern, while the stated goal is
+  *inbound* misattribution, which returning a plain object does not address at all. The real
+  reason a nested tool-in-play violation is safe is that `toolbox.ts:252` strips the tag, and
+  that has nothing to do with what `Playbook.execute` does. The residual hole is exactly the
+  one `tool-authoring-sugar.md:743` flagged for tools and the spec mis-summarizes: if a play's
+  body calls a `defineTool`/`definePlay` definition's `.execute()` **directly** (bypassing
+  `Toolbox.execute`), the inner tagged violation reaches the outer catch and the proposed
+  branch labels it `play '<outer>' output violated its returns schema` — a wrong play, a wrong
+  claim about which schema failed, and the only case where `isReturnsViolation` is true for
+  something that is not this play's violation. Nothing in the design or test plan covers it.
+  _Fix:_ rewrite Correction #3 to name the inbound direction and state the actual mitigation
+  (`Toolbox.execute`'s strip); then either accept the direct-`.execute()` composition edge
+  explicitly as a documented limitation inherited from #264, or scope the tag (stamp an owner
+  and clear/ignore it when the owner isn't this boundary). Add a test either way.
+
+- [`§ File-by-file change plan` (spec:149) / `playbook.ts:26-32`] The plan never updates
+  `PlayDefinition.returns`'s docstring, which still says `returns` exists "to enable **future
+  output validation**." After this ships, that sentence is actively false-in-spirit —
+  validation exists, just not for plain definitions — and it is the single site a consumer
+  reads to learn the invariant the whole design is built on. #264 set the exact precedent on
+  the tool side (`toolbox.ts:76-79`: "On a plain object definition this is metadata only —
+  output is never validated. Tools built with `defineTool` opt into runtime output
+  validation"). The spec's plan includes a much smaller doc fix (the ADR comment) but omits
+  this one. _Fix:_ add `playbook.ts:26-32` to the change plan with the `toolbox.ts:76-79`
+  wording mirrored for plays.
+
+**Notes (5):**
+
+- [`§ Scope and PR slicing` (spec:17)] "Per repo rhythm the bump lands in its own release PR
+  (see #332/#355), not here" is contradicted by the two most analogous precedents: `175f59a`
+  (#264, the parent of this work) bumped core `0.10.0 → 0.11.0` **and** added a CHANGELOG
+  entry in the feature commit; `3d1a3a5` (#265) did the same for `0.11.0 → 0.12.0`. `#332` and
+  `#355` are also open **issues**, not PRs. Consequently `CHANGELOG.md` is missing from the
+  file-by-file plan even though every comparable feature commit touched it.
+
+- [`§ D1` (spec:53) / `§ Test plan` (spec:186)] `toolbox-executor.test.ts:120-124` is drifted:
+  the "returns the `{ error }` envelope for a failing play instead of throwing" test is
+  `:118-122`; `:120-124` starts mid-test and runs into the next test's comment. Likewise
+  `:151-162` (cited for tool-wins-on-collision) — that test is `:146-159`; the cited range
+  covers only its tail. Both anchors are instructions to the implementer about where to extend
+  tests, so the drift is load-bearing. Same class: `examples/agents/toolsmith/agent.ts:162` is
+  blank — the class is at `:163`; and `sdk-bridge.ts:82` (cited twice as the envelope-shape
+  consumer) is `return {` — the actual `{ error }` consumption is `:80-81`.
+
+- [`§ Test plan` (spec:156-187)] Given the spec's own admission that there is no production
+  signal, the plan under-covers two paths it names as load-bearing. (a) `sdk-bridge.ts:79-84`
+  is the argument for never-throw (no try/catch → a throw rejects inside the MCP handler), but
+  no test drives a violating `definePlay` play through `buildCapabilityServer` to confirm it
+  lands as `isError: true` rather than a rejection. (b) Nothing pins that
+  `definePlay(...).execute(args)` invoked **directly** — outside any `Playbook` — throws; that
+  is a new behavior for a publicly exported shape and the only escape hatch from the
+  never-throw guarantee. Add both.
+
+- [`§ File-by-file change plan` (spec:153)] "Replace the `:224-226` non-goal with a real
+  play-authoring section" would delete three still-valid #264 non-goals (camel↔snake mappers,
+  `.describe()` prose compression, host-specific filter envelopes) that share that paragraph
+  with the playbook-parity sentence. Amend the last sentence only.
+
+- [`molecules/returns-violation.ts` (spec:84-95)] #264's own quality review nit
+  (`tool-authoring-sugar.md:747`) flagged that the literal `"output violated its returns
+  schema"` is duplicated between the inner wrapper (`toolbox.ts:179`) and the boundary
+  (`toolbox.ts:252`) and can drift. This spec adds a third and fourth copy (`definePlay`'s
+  inner message, `Playbook.execute`'s rename) while creating precisely the shared module that
+  would fix it, and does not hoist the fragment. Free win; take it.
+
+**Nits (3):**
+
+- [`§ Current state` (spec:37)] The consumer inventory omits `tools/check-model-facing-schemas.ts`,
+  which lints the toolsmith playbook's play `parameters` + `returns` and is wired into the root
+  `check` pipeline (#265). Migrating `slug_and_span` to `definePlay` passes both schemas through
+  by reference so the sweep still passes — but it is a CI gate on a file the plan edits and it
+  should be named.
+
+- [`§ Test plan` (spec:178)] `playbook.test.ts:31-35` already ships a `returnDate` fixture
+  exercising the `Date` → ISO-string round-trip. Pin the D2 caveat against (or adjacent to)
+  that existing fixture rather than introducing a parallel one.
+
+- [`§ Current state` (spec:37)] "whose own header comment says it exists so the **dashboard's**
+  Playbook section has something to render" — the comment (`examples/agents/toolsmith/agent.ts:157-161`)
+  says "the **capability detail page's** Playbook section." Immaterial, but it reads as a quote.
+
+**Reviewed by:** reviewer agent · 2026-07-26T00:00:00Z
