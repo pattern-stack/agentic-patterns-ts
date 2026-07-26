@@ -444,11 +444,9 @@ describe("claudeCode provider", () => {
   it("maps reasoning: 'high' to captured SDK options.effort", async () => {
     const model = makeModel();
     await model.doGenerate(
-      makeCallOptions(
-        [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-        [],
-        { reasoning: "high" },
-      ),
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "high",
+      }),
     );
     expect(captured.options?.effort).toBe("high");
   });
@@ -456,11 +454,9 @@ describe("claudeCode provider", () => {
   it("maps reasoning: 'none' to captured SDK options.thinking = { type: 'disabled' }", async () => {
     const model = makeModel();
     await model.doGenerate(
-      makeCallOptions(
-        [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-        [],
-        { reasoning: "none" },
-      ),
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "none",
+      }),
     );
     expect(captured.options?.thinking).toEqual({ type: "disabled" });
   });
@@ -468,19 +464,16 @@ describe("claudeCode provider", () => {
   it("maps reasoning: 'minimal' to effort 'low' with a compatibility warning", async () => {
     const model = makeModel();
     const result = await model.doGenerate(
-      makeCallOptions(
-        [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-        [],
-        { reasoning: "minimal" },
-      ),
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "minimal",
+      }),
     );
     expect(captured.options?.effort).toBe("low");
     expect(result.warnings).toEqual([
       {
         type: "compatibility",
         feature: "reasoning",
-        details:
-          "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
+        details: "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
       },
     ]);
   });

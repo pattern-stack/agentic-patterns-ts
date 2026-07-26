@@ -638,7 +638,12 @@ async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<Q
 function buildUsage(raw: Record<string, number> | null): LanguageModelV4Usage {
   if (!raw) {
     return {
-      inputTokens: { total: undefined, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+      inputTokens: {
+        total: undefined,
+        noCache: undefined,
+        cacheRead: undefined,
+        cacheWrite: undefined,
+      },
       outputTokens: { total: undefined, text: undefined, reasoning: undefined },
       raw: undefined,
     };
@@ -1191,8 +1196,7 @@ function applyReasoning(
         {
           type: "compatibility",
           feature: "reasoning",
-          details:
-            "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
+          details: "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
         },
       ];
     case "low":
