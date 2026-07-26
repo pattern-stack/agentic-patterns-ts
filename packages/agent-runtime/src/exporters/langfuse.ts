@@ -58,10 +58,15 @@ export function buildLangfuseUsageDetails(
     return { input: inputTokens, output: outputTokens };
   }
 
+  // Math.max(0, …) guard: a partial-reporting provider may hand us an
+  // `inputTokens`/`outputTokens` that is ALREADY exclusive (not inclusive of
+  // cache/reasoning) while still populating the detail members — subtracting
+  // would then go negative. Clamp so a negative bucket never reaches
+  // Langfuse's cost inference.
   const input =
     details.noCacheTokens ??
-    inputTokens - (details.cacheReadTokens ?? 0) - (details.cacheWriteTokens ?? 0);
-  const output = details.textTokens ?? outputTokens - (details.reasoningTokens ?? 0);
+    Math.max(0, inputTokens - (details.cacheReadTokens ?? 0) - (details.cacheWriteTokens ?? 0));
+  const output = details.textTokens ?? Math.max(0, outputTokens - (details.reasoningTokens ?? 0));
 
   return {
     input,

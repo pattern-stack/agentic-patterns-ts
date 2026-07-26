@@ -492,6 +492,47 @@ describe("LangfuseExporter", () => {
       );
     });
 
+    it("clamps to 0 rather than going negative when a partial-reporting provider's inputTokens/outputTokens is already exclusive", async () => {
+      const { mockClient, mockObservation } = makeMockLangfuse();
+      const exporter = new LangfuseExporter({ client: mockClient });
+
+      await exporter.handleEvent(
+        createEvent("agent.message.start", { traceId: "t1", runId: "r1", agentName: "Test" }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.llm.start", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: "gen-3",
+          model: "claude",
+          messageCount: 1,
+          hasTools: false,
+        }),
+      );
+      await exporter.handleEvent(
+        createEvent("agent.llm.end", {
+          traceId: "t1",
+          runId: "r1",
+          spanId: "gen-3",
+          model: "claude",
+          // Already-exclusive totals (not inclusive of cache/reasoning) — a
+          // partial-reporting provider shape the subtraction doesn't expect.
+          inputTokens: 100,
+          outputTokens: 20,
+          durationMs: 100,
+          hasToolCalls: false,
+          finishReason: "stop",
+          usageDetails: { cacheReadTokens: 11900, cacheWriteTokens: 0, reasoningTokens: 140 },
+        }),
+      );
+
+      expect(mockObservation.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          usage_details: expect.objectContaining({ input: 0, output: 0 }),
+        }),
+      );
+    });
+
     it("sends the byte-identical {input, output} shape when usageDetails is absent", async () => {
       const { mockClient, mockObservation } = makeMockLangfuse();
       const exporter = new LangfuseExporter({ client: mockClient });
