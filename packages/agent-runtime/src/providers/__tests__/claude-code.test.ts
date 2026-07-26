@@ -142,6 +142,7 @@ import { claudeCode } from "../claude-code.js";
 function makeCallOptions(
   prompt: LanguageModelV4Prompt,
   tools: Array<{ name: string; description?: string }> = [],
+  overlay: Partial<LanguageModelV4CallOptions> = {},
 ): LanguageModelV4CallOptions {
   return {
     // v5 lifts tools to a top-level array; the schema field is `inputSchema`.
@@ -152,6 +153,7 @@ function makeCallOptions(
       inputSchema: { type: "object", properties: {}, additionalProperties: true } as const,
     })),
     prompt,
+    ...overlay,
   };
 }
 
@@ -433,6 +435,63 @@ describe("claudeCode provider", () => {
     const model = claudeCode("sonnet", { oauthToken: TOKEN });
     model.dispose();
     expect(() => model.dispose()).not.toThrow();
+  });
+
+  // -------------------------------------------------------------------------
+  // Reasoning CallOption mapping (V4 `reasoning` → harness effort/thinking)
+  // -------------------------------------------------------------------------
+
+  it("maps reasoning: 'high' to captured SDK options.effort", async () => {
+    const model = makeModel();
+    await model.doGenerate(
+      makeCallOptions(
+        [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        [],
+        { reasoning: "high" },
+      ),
+    );
+    expect(captured.options?.effort).toBe("high");
+  });
+
+  it("maps reasoning: 'none' to captured SDK options.thinking = { type: 'disabled' }", async () => {
+    const model = makeModel();
+    await model.doGenerate(
+      makeCallOptions(
+        [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        [],
+        { reasoning: "none" },
+      ),
+    );
+    expect(captured.options?.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("maps reasoning: 'minimal' to effort 'low' with a compatibility warning", async () => {
+    const model = makeModel();
+    const result = await model.doGenerate(
+      makeCallOptions(
+        [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+        [],
+        { reasoning: "minimal" },
+      ),
+    );
+    expect(captured.options?.effort).toBe("low");
+    expect(result.warnings).toEqual([
+      {
+        type: "compatibility",
+        feature: "reasoning",
+        details:
+          "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
+      },
+    ]);
+  });
+
+  it("leaves SDK options untouched for reasoning: 'provider-default' / unset", async () => {
+    const model = makeModel();
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
+    );
+    expect(captured.options?.effort).toBeUndefined();
+    expect(captured.options?.thinking).toBeUndefined();
   });
 });
 

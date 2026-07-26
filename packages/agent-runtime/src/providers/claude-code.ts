@@ -826,7 +826,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       return this._flattenGenerate(options);
     }
     const shim = createShim(fnTools, this._stringEnv());
-    const sdkOptions = this._baseSdkOptions();
+    const { sdkOptions, warnings } = this._baseSdkOptions(options);
     sdkOptions.systemPrompt = systemPrompt;
     sdkOptions.mcpServers = shim.mcpServers;
     sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...shim.allowedTools];
@@ -839,7 +839,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       // Never learned a session id — cannot resume later; drop the shim and
       // treat this turn's output as-is (flatten will run next turn).
       disposeShim(shim.storeDir);
-      return buildGenerateResult(out, []);
+      return buildGenerateResult(out, warnings);
     }
 
     const entry: SessionEntry = {
@@ -855,7 +855,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       resumeOf: null,
       deferredId: out.deferred?.id ?? null,
     });
-    return buildGenerateResult(out, []);
+    return buildGenerateResult(out, warnings);
   }
 
   /** Later turn: park the tool result and resume the live session. */
@@ -872,7 +872,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
     parkResult(session.shim.resultFile, pendingResult);
     writeShimSchemas(session.shim.schemasFile, fnTools);
 
-    const sdkOptions = this._baseSdkOptions();
+    const { sdkOptions, warnings } = this._baseSdkOptions(options);
     sdkOptions.systemPrompt = systemPrompt;
     sdkOptions.mcpServers = session.shim.mcpServers;
     sdkOptions.allowedTools = [...(sdkOptions.allowedTools ?? []), ...session.shim.allowedTools];
@@ -901,7 +901,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       resumeOf: session.sessionId,
       deferredId: out.deferred?.id ?? null,
     });
-    return buildGenerateResult(out, []);
+    return buildGenerateResult(out, warnings);
   }
 
   // -------------------------------------------------------------------------
@@ -913,7 +913,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
   ): Promise<Awaited<ReturnType<LanguageModelV4["doGenerate"]>>> {
     const systemPrompt = extractSystemPrompt(options.prompt);
     const fnTools = extractFunctionTools(options);
-    const sdkOptions = this._baseSdkOptions();
+    const { sdkOptions, warnings } = this._baseSdkOptions(options);
     sdkOptions.systemPrompt = systemPrompt;
     sdkOptions.hooks = makeDeferHook(null);
 
@@ -934,7 +934,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       resumeOf: null,
       deferredId: out.deferred?.id ?? null,
     });
-    return buildGenerateResult(out, []);
+    return buildGenerateResult(out, warnings);
   }
 
   private _emitDebug(event: CCSessionDebugEvent): void {
@@ -962,7 +962,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
     const fnTools = extractFunctionTools(options);
     const promptString = renderConversation(options.prompt) || " ";
 
-    const sdkOptions = this._baseSdkOptions();
+    const { sdkOptions, warnings } = this._baseSdkOptions(options);
     sdkOptions.systemPrompt = systemPrompt;
     sdkOptions.hooks = makeDeferHook(null);
     const built = buildToolsServer(fnTools);
@@ -990,7 +990,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
           }
         };
 
-        controller.enqueue({ type: "stream-start", warnings: [] });
+        controller.enqueue({ type: "stream-start", warnings });
 
         const q = query({
           prompt: promptString,
@@ -1096,8 +1096,17 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
   // Internal — shared SDK option assembly
   // -------------------------------------------------------------------------
 
-  /** Base SDK options common to every query: model, turns, isolation, blocks. */
-  private _baseSdkOptions(): SDKOptions {
+  /**
+   * Base SDK options common to every query: model, turns, isolation, blocks,
+   * and the V4 `reasoning` CallOption mapped onto the harness's `effort` /
+   * `thinking` knobs. Any warnings the reasoning mapping produces (currently
+   * just the `'minimal'` compatibility downgrade) are returned alongside the
+   * options so callers can thread them into the result.
+   */
+  private _baseSdkOptions(options: LanguageModelV4CallOptions): {
+    sdkOptions: SDKOptions;
+    warnings: SharedV4Warning[];
+  } {
     const sdkOptions: SDKOptions = {
       ...(this._opts.defaults ?? {}),
       model: mapModel(this.modelId) ?? this._opts.defaults?.model ?? this.modelId,
@@ -1119,7 +1128,12 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
       if (token) applyIsolatedEnv(sdkOptions, this._isolatedConfigDir, token);
     }
 
-    return sdkOptions;
+    // Applied after the `defaults` spread so a caller-set `reasoning` wins
+    // over `opts.defaults.effort`/`thinking`; unset / `'provider-default'`
+    // touches nothing, preserving any defaults the caller configured.
+    const warnings = applyReasoning(sdkOptions, options.reasoning);
+
+    return { sdkOptions, warnings };
   }
 
   /**
@@ -1138,6 +1152,57 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
     return Object.fromEntries(
       Object.entries(process.env).filter(([, v]) => typeof v === "string") as [string, string][],
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Reasoning mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Apply the V4 `reasoning` CallOption to the SDK options (effort / thinking),
+ * mutating `sdkOptions` in place. Returns any warnings the mapping produces
+ * (only `'minimal'`, which has no harness equivalent, warns).
+ *
+ *   - unset / `'provider-default'` — untouched; the harness default
+ *     (adaptive thinking) and any caller `defaults.effort`/`defaults.thinking`
+ *     stand as-is.
+ *   - `'none'` — `thinking: { type: "disabled" }`.
+ *   - `'minimal'` — no harness equivalent; mapped to `effort: "low"` with a
+ *     `compatibility` warning.
+ *   - `'low'` / `'medium'` / `'high'` / `'xhigh'` — `effort` set to the same
+ *     value (the harness silently downgrades `xhigh` on models that don't
+ *     support it — no warning of our own for that).
+ */
+function applyReasoning(
+  sdkOptions: SDKOptions,
+  reasoning: LanguageModelV4CallOptions["reasoning"],
+): SharedV4Warning[] {
+  switch (reasoning) {
+    case undefined:
+    case "provider-default":
+      return [];
+    case "none":
+      sdkOptions.thinking = { type: "disabled" };
+      return [];
+    case "minimal":
+      sdkOptions.effort = "low";
+      return [
+        {
+          type: "compatibility",
+          feature: "reasoning",
+          details:
+            "'minimal' is not supported by the Claude Code harness; mapped to effort 'low'",
+        },
+      ];
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      sdkOptions.effort = reasoning;
+      return [];
+    default:
+      return [];
   }
 }
 
