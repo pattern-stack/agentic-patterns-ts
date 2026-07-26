@@ -16,6 +16,7 @@ import { Card } from "../../components/atoms/Card";
 import { AsyncState } from "../../components/kit/AsyncState";
 import { PageHeader } from "../../components/kit/PageHeader";
 import { DataTable } from "../../components/organisms/DataTable";
+import { useBreakpoint } from "../../hooks/useMediaQuery";
 import { fetchEvalSets } from "../../lib/evalApi";
 import { relTime } from "../../lib/format";
 import { SetEditModal } from "./SetEditModal";
@@ -36,6 +37,7 @@ type LoadState =
 
 export function EvalSetsPage() {
   const navigate = useNavigate();
+  const { isPhone } = useBreakpoint();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [showNew, setShowNew] = useState(false);
 
@@ -137,10 +139,21 @@ export function EvalSetsPage() {
                           fontSize: 12,
                           color: "var(--mute)",
                           lineHeight: 1.4,
-                          maxWidth: 440,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
+                          // On phone the description must WRAP. Under
+                          // `table-layout: auto` a nowrap cell reports its whole
+                          // string as min-content width, so the table outgrew a
+                          // 390px viewport and scrolled sideways — and a px/%
+                          // max-width can't fix that (the cell is already as wide
+                          // as the content). Wrapping drops min-content to the
+                          // longest word. Desktop keeps the 440px ellipsis.
+                          ...(isPhone
+                            ? { whiteSpace: "normal" as const, overflowWrap: "anywhere" as const }
+                            : {
+                                maxWidth: 440,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap" as const,
+                              }),
                         }}
                       >
                         {row.description}

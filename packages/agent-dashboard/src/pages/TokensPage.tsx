@@ -83,12 +83,14 @@ export function TokensPage() {
               key: "inputTokens",
               header: "Input Tokens",
               align: "right",
+              hideBelow: "sm",
               render: (row) => row.inputTokens.toLocaleString(),
             },
             {
               key: "outputTokens",
               header: "Output Tokens",
               align: "right",
+              hideBelow: "sm",
               render: (row) => row.outputTokens.toLocaleString(),
             },
             {
