@@ -191,6 +191,34 @@ describe("Toolbox", () => {
       expect(emitted).toHaveLength(0);
     });
 
+    it("forwards publishArtifact verbatim as a fire-and-forget sink, uninterpreted by execute()", async () => {
+      const probeToolbox = new ProbeToolbox();
+      const published: unknown[] = [];
+      const ctx: ToolExecutionContext = {
+        runId: "run-3",
+        publishArtifact: (artifact) => published.push(artifact),
+      };
+
+      const result = await probeToolbox.execute("probe", { a: 1 }, ctx);
+
+      // execute() never inspects/awaits publishArtifact — its own return
+      // value is untouched by the artifact channel (ADR-0006 §1).
+      expect(result).toEqual({ a: 1 });
+      expect(probeToolbox.receivedCtx?.publishArtifact).toBe(ctx.publishArtifact);
+      // Nothing calls it unless the tool itself does — ProbeToolbox's
+      // "probe" tool doesn't, so nothing is published here.
+      expect(published).toHaveLength(0);
+    });
+
+    it("publishArtifact is omitted (not a no-op) when the caller doesn't provide it", async () => {
+      const probeToolbox = new ProbeToolbox();
+      const ctx: ToolExecutionContext = { runId: "run-4" };
+
+      await probeToolbox.execute("probe", { a: 1 }, ctx);
+
+      expect(probeToolbox.receivedCtx?.publishArtifact).toBeUndefined();
+    });
+
     it("type-level: legacy and context-aware execute signatures both assign to ToolDefinition", () => {
       const legacyDef: ToolDefinition = {
         description: "legacy",

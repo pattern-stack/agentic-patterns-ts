@@ -7,7 +7,77 @@
  * exhaustiveness live in one place.
  */
 
+import {
+  DEFAULT_ARTIFACT_BYTE_CEILING,
+  type RenderArtifact,
+  artifactMarker,
+} from "@agentic-patterns/core";
 import type { AgentEvent, AgentEventType } from "../events/types.js";
+
+// ---------------------------------------------------------------------------
+// Render-artifact wire mapping (ADR-0006)
+// ---------------------------------------------------------------------------
+
+/** Config accepted by every SSE formatting entry point. */
+export interface SSEFormatterOptions {
+  /**
+   * Override the per-artifact transport ceiling (bytes). Defaults to core's
+   * {@link DEFAULT_ARTIFACT_BYTE_CEILING} — a sanity bound, not a tuning
+   * knob (ADR-0006 §4). Exposed here purely so a deployment with unusual
+   * needs can override it without forking the formatter.
+   */
+  readonly artifactByteCeiling?: number;
+}
+
+const artifactEncoder = new TextEncoder();
+
+/**
+ * UTF-8 byte size of an artifact's serialized wire form. A `JSON.stringify`
+ * throw (circular reference, BigInt, …) is treated as an automatic ceiling
+ * breach (`Infinity`) — the same "hard drop over guesswork" posture as the
+ * rest of this ADR, rather than risking a partial/invalid frame.
+ */
+function artifactByteSize(artifact: RenderArtifact): number {
+  try {
+    return artifactEncoder.encode(JSON.stringify(artifact)).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/** Map a `RenderArtifact` to its pinned wire shape (snake_case `display_type`). */
+function toWireArtifact(artifact: RenderArtifact): Record<string, unknown> {
+  const wire: Record<string, unknown> = { id: artifact.id, display_type: artifact.displayType };
+  if (artifact.data !== undefined) wire.data = artifact.data;
+  if (artifact.title !== undefined) wire.title = artifact.title;
+  if (artifact.truncated !== undefined) wire.truncated = artifact.truncated;
+  return wire;
+}
+
+/**
+ * Enforce the transport ceiling (ADR-0006 §4) on a batch of artifacts before
+ * they hit the wire. An artifact whose serialized form breaches
+ * `ceilingBytes` is replaced by `artifactMarker(...)` — identity + type, no
+ * `data`, `truncated: true` — and the breach is logged loudly via
+ * `console.error`. This is a hard drop, never a silent shrink or a partial
+ * reshape: the framework cannot safely reshape a payload whose `displayType`
+ * is an opaque, open string.
+ */
+function sanitizeArtifacts(
+  artifacts: readonly RenderArtifact[],
+  ceilingBytes: number,
+): Array<Record<string, unknown>> {
+  return artifacts.map((artifact) => {
+    const size = artifactByteSize(artifact);
+    if (size > ceilingBytes) {
+      console.error(
+        `[agentic-patterns] render artifact "${artifact.id}" (displayType "${artifact.displayType}") is ${size} bytes, exceeding the ${ceilingBytes}-byte transport ceiling (ADR-0006 §4). Shipping a marker (no data) instead of a truncated payload.`,
+      );
+      return toWireArtifact(artifactMarker(artifact));
+    }
+    return toWireArtifact(artifact);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Canonical wire event names (string union)
@@ -138,9 +208,15 @@ void _wireNamesAreExhaustive;
  * run-mode `llm.start`), the wrapper stamps `synthetic: true` onto the wire
  * payload. Consumers (the dashboard) badge such rows and MUST exclude them from
  * any latency computation — a synthesized boundary is never a causal anchor.
+ *
+ * `opts.artifactByteCeiling` (ADR-0006 §4) overrides the render-artifact
+ * transport ceiling for `tool.end`/`message.complete` payloads; omit it to
+ * use core's `DEFAULT_ARTIFACT_BYTE_CEILING`. Purely additive — every
+ * existing single-argument call site keeps compiling and gets the default.
  */
-export function toSSEMapping(event: AgentEvent): SSEMapping | null {
-  const mapping = mapEventToSSE(event);
+export function toSSEMapping(event: AgentEvent, opts?: SSEFormatterOptions): SSEMapping | null {
+  const ceilingBytes = opts?.artifactByteCeiling ?? DEFAULT_ARTIFACT_BYTE_CEILING;
+  const mapping = mapEventToSSE(event, ceilingBytes);
   if (!mapping) return null;
   if (event.meta?.synthetic) {
     return { name: mapping.name, payload: { ...mapping.payload, synthetic: true } };
@@ -151,7 +227,7 @@ export function toSSEMapping(event: AgentEvent): SSEMapping | null {
 /** Core event→wire mapping. Wrapped by {@link toSSEMapping}, which layers on the
  *  cross-cutting `synthetic` provenance marker. Kept private so the marker can
  *  never be forgotten by a caller reaching for the raw switch. */
-function mapEventToSSE(event: AgentEvent): SSEMapping | null {
+function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMapping | null {
   switch (event.type) {
     case "agent.conversation.start":
       return {
@@ -182,6 +258,15 @@ function mapEventToSSE(event: AgentEvent): SSEMapping | null {
       // no cost/finish signal (e.g. `AgentRunner`) — additive, non-breaking.
       if (event.costUsd !== undefined) payload.cost_usd = event.costUsd;
       if (event.finishReason !== undefined) payload.finish_reason = event.finishReason;
+      // ADR-0006: §9 preserves a structured terminal result alongside the
+      // (unchanged) stringified `content`; §3/§4 attach render artifacts
+      // under the ceiling. Both additive — absent on every run with neither.
+      if (event.structuredContent !== undefined) {
+        payload.structured_content = event.structuredContent;
+      }
+      if (event.artifacts !== undefined && event.artifacts.length > 0) {
+        payload.artifacts = sanitizeArtifacts(event.artifacts, artifactByteCeiling);
+      }
       return { name: "message.complete", payload };
     }
     case "agent.message.cancel":
@@ -241,6 +326,10 @@ function mapEventToSSE(event: AgentEvent): SSEMapping | null {
       };
       if (event.error !== undefined) payload.error = event.error;
       if (event.displayType !== undefined) payload.display_type = event.displayType;
+      // ADR-0006 §1-2, §4: render artifacts this call published, under the ceiling.
+      if (event.artifacts !== undefined && event.artifacts.length > 0) {
+        payload.artifacts = sanitizeArtifacts(event.artifacts, artifactByteCeiling);
+      }
       return { name: "tool.end", payload };
     }
     case "agent.tool.rejected":
@@ -517,9 +606,15 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
  * runtime's admin SSE broadcast stays self-describing.
  */
 export class SSEFormatter {
+  /**
+   * @param options Optional formatter config (ADR-0006 §4:
+   *   `artifactByteCeiling` override). Omit for the default ceiling.
+   */
+  constructor(private readonly options?: SSEFormatterOptions) {}
+
   /** Format an AgentEvent as an SSE frame string, or `null` if unmappable. */
   format(event: AgentEvent): string | null {
-    const mapping = toSSEMapping(event);
+    const mapping = toSSEMapping(event, this.options);
     if (!mapping) return null;
     const enriched = {
       ...mapping.payload,
@@ -534,8 +629,11 @@ export class SSEFormatter {
    * names. Static so StdioAdapter and other consumers can reuse it without
    * instantiating a formatter. Returns `null` if the event has no mapping.
    */
-  static extractPayload(event: AgentEvent): Record<string, unknown> | null {
-    return toSSEMapping(event)?.payload ?? null;
+  static extractPayload(
+    event: AgentEvent,
+    options?: SSEFormatterOptions,
+  ): Record<string, unknown> | null {
+    return toSSEMapping(event, options)?.payload ?? null;
   }
 
   /** Format a stream-terminator "done" event. */

@@ -37,6 +37,10 @@ export type Part =
       error?: string;
       durationMs?: number;
       rejected?: boolean;
+      // Render artifacts (ADR-0006) carried on this tool's `tool.end` event —
+      // render-ready payloads independent of what the tool returned to the
+      // model. See `ChatArtifact` below.
+      artifacts?: ChatArtifact[];
     }
   | {
       // A pipeline STAGE delegated to a sub-agent (agent.step.*) — rendered as an
@@ -86,7 +90,61 @@ export type Part =
   // Harness-native envelope (#323/#324) — a harness-specific event (compaction
   // boundary, subagent progress, rate-limit notice) shown as a collapsed panel.
   | { kind: "harness_native"; harness: string; name: string; payload: unknown }
+  // Message-scoped render artifacts (ADR-0006) carried on `message.complete`
+  // with no single producing tool (or repeating an id already emitted on
+  // `tool.end` — deduped by `collectArtifactIds` before this part is built).
+  | { kind: "artifacts"; items: ChatArtifact[] }
+  // ADR-0006 §9: a terminal tool's structured result, preserved alongside the
+  // (unchanged, stringified) `content` on `message.complete`. Substituted for
+  // the `{ kind: "text" }` part that would otherwise render the raw JSON blob
+  // verbatim — see `applyStructuredContent` below.
+  | { kind: "answer"; value: unknown }
   | { kind: "error"; errorType: string; message: string };
+
+/**
+ * A render-ready payload delivered alongside a run's response (ADR-0006) —
+ * something a client can render directly, no id lookup, no fetch. Deliberately
+ * INDEPENDENT of what the producing tool returned to the model (that is the
+ * tool author's business, see ADR §1).
+ *
+ * Mirrors `@agentic-patterns/core`'s `RenderArtifact`/`TableArtifactDataSchema`
+ * structurally, but is hand-defined here rather than imported: the dashboard
+ * has no core/runtime dependency (`api/types.ts`'s `ConversationSummary`
+ * precedent — "the dashboard has no runtime dependency").
+ */
+export interface ChatArtifact {
+  readonly id: string;
+  readonly displayType: string;
+  /** Absent = a ceiling marker: the producer's payload breached the
+   *  transport's safety cap and was dropped rather than shrunk (ADR §4). */
+  readonly data?: unknown;
+  readonly title?: string;
+  /** Producer advisory: "I shortened this." Surfaced as a chip, never acted on. */
+  readonly truncated?: boolean;
+}
+
+/** Canonical `data` shape for `displayType: "table"`. */
+export interface TableArtifactData {
+  readonly columns: string[];
+  readonly rows: unknown[][];
+}
+
+/**
+ * Narrow an artifact's `data` to the table shape. False for absent or
+ * malformed data — callers fall back to the JSON/placeholder render rather
+ * than crash, since `displayType` is an open string the framework never
+ * validated on the producer's behalf (ADR §4/§9 Consequences).
+ */
+export function isTableArtifactData(data: unknown): data is TableArtifactData {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const r = data as Record<string, unknown>;
+  return (
+    Array.isArray(r.columns) &&
+    r.columns.every((c) => typeof c === "string") &&
+    Array.isArray(r.rows) &&
+    r.rows.every((row) => Array.isArray(row))
+  );
+}
 
 export interface ChatMessage {
   id: string;
@@ -151,6 +209,105 @@ const spanId = (col: Record<string, unknown>, p: Record<string, unknown>) =>
   str(col.span_id) ?? str(p.spanId) ?? str(p.span_id);
 const parentSpanId = (col: Record<string, unknown>, p: Record<string, unknown>) =>
   str(col.parent_span_id) ?? str(p.parentSpanId) ?? str(p.parent_span_id);
+
+/* ── render artifacts (ADR-0006) ─────────────────────────────────────────────
+ * `tool.end` and `message.complete` may each carry an `artifacts` array — see
+ * `ChatArtifact` above. Wire field is `display_type` (snake_case, the pinned
+ * SSE contract); tolerant of a stray camelCase `displayType` too, matching
+ * this module's other dual-case accessors above. */
+
+/** Parse the wire `artifacts` array. Drops entries missing `id`/`displayType`
+ *  rather than throwing — a malformed artifact must not lose the rest of the
+ *  turn. `undefined` in, `undefined` out (absent key = no artifacts, not []). */
+function parseArtifacts(v: unknown): ChatArtifact[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: ChatArtifact[] = [];
+  for (const raw of v) {
+    const r = rec(raw);
+    const id = str(r.id);
+    const displayType = str(r.displayType) ?? str(r.display_type);
+    if (!id || !displayType) continue;
+    const title = str(r.title);
+    const truncated = typeof r.truncated === "boolean" ? r.truncated : undefined;
+    out.push({
+      id,
+      displayType,
+      ...("data" in r ? { data: r.data } : {}),
+      ...(title !== undefined ? { title } : {}),
+      ...(truncated !== undefined ? { truncated } : {}),
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+/* ── structured terminal answer (ADR-0006 §9) ────────────────────────────────
+ * `message.complete` may additionally carry `structured_content` — the
+ * un-flattened result of a structured terminal tool, preserved alongside the
+ * (unchanged) stringified `content` the model actually emitted. `content`
+ * folds into an ordinary `{ kind: "text" }` part via message.delta/chunk
+ * accumulation (this module's only text-part producer); when that text is
+ * PROVABLY that stringified blob (byte-identical to
+ * `JSON.stringify(structuredContent)`), it is replaced with an `answer` part
+ * instead of rendering as raw JSON. */
+
+/** Dual-case read mirroring the `cost_usd`/`costUsd` accessor: camelCase
+ *  first (persisted shape), snake_case second (wire shape). Presence is
+ *  checked with `in`, not `??` / `!= null` — the value is `unknown`, and a
+ *  producer may legitimately send `null`/`false`/`0`, which `??` would
+ *  misread as "absent". */
+function structuredContentOf(p: Record<string, unknown>): { present: boolean; value: unknown } {
+  if ("structuredContent" in p) return { present: true, value: p.structuredContent };
+  if ("structured_content" in p) return { present: true, value: p.structured_content };
+  return { present: false, value: undefined };
+}
+
+/**
+ * Replace the LAST `{ kind: "text" }` part whose content is byte-identical to
+ * `JSON.stringify(value)` with `{ kind: "answer", value }` — exact match is
+ * the proof that part IS the stringified blob, not legitimate prose that
+ * merely resembles JSON. Text parts are only ever produced at the top level
+ * (the `message.delta`/`.chunk` case never nests into an `agent_step`), so a
+ * top-level scan is sufficient — no need to recurse into `children`. No match
+ * (e.g. no accumulated text, or it diverged) → APPEND rather than mangle a
+ * text part we can't prove is the blob.
+ */
+function applyStructuredContent(parts: Part[], value: unknown): Part[] {
+  let serialized: string | undefined;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    serialized = undefined;
+  }
+  if (serialized !== undefined) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const pt = parts[i];
+      if (pt && pt.kind === "text" && pt.content === serialized) {
+        const copy = parts.slice();
+        copy[i] = { kind: "answer", value };
+        return copy;
+      }
+    }
+  }
+  return parts.concat({ kind: "answer", value });
+}
+
+/** Artifact ids already surfaced by a tool_call (top-level or nested in an
+ *  agent_step) or a prior standalone artifacts part. `message.complete`
+ *  dedupes its list against this (ADR §3: emitting the same id in both
+ *  places is wasteful, not illegal — the client renders it once). */
+function collectArtifactIds(parts: Part[]): Set<string> {
+  const ids = new Set<string>();
+  for (const pt of parts) {
+    if (pt.kind === "tool_call" && pt.artifacts) {
+      for (const a of pt.artifacts) ids.add(a.id);
+    } else if (pt.kind === "agent_step") {
+      for (const id of collectArtifactIds(pt.children)) ids.add(id);
+    } else if (pt.kind === "artifacts") {
+      for (const a of pt.items) ids.add(a.id);
+    }
+  }
+  return ids;
+}
 
 /* Where a child (tool) part lives: nested in the agent_step whose id matches the
  * event's parentSpanId, else the top-level list. Returns the list to read + an
@@ -472,6 +629,7 @@ export function applyParts(
         result: toolResult(col, p),
         error: err,
         durationMs: durMs(col, p),
+        artifacts: parseArtifacts(p.artifacts ?? col.artifacts),
       };
       const copy = list.slice();
       if (idx >= 0) copy[idx] = filled;
@@ -556,7 +714,26 @@ export function applyParts(
       if (inT != null) meta.inputTokens = inT;
       if (outT != null) meta.outputTokens = outT;
       if (cost != null) meta.costUsd = cost;
-      return { parts, meta: Object.keys(meta).length ? meta : undefined };
+      // ADR-0006: structured content + render artifacts both ride on
+      // message.complete only (mirrors the cost_usd precedent above) —
+      // llm.end carries neither.
+      let outParts = parts;
+      if (bare(String(e.type)) === "message.complete") {
+        // §9: fix up the raw-JSON text part (if the structured result is
+        // provably the blob it came from) before anything else runs.
+        const sc = structuredContentOf(p);
+        if (sc.present) outParts = applyStructuredContent(outParts, sc.value);
+
+        // §3/§4: append any render artifacts not already surfaced by an
+        // earlier tool.end in this same fold.
+        const parsedArtifacts = parseArtifacts(p.artifacts ?? col.artifacts);
+        if (parsedArtifacts) {
+          const seen = collectArtifactIds(outParts);
+          const fresh = parsedArtifacts.filter((a) => !seen.has(a.id));
+          if (fresh.length) outParts = outParts.concat({ kind: "artifacts", items: fresh });
+        }
+      }
+      return { parts: outParts, meta: Object.keys(meta).length ? meta : undefined };
     }
     // Gate-decision audit row (F-2, #324) — one allow/block record per intent.
     case "gate.decision": {

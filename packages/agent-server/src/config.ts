@@ -150,6 +150,14 @@ export interface AgentRegistration {
   readonly runner: Pick<RunnerProtocol, "run" | "stream"> & {
     run(agent: AgentLike, message: string, options?: Record<string, unknown>): Promise<RunResult>;
   };
+  /**
+   * ADR-0006 §2 — the caller half of the two-layer opt-in for render
+   * artifacts. The TOOL declares what it can publish (`ToolSchema.displayType`);
+   * this registration decides whether the channel is wired for this agent.
+   * Default off: publishing costs bytes and may carry data a given deployment
+   * should not surface, so it is opt-in at the seam that knows the deployment.
+   */
+  readonly publishArtifacts?: boolean;
 }
 
 // AdminServiceProtocol is imported from @agentic-patterns/runtime

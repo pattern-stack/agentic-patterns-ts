@@ -8,4 +8,4 @@ export {
   formatSSE,
   toSSEMapping,
 } from "./sse-formatter.js";
-export type { SSEEventName, SSEMapping } from "./sse-formatter.js";
+export type { SSEEventName, SSEFormatterOptions, SSEMapping } from "./sse-formatter.js";

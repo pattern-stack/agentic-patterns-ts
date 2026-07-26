@@ -21,6 +21,16 @@ export { Capability, capability } from "./capability.js";
 export { Playbook } from "./playbook.js";
 export type { PlayDefinition } from "./playbook.js";
 
+export {
+  DEFAULT_ARTIFACT_BYTE_CEILING,
+  RenderArtifactSchema,
+  TableArtifactDataSchema,
+  artifactMarker,
+  isTableArtifact,
+  tableArtifact,
+} from "./render-artifact.js";
+export type { RenderArtifact, TableArtifactData } from "./render-artifact.js";
+
 export { ScopeItem, SessionScope, scopeItem, sessionScope } from "./session-scope.js";
 export type { ScopeItemOptions, SessionScopeOptions, ScopeValue } from "./session-scope.js";
 

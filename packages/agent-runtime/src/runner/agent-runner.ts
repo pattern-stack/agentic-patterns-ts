@@ -19,7 +19,12 @@
  * gate-allow regression test in agent-runner.test.ts) will be bypassed.
  */
 
-import type { RenderContext, ToolExecutionContext, ToolSchema } from "@agentic-patterns/core";
+import type {
+  RenderArtifact,
+  RenderContext,
+  ToolExecutionContext,
+  ToolSchema,
+} from "@agentic-patterns/core";
 import type { LanguageModelV2 } from "@ai-sdk/provider";
 import {
   type ModelMessage,
@@ -250,12 +255,21 @@ export class AgentRunner implements RunnerProtocol {
     parentToolCallId: string;
     parentSpanId: string;
     host?: unknown;
+    /**
+     * Render-artifact publish sink for THIS tool call (ADR-0006 §2). Passed
+     * only when the run opted in (`RunOptions.publishArtifacts`); when
+     * `undefined`, `publishArtifact` is omitted from the returned ctx
+     * entirely (not wired as a no-op) so a tool can cheaply skip building an
+     * artifact it isn't allowed to publish.
+     */
+    onArtifact?: (artifact: RenderArtifact) => void;
   }): ToolExecutionContext {
     return {
       runId: a.runId,
       traceId: a.traceId,
       parentToolCallId: a.parentToolCallId,
       host: a.host, // #124 — the single copy site
+      ...(a.onArtifact ? { publishArtifact: a.onArtifact } : {}),
       // Channel B (secondary): a non-agent tool's only progress-reporting path.
       // Fire-and-forget — never let a tool author await bus/gate plumbing, and
       // never let a publish failure (sync OR async) surface into the tool's
@@ -626,6 +640,9 @@ export class AgentRunner implements RunnerProtocol {
           const startTime = Date.now();
           let toolResult: unknown;
           let errorMsg: string | undefined;
+          // ADR-0006 §2: collected only when this run opted in
+          // (`RunOptions.publishArtifacts`) — see `onArtifact` below.
+          const publishedArtifacts: RenderArtifact[] = [];
 
           try {
             if (toolExecutor) {
@@ -638,6 +655,9 @@ export class AgentRunner implements RunnerProtocol {
                   parentToolCallId: tc.toolCallId,
                   parentSpanId: tcSpanId,
                   host: options?.host,
+                  onArtifact: options?.publishArtifacts
+                    ? (a) => publishedArtifacts.push(a)
+                    : undefined,
                 }),
               );
             } else {
@@ -669,6 +689,7 @@ export class AgentRunner implements RunnerProtocol {
               ...(displayTypes.has(tc.toolName)
                 ? { displayType: displayTypes.get(tc.toolName) }
                 : {}),
+              ...(publishedArtifacts.length > 0 ? { artifacts: publishedArtifacts } : {}),
             }),
           );
 
@@ -691,10 +712,21 @@ export class AgentRunner implements RunnerProtocol {
         (tr) => terminalTools.has(tr.toolName) && tr.error === undefined,
       );
       if (terminalHit) {
+        // ADR-0006 §9: `content` stays byte-identical to before this ADR — a
+        // string result passes through unchanged; a structured result is
+        // still flattened to JSON for `content`/`response` (untouched
+        // consumers keep working). `structuredContent` additionally carries
+        // the un-flattened value so a client can render prose + data instead
+        // of a stringified blob; absent entirely when the result was already
+        // a string.
         const content =
           typeof terminalHit.result === "string"
             ? terminalHit.result
             : JSON.stringify(terminalHit.result ?? "");
+        const structuredContent =
+          terminalHit.result !== undefined && typeof terminalHit.result !== "string"
+            ? terminalHit.result
+            : undefined;
 
         await this.emit(
           createEvent("agent.iteration.end", {
@@ -719,6 +751,7 @@ export class AgentRunner implements RunnerProtocol {
             outputTokens: totalOutputTokens,
             model: modelName,
             finishReason: "terminal_tool",
+            ...(structuredContent !== undefined ? { structuredContent } : {}),
           }),
         );
 
@@ -896,7 +929,13 @@ export class AgentRunner implements RunnerProtocol {
   private convertExecutableTools(
     agent: AgentLike,
     toolExecutor: ToolExecutor | undefined,
-    ctx: { traceId: string; runId: string; parentSpanId: string; host?: unknown },
+    ctx: {
+      traceId: string;
+      runId: string;
+      parentSpanId: string;
+      host?: unknown;
+      publishArtifacts?: boolean;
+    },
   ): ToolSet {
     const agentTools = agent.getTools() as ToolSchema[];
     if (agentTools.length === 0) return {};
@@ -942,6 +981,8 @@ export class AgentRunner implements RunnerProtocol {
           const startTime = Date.now();
           let toolResult: unknown;
           let errorMsg: string | undefined;
+          // ADR-0006 §2: collected only when this run opted in.
+          const publishedArtifacts: RenderArtifact[] = [];
           try {
             if (toolExecutor) {
               toolResult = await toolExecutor.execute(
@@ -953,6 +994,7 @@ export class AgentRunner implements RunnerProtocol {
                   parentToolCallId: intent.toolCallId,
                   parentSpanId: tcSpanId,
                   host: ctx.host,
+                  onArtifact: ctx.publishArtifacts ? (a) => publishedArtifacts.push(a) : undefined,
                 }),
               );
             } else {
@@ -979,6 +1021,7 @@ export class AgentRunner implements RunnerProtocol {
               durationMs: Date.now() - startTime,
               resultTokens: 0,
               ...(t.displayType !== undefined ? { displayType: t.displayType } : {}),
+              ...(publishedArtifacts.length > 0 ? { artifacts: publishedArtifacts } : {}),
             }),
           );
 
@@ -1079,6 +1122,7 @@ export class AgentRunner implements RunnerProtocol {
         runId,
         parentSpanId: rootSpanId,
         host: options?.host,
+        publishArtifacts: options?.publishArtifacts,
       });
       const result = await generateText({
         model,
@@ -1719,6 +1763,8 @@ export class AgentRunner implements RunnerProtocol {
         const startTime = Date.now();
         let toolResult: unknown;
         let errorMsg: string | undefined;
+        // ADR-0006 §2: collected only when this run opted in.
+        const publishedArtifacts: RenderArtifact[] = [];
 
         try {
           if (toolExecutor) {
@@ -1731,6 +1777,9 @@ export class AgentRunner implements RunnerProtocol {
                 parentToolCallId: tc.toolCallId,
                 parentSpanId: tcSpanId,
                 host: options?.host,
+                onArtifact: options?.publishArtifacts
+                  ? (a) => publishedArtifacts.push(a)
+                  : undefined,
               }),
             );
           } else {
@@ -1776,6 +1825,7 @@ export class AgentRunner implements RunnerProtocol {
           durationMs,
           resultTokens: 0,
           ...(displayTypes.has(tc.toolName) ? { displayType: displayTypes.get(tc.toolName) } : {}),
+          ...(publishedArtifacts.length > 0 ? { artifacts: publishedArtifacts } : {}),
         });
         await this.emit(tcEnd);
         yield tcEnd;
@@ -1784,10 +1834,16 @@ export class AgentRunner implements RunnerProtocol {
       // TERMINAL-TOOL EXIT (parity with run()): the tool's result IS the final
       // response; every call in this iteration's batch has already executed.
       if (terminalFired) {
+        // ADR-0006 §9 (parity with run()): `content` stays byte-identical;
+        // `structuredContent` additionally carries the un-flattened result.
         const content =
           typeof terminalResult === "string"
             ? terminalResult
             : JSON.stringify(terminalResult ?? "");
+        const structuredContent =
+          terminalResult !== undefined && typeof terminalResult !== "string"
+            ? terminalResult
+            : undefined;
 
         const iterEnd = createEvent("agent.iteration.end", {
           traceId: effectiveTraceId,
@@ -1811,6 +1867,7 @@ export class AgentRunner implements RunnerProtocol {
           outputTokens: totalOutputTokens,
           model: modelName,
           finishReason: "terminal_tool",
+          ...(structuredContent !== undefined ? { structuredContent } : {}),
         });
         await this.emit(msgComplete);
         yield msgComplete;

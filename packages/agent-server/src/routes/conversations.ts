@@ -521,6 +521,13 @@ export function conversationRoutes(
           eventBus,
           maxIterations,
           signal: controller.signal,
+          // ADR-0006 §2: the registration is the caller half of the two-layer
+          // artifact opt-in. Resolved per turn from `entry.agentId` (the same
+          // lookup conversation creation does) — without this the flag has no
+          // route from config to RunOptions and the channel is unreachable.
+          ...(agents.find((a) => a.id === entry.agentId)?.publishArtifacts === true
+            ? { publishArtifacts: true }
+            : {}),
         })) {
           turnTraceId ??= event.traceId;
           turnBusRunId ??= event.runId;

@@ -763,4 +763,216 @@ describe("applyParts — #324 kinds (gate.decision / harness.native / cost)", ()
     ]);
     expect(msg.costUsd).toBe(0.5);
   });
+
+  /* ── render artifacts (ADR-0006) ────────────────────────────────────────── */
+
+  test("tool.end carries a wire-shaped artifacts array (snake_case display_type) onto the tool_call", () => {
+    const parts = fold([
+      { type: "tool.start", tool_call_id: "t1", tool_name: "listDeals" },
+      {
+        type: "tool.end",
+        tool_call_id: "t1",
+        tool_name: "listDeals",
+        result: "23 deals",
+        artifacts: [
+          {
+            id: "crm_table:abc",
+            display_type: "table",
+            data: { columns: ["name"], rows: [["Acme"]] },
+            title: "May deals",
+          },
+        ],
+      },
+    ]);
+    const tc = parts[0] as Extract<Part, { kind: "tool_call" }>;
+    expect(tc.artifacts).toEqual([
+      {
+        id: "crm_table:abc",
+        displayType: "table",
+        data: { columns: ["name"], rows: [["Acme"]] },
+        title: "May deals",
+      },
+    ]);
+  });
+
+  test("tool.end with no artifacts key leaves tool_call.artifacts undefined", () => {
+    const parts = fold([
+      { type: "tool.start", tool_call_id: "t1", tool_name: "noop" },
+      { type: "tool.end", tool_call_id: "t1", tool_name: "noop", result: "ok" },
+    ]);
+    const tc = parts[0] as Extract<Part, { kind: "tool_call" }>;
+    expect(tc.artifacts).toBeUndefined();
+  });
+
+  test("a malformed artifact entry (missing id) is dropped, not thrown", () => {
+    const parts = fold([
+      { type: "tool.start", tool_call_id: "t1", tool_name: "listDeals" },
+      {
+        type: "tool.end",
+        tool_call_id: "t1",
+        tool_name: "listDeals",
+        result: "ok",
+        artifacts: [
+          { display_type: "table", data: { columns: [], rows: [] } },
+          { id: "good:1", display_type: "table", data: { columns: [], rows: [] } },
+        ],
+      },
+    ]);
+    const tc = parts[0] as Extract<Part, { kind: "tool_call" }>;
+    expect(tc.artifacts).toHaveLength(1);
+    expect(tc.artifacts?.[0]?.id).toBe("good:1");
+  });
+
+  test("a ceiling marker (data absent) parses with data left undefined, never fabricated", () => {
+    const parts = fold([
+      { type: "tool.start", tool_call_id: "t1", tool_name: "listDeals" },
+      {
+        type: "tool.end",
+        tool_call_id: "t1",
+        tool_name: "listDeals",
+        result: "ok",
+        artifacts: [{ id: "crm_table:big", display_type: "table", truncated: true }],
+      },
+    ]);
+    const tc = parts[0] as Extract<Part, { kind: "tool_call" }>;
+    expect(tc.artifacts).toEqual([{ id: "crm_table:big", displayType: "table", truncated: true }]);
+    expect("data" in (tc.artifacts?.[0] ?? {})).toBe(false);
+  });
+
+  test("message.complete artifacts with no matching prior tool become a standalone artifacts part", () => {
+    const parts = fold([
+      { type: "message.delta", delta: "23 deals closed." },
+      {
+        type: "message.complete",
+        artifacts: [
+          { id: "crm_table:xyz", display_type: "table", data: { columns: [], rows: [] } },
+        ],
+      },
+    ]);
+    expect(parts).toHaveLength(2);
+    expect(parts[1]).toEqual({
+      kind: "artifacts",
+      items: [{ id: "crm_table:xyz", displayType: "table", data: { columns: [], rows: [] } }],
+    });
+  });
+
+  test("message.complete artifacts already emitted on an earlier tool.end are deduped", () => {
+    const parts = fold([
+      { type: "tool.start", tool_call_id: "t1", tool_name: "listDeals" },
+      {
+        type: "tool.end",
+        tool_call_id: "t1",
+        tool_name: "listDeals",
+        result: "ok",
+        artifacts: [
+          { id: "crm_table:dup", display_type: "table", data: { columns: [], rows: [] } },
+        ],
+      },
+      {
+        type: "message.complete",
+        artifacts: [
+          { id: "crm_table:dup", display_type: "table", data: { columns: [], rows: [] } },
+        ],
+      },
+    ]);
+    // Only the tool_call carries it — no second standalone `artifacts` part.
+    expect(parts).toHaveLength(1);
+    expect(parts.some((p) => p.kind === "artifacts")).toBe(false);
+  });
+
+  test("llm.end carrying an artifacts field is ignored (artifacts ride on message.complete only)", () => {
+    const parts = fold([
+      {
+        type: "llm.end",
+        artifacts: [
+          { id: "crm_table:xyz", display_type: "table", data: { columns: [], rows: [] } },
+        ],
+      },
+    ]);
+    expect(parts).toEqual([]);
+  });
+
+  /* ── structured terminal answer (ADR-0006 §9) ──────────────────────────── */
+
+  test("structured_content byte-identical to the accumulated text REPLACES that text part", () => {
+    const structured = { answer: "We closed 23 deals.", ref: "crm_table:e891" };
+    const parts = fold([
+      { type: "message.delta", delta: JSON.stringify(structured) },
+      { type: "message.complete", structured_content: structured },
+    ]);
+    expect(parts).toEqual([{ kind: "answer", value: structured }]);
+  });
+
+  test("structured_content with no matching text part is APPENDED, not mangled", () => {
+    const structured = { answer: "23 deals." };
+    const parts = fold([
+      { type: "message.delta", delta: "some other prose" },
+      { type: "message.complete", structured_content: structured },
+    ]);
+    expect(parts).toEqual([
+      { kind: "text", content: "some other prose" },
+      { kind: "answer", value: structured },
+    ]);
+  });
+
+  test("structured_content with NO preceding text at all is appended standalone", () => {
+    const structured = { answer: "23 deals." };
+    const parts = fold([{ type: "message.complete", structured_content: structured }]);
+    expect(parts).toEqual([{ kind: "answer", value: structured }]);
+  });
+
+  test("reads persisted camelCase structuredContent the same as wire structured_content", () => {
+    const structured = { answer: "23 deals." };
+    const msg = eventsToAssistantMessage("a", [
+      {
+        type: "message.delta",
+        delta: JSON.stringify(structured),
+        seq: 1,
+      },
+      {
+        type: "message.complete",
+        seq: 2,
+        run_id: "r1",
+        payload_json: JSON.stringify({ structuredContent: structured }),
+      },
+    ]);
+    expect(msg.parts).toEqual([{ kind: "answer", value: structured }]);
+  });
+
+  test("llm.end carrying structured_content is ignored (rides on message.complete only)", () => {
+    const parts = fold([
+      { type: "message.delta", delta: JSON.stringify({ answer: "x" }) },
+      { type: "llm.end", structured_content: { answer: "x" } },
+    ]);
+    expect(parts).toEqual([{ kind: "text", content: JSON.stringify({ answer: "x" }) }]);
+  });
+
+  test("a normal string answer with no structured_content is completely unaffected", () => {
+    const parts = fold([
+      { type: "message.delta", delta: "Hello there." },
+      { type: "message.complete", model: "sonnet" },
+    ]);
+    expect(parts).toEqual([{ kind: "text", content: "Hello there." }]);
+  });
+
+  test("message.complete can carry BOTH structured_content and artifacts in one fold", () => {
+    const structured = { answer: "23 deals.", ref: "crm_table:xyz" };
+    const parts = fold([
+      { type: "message.delta", delta: JSON.stringify(structured) },
+      {
+        type: "message.complete",
+        structured_content: structured,
+        artifacts: [
+          { id: "crm_table:xyz", display_type: "table", data: { columns: [], rows: [] } },
+        ],
+      },
+    ]);
+    expect(parts).toEqual([
+      { kind: "answer", value: structured },
+      {
+        kind: "artifacts",
+        items: [{ id: "crm_table:xyz", displayType: "table", data: { columns: [], rows: [] } }],
+      },
+    ]);
+  });
 });

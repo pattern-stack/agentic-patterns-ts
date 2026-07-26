@@ -5,6 +5,7 @@
  * Trace fields (traceId, runId, spanId, parentSpanId, timestamp) on every event.
  */
 
+import type { RenderArtifact } from "@agentic-patterns/core";
 import type { ClaudeCodeHookEvent } from "./claude-code.js";
 
 /**
@@ -75,6 +76,23 @@ export interface MessageCompleteEvent extends BaseEvent {
    * cost signal (e.g. `AgentRunner`). Optional and additive — non-breaking.
    */
   readonly costUsd?: number;
+  /**
+   * Render artifacts attached to this message
+   * ([ADR-0006](../../../../docs/adr/0006-render-artifacts.md) §3). Optional —
+   * most runs carry none. May duplicate ids already emitted on a `tool.end`
+   * (wasteful, not illegal) or carry answer-scoped data with no single
+   * producing tool.
+   */
+  readonly artifacts?: readonly RenderArtifact[];
+  /**
+   * The un-flattened terminal-tool result (ADR-0006 §9). `content` above is
+   * always a string (unchanged, byte-identical to before this ADR); when a
+   * terminal tool's result was structured (not already a string), that
+   * structure is carried here so a client can render prose + data instead of
+   * a stringified blob. Absent when the terminal result was already a string,
+   * or when this run ended for any other reason.
+   */
+  readonly structuredContent?: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +166,15 @@ export interface ToolCallEndEvent extends BaseEvent {
   readonly displayType?: string;
   readonly durationMs: number;
   readonly resultTokens: number;
+  /**
+   * Render artifacts this tool call published via `ToolExecutionContext.
+   * publishArtifact` ([ADR-0006](../../../../docs/adr/0006-render-artifacts.md)
+   * §1-2). Independent of `result` above — a tool may hand the model a
+   * two-token ref while this carries the full render-ready payload. Present
+   * only when the run opted in (`RunOptions.publishArtifacts`) AND the tool
+   * actually published something this call.
+   */
+  readonly artifacts?: readonly RenderArtifact[];
 }
 
 // ---------------------------------------------------------------------------

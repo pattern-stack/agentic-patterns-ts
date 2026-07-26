@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { tableArtifact } from "@agentic-patterns/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEvent } from "../../events/types.js";
 import {
   SSEFormatter,
@@ -508,6 +509,163 @@ describe("SSEFormatter", () => {
       for (const wireName of Object.values(SSE_EVENT_NAMES)) {
         expect(set.has(wireName)).toBe(true);
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // ADR-0006 — render-artifact wire forwarding + ceiling enforcement.
+  // ---------------------------------------------------------------------------
+  describe("render artifacts (ADR-0006)", () => {
+    let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      consoleErrorSpy.mockRestore();
+    });
+
+    const artifact = tableArtifact("crm_table:e891", {
+      columns: ["deal", "amount"],
+      rows: [["Acme", 1200]],
+    });
+
+    it("forwards artifacts on tool.end as snake_case display_type", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.tool.end", {
+          ...makeBase(),
+          toolCallId: "tc-1",
+          toolName: "run_select",
+          arguments: {},
+          result: "ref_key: crm_table:e891",
+          durationMs: 10,
+          resultTokens: 0,
+          artifacts: [artifact],
+        }),
+      );
+      expect(mapping?.payload.artifacts).toEqual([
+        {
+          id: "crm_table:e891",
+          display_type: "table",
+          data: { columns: ["deal", "amount"], rows: [["Acme", 1200]] },
+        },
+      ]);
+    });
+
+    it("omits the artifacts key on tool.end when none were published", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.tool.end", {
+          ...makeBase(),
+          toolCallId: "tc-1",
+          toolName: "search",
+          arguments: {},
+          result: { items: [] },
+          durationMs: 10,
+          resultTokens: 0,
+        }),
+      );
+      expect(mapping?.payload).not.toHaveProperty("artifacts");
+    });
+
+    it("forwards artifacts and structured_content on message.complete", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.message.complete", {
+          ...makeBase(),
+          content: JSON.stringify({ facets: 3 }),
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "opus",
+          finishReason: "terminal_tool",
+          structuredContent: { facets: 3 },
+          artifacts: [artifact],
+        }),
+      );
+      expect(mapping?.payload.structured_content).toEqual({ facets: 3 });
+      expect(mapping?.payload.artifacts).toEqual([
+        {
+          id: "crm_table:e891",
+          display_type: "table",
+          data: { columns: ["deal", "amount"], rows: [["Acme", 1200]] },
+        },
+      ]);
+    });
+
+    it("omits artifacts and structured_content on message.complete when absent", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.message.complete", {
+          ...makeBase(),
+          content: "done",
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "opus",
+        }),
+      );
+      expect(mapping?.payload).not.toHaveProperty("artifacts");
+      expect(mapping?.payload).not.toHaveProperty("structured_content");
+    });
+
+    it("replaces an over-ceiling artifact with a marker (no data, truncated:true) and logs loudly", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.tool.end", {
+          ...makeBase(),
+          toolCallId: "tc-1",
+          toolName: "run_select",
+          arguments: {},
+          result: "ref",
+          durationMs: 10,
+          resultTokens: 0,
+          artifacts: [artifact],
+        }),
+        { artifactByteCeiling: 5 }, // tiny — guaranteed breach
+      );
+      expect(mapping?.payload.artifacts).toEqual([
+        { id: "crm_table:e891", display_type: "table", truncated: true },
+      ]);
+      expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+      expect(consoleErrorSpy.mock.calls[0]?.[0]).toContain("crm_table:e891");
+    });
+
+    it("ships the artifact as-is when under a custom (larger) ceiling", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.tool.end", {
+          ...makeBase(),
+          toolCallId: "tc-1",
+          toolName: "run_select",
+          arguments: {},
+          result: "ref",
+          durationMs: 10,
+          resultTokens: 0,
+          artifacts: [artifact],
+        }),
+        { artifactByteCeiling: 10_000 },
+      );
+      expect(mapping?.payload.artifacts).toEqual([
+        {
+          id: "crm_table:e891",
+          display_type: "table",
+          data: { columns: ["deal", "amount"], rows: [["Acme", 1200]] },
+        },
+      ]);
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+    });
+
+    it("SSEFormatter honors a configured ceiling on format()", () => {
+      const strictFormatter = new SSEFormatter({ artifactByteCeiling: 5 });
+      const event = createEvent("agent.tool.end", {
+        ...makeBase(),
+        toolCallId: "tc-1",
+        toolName: "run_select",
+        arguments: {},
+        result: "ref",
+        durationMs: 10,
+        resultTokens: 0,
+        artifacts: [artifact],
+      });
+      const parsed = parseSSE(strictFormatter.format(event)!);
+      expect(parsed.data.artifacts).toEqual([
+        { id: "crm_table:e891", display_type: "table", truncated: true },
+      ]);
     });
   });
 });

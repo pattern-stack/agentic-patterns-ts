@@ -188,6 +188,20 @@ export interface RunOptions {
    * copied verbatim.
    */
   host?: unknown;
+  /**
+   * Turn on the render-artifact publication channel for this run
+   * ([ADR-0006](../../../../docs/adr/0006-render-artifacts.md) §2). A tool
+   * DECLARES what it can publish (already true today via `ToolDefinition.
+   * displayType`); this flag is the other half of the "two-layer opt-in" —
+   * the CALLER/registration deciding whether publication is actually wired
+   * for this run. Default `false`: emission costs bytes and may carry data a
+   * given surface should not receive, so it must be turned on deliberately
+   * rather than leaking by default. When `false` (or omitted), every
+   * `ToolExecutionContext` this run builds OMITS `publishArtifact` entirely
+   * (not a no-op function), so a tool can cheaply skip building an artifact
+   * it isn't allowed to publish.
+   */
+  publishArtifacts?: boolean;
 }
 
 // ---------------------------------------------------------------------------
