@@ -13,10 +13,17 @@ One PR. The pieces are small and interlocking (the shared violation module exist
 | 3. Discriminated envelope | `molecules/playbook.ts` | Needs 1 + 2 |
 | 4. `playbook()` literal | `molecules/playbook.ts`, `molecules/index.ts` | Yes |
 | 5. Docs + the ADR-citation fix | `docs/authoring-a-toolbox.md`, `packages/agent-core/README.md`, `runner/toolbox-executor.ts` | Yes |
+| 6. Release | `packages/agent-core/package.json`, `CHANGELOG.md`, `bun.lock` | No — must ride with 1-4 or core never publishes |
 
 Core floats independently of the lockstep triple. This is purely additive → **minor bump on `@agentic-patterns/core` (0.14.0 → 0.15.0), in this PR, with a CHANGELOG entry.**
 
-Precedent, verified: `175f59a` (#264) bumped core `0.10.0 → 0.11.0` and added a CHANGELOG entry *in the feature commit*; `3d1a3a5` (#265) did the same for `0.11.0 → 0.12.0`. #332/#355 are **lockstep** release issues (runtime/server/cli) and do not apply to core. Omitting the bump would mean the publish job correctly skips core and this work never reaches npm.
+Precedent, verified: `175f59a` (#264) bumped core `0.10.0 → 0.11.0` and added a CHANGELOG entry *in the feature commit*; `3d1a3a5` (#265) did the same for `0.11.0 → 0.12.0`. Both also touched `bun.lock` in that same commit.
+
+Omitting the bump would mean the publish job correctly skips core (`ci.yml:57-65`: "publishes it IFF its version isn't already on npm — so merges without a version bump are fast no-ops") and this work never reaches npm.
+
+**Lockfile is not optional.** #355 states it as a hard rule: `rm bun.lock && bun install` in the **same commit** as the version bump. A `package.json`-only bump drifts the lockfile and fails CI.
+
+(#332 is lockstep-only. #355 is *"lockstep+core bump (bump-both)"* — it does cover core, contrary to an earlier draft of this paragraph. It doesn't change the decision, which rests on the `175f59a`/`3d1a3a5` precedent, but the two issues are not interchangeable.)
 
 ## Current state
 
@@ -84,7 +91,7 @@ The alternative — moving validation into `Playbook.execute` and parsing the po
 
    *Inbound* is the real risk: a violation raised **inside** the play's own body reaching the play's catch and being reported as the outer play's violation. Two sub-cases:
 
-   - The play calls `someToolbox.execute("x", …)` — **safe**. `toolbox.ts:250-257` catches the tagged violation and rethrows a fresh `new Error(…, { cause })` *without* the marker, so `isReturnsViolation` is false at the play's catch and it falls through to the generic branch. This is the toolsmith pattern (`examples/agents/toolsmith/agent.ts:180-186`) and the common case.
+   - The play calls `someToolbox.execute("x", …)` — **safe**. `toolbox.ts:250-257` catches the tagged violation and rethrows a fresh `new Error(…, { cause })` *without* the marker, so `isReturnsViolation` is false at the play's catch and it falls through to the generic branch. This is the toolsmith pattern (`examples/agents/toolsmith/agent.ts:187-188`) and the common case.
    - The play calls a `defineTool`/`definePlay` definition's `.execute()` **directly**, bypassing the `Toolbox`/`Playbook` boundary — **unsafe**. The tag survives, the outer catch matches, and the envelope reads `play '<outer>' output violated its returns schema` naming the wrong play and the wrong schema. This is the only case where `isReturnsViolation` is true for something that is not this play's violation.
 
    **Decision: accept and document, do not mitigate here.** A correct fix needs provenance on the tag (which definition raised it), which is a change to the tool-side mechanism too and is out of scope for #266 — the identical residual exists on the tool side today (`tool-authoring-sugar.md:743`). Direct `.execute()` on a definition bypasses parameter validation as well, so it is already outside the supported path. The test plan pins the behavior so it is a known, documented limitation rather than a surprise.
@@ -153,13 +160,15 @@ try {
 } catch (err) {
   if (isReturnsViolation(err)) {
     const detail = err.cause instanceof Error ? err.cause.message : err.message;
-    return { error: `play '${name}' output violated its returns schema: ${detail}` };
+    return { error: `play '${name}' ${RETURNS_VIOLATION_PHRASE}: ${detail}` };
   }
   return { error: err instanceof Error ? err.message : String(err) };
 }
 ```
 
-Still returns, never throws. Note the violation branch returns a **plain object**, so the untagged-rethrow concern from Correction #3 is satisfied structurally — nothing propagates.
+Still returns, never throws — the violation branch returns a **plain object**, so nothing propagates *outward*.
+
+**This does not close Correction #3.** The *inbound* residual is live in exactly this branch: if a still-tagged violation arrives from a definition's direct `.execute()`, `isReturnsViolation` matches and this code emits the outer play's name. That is the accepted, documented limitation — see Correction #3 and the two tests that pin it.
 
 ## File-by-file change plan
 
@@ -171,6 +180,7 @@ Still returns, never throws. Note the violation branch returns a **plain object*
 | `packages/agent-core/src/molecules/index.ts` | Export `definePlay`, `playbook` alongside `Playbook` (line 6 pattern). **Do not** export the violation module |
 | `packages/agent-core/package.json` | Bump `0.14.0 → 0.15.0` (see § Scope) |
 | `CHANGELOG.md` | Entry for the core minor — matches `175f59a`/`3d1a3a5` precedent |
+| `bun.lock` | `rm bun.lock && bun install` in the **same commit** as the bump (#355 hard rule; both precedent commits did this). Skipping it drifts the lockfile and fails CI |
 | `packages/agent-runtime/src/runner/toolbox-executor.ts` | Comment fix only — replace the unverifiable "ADR 0002 D3" citation (`:17`) with a pointer to this spec's D1 |
 | `examples/agents/toolsmith/agent.ts` | Migrate `slug_and_span` to `definePlay`; drop the two hand-casts and the `#266` placeholder comment left by the sweep (PR #382) |
 | `docs/authoring-a-toolbox.md` | **Add** a play-authoring section (envelope semantics, the D2 caveat, the tool-wins collision rule). Narrow the `:224-226` non-goal paragraph to drop only the #266 sentence — **the other three non-goals in it (camel↔snake mappers, `.describe()` compression, host-specific filter envelopes) remain valid and must survive** |
@@ -492,7 +502,7 @@ New anchors introduced by the revision, verified: `toolbox.ts:250-257` ✅, `:76
   point at Correction #3's accepted limitation.
 
 - [`§ Corrections #3`, inbound sub-case 1] Fresh citation drift, introduced by the B1 fix:
-  "This is the toolsmith pattern (`examples/agents/toolsmith/agent.ts:180-186`)". `:180-186`
+  "This is the toolsmith pattern (`examples/agents/toolsmith/agent.ts:187-188`)". `:180-186`
   is the `parameters` object literal plus the `execute:` line and the args hand-cast; the
   `tools.execute(...)` calls that make it "the toolsmith pattern" are at **`:187-190`**
   (inside `Promise.all`, `:187-190`). Same class of error as the four just corrected.
@@ -510,3 +520,29 @@ New anchors introduced by the revision, verified: `toolbox.ts:250-257` ✅, `:76
   appear in no row. Row 5 still lists only the three doc/comment files.
 
 **Reviewed by:** reviewer agent · 2026-07-26 (re-check)
+
+---
+
+## Design Addendum 2 — response to Gate 1.5 re-check (PASS_WITH_NOTES)
+
+Gate 1.5 cleared. All 4 notes and 2 nits fixed anyway — three of them were errors the *first* revision introduced, and a spec an implementer follows verbatim shouldn't ship known-wrong instructions just because the gate passed.
+
+Each verified independently before acting, as with the first pass.
+
+| Finding | Verified how | Fix |
+|---|---|---|
+| **N1** — the paragraph correcting a wrong claim shipped another one: #355 is *"release: TS lockstep+core bump for the cockpit arc (bump-both)"*, so it **does** cover core | `gh issue view 355` | Paragraph corrected; the bump decision is unchanged (it rests on `175f59a`/`3d1a3a5`, not on either issue) |
+| **N2** — `bun.lock` missing from the file plan | Both precedent commits touch it; #355 states `rm bun.lock && bun install` in the same commit as a hard rule | Added to the file plan and the slicing table, with the rule quoted |
+| **N3** — stale cross-reference at § `Playbook.execute` still claimed Correction #3 was "satisfied structurally" | Read against the revised Correction #3 | Rewritten: outbound is closed, **inbound is live in exactly that branch**, pointing at the accepted limitation and its two tests |
+| **N4** — fresh drift from the B1 fix: `toolsmith/agent.ts:180-186` | `sed -n '185,191p'` — the `tools.execute(...)` calls are at `:187-188`; `:180-186` is the `parameters` literal | Corrected to `:187-188` |
+| **Nit 1** — illustrated code hardcoded the phrase the API section declares as "the one copy" | Read both sections | Code block now composes from `RETURNS_VIOLATION_PHRASE` — the implementer copies what they see |
+| **Nit 2** — slicing table omitted the release files | Read against the revised file plan | Row 6 added, marked **not** independently landable: without it core never publishes |
+
+### Standing verdict
+
+**PASS_WITH_NOTES → notes closed.** Gate 1.5 is cleared and the spec halts here for human review (Gate 1, strict mode — #266 carries `state:awaiting-strategy-review`).
+
+Two things a reviewer should push on, because they are judgment calls rather than facts:
+
+1. **D2's caveat is a real weakening.** "Validated" does not mean the delivered payload matches `returns`. It buys the metadata-only invariant for plain `PlayDefinition`s. If preserving that fixture matters less than the guarantee, D2 should flip — and that changes the design shape, not just a line.
+2. **Correction #3's residual is accepted, not solved.** A play calling a definition's `.execute()` directly still gets misattributed. Fixing it properly needs provenance on the violation tag, which touches the tool-side mechanism too. Deferred deliberately; say so if that's the wrong call.
