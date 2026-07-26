@@ -1,5 +1,5 @@
 /**
- * Tests for the Claude Code LanguageModelV2 provider.
+ * Tests for the Claude Code LanguageModelV4 provider.
  *
  * Unit tests mock `@anthropic-ai/claude-agent-sdk` so they run offline.
  * The integration test is skipped unless the `claude` CLI is installed
@@ -10,9 +10,9 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { ToolSchema } from "@agentic-patterns/core";
 import type {
-  LanguageModelV2CallOptions,
-  LanguageModelV2Content,
-  LanguageModelV2Prompt,
+  LanguageModelV4CallOptions,
+  LanguageModelV4Content,
+  LanguageModelV4Prompt,
 } from "@ai-sdk/provider";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -131,9 +131,9 @@ import { claudeCode } from "../claude-code.js";
 // ---------------------------------------------------------------------------
 
 function makeCallOptions(
-  prompt: LanguageModelV2Prompt,
+  prompt: LanguageModelV4Prompt,
   tools: Array<{ name: string; description?: string }> = [],
-): LanguageModelV2CallOptions {
+): LanguageModelV4CallOptions {
   return {
     // v5 lifts tools to a top-level array; the schema field is `inputSchema`.
     tools: tools.map((t) => ({
@@ -147,19 +147,19 @@ function makeCallOptions(
 }
 
 /** Extract the joined text from a v5 doGenerate `content` array. */
-function contentText(content: LanguageModelV2Content[]): string {
+function contentText(content: LanguageModelV4Content[]): string {
   return content
-    .filter((c): c is Extract<LanguageModelV2Content, { type: "text" }> => c.type === "text")
+    .filter((c): c is Extract<LanguageModelV4Content, { type: "text" }> => c.type === "text")
     .map((c) => c.text)
     .join("");
 }
 
 /** Extract the tool-call parts from a v5 doGenerate `content` array. */
 function contentToolCalls(
-  content: LanguageModelV2Content[],
-): Array<Extract<LanguageModelV2Content, { type: "tool-call" }>> {
+  content: LanguageModelV4Content[],
+): Array<Extract<LanguageModelV4Content, { type: "tool-call" }>> {
   return content.filter(
-    (c): c is Extract<LanguageModelV2Content, { type: "tool-call" }> => c.type === "tool-call",
+    (c): c is Extract<LanguageModelV4Content, { type: "tool-call" }> => c.type === "tool-call",
   );
 }
 

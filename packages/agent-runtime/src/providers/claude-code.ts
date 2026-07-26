@@ -1,8 +1,8 @@
 /**
- * Claude Code LanguageModelV2 provider.
+ * Claude Code LanguageModelV4 provider.
  *
  * Wraps the Claude Agent SDK's `query()` function in a Vercel AI SDK
- * `LanguageModelV2` so agents can be executed through `AgentRunner` using
+ * `LanguageModelV4` so agents can be executed through `AgentRunner` using
  * a Claude Max subscription (OAuth cached in ~/.claude) or an
  * `ANTHROPIC_API_KEY` env var picked up by the SDK itself.
  *
@@ -43,13 +43,14 @@
  */
 
 import type {
-  LanguageModelV2,
-  LanguageModelV2CallOptions,
-  LanguageModelV2Content,
-  LanguageModelV2FinishReason,
-  LanguageModelV2FunctionTool,
-  LanguageModelV2Prompt,
-  LanguageModelV2StreamPart,
+  LanguageModelV4,
+  LanguageModelV4CallOptions,
+  LanguageModelV4Content,
+  LanguageModelV4FinishReason,
+  LanguageModelV4FunctionTool,
+  LanguageModelV4Prompt,
+  LanguageModelV4StreamPart,
+  SharedV4Warning,
 } from "@ai-sdk/provider";
 import {
   type McpSdkServerConfigWithInstance,
@@ -227,13 +228,13 @@ const ISOLATED_NO_TOKEN_MESSAGE =
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the single system prompt from a LanguageModelV2 message array.
+ * Extract the single system prompt from a LanguageModelV4 message array.
  *
- * LanguageModelV2Prompt only ever contains one leading system message (if
+ * LanguageModelV4Prompt only ever contains one leading system message (if
  * any) — the AI SDK normalizes `generateText({ system, messages })` into
  * a prompt that starts with `{ role: 'system' }`.
  */
-function extractSystemPrompt(prompt: LanguageModelV2Prompt): string | undefined {
+function extractSystemPrompt(prompt: LanguageModelV4Prompt): string | undefined {
   const first = prompt[0];
   if (first && first.role === "system") return first.content;
   return undefined;
@@ -257,7 +258,7 @@ function stringifyValue(v: unknown): string {
  * resume support. Used by the `flatten` strategy and by the first (fresh)
  * turn of the `deferred` strategy.
  */
-function renderConversation(prompt: LanguageModelV2Prompt): string {
+function renderConversation(prompt: LanguageModelV4Prompt): string {
   const parts: string[] = [];
 
   for (const msg of prompt) {
@@ -277,7 +278,7 @@ function renderConversation(prompt: LanguageModelV2Prompt): string {
   return parts.join("\n\n");
 }
 
-type PromptMessage = LanguageModelV2Prompt[number];
+type PromptMessage = LanguageModelV4Prompt[number];
 
 function renderUserContent(msg: Extract<PromptMessage, { role: "user" }>): string {
   const chunks: string[] = [];
@@ -307,6 +308,10 @@ function renderAssistantContent(msg: Extract<PromptMessage, { role: "assistant" 
 function renderToolContent(msg: Extract<PromptMessage, { role: "tool" }>): string {
   const chunks: string[] = [];
   for (const part of msg.content) {
+    // V4 adds a `tool-approval-response` part to the tool-message union
+    // alongside `tool-result` — skip it here (the approval loop is #389's
+    // surface, out of scope for this promotion).
+    if (part.type !== "tool-result") continue;
     // v5 ToolResultPart carries the result under `output` as a typed union.
     chunks.push(
       `[tool-result name=${part.toolName} id=${part.toolCallId}] ${renderToolOutput(part.output)}`,
@@ -315,10 +320,13 @@ function renderToolContent(msg: Extract<PromptMessage, { role: "tool" }>): strin
   return chunks.join("\n");
 }
 
-/** Render a v5 tool-result `output` union into a flat string for the prompt. */
-function renderToolOutput(
-  output: Extract<PromptMessage, { role: "tool" }>["content"][number]["output"],
-): string {
+type ToolResultPart = Extract<
+  Extract<PromptMessage, { role: "tool" }>["content"][number],
+  { type: "tool-result" }
+>;
+
+/** Render a V4 tool-result `output` union into a flat string for the prompt. */
+function renderToolOutput(output: ToolResultPart["output"]): string {
   switch (output.type) {
     case "text":
     case "error-text":
@@ -326,9 +334,15 @@ function renderToolOutput(
     case "json":
     case "error-json":
       return stringifyValue(output.value);
+    case "execution-denied":
+      return `[tool execution denied${output.reason ? `: ${output.reason}` : ""}]`;
     case "content":
       return output.value
-        .map((c) => (c.type === "text" ? c.text : `[media ${c.mediaType}]`))
+        .map((c) => {
+          if (c.type === "text") return c.text;
+          if (c.type === "file") return `[file ${c.mediaType}]`;
+          return "[custom content]";
+        })
         .join("\n");
     default:
       return "";
@@ -338,7 +352,7 @@ function renderToolOutput(
 // ---------------------------------------------------------------------------
 // JSON Schema → Zod (just enough to round-trip the tool param schemas)
 //
-// The provider sits at the LanguageModelV2 boundary, where the AI SDK has
+// The provider sits at the LanguageModelV4 boundary, where the AI SDK has
 // already projected each tool to JSON Schema (the original Zod is gone). But the
 // Agent SDK's tool() helper only accepts a ZodRawShape — so we rebuild one from
 // `inputSchema` for the in-process (flatten) server. Without it Claude sees NO
@@ -405,14 +419,14 @@ function jsonSchemaToZodShape(schema: unknown): Record<string, z.ZodTypeAny> {
 }
 
 /**
- * Build an in-process MCP server exposing each LanguageModelV2 function tool,
+ * Build an in-process MCP server exposing each LanguageModelV4 function tool,
  * used by the `flatten` strategy and by `doStream`. The handlers never run —
  * the `PreToolUse` defer hook aborts before any handler is reached — they're
  * installed only so Claude sees real tool schemas. (The `deferred` strategy
  * uses the stdio shim in `cc-shim.ts` instead, because the in-process server
  * is not resumable; see F-3.)
  */
-function buildToolsServer(tools: ReadonlyArray<LanguageModelV2FunctionTool>):
+function buildToolsServer(tools: ReadonlyArray<LanguageModelV4FunctionTool>):
   | {
       server: McpSdkServerConfigWithInstance;
       allowedTools: string[];
@@ -442,7 +456,7 @@ function buildToolsServer(tools: ReadonlyArray<LanguageModelV2FunctionTool>):
 /**
  * Resolve `mcp__server__tool` back to the original tool name Claude was
  * offered. For framework tools we strip the `mcp__agent_runner_tools__`
- * prefix so `LanguageModelV2` consumers see the original tool names.
+ * prefix so `LanguageModelV4` consumers see the original tool names.
  */
 function normalizeToolName(sdkToolName: string): string {
   const prefix = `mcp__${FRAMEWORK_SERVER}__`;
@@ -613,8 +627,8 @@ async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<Q
 /** Translate a `QueryOutcome` into a v5 `doGenerate` return value. */
 function buildGenerateResult(
   out: QueryOutcome,
-): Awaited<ReturnType<LanguageModelV2["doGenerate"]>> {
-  const content: LanguageModelV2Content[] = [];
+): Awaited<ReturnType<LanguageModelV4["doGenerate"]>> {
+  const content: LanguageModelV4Content[] = [];
   if (out.text.length > 0) content.push({ type: "text", text: out.text });
   if (out.deferred) {
     content.push({
@@ -643,8 +657,8 @@ function buildGenerateResult(
 // ClaudeCodeLanguageModel
 // ---------------------------------------------------------------------------
 
-export class ClaudeCodeLanguageModel implements LanguageModelV2 {
-  readonly specificationVersion = "v2" as const;
+export class ClaudeCodeLanguageModel implements LanguageModelV4 {
+  readonly specificationVersion = "v4" as const;
   readonly provider = "claude-code";
   readonly modelId: string;
   /**
@@ -711,13 +725,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   // doGenerate
   // -------------------------------------------------------------------------
 
-  doGenerate(options: LanguageModelV2CallOptions): ReturnType<LanguageModelV2["doGenerate"]> {
+  doGenerate(options: LanguageModelV4CallOptions): ReturnType<LanguageModelV4["doGenerate"]> {
     return this._doGenerate(options);
   }
 
   private async _doGenerate(
-    options: LanguageModelV2CallOptions,
-  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    options: LanguageModelV4CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV4["doGenerate"]>>> {
     if (this._resolveStrategy() === "flatten") {
       return this._flattenGenerate(options);
     }
@@ -746,8 +760,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   // -------------------------------------------------------------------------
 
   private async _deferGenerate(
-    options: LanguageModelV2CallOptions,
-  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    options: LanguageModelV4CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV4["doGenerate"]>>> {
     const systemPrompt = extractSystemPrompt(options.prompt);
     const fnTools = extractFunctionTools(options);
     const identity = conversationIdentity(
@@ -766,11 +780,11 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
 
   /** First turn of a conversation: fresh session, capture `session_id`. */
   private async _deferFresh(
-    options: LanguageModelV2CallOptions,
+    options: LanguageModelV4CallOptions,
     identity: string,
-    fnTools: LanguageModelV2FunctionTool[],
+    fnTools: LanguageModelV4FunctionTool[],
     systemPrompt: string | undefined,
-  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+  ): Promise<Awaited<ReturnType<LanguageModelV4["doGenerate"]>>> {
     if (fnTools.length === 0) {
       // Nothing to keep a session for — a plain single-turn flatten suffices.
       return this._flattenGenerate(options);
@@ -810,13 +824,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
 
   /** Later turn: park the tool result and resume the live session. */
   private async _deferResume(
-    options: LanguageModelV2CallOptions,
+    options: LanguageModelV4CallOptions,
     identity: string,
     session: SessionEntry,
     pendingResult: NonNullable<ReturnType<typeof findPendingToolResult>>,
-    fnTools: LanguageModelV2FunctionTool[],
+    fnTools: LanguageModelV4FunctionTool[],
     systemPrompt: string | undefined,
-  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+  ): Promise<Awaited<ReturnType<LanguageModelV4["doGenerate"]>>> {
     // Park the framework's real result where the shim will serve it, and keep
     // the advertised schemas current (tool set can shift between turns).
     parkResult(session.shim.resultFile, pendingResult);
@@ -859,8 +873,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   // -------------------------------------------------------------------------
 
   private async _flattenGenerate(
-    options: LanguageModelV2CallOptions,
-  ): Promise<Awaited<ReturnType<LanguageModelV2["doGenerate"]>>> {
+    options: LanguageModelV4CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV4["doGenerate"]>>> {
     const systemPrompt = extractSystemPrompt(options.prompt);
     const fnTools = extractFunctionTools(options);
     const sdkOptions = this._baseSdkOptions();
@@ -901,13 +915,13 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
   // doStream — single-turn stream (flatten-style; no session resume)
   // -------------------------------------------------------------------------
 
-  doStream(options: LanguageModelV2CallOptions): ReturnType<LanguageModelV2["doStream"]> {
+  doStream(options: LanguageModelV4CallOptions): ReturnType<LanguageModelV4["doStream"]> {
     return this._doStream(options);
   }
 
   private async _doStream(
-    options: LanguageModelV2CallOptions,
-  ): Promise<Awaited<ReturnType<LanguageModelV2["doStream"]>>> {
+    options: LanguageModelV4CallOptions,
+  ): Promise<Awaited<ReturnType<LanguageModelV4["doStream"]>>> {
     const systemPrompt = extractSystemPrompt(options.prompt);
     const fnTools = extractFunctionTools(options);
     const promptString = renderConversation(options.prompt) || " ";
@@ -925,7 +939,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
     }
 
     const textId = "text-0";
-    const stream = new ReadableStream<LanguageModelV2StreamPart>({
+    const stream = new ReadableStream<LanguageModelV4StreamPart>({
       start: async (controller) => {
         let inputTokens = 0;
         let outputTokens = 0;
@@ -1099,8 +1113,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV2 {
 // ---------------------------------------------------------------------------
 
 /** Pull the plain function tools out of the call options (drop provider tools). */
-function extractFunctionTools(options: LanguageModelV2CallOptions): LanguageModelV2FunctionTool[] {
-  const fnTools: LanguageModelV2FunctionTool[] = [];
+function extractFunctionTools(options: LanguageModelV4CallOptions): LanguageModelV4FunctionTool[] {
+  const fnTools: LanguageModelV4FunctionTool[] = [];
   if (options.tools) {
     for (const t of options.tools) {
       if (t.type === "function") fnTools.push(t);
@@ -1116,7 +1130,7 @@ function extractFunctionTools(options: LanguageModelV2CallOptions): LanguageMode
 function deriveFinishReason(args: {
   hasToolCalls: boolean;
   sdkStopReason: string | null;
-}): LanguageModelV2FinishReason {
+}): LanguageModelV4FinishReason {
   if (args.hasToolCalls) return "tool-calls";
   switch (args.sdkStopReason) {
     case "end_turn":
@@ -1137,7 +1151,7 @@ function deriveFinishReason(args: {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a `LanguageModelV2` backed by the Claude Agent SDK.
+ * Create a `LanguageModelV4` backed by the Claude Agent SDK.
  *
  * Runs in isolated config mode by default — the provider acts as a plain
  * model and does NOT inherit the host's ~/.claude connectors/plugins/skills.
