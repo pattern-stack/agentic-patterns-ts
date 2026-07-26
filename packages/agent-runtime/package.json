@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/runtime",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
   "type": "module",
@@ -10,7 +10,7 @@
     "directory": "packages/agent-runtime"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "publishConfig": {
     "access": "public"
@@ -18,19 +18,11 @@
   "keywords": ["agents", "llm", "ai", "runtime", "vercel-ai-sdk", "events", "multi-agent"],
   "homepage": "https://github.com/pattern-stack/agentic-patterns-ts",
   "bugs": "https://github.com/pattern-stack/agentic-patterns-ts/issues",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
-      },
-      "require": {
-        "types": "./dist/index.d.cts",
-        "default": "./dist/index.cjs"
-      }
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "files": ["dist"],
