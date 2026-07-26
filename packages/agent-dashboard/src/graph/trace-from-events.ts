@@ -127,6 +127,39 @@ const durMs = (col: Record<string, unknown>, p: Record<string, unknown>) =>
   num(col.duration_ms) ?? num(p.durationMs) ?? num(p.duration_ms) ?? 0;
 const ctxTok = (p: Record<string, unknown>) => num(p.inputTokens) ?? num(p.input_tokens);
 const outTok = (p: Record<string, unknown>) => num(p.outputTokens) ?? num(p.output_tokens);
+/**
+ * #388 — cache/reasoning token breakdown, read from BOTH wire shapes: live
+ * SSE carries snake_case `usage_details` (per-member snake_case, per
+ * `toSnakeUsageDetails`); persisted replay carries the camelCase
+ * `usageDetails` object verbatim (spread straight off the stored `AgentEvent`
+ * JSON — same dual-read discipline as `ctxTok`/`outTok` above). Returns
+ * `undefined` when the source object itself is absent — never zero-filled.
+ */
+function tokenDetailsOf(p: Record<string, unknown>): TraceStep["tokenDetails"] {
+  const camel = rec(p.usageDetails);
+  const snake = rec(p.usage_details);
+  const noCache = num(camel.noCacheTokens) ?? num(snake.no_cache_tokens);
+  const cacheRead = num(camel.cacheReadTokens) ?? num(snake.cache_read_tokens);
+  const cacheWrite = num(camel.cacheWriteTokens) ?? num(snake.cache_write_tokens);
+  const text = num(camel.textTokens) ?? num(snake.text_tokens);
+  const reasoning = num(camel.reasoningTokens) ?? num(snake.reasoning_tokens);
+  if (
+    noCache === undefined &&
+    cacheRead === undefined &&
+    cacheWrite === undefined &&
+    text === undefined &&
+    reasoning === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(noCache !== undefined ? { noCache } : {}),
+    ...(cacheRead !== undefined ? { cacheRead } : {}),
+    ...(cacheWrite !== undefined ? { cacheWrite } : {}),
+    ...(text !== undefined ? { text } : {}),
+    ...(reasoning !== undefined ? { reasoning } : {}),
+  };
+}
 const planned = (p: Record<string, unknown>): boolean =>
   typeof p.hasToolCalls === "boolean"
     ? p.hasToolCalls
@@ -240,6 +273,7 @@ export function eventsToSteps(
           pending.ms = durMs(col, p);
           pending.ctxTokens = ctxTok(p);
           pending.outTokens = outTok(p);
+          pending.tokenDetails = tokenDetailsOf(p);
           pending.detail = detail;
           pending.status = undefined;
           pendingModelIdx = -1;
@@ -251,6 +285,7 @@ export function eventsToSteps(
             ms: durMs(col, p),
             ctxTokens: ctxTok(p),
             outTokens: outTok(p),
+            tokenDetails: tokenDetailsOf(p),
             detail,
             agent: curAgent,
           });

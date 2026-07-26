@@ -47,6 +47,17 @@ export interface TraceStep {
   /** model steps */
   ctxTokens?: number;
   outTokens?: number;
+  /**
+   * #388: cache/reasoning token breakdown for this model step. Absent when
+   * the provider reported no detail members at all — never zero-filled.
+   */
+  tokenDetails?: {
+    noCache?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    text?: number;
+    reasoning?: number;
+  };
   emits?: string[];
   /** tool steps */
   tool?: string;

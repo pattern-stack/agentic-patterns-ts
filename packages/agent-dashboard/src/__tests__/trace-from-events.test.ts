@@ -623,3 +623,68 @@ describe("eventsToSteps — synthetic boundary provenance (#324/D12)", () => {
     expect(model?.synthetic).toBe(true);
   });
 });
+
+describe("eventsToSteps — tokenDetails fold (#388, absent ≠ zero)", () => {
+  const TOOLS: ToolIndex = new Map();
+
+  it("folds usage_details from a live snake_case llm.end frame into TraceStep.tokenDetails", () => {
+    const events = [
+      { type: "message.start", seq: 1, agent_name: "agent" },
+      { type: "llm.start", seq: 2, model: "claude", message_count: 1, has_tools: false },
+      {
+        type: "llm.end",
+        seq: 3,
+        model: "claude",
+        input_tokens: 12000,
+        output_tokens: 320,
+        duration_ms: 100,
+        finish_reason: "stop",
+        usage_details: { cache_read_tokens: 11900, cache_write_tokens: 0, reasoning_tokens: 140 },
+      },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.tokenDetails).toEqual({ cacheRead: 11900, cacheWrite: 0, reasoning: 140 });
+  });
+
+  it("folds usageDetails from a persisted camelCase (payload_json) llm.end row into TraceStep.tokenDetails", () => {
+    const events = [
+      { type: "message.start", seq: 1, agent_name: "agent" },
+      {
+        type: "llm.start",
+        seq: 2,
+        run_id: "r1",
+        payload_json: '{"model":"claude","messageCount":1,"hasTools":false}',
+      },
+      {
+        type: "llm.end",
+        seq: 3,
+        run_id: "r1",
+        payload_json:
+          '{"model":"claude","inputTokens":12000,"outputTokens":320,"durationMs":100,"finishReason":"stop","usageDetails":{"cacheReadTokens":11900,"reasoningTokens":140}}',
+      },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.tokenDetails).toEqual({ cacheRead: 11900, reasoning: 140 });
+  });
+
+  it("leaves TraceStep.tokenDetails undefined when the event carries no usage_details/usageDetails key (absent ≠ zero)", () => {
+    const events = [
+      { type: "message.start", seq: 1, agent_name: "agent" },
+      { type: "llm.start", seq: 2, model: "claude", message_count: 1, has_tools: false },
+      {
+        type: "llm.end",
+        seq: 3,
+        model: "claude",
+        input_tokens: 10,
+        output_tokens: 5,
+        duration_ms: 5,
+        finish_reason: "stop",
+      },
+    ];
+    const steps = eventsToSteps(events, TOOLS, { terminal: false });
+    const model = steps.find((s) => s.kind === "model");
+    expect(model?.tokenDetails).toBeUndefined();
+  });
+});
