@@ -210,7 +210,18 @@ export class Conversation {
    */
   async *stream(
     message: string,
-    options?: { eventBus?: AgentEventBus; maxIterations?: number; signal?: AbortSignal },
+    options?: {
+      eventBus?: AgentEventBus;
+      maxIterations?: number;
+      signal?: AbortSignal;
+      /**
+       * ADR-0006 §2, the caller half of the two-layer opt-in: whether tools
+       * may publish render artifacts on this run. Without this the flag has
+       * no route from a registration to `RunOptions`, and the artifact channel
+       * is unreachable in practice.
+       */
+      publishArtifacts?: boolean;
+    },
   ): AsyncGenerator<AgentEvent> {
     if (!this.runner.stream) {
       throw new Error("Runner does not support streaming");
@@ -269,6 +280,12 @@ export class Conversation {
         // so a runner that special-cases "key present" behaves the same as
         // before this option existed.
         ...(options?.signal ? { abortSignal: options.signal } : {}),
+        // ADR-0006: same omitted-when-absent discipline as `abortSignal` above,
+        // so a runner that special-cases "key present" is unaffected when the
+        // caller never opts in.
+        ...(options?.publishArtifacts !== undefined
+          ? { publishArtifacts: options.publishArtifacts }
+          : {}),
       })) {
         yield event;
         capturedRunId ??= event.runId;

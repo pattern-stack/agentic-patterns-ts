@@ -1547,4 +1547,161 @@ describe("AgentRunner", () => {
       });
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // ADR-0006 — render-artifact publication + preserved structured terminal
+  // output. `RunOptions.publishArtifacts` gates `ToolExecutionContext.
+  // publishArtifact`; a terminal tool's structured result is carried
+  // alongside (not instead of) the still-stringified `content`.
+  // ---------------------------------------------------------------------------
+  describe("render artifacts (ADR-0006)", () => {
+    const weatherSchema = z.object({ city: z.string() });
+
+    it("publishArtifacts: true — ctx.publishArtifact is wired, and published artifacts land on that call's tool.end", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "get_weather", input: { city: "NYC" } },
+            10,
+            5,
+          ),
+      });
+      const tools = [ToolSchema.fromZod("get_weather", "Get weather", weatherSchema)];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          ctx?.publishArtifact?.({
+            id: "wx:nyc",
+            displayType: "table",
+            data: { columns: ["day"], rows: [["mon"]] },
+          });
+          return { weather: "sunny" };
+        },
+      };
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      await runner.run(agent, "weather?", { toolExecutor: executor, publishArtifacts: true });
+
+      const toolEnd = events.find((e) => e.type === "agent.tool.end") as unknown as {
+        artifacts?: Array<{ id: string }>;
+      };
+      expect(toolEnd.artifacts).toEqual([
+        { id: "wx:nyc", displayType: "table", data: { columns: ["day"], rows: [["mon"]] } },
+      ]);
+    });
+
+    it("publishArtifacts: false (default) — ctx.publishArtifact is undefined, and tool.end carries no artifacts key", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "get_weather", input: { city: "NYC" } },
+            10,
+            5,
+          ),
+      });
+      const tools = [ToolSchema.fromZod("get_weather", "Get weather", weatherSchema)];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { weather: "sunny" };
+        },
+      };
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      // publishArtifacts omitted — defaults to off.
+      await runner.run(agent, "weather?", { toolExecutor: executor });
+
+      expect(capturedCtx[0]?.publishArtifact).toBeUndefined();
+      const toolEnd = events.find((e) => e.type === "agent.tool.end") as unknown as {
+        artifacts?: unknown;
+      };
+      expect(toolEnd).not.toHaveProperty("artifacts");
+    });
+
+    it("does not attach artifacts to a call that never publishes, even with the gate on", async () => {
+      const model = new MockLanguageModelV2({
+        doGenerate: async () =>
+          toolCallResult(
+            { toolCallId: "tc-1", toolName: "get_weather", input: { city: "NYC" } },
+            10,
+            5,
+          ),
+      });
+      const tools = [ToolSchema.fromZod("get_weather", "Get weather", weatherSchema)];
+      const agent = makeAgent({ getTools: () => tools });
+      const executor = makeToolExecutor(async () => ({ weather: "sunny" }));
+
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      await runner.run(agent, "weather?", { toolExecutor: executor, publishArtifacts: true });
+
+      const toolEnd = events.find((e) => e.type === "agent.tool.end");
+      expect(toolEnd).not.toHaveProperty("artifacts");
+    });
+
+    describe("preserved structured terminal output (ADR §9)", () => {
+      const finishSchema = z.object({ summary: z.string() });
+      const finishTool = ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true);
+
+      it("attaches structuredContent to message.complete for a structured terminal result, content stays JSON-stringified", async () => {
+        const structured = { facets: 3, gaps: 0 };
+        const model = new MockLanguageModelV2({
+          doGenerate: async () =>
+            toolCallResult(
+              { toolCallId: "tc-1", toolName: "finish", input: { summary: "done" } },
+              20,
+              10,
+            ),
+        });
+        const agent = makeAgent({ getTools: () => [finishTool] });
+        const executor = makeToolExecutor(async () => structured);
+
+        const bus = new AgentEventBus();
+        const events = collectEvents(bus);
+        const runner = new AgentRunner(model, bus);
+        const result = await runner.run(agent, "Gather", { toolExecutor: executor });
+
+        expect(result.response).toBe(JSON.stringify(structured));
+
+        const complete = events.find((e) => e.type === "agent.message.complete") as unknown as {
+          content: string;
+          structuredContent?: unknown;
+        };
+        expect(complete.content).toBe(JSON.stringify(structured));
+        expect(complete.structuredContent).toEqual(structured);
+      });
+
+      it("omits structuredContent entirely for a string terminal result — byte-identical content", async () => {
+        const model = new MockLanguageModelV2({
+          doGenerate: async () =>
+            toolCallResult(
+              { toolCallId: "tc-1", toolName: "finish", input: { summary: "covered 3 facets" } },
+              20,
+              10,
+            ),
+        });
+        const agent = makeAgent({ getTools: () => [finishTool] });
+        const executor = makeToolExecutor(async (_name, args) => args.summary);
+
+        const bus = new AgentEventBus();
+        const events = collectEvents(bus);
+        const runner = new AgentRunner(model, bus);
+        const result = await runner.run(agent, "Gather", { toolExecutor: executor });
+
+        expect(result.response).toBe("covered 3 facets");
+
+        const complete = events.find((e) => e.type === "agent.message.complete");
+        expect(complete).not.toHaveProperty("structuredContent");
+      });
+    });
+  });
 });

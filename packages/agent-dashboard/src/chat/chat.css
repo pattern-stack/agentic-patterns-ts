@@ -272,6 +272,52 @@
   margin-bottom: 3px;
 }
 
+/* ── render artifacts (ADR-0006) ─────────────────────────────────────────────
+ * Render-ready payloads delivered alongside tool.end / message.complete —
+ * table (DataTable), JSON fallback, or a ceiling-marker placeholder. Both
+ * wrapper levels get min-width: 0 — a flex-column child's automatic minimum
+ * width defaults to its content's min-content size, which a nested DataTable
+ * could otherwise use to stretch the whole chat message (same class of fix as
+ * .md-table-wrap below, and .chat-body / scratchpad-rail.css above). */
+.chat-artifacts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.artifact-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.artifact-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fz-micro);
+  color: var(--mute);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.artifact-chip {
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: normal;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  color: var(--ink-2);
+}
+.artifact-placeholder {
+  padding: 9px 11px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--mute);
+  font-size: var(--fz-small);
+  font-style: italic;
+}
+
 /* Agent step (delegation) — a pipeline stage handed to a sub-agent. A doubled
    left-accent, an "agent" chip, and an indented child rail visually separate a
    DELEGATION from a tool the model called (which stays a plain .chat-tool). */

@@ -890,4 +890,136 @@ describe("AgentRunner.stream()", () => {
       expect((convEnd as { reason?: string }).reason).toBe("cancelled");
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // ADR-0006 — render-artifact publication + preserved structured terminal
+  // output, parity with run()'s dispatch site (the 3rd of 3 `buildToolCtx`
+  // call sites).
+  // ---------------------------------------------------------------------------
+  describe("render artifacts (ADR-0006)", () => {
+    it("publishArtifacts: true — published artifacts land on that call's tool.end", async () => {
+      const model = new MockLanguageModelV2({
+        doStream: async () =>
+          streamFrom([
+            toolCallPart("tc-1", "weather", { city: "SF" }),
+            finishPart("tool-calls", 10, 5),
+          ])(),
+      });
+      const weatherSchema = z.object({ city: z.string() });
+      const tools = [ToolSchema.fromZod("weather", "Get weather", weatherSchema)];
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent({ getTools: () => tools });
+
+      const events = await collectStream(
+        runner.stream(agent, "weather?", {
+          toolExecutor: {
+            execute: async (_name, _args, ctx) => {
+              ctx?.publishArtifact?.({
+                id: "wx:sf",
+                displayType: "table",
+                data: { columns: ["day"], rows: [["tue"]] },
+              });
+              return { forecast: "foggy" };
+            },
+          },
+          publishArtifacts: true,
+        }),
+      );
+
+      const toolEnd = events.find((e) => e.type === "agent.tool.end") as unknown as {
+        artifacts?: Array<{ id: string }>;
+      };
+      expect(toolEnd.artifacts).toEqual([
+        { id: "wx:sf", displayType: "table", data: { columns: ["day"], rows: [["tue"]] } },
+      ]);
+    });
+
+    it("publishArtifacts: false (default) — ctx.publishArtifact is undefined, tool.end carries no artifacts key", async () => {
+      const model = new MockLanguageModelV2({
+        doStream: async () =>
+          streamFrom([
+            toolCallPart("tc-1", "weather", { city: "SF" }),
+            finishPart("tool-calls", 10, 5),
+          ])(),
+      });
+      const weatherSchema = z.object({ city: z.string() });
+      const tools = [ToolSchema.fromZod("weather", "Get weather", weatherSchema)];
+      const bus = new AgentEventBus();
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent({ getTools: () => tools });
+
+      const capturedCtx: Array<{ publishArtifact?: unknown } | undefined> = [];
+      const events = await collectStream(
+        runner.stream(agent, "weather?", {
+          toolExecutor: {
+            execute: async (_name, _args, ctx) => {
+              capturedCtx.push(ctx);
+              return { forecast: "foggy" };
+            },
+          },
+        }),
+      );
+
+      expect(capturedCtx[0]?.publishArtifact).toBeUndefined();
+      const toolEnd = events.find((e) => e.type === "agent.tool.end");
+      expect(toolEnd).not.toHaveProperty("artifacts");
+    });
+
+    describe("preserved structured terminal output (ADR §9, parity with run())", () => {
+      it("attaches structuredContent to message.complete for a structured terminal result, content stays JSON-stringified", async () => {
+        const structured = { facets: 3, gaps: 0 };
+        const model = new MockLanguageModelV2({
+          doStream: async () =>
+            streamFrom([
+              toolCallPart("tc-1", "finish", { summary: "done" }),
+              finishPart("tool-calls", 10, 5),
+            ])(),
+        });
+        const finishSchema = z.object({ summary: z.string() });
+        const tools = [ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true)];
+        const bus = new AgentEventBus();
+        const runner = new AgentRunner(model, bus);
+        const agent = makeAgent({ getTools: () => tools });
+
+        const events = await collectStream(
+          runner.stream(agent, "Gather", {
+            toolExecutor: { execute: async () => structured },
+          }),
+        );
+
+        const complete = events.find((e) => e.type === "agent.message.complete") as unknown as {
+          content: string;
+          structuredContent?: unknown;
+        };
+        expect(complete.content).toBe(JSON.stringify(structured));
+        expect(complete.structuredContent).toEqual(structured);
+      });
+
+      it("omits structuredContent entirely for a string terminal result — byte-identical content", async () => {
+        const model = new MockLanguageModelV2({
+          doStream: async () =>
+            streamFrom([
+              toolCallPart("tc-1", "finish", { summary: "all facets covered" }),
+              finishPart("tool-calls", 10, 5),
+            ])(),
+        });
+        const finishSchema = z.object({ summary: z.string() });
+        const tools = [ToolSchema.fromZod("finish", "Signal done", finishSchema, undefined, true)];
+        const bus = new AgentEventBus();
+        const runner = new AgentRunner(model, bus);
+        const agent = makeAgent({ getTools: () => tools });
+
+        const events = await collectStream(
+          runner.stream(agent, "Gather", {
+            toolExecutor: { execute: async (_name, args) => args.summary },
+          }),
+        );
+
+        const complete = events.find((e) => e.type === "agent.message.complete");
+        expect((complete as { content?: string }).content).toBe("all facets covered");
+        expect(complete).not.toHaveProperty("structuredContent");
+      });
+    });
+  });
 });

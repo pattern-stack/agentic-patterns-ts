@@ -3,9 +3,10 @@
  * new part kind = add a case here; nothing else changes.
  */
 import { Fragment, useEffect, useRef, useState } from "react";
+import { type Column, DataTable } from "../components/organisms/DataTable";
 import { CodeBlock, Markdown } from "./atoms";
 import { type InputAnswer, useInputResponder } from "./input-responder";
-import type { Part } from "./model";
+import { type ChatArtifact, type Part, isTableArtifactData } from "./model";
 import type { StateDeltaPart as StateDelta } from "./state-accessors";
 
 const fmt = (v: unknown): string => {
@@ -19,6 +20,34 @@ const fmt = (v: unknown): string => {
 };
 const preview = (s: string, n = 72): string => (s.length > n ? `${s.slice(0, n)}…` : s);
 const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * ADR-0006 §9 fallback render for a terminal tool's structured answer. This
+ * key list is a DELIBERATE, CONSERVATIVE HEURISTIC, not a schema — the
+ * framework has no contract with agent authors about tool return shapes (the
+ * agent is not involved in artifact/answer publication, ADR §6). It exists
+ * only to make the common "prose + a machine field" shape from the bug
+ * report (`{"answer": "...", "ref": "..."}`) render as prose instead of raw
+ * JSON. Anything that doesn't match this narrow shape EXACTLY — more than one
+ * candidate key present, the candidate's value isn't a string, or the value
+ * isn't a plain object at all — falls through to the JSON/CodeBlock render.
+ * Never guessed, never partially unwrapped.
+ */
+const PROSE_KEYS = ["answer", "text", "response", "message", "summary"] as const;
+
+function findProseField(
+  value: unknown,
+): { prose: string; rest: Record<string, unknown> } | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const r = value as Record<string, unknown>;
+  const matches = PROSE_KEYS.filter((k) => k in r && typeof r[k] === "string");
+  if (matches.length !== 1) return undefined;
+  const key = matches[0];
+  if (key === undefined) return undefined;
+  const rest: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(r)) if (k !== key) rest[k] = v;
+  return { prose: r[key] as string, rest };
+}
 
 /* ── [#N] citation chips (#226) ─────────────────────────────────────────────
  * Canonical backpack handles in assistant prose become live chips: hover
@@ -177,6 +206,40 @@ function TextPart({ content, role }: { content: string; role: "user" | "assistan
   return <AssistantText content={content} />;
 }
 
+/* ── structured terminal answer (ADR-0006 §9) ────────────────────────────────
+ * Substituted (by `model.ts`'s `applyStructuredContent`) for the raw-JSON text
+ * part a structured terminal result used to render as. A plain object with
+ * exactly one recognized prose key (see `findProseField`/`PROSE_KEYS` above)
+ * renders that string through the SAME markdown + cite-linkify path as any
+ * other assistant text (`AssistantText`); any remaining fields go in a
+ * collapsed disclosure so nothing is hidden. Anything else — not an object,
+ * no prose key, or more than one candidate — degrades to the plain
+ * JSON/CodeBlock render used everywhere else in this file. Never crashes.
+ */
+function AnswerPart({ value }: { value: unknown }) {
+  const found = findProseField(value);
+  if (!found) {
+    const body = fmt(value);
+    return (
+      <div className="chat-bubble assistant">
+        {body && <CodeBlock text={body} copyable maxHeight={280} />}
+      </div>
+    );
+  }
+  const restKeys = Object.keys(found.rest);
+  return (
+    <div className="answer-part">
+      <AssistantText content={found.prose} />
+      {restKeys.length > 0 && (
+        <details className="answer-fields">
+          <summary>{count(restKeys.length, "more field")}</summary>
+          <CodeBlock text={fmt(found.rest)} maxHeight={280} />
+        </details>
+      )}
+    </div>
+  );
+}
+
 /* ── thinking ───────────────────────────────────────────────────────────────*/
 function ThinkingPart({ content, complete }: { content: string; complete: boolean }) {
   const empty = !content.trim();
@@ -212,8 +275,15 @@ function ToolCallPart({ part }: { part: Extract<Part, { kind: "tool_call" }> }) 
   const badge = part.rejected ? "⊘" : part.error ? "✗" : running ? "⋯" : "✓";
   const args = fmt(part.arguments);
   const out = fmt(part.result);
+  // ADR-0006: a card carrying render artifacts opens itself. The artifact is
+  // the point of the call — leaving it behind a collapsed summary means the
+  // reader has to already know a table is in there, which defeats "inserted
+  // immediately". Errors open for the same reason. Artifacts stay ATTACHED to
+  // their producing call (rather than floating as a sibling block) so the
+  // "this table came from this tool" provenance survives.
+  const hasArtifacts = (part.artifacts?.length ?? 0) > 0;
   return (
-    <details className={`chat-tool ${status}`} open={!!part.error}>
+    <details className={`chat-tool ${status}`} open={!!part.error || hasArtifacts}>
       <summary>
         <span aria-hidden>{badge}</span>
         <span className="tool-name">{part.name}</span>
@@ -238,6 +308,12 @@ function ToolCallPart({ part }: { part: Extract<Part, { kind: "tool_call" }> }) 
               <CodeBlock text={out} copyable maxHeight={240} />
             </div>
           )
+        )}
+        {part.artifacts && part.artifacts.length > 0 && (
+          <div>
+            <div className="io-label">artifacts</div>
+            <ArtifactList artifacts={part.artifacts} />
+          </div>
         )}
       </div>
     </details>
@@ -884,6 +960,90 @@ export function StateGroupPart({ parts }: { parts: StateDelta[] }) {
   );
 }
 
+/* ── render artifacts (ADR-0006) ─────────────────────────────────────────────
+ * A render-ready payload delivered alongside `tool.end` / `message.complete` —
+ * inserted directly, no resolution step. `displayType` is an OPEN string:
+ * anything but `"table"` (and a `"table"` whose `data` fails the shape guard —
+ * a producer contract violation) degrades to the existing JSON/CodeBlock
+ * fallback, never a crash. A `data === undefined` artifact is a CEILING
+ * MARKER — the producer's payload breached the transport's size cap and was
+ * dropped rather than shrunk — rendered as an honest placeholder, never a
+ * partial or fabricated table (ADR §4).
+ */
+
+function ArtifactHead({ artifact }: { artifact: ChatArtifact }) {
+  return (
+    <div className="artifact-head">
+      <span>{artifact.title ?? artifact.displayType}</span>
+      {artifact.truncated && (
+        <span className="artifact-chip" title="the producer shortened this payload">
+          truncated
+        </span>
+      )}
+    </div>
+  );
+}
+
+function TableArtifactBlock({
+  artifact,
+  data,
+}: {
+  artifact: ChatArtifact;
+  data: { columns: string[]; rows: unknown[][] };
+}) {
+  const cols: Column<unknown[]>[] = data.columns.map((header, i) => ({
+    key: String(i),
+    header,
+    render: (row) => fmt(row[i]),
+  }));
+  return (
+    <div className="artifact-card">
+      <ArtifactHead artifact={artifact} />
+      <DataTable columns={cols} data={data.rows} />
+    </div>
+  );
+}
+
+function CeilingPlaceholder({ artifact }: { artifact: ChatArtifact }) {
+  return (
+    <div className="artifact-card">
+      <ArtifactHead artifact={artifact} />
+      <div className="artifact-placeholder">{artifact.displayType} — too large to display</div>
+    </div>
+  );
+}
+
+function JsonArtifactBlock({ artifact }: { artifact: ChatArtifact }) {
+  const body = fmt(artifact.data);
+  return (
+    <div className="artifact-card">
+      <ArtifactHead artifact={artifact} />
+      {body && <CodeBlock text={body} copyable maxHeight={280} />}
+    </div>
+  );
+}
+
+/** Dispatcher: ceiling marker → placeholder; valid table → DataTable; anything
+ *  else (unknown `displayType`, or a `table` whose `data` fails the shape
+ *  guard) → the JSON fallback. Exported for tests. */
+export function ArtifactBlock({ artifact }: { artifact: ChatArtifact }) {
+  if (artifact.data === undefined) return <CeilingPlaceholder artifact={artifact} />;
+  if (artifact.displayType === "table" && isTableArtifactData(artifact.data)) {
+    return <TableArtifactBlock artifact={artifact} data={artifact.data} />;
+  }
+  return <JsonArtifactBlock artifact={artifact} />;
+}
+
+function ArtifactList({ artifacts }: { artifacts: ChatArtifact[] }) {
+  return (
+    <div className="chat-artifacts">
+      {artifacts.map((a) => (
+        <ArtifactBlock key={a.id} artifact={a} />
+      ))}
+    </div>
+  );
+}
+
 /* ── gate decision (F-2, #324) ───────────────────────────────────────────────
  * A compact audit row: outcome + tool + who settled it + the evaluation trail.
  * Prose is regular UI text (no mono — project convention); only literal payloads
@@ -985,6 +1145,10 @@ export function PartView({
       return <GateDecisionPart part={part} />;
     case "harness_native":
       return <HarnessNativePart part={part} />;
+    case "artifacts":
+      return <ArtifactList artifacts={part.items} />;
+    case "answer":
+      return <AnswerPart value={part.value} />;
     case "error":
       return <ErrorPart errorType={part.errorType} message={part.message} />;
     default:

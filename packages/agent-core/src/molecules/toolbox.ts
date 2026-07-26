@@ -7,6 +7,7 @@
  */
 
 import type { ZodTypeAny, z } from "zod";
+import type { RenderArtifact } from "./render-artifact.js";
 import { ToolSchema } from "./tool-schema.js";
 
 /**
@@ -43,6 +44,20 @@ export interface ToolExecutionContext {
    * agent-as-tool seam, #124).
    */
   readonly host?: unknown;
+  /**
+   * Fire-and-forget render-artifact publication sink
+   * ([ADR-0006](../../../../docs/adr/0006-render-artifacts.md)). Deliberately
+   * INDEPENDENT of the tool's return value to the model (§1) — a tool may
+   * publish a 500-row table here while returning a two-token ref to the
+   * agent. Same philosophy as `emit`: core declares the slot and never
+   * awaits, validates, or interprets what's published; the host wires it to
+   * whatever transport/ceiling it runs (§4). Present only when the run's
+   * caller opted in (ADR §2's "two-layer opt-in" — the tool declares via
+   * `ToolSchema.displayType`, the caller/registration decides whether
+   * publication is wired for this run); absent otherwise, so a tool can
+   * cheaply skip building an artifact it isn't allowed to publish.
+   */
+  readonly publishArtifact?: (artifact: RenderArtifact) => void;
 }
 
 /**

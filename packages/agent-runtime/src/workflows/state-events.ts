@@ -144,9 +144,20 @@ export function byteLength(s: string): number {
   return encoder.encode(s).length;
 }
 
-/** Render any value to a one-line string suitable for previewing. */
+/**
+ * Render any value to a one-line string suitable for previewing.
+ *
+ * `undefined` renders as the EMPTY string, not `"undefined"`. Reading an unset
+ * slot is absence, and `JSON.stringify(undefined)` returns `undefined`, which
+ * used to fall into the `String(value)` fallback below and surface the literal
+ * text "undefined" in the UI — a read frame rendered `key · read · undefined`,
+ * reporting absence as though it were a value. The fallback is still correct
+ * for genuinely unserializable values (functions, symbols); it was only wrong
+ * for absence.
+ */
 export function renderPreviewSource(value: unknown): string {
   if (typeof value === "string") return value;
+  if (value === undefined) return "";
   try {
     const s = JSON.stringify(value);
     return s === undefined ? String(value) : s;
