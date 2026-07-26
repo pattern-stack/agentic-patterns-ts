@@ -1,7 +1,8 @@
 # ADR 0006 — Render artifacts: a second data channel on the response envelope
 
 - **Status:** Accepted (2026-07-26) — open questions resolved in review:
-  attachment optional on both events, no framework capping, artifacts not
+  attachment optional on both events, producer-owned shaping under an
+  absurdity ceiling, artifacts not
   persisted (run-state persistence tracked as a follow-up). Not yet implemented.
 - **Date:** 2026-07-26
 - **Context owner:** Doug
@@ -145,13 +146,31 @@ tool's return value to the model.**
    framework does not require artifacts anywhere: a run with none is the
    normal case.
 
-4. **Size is entirely the producer's concern. The framework never truncates,
-   caps, or paginates artifacts.** `truncated` is an advisory flag the
-   *producer* sets to tell a client that it shortened the data; nothing in the
-   framework inspects `data` or acts on the flag. This follows §1 — the
-   framework has no opinion about a tool's data — and avoids the framework
-   corrupting a structured payload it cannot parse. The operational
-   consequence is accepted and named under Consequences.
+4. **Shaping is the producer's concern; the framework enforces only an
+   absurdity ceiling.** The framework never truncates, paginates, samples, or
+   otherwise *reshapes* `data` — it cannot, since `displayType` is open and the
+   payload is opaque to it, and a partial reshape of a structure it cannot
+   parse produces invalid output. `truncated` is an advisory flag the
+   **producer** sets when it shortened the data; the framework never inspects
+   it.
+
+   The framework does enforce **one absolute byte ceiling** as a safety valve.
+   It is deliberately set far above any legitimate artifact — reference point:
+   a ~1M-token context is on the order of a few MB of text, so a ceiling an
+   order of magnitude above that can never bite a real payload while still
+   ruling out the runaway case. It is a sanity bound, **not** a tuning knob and
+   not an opinion about the data.
+
+   Breaching it is a **loud failure, never a silent shrink**: the artifact is
+   published as a marker (`id`, `displayType`, `truncated: true`, no `data`)
+   and the breach is surfaced as an error. The framework will drop an artifact
+   it cannot safely ship, but it will never hand a client half a structure and
+   call it the answer. This matches the house rule already visible in
+   `state-accessors.ts` ("rows left out… never silently clipped").
+
+   Suggested default: 64 MB, configurable. That number is the one thing here
+   worth bikeshedding; the principle is that it exists and never fires in
+   normal use.
 
 5. **Artifacts are not persisted.** They are live-stream render output, not
    system-of-record data, and storing a derived view alongside the source it
@@ -197,15 +216,18 @@ tool's return value to the model.**
 
 **Costs / risks**
 
-- **Unbounded payloads are a real failure mode, by design.** Because the
-  framework never caps (§2b), a tool that publishes a very large artifact can
-  produce an SSE frame big enough to stall the connection or exhaust client
-  memory. This is accepted: the alternative — the framework mangling a
-  structured payload it cannot parse — is worse, and capping belongs where the
-  semantics live. It does mean the failure is operational (a wedged stream)
-  rather than graceful (a truncation notice). Producers publishing unbounded
-  result sets should cap and set `truncated`.
-- **Reload loses artifacts (v1).** Since artifacts are not persisted (§2c) and
+- **Large payloads remain the producer's problem, up to the ceiling.** Between
+  "sensible" and the absurdity ceiling (§4) the framework ships whatever it is
+  given, so a tool publishing a multi-megabyte artifact can still make an SSE
+  frame heavy enough to hurt a client — it just can no longer take the process
+  down. Producers publishing unbounded result sets should cap and set
+  `truncated`; the ceiling is a backstop against bugs, not a substitute for
+  producer judgement.
+- **The ceiling is a hard drop, not a shrink.** An artifact over the limit
+  arrives as a marker with no `data`, so a client shows "there was a table
+  here" rather than a partial one. That is the intended trade: a visible gap
+  beats a plausible-looking half-truth.
+- **Reload loses artifacts (v1).** Since artifacts are not persisted (§5) and
   run state is not yet durable, replaying a stored conversation shows the prose
   without its tables — the same degraded view we have today. Acceptable only
   because it is no worse than the status quo; run-state persistence is the fix
@@ -241,7 +263,7 @@ tool's return value to the model.**
 ## Follow-ups
 
 - **Run-state persistence (the real fix for replay).** Artifacts are
-  deliberately not persisted (§2c), so today a reload loses them. The durable
+  deliberately not persisted (§5), so today a reload loses them. The durable
   answer is to persist the **state alongside a run** — the backpack pools and
   scratchpad slots a run actually produced — so a stored conversation can be
   *recreated*, artifacts included, from the source of truth rather than from a
