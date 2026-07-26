@@ -36,7 +36,6 @@
       "dist/",
       "node_modules/",
       "*.d.ts",
-      "*.d.cts",
       "pnpm-lock.yaml",
       "bun.lock",
       "demo/",

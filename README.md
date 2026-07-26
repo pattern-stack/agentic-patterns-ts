@@ -408,7 +408,7 @@ Capability = Toolbox + Manual + Playbook
 
 - **Zod schemas** for all data models -- define schema, `z.infer<>` for types
 - **Immutability** -- `Object.freeze()` + `Readonly<>` on atom data
-- **ESM-first** -- tsup produces both ESM and CJS outputs
+- **ESM-first** -- tsup produces ESM output (ESM-only as of v0.31)
 - **Strict TypeScript** -- `noUncheckedIndexedAccess`, `noUnusedLocals`
 - **Async throughout** -- all protocol methods return `Promise<T>`
 - **Fluent builders** -- `.with*()` methods return `this` for chaining
@@ -447,7 +447,7 @@ attestations are generated automatically. Packages pin each other with `workspac
 so CI `bun pm pack`s each package (rewriting `workspace:^` -> concrete caret pins)
 then `npm publish`es the tarball. Before any upload, a **tarball smoke gate**
 (`test/post-publish/run-tarball-smoke.ts`) installs the tarballs into a throwaway
-project and verifies the ESM/CJS import, type, and CLI-bin contract -- so a broken
+project and verifies the ESM import, type, no-CJS-artifact, and CLI-bin contract -- so a broken
 tarball aborts the release instead of reaching npm.
 
 **Dry-run / pre-flight locally:**
@@ -468,7 +468,7 @@ publish fails with an auth error.
 
 - **zod** -- schema validation and type inference
 - **ai** (Vercel AI SDK) -- LLM provider abstraction
-- **tsup** -- bundler (ESM + CJS)
+- **tsup** -- bundler (ESM-only)
 - **vitest** -- test runner
 - **biome** -- formatter and linter
 - **TypeScript 5.7+** -- strict mode compilation

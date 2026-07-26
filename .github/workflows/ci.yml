@@ -31,12 +31,13 @@ jobs:
       - name: Build
         run: bun run build
 
-      # Loads every built entry in BOTH formats. Cheap (no pack/install/network),
-      # so it can gate every PR. Exists because the cjs `import.meta` bug shipped
-      # behind a green `check` for ~6 merges — nothing here ever imported its own
-      # build output; only the publish-job tarball smoke did, and that runs after
-      # merge. Packaging-level checks stay in that smoke.
-      - name: Dist contract (ESM + CJS load)
+      # Loads every built ESM entry and asserts no CJS artifacts. Cheap (no
+      # pack/install/network), so it can gate every PR. Exists because the cjs
+      # `import.meta` bug shipped behind a green `check` for ~6 merges — nothing
+      # here ever imported its own build output; only the publish-job tarball
+      # smoke did, and that runs after merge. Packaging-level checks stay in
+      # that smoke.
+      - name: Dist contract (ESM load, no CJS artifacts)
         run: bun run check:dist-contract
 
       - name: Typecheck

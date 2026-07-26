@@ -81,7 +81,7 @@ bun run test            # vitest across all packages
 
 - Zod schemas for all data models (`z.object(...)`, then `z.infer<>` for types)
 - Immutability: `Object.freeze()` + `Readonly<>` types on atom data
-- ESM-first, `tsup` dual ESM/CJS output
+- ESM-first, `tsup` ESM-only output
 - Strict TypeScript (`noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`)
 - Fluent builders: `.with*()` returns `this`
 - Barrel exports (`index.ts`) for each public surface

@@ -18,14 +18,14 @@ Instructions for TypeScript workflows in this project.
 | Lint | `biome check` | Linting + import organization |
 | Typecheck | `tsc --noEmit` | Strict TypeScript checking |
 | Test | `vitest run` | Test runner with workspace support |
-| Build | `tsup` | Bundle ESM + CJS outputs |
+| Build | `tsup` | Bundle ESM output |
 | All gates | `bun run check` | build + typecheck + lint + test |
 
 ## Conventions
 
 - **Zod schemas** define all data models -- `z.object({})` then `z.infer<>` for types
 - **Immutability** -- `Object.freeze()` + `Readonly<>` types on atom data
-- **ESM-first** -- tsup produces both ESM and CJS, source uses ESM imports
+- **ESM-first** -- tsup produces ESM-only output, source uses ESM imports
 - **Strict mode** -- `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
 - **Async throughout** -- protocol methods return `Promise<T>`
 - **Fluent builders** -- `.with*()` methods return `this` for chaining
