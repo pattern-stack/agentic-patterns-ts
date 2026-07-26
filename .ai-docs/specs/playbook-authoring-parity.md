@@ -15,13 +15,13 @@ One PR. The pieces are small and interlocking (the shared violation module exist
 | 5. Docs + the ADR-citation fix | `docs/authoring-a-toolbox.md`, `packages/agent-core/README.md`, `runner/toolbox-executor.ts` | Yes |
 | 6. Release | `packages/agent-core/package.json`, `CHANGELOG.md`, `bun.lock` | No — must ride with 1-4 or core never publishes |
 
-Core floats independently of the lockstep triple. This is purely additive → **minor bump on `@agentic-patterns/core` (0.14.0 → 0.15.0), in this PR, with a CHANGELOG entry.**
+Core floats independently of the lockstep triple. This is purely additive → **minor bump on `@agentic-patterns/core` (0.15.0 → 0.16.0), in this PR, with a CHANGELOG entry.**
 
 Precedent, verified: `175f59a` (#264) bumped core `0.10.0 → 0.11.0` and added a CHANGELOG entry *in the feature commit*; `3d1a3a5` (#265) did the same for `0.11.0 → 0.12.0`. Both also touched `bun.lock` in that same commit.
 
 Omitting the bump would mean the publish job correctly skips core (`ci.yml:57-65`: "publishes it IFF its version isn't already on npm — so merges without a version bump are fast no-ops") and this work never reaches npm.
 
-**Lockfile is not optional.** #355 states it as a hard rule: `rm bun.lock && bun install` in the **same commit** as the version bump. A `package.json`-only bump drifts the lockfile and fails CI.
+**Lockfile — narrowly.** Update ONLY the four workspace `version` fields bun.lock caches (read by `scripts/publish.sh`'s lockfile-sanity gate). Do **not** run `rm bun.lock && bun install`: it regenerates every caret-ranged external dep and silently drags in unrelated upgrades. #385 hit exactly this (`1335911`) — the refresh moved `@anthropic-ai/claude-agent-sdk` 0.3.215 → 0.3.220 and broke the SDK packaging-contract fixture — and fixed it by restoring the external pins and touching only the workspace version fields. CI runs `bun install --frozen-lockfile` (`ci.yml:29`, `:94`), which a workspace-version-only edit satisfies.
 
 (#332 is lockstep-only. #355 is *"lockstep+core bump (bump-both)"* — it does cover core, contrary to an earlier draft of this paragraph. It doesn't change the decision, which rests on the `175f59a`/`3d1a3a5` precedent, but the two issues are not interchangeable.)
 
@@ -546,3 +546,19 @@ Two things a reviewer should push on, because they are judgment calls rather tha
 
 1. **D2's caveat is a real weakening.** "Validated" does not mean the delivered payload matches `returns`. It buys the metadata-only invariant for plain `PlayDefinition`s. If preserving that fixture matters less than the guarantee, D2 should flip — and that changes the design shape, not just a line.
 2. **Correction #3's residual is accepted, not solved.** A play calling a definition's `.execute()` directly still gets misattributed. Fixing it properly needs provenance on the violation tag, which touches the tool-side mechanism too. Deferred deliberately; say so if that's the wrong call.
+
+---
+
+## Design Addendum 3 — rebase onto #385 (drop-CJS), and the lockfile rule corrected
+
+Implementation landed while #385 (*drop CJS output, require Node >= 22*) was merging. Rebased onto it; no conflicts. Three corrections to the release section, all verified:
+
+1. **Version retargeted `0.15.0 → 0.16.0`.** #385 already shipped core `0.15.0` on main, so the bump specified here collapsed into a no-op on rebase — this PR would have carried **no** version change and never published. Same failure the first Gate-1.5 pass caught, arriving by a different route: a stale target rather than a missing step.
+
+2. **The `rm bun.lock && bun install` rule was wrong, and #385 proved it independently.** Following it regenerated every caret-ranged external dependency — `@anthropic-ai/sdk`, `@ai-sdk/anthropic`, `@ai-sdk/gateway`, `@hono/node-server`, rollup, and `@anthropic-ai/claude-agent-sdk` 0.3.215 → 0.3.220 with its 8 platform packages — turning a playbook-parity PR into a broad dependency bump. It also moved the SDK out from under `sdk-contract.test.ts`, whose drift detector fired correctly and was then silenced by editing the pinned fixture: the one guard designed to make such a move visible, disabled in the same commit that made it.
+
+   `1335911` (#385) hit the identical drift from the same command and resolved it the same way. Rule replaced: touch only the workspace `version` fields. Verified against CI's actual command — `bun install --frozen-lockfile` exits 0.
+
+3. **`shims: true` from #374 is gone from main, and that is the better outcome.** #385 dropped CJS output entirely, so the `createRequire(import.meta.url)` bug class is eliminated at the root rather than patched. The `check-dist-contract` guard added alongside that fix survived and was inverted by #385 — it now asserts the ESM entry loads *and* that no CJS artifacts are emitted.
+
+**Standing verdict unchanged.** The design (D1–D5, the central invariant, Correction #3's accepted residual) is untouched by any of this; only the release mechanics moved.
