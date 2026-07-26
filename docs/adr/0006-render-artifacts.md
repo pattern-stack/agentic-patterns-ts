@@ -1,9 +1,9 @@
 # ADR 0006 — Render artifacts: a second data channel on the response envelope
 
 - **Status:** Accepted (2026-07-26) — open questions resolved in review:
-  attachment optional on both events, producer-owned shaping under an
-  absurdity ceiling, artifacts not
-  persisted (run-state persistence tracked as a follow-up). Not yet implemented.
+  attachment optional on both `tool.end` and `message.complete`; producer-owned
+  shaping under a framework absurdity ceiling; artifacts not persisted
+  (run-state persistence tracked as a follow-up). Not yet implemented.
 - **Date:** 2026-07-26
 - **Context owner:** Doug
 - **Scope:** `@agentic-patterns/core` (`molecules/tool-schema.ts` — the
