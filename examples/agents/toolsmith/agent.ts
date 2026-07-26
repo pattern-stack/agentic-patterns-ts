@@ -47,6 +47,7 @@ import {
   RoleBuilder,
   SimpleManual,
   type Toolbox,
+  definePlay,
   defineTool,
   toolbox,
 } from "@agentic-patterns/core";
@@ -165,16 +166,10 @@ class ToolsmithPlaybook extends Playbook {
   readonly description = "Named recipes that stitch the toolsmith utilities together.";
   readonly plays: Record<string, PlayDefinition>;
 
-  // NOTE: plays still hand-cast both their args and the results of
-  // `tools.execute(...)` — `PlayDefinition.execute` takes
-  // `Record<string, unknown>` and its `returns` is unvalidated. That is exactly
-  // the debt `defineTool` retired for tools; #266 tracks the play-side parity
-  // (`definePlay` + a `playbook()` literal). Left verbose on purpose so the
-  // before/after stays visible until #266 lands.
   constructor(tools: Toolbox) {
     super();
     this.plays = {
-      slug_and_span: {
+      slug_and_span: definePlay({
         description: "Slugify a title and report how many days until a target date, in one call.",
         parameters: z.object({
           title: z.string().describe("Text to slugify"),
@@ -182,15 +177,14 @@ class ToolsmithPlaybook extends Playbook {
           to: z.string().describe("ISO date to measure to"),
         }),
         returns: Slug.merge(DaySpan),
-        execute: async (args) => {
-          const { title, from, to } = args as { title: string; from: string; to: string };
+        execute: async ({ title, from, to }) => {
           const [{ slug }, { days }] = (await Promise.all([
             tools.execute("slugify", { text: title }),
             tools.execute("date_diff", { from, to }),
           ])) as [{ slug: string }, { days: number }];
           return { slug, days };
         },
-      },
+      }),
     };
   }
 }

@@ -126,6 +126,71 @@ This only works when the agent's registration declares a `scope` (a `SessionScop
 case where the registration has no `instantiate` hook at all and tools read scope live at call time
 instead of from a build-time closure.
 
+## Authoring a play
+
+Plays are like tools but with error-envelope semantics: a `Playbook` never throws from `execute` —
+unknown play, parameter-validation failure, and execution error all come back as `{ error: message
+}` instead. `definePlay` (core 0.15.0, issue #266) is the play-side counterpart of `defineTool`:
+args arrive typed, the return value is compile-checked against `returns`, and output is validated
+by default.
+
+```typescript
+import { z } from "zod";
+import { definePlay, playbook } from "@agentic-patterns/core";
+
+const plays = playbook("recipes", "Named multi-step recipes", {
+  slug_and_span: definePlay({
+    description: "Slugify a title and report how many days until a target date.",
+    parameters: z.object({
+      title: z.string(),
+      from: z.string().describe("ISO date"),
+      to: z.string().describe("ISO date"),
+    }),
+    returns: z.object({ slug: z.string(), days: z.number() }),
+    execute: async ({ title, from, to }) => {
+      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+      const days = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+      return { slug, days };
+    },
+  }),
+});
+```
+
+What's different from `defineTool`:
+
+- **`returns` is REQUIRED**, not optional. A `definePlay` with no `returns` would be
+  indistinguishable from "validation not configured" — exactly the plain-`PlayDefinition` behavior
+  this factory exists to opt into.
+- **No `terminal`.** Plays are deliberately never terminal.
+- **No `ctx`.** Plays don't receive `ToolExecutionContext` — out of scope for #266 (ADR 0005
+  precedent); `execute` takes only the parsed args.
+- **Violations never throw past `Playbook.execute`.** A `definePlay` whose output fails `returns`
+  throws internally, tagged; `Playbook.execute` catches the tag before its generic catch and
+  returns `{ error: "play 'x' output violated its returns schema: …" }` — never a rejection. Calling
+  `.execute()` on the returned `PlayDefinition` directly (bypassing a `Playbook`) DOES throw the
+  tagged error; that's outside the supported path.
+
+**The plain-`PlayDefinition` invariant is unchanged.** A hand-written object literal — `{
+description, parameters, returns, execute }` assigned straight into a `plays` record without
+`definePlay` — behaves exactly as it always has: `returns` stays metadata only, nothing validates
+it. Only `definePlay`-built plays gain runtime validation.
+
+**The D2 caveat: validated does not mean "matches what the host receives."** `definePlay`'s
+validation runs on the LIVE value your callback returns, before `Playbook.execute`'s
+`JSON.parse(JSON.stringify(...))` round-trip. A `z.date()` field validates against a real `Date`;
+the round-trip then flattens it to an ISO string. If the post-serialization shape must match
+`returns` exactly, declare a shape-preserving transform (e.g. `z.date().transform((d) =>
+d.toISOString())`) rather than relying on the raw type.
+
+**Tool-wins-on-collision.** When an agent's runner dispatches a tool call by name, a toolbox tool
+and a playbook play with the same name can't both be registered — the toolbox tool wins
+(`packages/agent-runtime/src/runner/toolbox-executor.ts`'s `toolLookup` is checked before
+`playLookup`). This is deterministic regardless of capability registration order; name a play
+distinctly from any tool in the same capability to avoid relying on it.
+
+`playbook(name, description, plays)` mirrors `toolbox(...)` — a literal `Playbook` over a static
+play record, record retained by reference, `instanceof Playbook` holds.
+
 ## Lint model-facing schemas in CI
 
 `lintModelFacingSchema` (core 0.12.0, issue #265) is a pure, structural Zod walker that flags
@@ -222,5 +287,4 @@ yourself once you know which dialect(s) your deployment targets, the way this re
 ## Non-goals
 
 Deliberately out of scope (see issue #264): automatic camel↔snake casing mappers, compression of
-`.describe()` prose, and host-specific filter envelopes. Playbook parity (`definePlay`, a
-`playbook()` literal) is tracked separately in #266.
+`.describe()` prose, and host-specific filter envelopes.

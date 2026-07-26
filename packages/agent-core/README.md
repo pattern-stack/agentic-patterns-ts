@@ -108,33 +108,42 @@ the factories are sugar over the same classes. See
 
 #### Playbook
 
-Playbooks define named "plays" with Zod-validated parameters and error-envelope semantics. Errors in `PlayDefinition.execute` are caught and returned as `{ error: message }`.
+Playbooks define named "plays" with Zod-validated parameters and error-envelope semantics. Errors
+in `PlayDefinition.execute` are caught by `Playbook.execute` and returned as `{ error: message }`
+instead of thrown — unknown play, parameter-validation failure, or execution error alike.
 
 ```typescript
 import { z } from "zod";
-import { Playbook, type PlayDefinition } from "@agentic-patterns/core";
+import { definePlay, playbook } from "@agentic-patterns/core";
 
-class AnalysisPlaybook extends Playbook {
-  readonly name = "analysis";
-  readonly description = "Data analysis plays";
-  readonly plays: Record<string, PlayDefinition> = {
-    summarize: {
-      description: "Summarize a dataset",
-      parameters: z.object({ data: z.string() }),
-      execute: async (args) => ({ summary: `Analyzed: ${args.data}` }),
-    },
-  };
-}
+const analysis = playbook("analysis", "Data analysis plays", {
+  summarize: definePlay({
+    description: "Summarize a dataset",
+    parameters: z.object({ data: z.string() }),
+    returns: z.object({ summary: z.string() }),
+    execute: async ({ data }) => ({ summary: `Analyzed: ${data}` }),
+  }),
+});
 
 // Integrate into a Capability
-const analysis = capability({
+const analysisCapability = capability({
   name: "analysis",
   description: "Data analysis",
   toolbox: docsToolbox,
-  playbook: new AnalysisPlaybook(),
+  playbook: analysis,
 });
-analysis.getTools(); // includes both toolbox tools and playbook play schemas
+analysisCapability.getTools(); // includes both toolbox tools and playbook play schemas
 ```
+
+`definePlay` infers `execute`'s argument types from `parameters`, compile-checks the return value
+against `returns` (REQUIRED, unlike `defineTool` where it's optional metadata), and validates
+output at runtime by default — violations are caught at `Playbook.execute` and returned as a
+play-named `{ error }` envelope, never thrown. Subclassing `Playbook` and hand-writing a plain
+`PlayDefinition` object both still work unchanged — a plain object's `returns` stays metadata-only,
+exactly as before; only `definePlay`-built plays opt into validation. `playbook(name, description,
+plays)` is the literal counterpart to subclassing, mirroring `toolbox(...)`. See
+[docs/authoring-a-toolbox.md](../../docs/authoring-a-toolbox.md#authoring-a-play) for the full
+guide, including the D2 validate-before-serialize caveat.
 
 Definitions module provides Zod schemas for workflow configuration: `WorkflowStep`, `RuleDefinition`, `TemplateDefinition`, `EscalationTrigger`, `StateDefinition`, `PriorityDefinition`, `IssueTypeDefinition`, `HealthSignal`.
 

@@ -14,7 +14,9 @@
  *                    envelope rather than throwing — see `playbook.ts`)
  *
  * Routing plays through `playbook.execute` is the point: it keeps a
- * malformed/failing play call from aborting the runner loop (ADR 0002 D3).
+ * malformed/failing play call from aborting the runner loop (see
+ * `.ai-docs/specs/playbook-authoring-parity.md` D1 — the never-throw
+ * guarantee this depends on has no ADR of its own).
  * This mirrors the play-routing the SDK-bridge path already does in
  * `sdk-bridge.ts` `buildCapabilityServer`.
  *

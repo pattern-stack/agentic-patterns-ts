@@ -1,5 +1,12 @@
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import {
+  type ToolExecutionContext,
+  definePlay,
+  defineTool,
+  playbook,
+  toolbox,
+} from "@agentic-patterns/core";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createToolboxExecutor } from "../toolbox-executor.js";
 
 // ---------------------------------------------------------------------------
@@ -192,6 +199,62 @@ describe("createToolboxExecutor — playbook play dispatch", () => {
     await expect(executor.execute("ping", {})).resolves.toBe("pong");
     // No play keys registered → unknown play still throws not-found.
     await expect(executor.execute("ghost", {})).rejects.toThrow(/not found/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #266 — real Playbook/definePlay through the executor (not the hand-mocked
+// makePlaybook stub above): pins that the executor's never-abort contract and
+// the tool-wins-on-collision rule both hold against the ACTUAL Playbook.execute
+// implementation, including its new returns-violation branch.
+// ---------------------------------------------------------------------------
+
+describe("createToolboxExecutor — real Playbook/definePlay (#266)", () => {
+  it("returns the { error } envelope for a violating definePlay play instead of throwing", async () => {
+    const plays = playbook("real-plays", "Real plays", {
+      violating: definePlay({
+        description: "Violates its own returns schema",
+        parameters: z.object({}),
+        returns: z.object({ count: z.number() }),
+        execute: async () => ({ count: "nope" }) as unknown as { count: number },
+      }),
+    });
+    const cap = {
+      name: "real-cap",
+      toolbox: toolbox("real-toolbox", "Real toolbox", {}),
+      playbook: plays,
+    };
+    const executor = createToolboxExecutor(makeAgent([cap]));
+
+    await expect(executor.execute("violating", {})).resolves.toEqual({
+      error: expect.stringContaining("play 'violating' output violated its returns schema:"),
+    });
+  });
+
+  it("tool-wins-on-collision still holds when the play is definePlay-built", async () => {
+    const plays = playbook("real-plays", "Real plays", {
+      echo: definePlay({
+        description: "Echo from the play",
+        parameters: z.object({}),
+        returns: z.string(),
+        execute: async () => "from-playbook",
+      }),
+    });
+    const cap = {
+      name: "real-cap",
+      toolbox: toolbox("real-toolbox", "Real toolbox", {
+        echo: defineTool({
+          description: "Echo from the tool",
+          parameters: z.object({}),
+          returns: z.string(),
+          execute: async () => "from-toolbox",
+        }),
+      }),
+      playbook: plays,
+    };
+    const executor = createToolboxExecutor(makeAgent([cap]));
+
+    await expect(executor.execute("echo", {})).resolves.toBe("from-toolbox");
   });
 });
 

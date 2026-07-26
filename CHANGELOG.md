@@ -1,5 +1,14 @@
 # Changelog
 
+## core 0.15.0 (2026-07-26)
+
+### Features
+
+- **agent-core**: `definePlay` (#266) — typed play factory, the play-side counterpart of `defineTool`. `execute` args arrive typed from `parameters` (`z.infer`, type-level only — the host boundary already parses them); the callback's return is compile-checked against `returns` (`z.input`), which is now REQUIRED (unlike `defineTool`, where it's optional metadata) — a `definePlay` with no `returns` would be indistinguishable from validation-not-configured. Output is validated at runtime by default and the parsed `z.output` value is what validation sees; `validateReturns: false` opts out. Violations are tagged and, at `Playbook.execute`, renamed to a play-named `{ error }` envelope (`play 'x' output violated its returns schema: …`) — never thrown past that boundary, preserving the never-throw contract `toolbox-executor.ts`/`sdk-bridge.ts` depend on. Calling `.execute()` on the returned `PlayDefinition` directly (bypassing a `Playbook`) does throw the tagged violation — outside the supported path. No `terminal` (plays are never terminal) and no `ctx` (out of scope, ADR 0005 precedent). Returns a plain, non-generic `PlayDefinition` — no Zod types leak into consumer `.d.ts`. Plain object `PlayDefinition`s are untouched: their `returns` stays metadata-only, exactly as before.
+- **agent-core**: `playbook(name, description, plays)` — literal Playbook factory, mirroring `toolbox(...)`; no more one-shot `class X extends Playbook` for static play records. The record is retained by reference; result satisfies `instanceof Playbook` with inherited schema/name/execute behavior.
+- **agent-core**: hoisted the returns-violation tag (`Symbol.for`, guard, message constant, constructor) into a shared package-internal module (`molecules/returns-violation.ts`) used by both `defineTool` and `definePlay`, retiring the duplicated `"output violated its returns schema"` string literal across the tool and play sides.
+- **docs**: `docs/authoring-a-toolbox.md` — new "Authoring a play" section (envelope semantics, the D2 validate-before-serialize caveat, the tool-wins-on-collision rule); `packages/agent-core/README.md` — Playbook example updated to `definePlay`/`playbook()`.
+
 ## Unreleased
 
 ### Features

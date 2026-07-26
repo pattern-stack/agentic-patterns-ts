@@ -8,6 +8,11 @@
 
 import type { ZodTypeAny, z } from "zod";
 import type { RenderArtifact } from "./render-artifact.js";
+import {
+  RETURNS_VIOLATION_PHRASE,
+  isReturnsViolation,
+  returnsViolation,
+} from "./returns-violation.js";
 import { ToolSchema } from "./tool-schema.js";
 
 /**
@@ -112,23 +117,6 @@ export interface ToolDefinition {
 }
 
 /**
- * Marks a return-schema validation failure raised inside a `defineTool`
- * wrapper. A globally registered symbol rather than an error subclass:
- * deployments are known to carry two copies of core across a package
- * boundary, where an `instanceof` check would spuriously fail.
- */
-const RETURNS_VIOLATION = Symbol.for("agentic-patterns.core.returns-violation");
-
-/** Structural check for the marker — never `instanceof`. */
-function isReturnsViolation(err: unknown): err is Error & { cause: unknown } {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    (err as Record<PropertyKey, unknown>)[RETURNS_VIOLATION] === true
-  );
-}
-
-/**
  * Define a schema-typed tool while returning the framework's stable,
  * non-generic `ToolDefinition` surface.
  *
@@ -175,12 +163,10 @@ export function defineTool<P extends ZodTypeAny, R extends ZodTypeAny>(spec: {
       // safeParseAsync so async refinements/transforms in `returns` are supported.
       const result = await spec.returns.safeParseAsync(raw);
       if (!result.success) {
-        const violation = new Error(
-          `tool output violated its returns schema: ${result.error.message}`,
-          { cause: result.error },
+        throw returnsViolation(
+          `tool ${RETURNS_VIOLATION_PHRASE}: ${result.error.message}`,
+          result.error,
         );
-        (violation as unknown as Record<PropertyKey, unknown>)[RETURNS_VIOLATION] = true;
-        throw violation;
       }
       return result.data;
     },
@@ -249,7 +235,7 @@ export abstract class Toolbox {
     } catch (err) {
       if (isReturnsViolation(err)) {
         const detail = err.cause instanceof Error ? err.cause.message : err.message;
-        throw new Error(`tool '${name}' output violated its returns schema: ${detail}`, {
+        throw new Error(`tool '${name}' ${RETURNS_VIOLATION_PHRASE}: ${detail}`, {
           cause: err.cause,
         });
       }
