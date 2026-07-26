@@ -53,6 +53,24 @@ function fail(s: string): never {
   process.exit(1);
 }
 
+/**
+ * Recursively collect files under `dir` whose name matches `.cjs`/`.cjs.map`/
+ * `.d.cts` — mirrors findCjsArtifacts in tools/check-dist-contract.ts so both
+ * gates catch CJS artifacts regardless of dist/ nesting depth.
+ */
+function findCjsArtifacts(dir: string): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      found.push(...findCjsArtifacts(full));
+    } else if (/\.cjs(\.map)?$|\.d\.cts$/.test(entry.name)) {
+      found.push(full);
+    }
+  }
+  return found;
+}
+
 // ── 0. Pre-flight: every package must be built ────────────────────────────────
 console.log(bold("tarball smoke — pre-flight"));
 for (const pkg of ALL_PKGS) {
@@ -142,7 +160,7 @@ for (const pkg of LIB_PKGS) {
   for (const f of ["index.d.ts"]) {
     if (!existsSync(join(base, f))) fail(`${pkg.name}: missing type entry dist/${f}`);
   }
-  const cjsArtifacts = readdirSync(base).filter((f) => /\.cjs(\.map)?$|\.d\.cts$/.test(f));
+  const cjsArtifacts = findCjsArtifacts(base);
   if (cjsArtifacts.length > 0) {
     fail(`${pkg.name}: found CJS artifacts in installed dist/ — ${cjsArtifacts.join(", ")}`);
   }
