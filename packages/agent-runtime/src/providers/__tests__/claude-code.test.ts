@@ -145,7 +145,8 @@ function makeCallOptions(
   overlay: Partial<LanguageModelV4CallOptions> = {},
 ): LanguageModelV4CallOptions {
   return {
-    // v5 lifts tools to a top-level array; the schema field is `inputSchema`.
+    // ai package's v5+ shape lifts tools to a top-level array; the schema
+    // field is `inputSchema` (unrelated to the V2→V4 spec axis under test).
     tools: tools.map((t) => ({
       type: "function" as const,
       name: t.name,
@@ -157,7 +158,7 @@ function makeCallOptions(
   };
 }
 
-/** Extract the joined text from a v5 doGenerate `content` array. */
+/** Extract the joined text from a doGenerate `content` array. */
 function contentText(content: LanguageModelV4Content[]): string {
   return content
     .filter((c): c is Extract<LanguageModelV4Content, { type: "text" }> => c.type === "text")
@@ -165,7 +166,7 @@ function contentText(content: LanguageModelV4Content[]): string {
     .join("");
 }
 
-/** Extract the tool-call parts from a v5 doGenerate `content` array. */
+/** Extract the tool-call parts from a doGenerate `content` array. */
 function contentToolCalls(
   content: LanguageModelV4Content[],
 ): Array<Extract<LanguageModelV4Content, { type: "tool-call" }>> {
@@ -459,6 +460,22 @@ describe("claudeCode provider", () => {
       }),
     );
     expect(captured.options?.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("reasoning: 'none' clears a caller-configured defaults.effort so the disable is total", async () => {
+    const model = claudeCode("sonnet", {
+      config: { mode: "host" },
+      sessionStrategy: "flatten",
+      defaults: { effort: "high" },
+    });
+    disposables.push(model);
+    await model.doGenerate(
+      makeCallOptions([{ role: "user", content: [{ type: "text", text: "hi" }] }], [], {
+        reasoning: "none",
+      }),
+    );
+    expect(captured.options?.thinking).toEqual({ type: "disabled" });
+    expect(captured.options?.effort).toBeUndefined();
   });
 
   it("maps reasoning: 'minimal' to effort 'low' with a compatibility warning", async () => {

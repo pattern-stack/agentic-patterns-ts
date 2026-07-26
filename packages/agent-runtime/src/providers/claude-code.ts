@@ -297,7 +297,8 @@ function renderAssistantContent(msg: Extract<PromptMessage, { role: "assistant" 
     if (part.type === "text") {
       chunks.push(part.text);
     } else if (part.type === "tool-call") {
-      // v5 ToolCallPart carries the payload under `input` (was `args`).
+      // ToolCallPart carries the payload under `input` (was `args` pre-v5;
+      // unrelated to the V2→V4 LanguageModel spec axis this file promotes).
       chunks.push(
         `[tool-call name=${part.toolName} id=${part.toolCallId}] ${stringifyValue(part.input)}`,
       );
@@ -313,7 +314,8 @@ function renderToolContent(msg: Extract<PromptMessage, { role: "tool" }>): strin
     // alongside `tool-result` — skip it here (the approval loop is #389's
     // surface, out of scope for this promotion).
     if (part.type !== "tool-result") continue;
-    // v5 ToolResultPart carries the result under `output` as a typed union.
+    // ToolResultPart carries the result under `output` as a typed union
+    // (ai package's v5+ shape; unrelated to the V2→V4 spec axis).
     chunks.push(
       `[tool-result name=${part.toolName} id=${part.toolCallId}] ${renderToolOutput(part.output)}`,
     );
@@ -340,13 +342,28 @@ function renderToolOutput(output: ToolResultPart["output"]): string {
     case "content":
       return output.value
         .map((c) => {
-          if (c.type === "text") return c.text;
-          if (c.type === "file") return `[file ${c.mediaType}]`;
-          return "[custom content]";
+          switch (c.type) {
+            case "text":
+              return c.text;
+            case "file":
+              return `[file ${c.mediaType}]`;
+            case "custom":
+              return "[custom content]";
+            default: {
+              const _exhaustive: never = c;
+              void _exhaustive;
+              return "[custom content]";
+            }
+          }
         })
         .join("\n");
-    default:
+    default: {
+      // Exhaustiveness check — a future V5 ToolResultOutput variant will fail
+      // typecheck here instead of silently falling through to "".
+      const _exhaustive: never = output;
+      void _exhaustive;
       return "";
+    }
   }
 }
 
@@ -426,6 +443,13 @@ function jsonSchemaToZodShape(schema: unknown): Record<string, z.ZodTypeAny> {
  * installed only so Claude sees real tool schemas. (The `deferred` strategy
  * uses the stdio shim in `cc-shim.ts` instead, because the in-process server
  * is not resumable; see F-3.)
+ *
+ * V4's `strict`/`inputExamples` `FunctionTool` fields are accepted (the type
+ * carries them) but intentionally ignored here — these advisory schemas only
+ * need to be good enough for Claude to form a call; the framework's real Zod
+ * schema does the authoritative validation after the deferred call hands
+ * execution back to AgentRunner. No warning is emitted for the unsupported
+ * knobs, matching this provider's existing silent-ignore posture.
  */
 function buildToolsServer(tools: ReadonlyArray<LanguageModelV4FunctionTool>):
   | {
@@ -627,13 +651,20 @@ async function runQuery(promptString: string, sdkOptions: SDKOptions): Promise<Q
 
 /**
  * Map the CLI's raw result usage (`NonNullableUsage`-shaped `BetaUsage`) into
- * a V4 nested `LanguageModelV4Usage`. Formula mirrors `@ai-sdk/anthropic@4`
- * for cross-provider consistency: `total = input_tokens + cache_creation +
- * cache_read`, `noCache = input_tokens`. Absent cache fields (a degraded CLI
- * path, or a test mock that omits them) coalesce to `0` — matching
- * `NonNullableUsage`'s all-present contract. A wholly-absent `raw` (no usage
- * on the result at all) yields all-`undefined` nested fields instead of
- * fabricating zeros.
+ * a V4 nested `LanguageModelV4Usage`. The **cache** formula mirrors
+ * `@ai-sdk/anthropic@4` for cross-provider consistency: `total = input_tokens
+ * + cache_creation + cache_read`, `noCache = input_tokens`. Absent cache
+ * fields (a degraded CLI path, or a test mock that omits them) coalesce to
+ * `0` — matching `NonNullableUsage`'s all-present contract. A wholly-absent
+ * `raw` (no usage on the result at all) yields all-`undefined` nested fields
+ * instead of fabricating zeros.
+ *
+ * `outputTokens.text`/`.reasoning` are intentionally left `undefined` rather
+ * than mirroring anthropic@4's `output_tokens_details.thinking_tokens` split
+ * — the lock-resolved `@anthropic-ai/sdk` `BetaUsage` (the CLI's usage shape)
+ * carries no `output_tokens_details` field today, so there is nothing to
+ * derive from. Output-token detail is intentionally deferred; #388 will wire
+ * it through here if/when the CLI's usage payload grows that field.
  */
 function buildUsage(raw: Record<string, number> | null): LanguageModelV4Usage {
   if (!raw) {
@@ -1172,7 +1203,10 @@ export class ClaudeCodeLanguageModel implements LanguageModelV4 {
  *   - unset / `'provider-default'` — untouched; the harness default
  *     (adaptive thinking) and any caller `defaults.effort`/`defaults.thinking`
  *     stand as-is.
- *   - `'none'` — `thinking: { type: "disabled" }`.
+ *   - `'none'` — `thinking: { type: "disabled" }`, and any caller-configured
+ *     `defaults.effort` is cleared too, so the disable is total rather than
+ *     half-applied (a lingering `effort` alongside `thinking:disabled` would
+ *     be an incoherent option pair).
  *   - `'minimal'` — no harness equivalent; mapped to `effort: "low"` with a
  *     `compatibility` warning.
  *   - `'low'` / `'medium'` / `'high'` / `'xhigh'` — `effort` set to the same
@@ -1189,6 +1223,7 @@ function applyReasoning(
       return [];
     case "none":
       sdkOptions.thinking = { type: "disabled" };
+      sdkOptions.effort = undefined;
       return [];
     case "minimal":
       sdkOptions.effort = "low";
@@ -1205,8 +1240,11 @@ function applyReasoning(
     case "xhigh":
       sdkOptions.effort = reasoning;
       return [];
-    default:
+    default: {
+      const _exhaustive: never = reasoning;
+      void _exhaustive;
       return [];
+    }
   }
 }
 
@@ -1249,8 +1287,12 @@ function deriveFinishReason(args: {
       case "tool_deferred":
         return "tool-calls";
       default:
-        // Any unrecognized non-null stop reason — V4 has a slot for this;
-        // V2 forced it to "stop".
+        // Deliberately NOT converted to a `never`-typed exhaustiveness guard
+        // like the ToolResultOutput/reasoning switches above: `sdkStopReason`
+        // is raw `string | null` off the CLI's untyped result message, not a
+        // closed AI-SDK union — new real-world stop-reason strings are
+        // expected here, not a sign of a stale union migration. V4 has an
+        // "other" slot for exactly this (V2 forced it to "stop").
         return "other";
     }
   })();

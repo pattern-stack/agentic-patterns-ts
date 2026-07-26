@@ -242,13 +242,28 @@ function renderToolResultText(output: LanguageModelV4ToolResultOutput): string {
     case "content":
       return output.value
         .map((c) => {
-          if (c.type === "text") return c.text;
-          if (c.type === "file") return `[file ${c.mediaType}]`;
-          return "[custom content]";
+          switch (c.type) {
+            case "text":
+              return c.text;
+            case "file":
+              return `[file ${c.mediaType}]`;
+            case "custom":
+              return "[custom content]";
+            default: {
+              const _exhaustive: never = c;
+              void _exhaustive;
+              return "[custom content]";
+            }
+          }
         })
         .join("\n");
-    default:
+    default: {
+      // Exhaustiveness check — a future V5 ToolResultOutput variant will fail
+      // typecheck here instead of silently falling through to "".
+      const _exhaustive: never = output;
+      void _exhaustive;
       return "";
+    }
   }
 }
 
