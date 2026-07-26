@@ -513,6 +513,81 @@ describe("SSEFormatter", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // #388 — usage_details wire forwarding (additive, defined-only, absent ≠ zero).
+  // ---------------------------------------------------------------------------
+  describe("usage_details wire forwarding (#388)", () => {
+    it("forwards usage_details (snake_case, defined-only) on message.complete when present", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.message.complete", {
+          ...makeBase(),
+          content: "done",
+          inputTokens: 12000,
+          outputTokens: 320,
+          model: "opus",
+          finishReason: "stop",
+          usageDetails: { cacheReadTokens: 11900, cacheWriteTokens: 0, reasoningTokens: 140 },
+        }),
+      );
+      expect(mapping?.payload.usage_details).toEqual({
+        cache_read_tokens: 11900,
+        cache_write_tokens: 0,
+        reasoning_tokens: 140,
+      });
+      // absent-≠-zero: no key present for members the fixture didn't set
+      expect(mapping?.payload.usage_details).not.toHaveProperty("no_cache_tokens");
+      expect(mapping?.payload.usage_details).not.toHaveProperty("text_tokens");
+    });
+
+    it("omits usage_details entirely on message.complete when absent", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.message.complete", {
+          ...makeBase(),
+          content: "done",
+          inputTokens: 10,
+          outputTokens: 5,
+          model: "opus",
+        }),
+      );
+      expect(mapping?.payload).not.toHaveProperty("usage_details");
+    });
+
+    it("forwards usage_details on llm.end when present", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.llm.end", {
+          ...makeBase(),
+          model: "opus",
+          inputTokens: 500,
+          outputTokens: 20,
+          durationMs: 100,
+          hasToolCalls: false,
+          finishReason: "stop",
+          usageDetails: { noCacheTokens: 500, textTokens: 20 },
+        }),
+      );
+      expect(mapping?.name).toBe("llm.end");
+      expect(mapping?.payload.usage_details).toEqual({
+        no_cache_tokens: 500,
+        text_tokens: 20,
+      });
+    });
+
+    it("omits usage_details entirely on llm.end when absent (zero-token / non-reporting path)", () => {
+      const mapping = toSSEMapping(
+        createEvent("agent.llm.end", {
+          ...makeBase(),
+          model: "opus",
+          inputTokens: 0,
+          outputTokens: 0,
+          durationMs: 5,
+          hasToolCalls: false,
+          finishReason: "error",
+        }),
+      );
+      expect(mapping?.payload).not.toHaveProperty("usage_details");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // ADR-0006 — render-artifact wire forwarding + ceiling enforcement.
   // ---------------------------------------------------------------------------
   describe("render artifacts (ADR-0006)", () => {
