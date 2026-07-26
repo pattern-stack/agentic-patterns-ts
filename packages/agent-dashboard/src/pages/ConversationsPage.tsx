@@ -6,12 +6,14 @@ import { AsyncState } from "../components/kit/AsyncState";
 import { PageHeader } from "../components/kit/PageHeader";
 import { DataTable } from "../components/organisms/DataTable";
 import { useAdminData } from "../hooks/useAdminData";
+import { useBreakpoint } from "../hooks/useMediaQuery";
 import { useSortedRows } from "../hooks/useSortedRows";
 import { relTime, shortId, statusTone } from "../lib/format";
 
 export function ConversationsPage() {
   const { data, loading, error } = useAdminData<ConversationSummary[]>("/admin/conversations");
   const navigate = useNavigate();
+  const { isPhone } = useBreakpoint();
   const { sorted, sortKey, sortDir, handleSort } = useSortedRows(data ?? [], "startedAt", "desc");
 
   if (loading || error) {
@@ -52,11 +54,17 @@ export function ConversationsPage() {
                 ),
               },
               { key: "agentName", header: "Agent" },
-              { key: "messageCount", header: "Messages", align: "right" },
+              {
+                key: "messageCount",
+                header: "Messages",
+                align: "right",
+                hideBelow: "sm",
+              },
               {
                 key: "tokenCount",
                 header: "Tokens",
                 align: "right",
+                hideBelow: "md",
                 render: (row) => row.tokenCount.toLocaleString(),
               },
               {
@@ -67,11 +75,16 @@ export function ConversationsPage() {
               {
                 key: "startedAt",
                 header: "Started",
+                hideBelow: "md",
                 render: (row) => relTime(row.startedAt),
               },
               {
                 key: "lastMessageAt",
-                header: "Last Message",
+                // "Last Message" is the widest header left after phone pruning
+                // and pushed the table past a 390px viewport (the header, not
+                // the "8m ago" cell, is what overflowed). Shorten it instead of
+                // hiding the column — recency is the most useful phone signal.
+                header: isPhone ? "Last" : "Last Message",
                 render: (row) => relTime(row.lastMessageAt),
               },
             ]}

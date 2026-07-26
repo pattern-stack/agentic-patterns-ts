@@ -113,6 +113,7 @@ export function ConversationDetailPage() {
               color: "var(--err)",
               fontSize: 13,
               fontFamily: "var(--font-mono)",
+              overflowWrap: "anywhere",
             }}
           >
             {detail.error}
@@ -177,12 +178,16 @@ function PartBlock({ part, isAssistant }: { part: ConversationMessagePart; isAss
   // plain, assistant text is markdown.
   if (part.type === "user_prompt" || part.type === "text") {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
         {label}
         {isAssistant ? (
-          <Markdown content={part.content ?? ""} />
+          <div style={{ minWidth: 0, overflowX: "auto" }}>
+            <Markdown content={part.content ?? ""} />
+          </div>
         ) : (
-          <div style={{ fontSize: 14, whiteSpace: "pre-wrap" }}>{part.content ?? ""}</div>
+          <div style={{ fontSize: 14, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {part.content ?? ""}
+          </div>
         )}
       </div>
     );

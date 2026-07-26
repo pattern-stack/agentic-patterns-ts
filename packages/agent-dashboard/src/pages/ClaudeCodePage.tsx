@@ -21,6 +21,7 @@ import { Spinner } from "../components/atoms/Spinner";
 import { AlertIcon } from "../components/atoms/icons";
 import { SessionCard } from "../components/organisms/SessionCard";
 import { type StreamEvent, useEventStream } from "../hooks/useEventStream";
+import { useBreakpoint } from "../hooks/useMediaQuery";
 import { type SessionState, groupClaudeCodeEvents } from "../lib/claudeCodeSessions";
 import { fetchRecentEvents } from "../lib/eventApi";
 
@@ -52,6 +53,7 @@ function ClaudeCodeLoaded({ initialEvents }: { initialEvents: StreamEvent[] }) {
   const { events, connected, error, clear } = useEventStream("/admin/events/stream", {
     initialEvents,
   });
+  const { isPhone } = useBreakpoint();
 
   const sessions: SessionState[] = useMemo(() => groupClaudeCodeEvents(events), [events]);
 
@@ -65,6 +67,7 @@ function ClaudeCodeLoaded({ initialEvents }: { initialEvents: StreamEvent[] }) {
           alignItems: "center",
           justifyContent: "space-between",
           marginBottom: 20,
+          ...(isPhone ? { flexWrap: "wrap" as const, rowGap: 8 } : {}),
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
