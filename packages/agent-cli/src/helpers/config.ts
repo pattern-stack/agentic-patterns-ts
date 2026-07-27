@@ -1,10 +1,10 @@
 /**
- * Project config — find the project root, load `.env`, read the optional
- * `agentic` field from package.json for overrides.
+ * Project config — find the project root, load the env files, read the
+ * optional `agentic` field from package.json for overrides.
  *
  * Resolution rules:
  *   • Walk up from CWD looking for the first `package.json` — that's the root.
- *   • If `.env` exists at the root, parse it into `process.env`.
+ *   • Parse `.env.local` then `.env` at the root into `process.env`.
  *   • If `package.json` has an `agentic` field, return it as the project config.
  */
 
@@ -52,9 +52,35 @@ export function findProjectRoot(from: string = process.cwd()): string | null {
   }
 }
 
-/** Load `.env` at the given root (no-op if file missing). Idempotent. */
+/**
+ * Env files read at startup, in precedence order. Loading is first-wins (a key
+ * already present in `process.env` is never overwritten), so `.env.local` —
+ * the chmod-600 file secret managers generate — outranks the hand-edited
+ * `.env`. Matches how bun/vite/next layer the two.
+ */
+const ENV_FILES = [".env.local", ".env"] as const;
+
+/**
+ * True for a value that is still a secret-manager *reference* rather than a
+ * resolved value (`secret://NAME`, `op://vault/item/field`). These appear in a
+ * `.env` that feeds a resolver such as `pts secrets env`, and must never reach
+ * `process.env`: a literal "secret://OPENAI_API_KEY" is a non-empty string, so
+ * credential preflight would report a working provider and the request would
+ * then fail upstream with a confusing 401.
+ */
+function isUnresolvedSecretRef(value: string): boolean {
+  return value.startsWith("secret://") || value.startsWith("op://");
+}
+
+/** Load `.env.local` then `.env` at the given root. Idempotent. */
 export function loadDotEnv(root: string): void {
-  const file = path.join(root, ".env");
+  for (const name of ENV_FILES) {
+    loadEnvFile(path.join(root, name));
+  }
+}
+
+/** Parse one env file into `process.env` (no-op if missing). */
+function loadEnvFile(file: string): void {
   if (!fs.existsSync(file)) return;
   const text = fs.readFileSync(file, "utf-8");
   for (const rawLine of text.split("\n")) {
@@ -67,6 +93,7 @@ export function loadDotEnv(root: string): void {
       .slice(eq + 1)
       .trim()
       .replace(/^["'](.*)["']$/, "$1");
+    if (isUnresolvedSecretRef(value)) continue;
     if (process.env[key] === undefined) process.env[key] = value;
   }
 }
