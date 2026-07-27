@@ -196,6 +196,12 @@ export const ModelCapabilitiesSchema = z
     message:
       "inputExamples has no probe step in scripts/probe-capabilities.mjs yet (Gate 1.5 review note " +
       "3) — verifiedBy must be 'docs' or 'unverified' until a real probe exists to justify 'probe'.",
+  })
+  .refine((v) => v.match === v.match.toLowerCase(), {
+    message:
+      "match must be lowercase — getModelCapabilities() looks up against bareModelId(), which " +
+      "lowercases the model id, so any uppercase in match would silently never match (Gate 2.5 " +
+      "quality-review note).",
   });
 export type ModelCapabilities = z.infer<typeof ModelCapabilitiesSchema>;
 
@@ -489,24 +495,40 @@ export function getModelCapabilities(modelId: string): ModelCapabilities | undef
  * Keys already warned about (`"<bareId>:<capability>"`). Follows the
  * `schema-guard.ts` once-per-key `console.warn` idiom (D4) — a `Set<string>`
  * rather than schema-guard's `WeakSet<object>` because the key here is a
- * string (model id x capability name), not an object identity.
+ * string (model id x capability name), not an object identity. Grows with
+ * distinct (bare id x capability) pairs actually dispatched — in practice
+ * bounded by the number of model FAMILIES a process ever calls
+ * `runStructured()` against (a handful to a few dozen), not by call volume,
+ * so it isn't the unbounded-growth risk a naive read suggests (Gate 2.5
+ * quality-review nit — only a real concern if per-call custom/generated ids
+ * were ever dispatched, which nothing in this codebase does).
  */
 const advisedKeys = new Set<string>();
 
 /**
- * Called by `runStructured()` right after model resolution. Warns — once
- * per (model x capability) — when the map has something useful to say
- * about this run's structured-output path, and is silent otherwise. NEVER
- * throws and NEVER changes control flow: correctness always comes from the
- * 2-tier fallback in `agent-runner.ts`, not from this advisory. A thin
- * wrapper over {@link adviseStructuredRunFor}, which takes the looked-up
- * entry directly and is what tests exercise the "no" branch against — none
- * of today's seeded rows have a verified `structuredOutput.support === "no"`
- * (DESIGN §9.5's no-tools trial passed on every tested family), so that
- * branch has no honest real-data fixture to test through the live map.
+ * Called by `runStructured()` right after model resolution (and tool
+ * presence is known). Warns — once per (model x capability) — when the map
+ * has something useful to say about the capability that actually governs
+ * THIS run's path, and is silent otherwise. NEVER throws and NEVER changes
+ * control flow: correctness always comes from the 2-tier fallback in
+ * `agent-runner.ts`, not from this advisory.
+ *
+ * `hasTools` selects WHICH capability is advisory-relevant, mirroring
+ * `runStructured()`'s own branching (Gate 2.5 quality-review note — the
+ * first cut always keyed off `structuredOutput`, but a tools-bearing run's
+ * single-call-vs-2-tier choice is governed by `toolsWithStructuredOutput`,
+ * so a mapped-but-tools-incapable family like `claude-`/`gemini-2.5-` — which
+ * WILL drop to the slower 2-tier path — got no advisory at all):
+ *   - `hasTools: true`  → `toolsWithStructuredOutput` (does the single-call
+ *     tools+structured round-trip work, or does this run take 2-tier?).
+ *   - `hasTools: false` → `structuredOutput` (does the no-tools
+ *     `Output.object` path work at all?).
+ *
+ * A thin wrapper over {@link adviseStructuredRunFor}, which takes the
+ * looked-up entry directly for testing.
  */
-export function adviseStructuredRun(modelId: string): void {
-  adviseStructuredRunFor(modelId, getModelCapabilities(modelId));
+export function adviseStructuredRun(modelId: string, hasTools: boolean): void {
+  adviseStructuredRunFor(modelId, getModelCapabilities(modelId), hasTools);
 }
 
 /**
@@ -517,20 +539,28 @@ export function adviseStructuredRun(modelId: string): void {
 export function adviseStructuredRunFor(
   modelId: string,
   entry: ModelCapabilities | undefined,
+  hasTools: boolean,
 ): void {
   const bare = bareModelId(modelId);
-  const key = `${bare}:structuredOutput`;
+  // Which capability actually governs this run's path — see
+  // `adviseStructuredRun`'s doc comment.
+  const capabilityName = hasTools ? "toolsWithStructuredOutput" : "structuredOutput";
+  const key = `${bare}:${capabilityName}`;
   if (advisedKeys.has(key)) return;
 
-  const capability = entry?.structuredOutput;
+  const capability = entry?.[capabilityName];
 
   if (capability?.support === "no") {
     advisedKeys.add(key);
     const verified = capability.lastVerified ? `, ${capability.lastVerified}` : "";
-    const remedy =
-      'expect the 2-tier fallback, or a possible "No object generated" error on the no-tools path.';
+    const remedy = hasTools
+      ? "expect the 2-tier fallback (an extra LLM call) rather than a single-call round-trip."
+      : 'expect a possible "No object generated" error on this no-tools structured-output call.';
+    const capabilityLabel = hasTools
+      ? "the single-call tools+structured-output round-trip"
+      : "native structured output";
     console.warn(
-      `[agentic-patterns] model "${modelId}" is marked as NOT supporting native structured output (verified ${capability.verifiedBy}${verified}); ${remedy}`,
+      `[agentic-patterns] model "${modelId}" is marked as NOT supporting ${capabilityLabel} (verified ${capability.verifiedBy}${verified}); ${remedy}`,
     );
     return;
   }
@@ -538,7 +568,7 @@ export function adviseStructuredRunFor(
   if (entry === undefined || capability?.support === "unknown") {
     advisedKeys.add(key);
     console.warn(
-      `[agentic-patterns] structured-output capabilities are unverified for model "${modelId}"; taking the conservative path. Extend MODEL_CAPABILITIES (providers/capabilities.ts) once verified.`,
+      `[agentic-patterns] ${capabilityName} is unverified for model "${modelId}"; taking the conservative path. Extend MODEL_CAPABILITIES (providers/capabilities.ts) once verified.`,
     );
   }
 }

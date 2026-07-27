@@ -1685,7 +1685,13 @@ describe("AgentRunner", () => {
       warn2.mockRestore();
     });
 
-    it("runStructured() on a mapped-but-tools-incapable model (claude-sonnet-4-5): stays silent (structuredOutput is verified 'yes') and still 2-tiers", async () => {
+    it("runStructured() on a mapped-but-tools-incapable model (claude-sonnet-4-5, WITH tools): warns about the single-call round-trip and still 2-tiers (Gate 2.5 fix — this used to stay silent)", async () => {
+      // Before the Gate 2.5 re-key, the advisory checked `structuredOutput`
+      // unconditionally — verified "yes" for claude-, so this run got NO
+      // warning even though it silently drops to the slower 2-tier path.
+      // The advisory now consults `toolsWithStructuredOutput` when tools are
+      // present (the capability that actually governs this run's path), so
+      // this family — which WILL 2-tier — now warns.
       let llmCalls = 0;
       const model = new MockLanguageModelV3({
         modelId: "claude-sonnet-4-5",
@@ -1713,9 +1719,27 @@ describe("AgentRunner", () => {
       });
 
       expect(result.object).toEqual({ answer: "42" });
-      // toolsWithStructuredOutput is verified "no" for claude- -> 2-tier, but
-      // structuredOutput (what adviseStructuredRun checks) is verified "yes"
-      // -> no advisory warn is the CORRECT, non-silent-failure behavior here.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        "NOT supporting the single-call tools+structured-output round-trip",
+      );
+      warn.mockRestore();
+    });
+
+    it("runStructured() on claude-sonnet-4-5 with NO tools: stays silent — structuredOutput itself is verified 'yes', so the no-tools path is fine", async () => {
+      const model = new MockLanguageModelV3({
+        modelId: "claude-sonnet-4-5",
+        doGenerate: async () => textResult(JSON.stringify({ answer: "42" }), 10, 5),
+      });
+      const agent = makeAgent({ getModel: () => "claude-sonnet-4-5", getTools: () => [] });
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runner = new AgentRunner(model);
+      const schema = z.object({ answer: z.string() });
+
+      const result = await runner.runStructured(agent, "what is the answer?", schema);
+
+      expect(result.object).toEqual({ answer: "42" });
       expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });

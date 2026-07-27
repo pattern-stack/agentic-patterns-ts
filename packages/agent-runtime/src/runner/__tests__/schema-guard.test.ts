@@ -216,13 +216,21 @@ describe("AgentRunner.runStructured open-object guard", () => {
       anything: "goes",
     });
     // #390: runStructured() also fires the capability-map's own once-per-key
-    // advisory for "test-model" (unmapped -> "unverified, conservative
-    // path"), a second, unrelated console.warn — so this asserts the
-    // wire-seam warning specifically, not the total warn count.
+    // advisory for "test-model" (unmapped, no tools here -> keys off
+    // structuredOutput -> "unverified, conservative path"), a second,
+    // unrelated console.warn. Gate 2.5 review note B: pin BOTH the total
+    // count (so a missing or duplicated #390 advisory would be noticed
+    // here too) AND the wire-seam warning specifically (this guard's own
+    // once-per-schema contract).
+    expect(warn).toHaveBeenCalledTimes(2);
     const wireSeamCalls = warn.mock.calls.filter((args) =>
       String(args[0]).includes(WIRE_SEAM_REMEDY),
     );
     expect(wireSeamCalls).toHaveLength(1);
+    const capabilityAdvisoryCalls = warn.mock.calls.filter((args) =>
+      String(args[0]).includes("structuredOutput is unverified"),
+    );
+    expect(capabilityAdvisoryCalls).toHaveLength(1);
   });
 
   it("runs closed schemas untouched", async () => {

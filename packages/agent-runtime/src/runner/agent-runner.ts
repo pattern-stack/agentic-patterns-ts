@@ -1112,13 +1112,15 @@ export class AgentRunner implements RunnerProtocol {
 
     const model = await this._resolver.resolve(agent.getModel());
     const modelName = model.modelId;
-    // Advisory-only (#390): warns once per (model x capability) when the map
-    // knows this model doesn't (or might not) support native structured
-    // output. Never affects control flow — path selection below is
-    // unchanged and the 2-tier fallback stays the always-correct path.
-    adviseStructuredRun(modelName);
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
+    // Advisory-only (#390): warns once per (model x capability) when the map
+    // knows something about the capability that actually governs THIS run's
+    // path (toolsWithStructuredOutput when tools are present — the
+    // single-call-vs-2-tier decision below; structuredOutput otherwise).
+    // Never affects control flow — path selection below is unchanged and the
+    // 2-tier fallback stays the always-correct path.
+    adviseStructuredRun(modelName, hasTools);
     const instructions = agent.renderInitialPrompt(this._renderCtx(options));
 
     // Emit message start event (root of the trace), mirroring run().

@@ -6,10 +6,16 @@
  *     enforcement Gate 1.5 review note 1 added)
  *   - the `reasoningEffort` tri-state disambiguation (review note 2)
  *   - the `inputExamples` docs/unverified-only restriction (review note 3)
+ *   - `match` lowercase enforcement (Gate 2.5 quality-review note — a
+ *     future uppercase `match` would silently never match, since
+ *     `bareModelId()` lowercases the lookup input)
  *   - longest-prefix lookup + `bareModelId` parity with the pre-#390
  *     gateway-prefix / `:`-version stripping (the exact id-parsing cases
  *     `modelSupportsToolsWithStructuredOutput` handled)
- *   - `adviseStructuredRun`'s once-per-key advisory behavior
+ *   - `adviseStructuredRun`'s once-per-key advisory behavior, re-keyed
+ *     (Gate 2.5 quality-review note) to consult `toolsWithStructuredOutput`
+ *     when tools are present (the capability that actually governs the
+ *     single-call-vs-2-tier path) and `structuredOutput` otherwise
  */
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,9 +69,9 @@ describe("CapabilityValueSchema honesty invariant", () => {
   });
 
   it("REJECTS support:'yes' + verifiedBy:'unverified' (claimed yes with no evidence)", () => {
-    expect(() =>
-      CapabilityValueSchema.parse({ support: "yes", verifiedBy: "unverified" }),
-    ).toThrow();
+    expect(() => CapabilityValueSchema.parse({ support: "yes", verifiedBy: "unverified" })).toThrow(
+      /honesty invariant/,
+    );
   });
 
   it("REJECTS support:'unknown' + verifiedBy:'docs' (evidence claimed for an unknown)", () => {
@@ -75,15 +81,19 @@ describe("CapabilityValueSchema honesty invariant", () => {
         verifiedBy: "docs",
         lastVerified: "2026-01-01",
       }),
-    ).toThrow();
+    ).toThrow(/honesty invariant/);
   });
 
-  it("REJECTS a verified 'yes' with no lastVerified (Gate 1.5 review note 1)", () => {
-    expect(() => CapabilityValueSchema.parse({ support: "yes", verifiedBy: "docs" })).toThrow();
+  it("REJECTS a verified 'yes' with no lastVerified (Gate 1.5 review note 1) — the lastVerified refine, not the honesty one, fires", () => {
+    expect(() => CapabilityValueSchema.parse({ support: "yes", verifiedBy: "docs" })).toThrow(
+      /lastVerified is required/,
+    );
   });
 
-  it("REJECTS a verified 'no' with no lastVerified (Gate 1.5 review note 1)", () => {
-    expect(() => CapabilityValueSchema.parse({ support: "no", verifiedBy: "probe" })).toThrow();
+  it("REJECTS a verified 'no' with no lastVerified (Gate 1.5 review note 1) — the lastVerified refine, not the honesty one, fires", () => {
+    expect(() => CapabilityValueSchema.parse({ support: "no", verifiedBy: "probe" })).toThrow(
+      /lastVerified is required/,
+    );
   });
 });
 
@@ -132,7 +142,7 @@ describe("ReasoningEffortCapabilitySchema (Gate 1.5 review note 2)", () => {
         verifiedBy: "docs",
         lastVerified: "2026-01-01",
       }),
-    ).toThrow();
+    ).toThrow(/requires at least one entry/);
   });
 
   it("REJECTS support:'no' with a non-empty levels array (contradiction)", () => {
@@ -143,7 +153,7 @@ describe("ReasoningEffortCapabilitySchema (Gate 1.5 review note 2)", () => {
         verifiedBy: "docs",
         lastVerified: "2026-01-01",
       }),
-    ).toThrow();
+    ).toThrow(/must carry an empty levels array/);
   });
 
   it("REJECTS the honesty-invariant violation support:'unknown' + verifiedBy:'docs'", () => {
@@ -154,13 +164,51 @@ describe("ReasoningEffortCapabilitySchema (Gate 1.5 review note 2)", () => {
         verifiedBy: "docs",
         lastVerified: "2026-01-01",
       }),
-    ).toThrow();
+    ).toThrow(/honesty invariant/);
   });
 
   it("REJECTS a verified support:'no' with no lastVerified", () => {
     expect(() =>
       ReasoningEffortCapabilitySchema.parse({ support: "no", levels: [], verifiedBy: "docs" }),
-    ).toThrow();
+    ).toThrow(/lastVerified is required/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ModelCapabilitiesSchema.match — lowercase enforcement (Gate 2.5 quality note)
+// ---------------------------------------------------------------------------
+
+describe("ModelCapabilitiesSchema.match lowercase enforcement", () => {
+  const baseCapability = { support: "unknown" as const, verifiedBy: "unverified" as const };
+  const baseRow = {
+    provider: "xai" as const,
+    structuredOutput: baseCapability,
+    strictSchemaMode: baseCapability,
+    toolsWithStructuredOutput: baseCapability,
+    inputExamples: baseCapability,
+    reasoningEffort: { support: "unknown" as const, levels: [], verifiedBy: "unverified" as const },
+  };
+
+  it("accepts a lowercase match", () => {
+    expect(() => ModelCapabilitiesSchema.parse({ ...baseRow, match: "grok-5" })).not.toThrow();
+  });
+
+  it("REJECTS an uppercase match — bareModelId() lowercases the lookup input, so this would silently never match", () => {
+    expect(() => ModelCapabilitiesSchema.parse({ ...baseRow, match: "Grok-5" })).toThrow(
+      /match must be lowercase/,
+    );
+  });
+
+  it("REJECTS a mixed-case match", () => {
+    expect(() => ModelCapabilitiesSchema.parse({ ...baseRow, match: "Grok-5-Mini" })).toThrow(
+      /match must be lowercase/,
+    );
+  });
+
+  it("every seeded MODEL_CAPABILITIES row has a lowercase match", () => {
+    for (const row of MODEL_CAPABILITIES) {
+      expect(row.match).toBe(row.match.toLowerCase());
+    }
   });
 });
 
@@ -285,47 +333,96 @@ describe("getModelCapabilities", () => {
 // ---------------------------------------------------------------------------
 
 describe("adviseStructuredRun", () => {
-  it("warns once for an unmapped model, then stays silent for the same id", () => {
+  /** Capture console.warn calls for the duration of `fn`, then restore it. */
+  function captureWarnings(fn: () => void): unknown[][] {
     const calls: unknown[][] = [];
     const original = console.warn;
     console.warn = (...args: unknown[]) => {
       calls.push(args);
     };
     try {
-      adviseStructuredRun("totally-unmapped-model-390-a");
-      adviseStructuredRun("totally-unmapped-model-390-a");
-      adviseStructuredRun("totally-unmapped-model-390-a");
+      fn();
     } finally {
       console.warn = original;
     }
+    return calls;
+  }
+
+  it("warns once for an unmapped model (tools present), then stays silent for the same id", () => {
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("totally-unmapped-model-390-a", true);
+      adviseStructuredRun("totally-unmapped-model-390-a", true);
+      adviseStructuredRun("totally-unmapped-model-390-a", true);
+    });
     expect(calls).toHaveLength(1);
-    expect(String(calls[0]?.[0])).toContain("unverified");
+    expect(String(calls[0]?.[0])).toContain("toolsWithStructuredOutput is unverified");
   });
 
-  it("warns with the 'unverified' message for an unmapped id (distinct message content)", () => {
-    const calls: unknown[][] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => {
-      calls.push(args);
-    };
-    try {
-      adviseStructuredRun("totally-unmapped-model-390-b");
-    } finally {
-      console.warn = original;
-    }
+  it("warns once for an unmapped model (no tools) — keys off structuredOutput instead", () => {
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("totally-unmapped-model-390-b", false);
+      adviseStructuredRun("totally-unmapped-model-390-b", false);
+    });
     expect(calls).toHaveLength(1);
-    expect(String(calls[0]?.[0])).toContain("[agentic-patterns]");
-    expect(String(calls[0]?.[0])).toContain("totally-unmapped-model-390-b");
+    expect(String(calls[0]?.[0])).toContain("structuredOutput is unverified");
   });
 
-  it("warns with the 'NOT supporting native structured output' message for a mapped support:'no' entry", () => {
-    // None of today's seeded MODEL_CAPABILITIES rows are honestly
-    // structuredOutput:"no" (DESIGN §9.5's no-tools trial passed on every
-    // tested family — see capabilities.ts's module doc comment), so this
-    // exercises the "no" branch's message content via
-    // `adviseStructuredRunFor` against a synthetic (but schema-valid) entry,
-    // rather than fabricating an unverified real-world claim in the seed
-    // data just to get coverage.
+  it("hasTools:true and hasTools:false are tracked as DISTINCT keys for the same model id — both can warn", () => {
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("totally-unmapped-model-390-both", true);
+      adviseStructuredRun("totally-unmapped-model-390-both", false);
+    });
+    expect(calls).toHaveLength(2);
+    expect(String(calls[0]?.[0])).toContain("toolsWithStructuredOutput is unverified");
+    expect(String(calls[1]?.[0])).toContain("structuredOutput is unverified");
+  });
+
+  it("REAL SEED DATA, tools present: claude- warns about the single-call round-trip (Gate 2.5 fix — this branch was previously dead)", () => {
+    // Before the re-key, this branch only fired when `structuredOutput` was
+    // "no" — no seeded row is honestly structuredOutput:"no", so it never
+    // fired against real data. claude-'s `toolsWithStructuredOutput` IS
+    // verified "no" (DESIGN §9.5), and a tools-bearing run genuinely takes
+    // the 2-tier fallback because of exactly that field — so this is the
+    // real-data case the advisory exists to cover.
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("claude-sonnet-4-5", true);
+    });
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0]?.[0])).toContain(
+      "NOT supporting the single-call tools+structured-output round-trip",
+    );
+    expect(String(calls[0]?.[0])).toContain("probe");
+  });
+
+  it("REAL SEED DATA, tools present: gemini-2.5- also warns (not a claude-only special case)", () => {
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("gemini-2.5-flash", true);
+    });
+    expect(calls).toHaveLength(1);
+    expect(String(calls[0]?.[0])).toContain(
+      "NOT supporting the single-call tools+structured-output round-trip",
+    );
+  });
+
+  it("REAL SEED DATA, NO tools: claude- stays silent — structuredOutput itself is verified 'yes', so the no-tools path is fine", () => {
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("claude-sonnet-4-5", false);
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("REAL SEED DATA, tools present: gpt-4o stays silent — toolsWithStructuredOutput is verified 'yes' (single-call path, no fallback)", () => {
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("gpt-4o", true);
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("warns with the 'NOT supporting native structured output' message for a synthetic no-tools support:'no' entry", () => {
+    // No seeded row is honestly structuredOutput:"no" (DESIGN §9.5's
+    // no-tools trial passed on every tested family), so the NO-TOOLS "no"
+    // branch specifically still needs a synthetic fixture; the TOOLS "no"
+    // branch is covered against real data above.
     const syntheticNoEntry: ModelCapabilities = ModelCapabilitiesSchema.parse({
       provider: "openai",
       match: "synthetic-no-family",
@@ -336,16 +433,9 @@ describe("adviseStructuredRun", () => {
       reasoningEffort: { support: "unknown", levels: [], verifiedBy: "unverified" },
     });
 
-    const calls: unknown[][] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => {
-      calls.push(args);
-    };
-    try {
-      adviseStructuredRunFor("synthetic-no-family-v1", syntheticNoEntry);
-    } finally {
-      console.warn = original;
-    }
+    const calls = captureWarnings(() => {
+      adviseStructuredRunFor("synthetic-no-family-v1", syntheticNoEntry, false);
+    });
     expect(calls).toHaveLength(1);
     expect(String(calls[0]?.[0])).toContain("NOT supporting native structured output");
     expect(String(calls[0]?.[0])).toContain("docs");
@@ -353,18 +443,11 @@ describe("adviseStructuredRun", () => {
   });
 
   it("resetAdvisoryWarningsForTests() clears the memory so the same id can warn again", () => {
-    const calls: unknown[][] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => {
-      calls.push(args);
-    };
-    try {
-      adviseStructuredRun("totally-unmapped-model-390-c");
+    const calls = captureWarnings(() => {
+      adviseStructuredRun("totally-unmapped-model-390-c", true);
       resetAdvisoryWarningsForTests();
-      adviseStructuredRun("totally-unmapped-model-390-c");
-    } finally {
-      console.warn = original;
-    }
+      adviseStructuredRun("totally-unmapped-model-390-c", true);
+    });
     expect(calls).toHaveLength(2);
   });
 });
