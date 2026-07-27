@@ -17,6 +17,14 @@
  * tool an `execute`, or add `stopWhen` / `maxSteps`/`isStepCount(>1)`, the SDK
  * will run and loop tools itself and the gate interception (and the T0-1
  * gate-allow regression test in agent-runner.test.ts) will be bypassed.
+ *
+ * SCOPE NOTE (#389, D0/Option C): the invariant above governs `run()` and
+ * `stream()` only. `runStructured()`'s CAPABLE path is the one place the SDK
+ * already drives a multi-step loop with execute-bearing tools (§9.4) — there,
+ * gate interception is preserved via `toolApproval` (see
+ * `tool-approval-bridge.ts`), which awaits `AgentEventBus.evaluateIntent`
+ * before the SDK ever calls `execute`. That path is a deliberate, scoped
+ * exception to this invariant, not a violation of it.
  */
 
 import type {
@@ -58,6 +66,7 @@ import {
 import type { ResolvedLanguageModel } from "../providers/types.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
 import { guardOpenObjectSchemas } from "./schema-guard.js";
+import { type ToolArgsOverlay, createGateToolApproval } from "./tool-approval-bridge.js";
 import type {
   AgentLike,
   RunOptions,
@@ -965,13 +974,26 @@ export class AgentRunner implements RunnerProtocol {
   /**
    * Build the agent's tools WITH an `execute` function for the single-call
    * capable path. Unlike {@link convertTools} (execute-less, gate-chain
-   * invariant), here the SDK DOES drive the tool loop — so each `execute`
-   * still routes through the gate chain + `toolExecutor` + event emission,
-   * preserving gate interception even though the SDK runs the loop.
+   * invariant), here the SDK DOES drive the tool loop — so gate interception
+   * is preserved via `toolApproval` (see `tool-approval-bridge.ts`), NOT a
+   * pre-check inside `execute`: the `toolApproval` callback passed alongside
+   * these tools is where `AgentEventBus.evaluateIntent` runs, once, before
+   * the SDK ever calls `execute` for a given call (#389, D0/Option C — moving
+   * the evaluation out of `execute` is what keeps the gate chain from running
+   * TWICE per call). `execute` here only dispatches — via `toolExecutor` +
+   * event emission — a call `toolApproval` has already cleared.
+   *
+   * `overlay` is the rewrite overlay `toolApproval` populates on a `modify`
+   * gate decision (a NEW capability on this path — the SDK's `toolApproval`
+   * API has no rewrite affordance of its own); `execute` consults it via
+   * `overlay.take(toolCallId)` so a rewritten call actually EXECUTES with the
+   * gate's rewritten args, even though the model's message history (and the
+   * SDK's own `input`) still shows the original ones.
    */
   private convertExecutableTools(
     agent: AgentLike,
     toolExecutor: ToolExecutor | undefined,
+    overlay: ToolArgsOverlay,
     ctx: {
       traceId: string;
       runId: string;
@@ -990,30 +1012,27 @@ export class AgentRunner implements RunnerProtocol {
       tools[toolName] = tool({
         description: vercel.description,
         inputSchema: vercel.parameters,
-        execute: async (input: unknown) => {
-          const args = (input ?? {}) as Record<string, unknown>;
-          const intent = createEvent("agent.tool.intent", {
-            traceId: ctx.traceId,
-            runId: ctx.runId,
-            parentSpanId: ctx.parentSpanId,
-            toolCallId: generateId(),
-            toolName,
-            arguments: args,
-          });
-          const allowed = await this.emitIntent(intent);
-          if (!allowed) {
-            throw new ToolCallBlocked(toolName, "Blocked by gate");
-          }
+        execute: async (input: unknown, toolOpts: { toolCallId: string }) => {
+          // The SDK's OWN toolCallId (not a freshly generated one) — matches
+          // what `toolApproval` already evaluated against, so span anchoring
+          // (#102) and the rewrite overlay both key on the same id.
+          const toolCallId = toolOpts.toolCallId;
+          // Rewritten args win when a `modify` gate decision produced them
+          // (the overlay carries byte-identical args back when nothing
+          // rewrote the call — see tool-approval-bridge.ts); the SDK's own
+          // `input` is the fallback for the (unreachable in practice) case
+          // where `toolApproval` wasn't reached for this call.
+          const args = overlay.take(toolCallId) ?? ((input ?? {}) as Record<string, unknown>);
 
           const tcStart = createEvent("agent.tool.start", {
             // #102 fix: see the sibling dispatch site's comment — stamp
             // spanId with the toolCallId so span exporters can resolve a
             // nested sub-agent's `parentSpanId === parentToolCallId` anchor.
-            spanId: intent.toolCallId,
+            spanId: toolCallId,
             traceId: ctx.traceId,
             runId: ctx.runId,
             parentSpanId: ctx.parentSpanId,
-            toolCallId: intent.toolCallId,
+            toolCallId,
             toolName,
             arguments: args,
             ...(t.displayType !== undefined ? { displayType: t.displayType } : {}),
@@ -1034,7 +1053,7 @@ export class AgentRunner implements RunnerProtocol {
                 this.buildToolCtx({
                   traceId: ctx.traceId,
                   runId: ctx.runId,
-                  parentToolCallId: intent.toolCallId,
+                  parentToolCallId: toolCallId,
                   parentSpanId: tcSpanId,
                   host: ctx.host,
                   onArtifact: ctx.publishArtifacts ? (a) => publishedArtifacts.push(a) : undefined,
@@ -1056,7 +1075,7 @@ export class AgentRunner implements RunnerProtocol {
               runId: ctx.runId,
               spanId: tcSpanId,
               parentSpanId: ctx.parentSpanId,
-              toolCallId: intent.toolCallId,
+              toolCallId,
               toolName,
               arguments: args,
               result: toolResult,
@@ -1169,8 +1188,16 @@ export class AgentRunner implements RunnerProtocol {
       rawObject = result.output;
     } else if (modelSupportsToolsWithStructuredOutput(modelName)) {
       // Tools + capable model → single experimental_output + tools call. The
-      // SDK drives the loop; execute-bearing tools keep gate interception.
-      const tools = this.convertExecutableTools(agent, toolExecutor, {
+      // SDK drives the loop; execute-bearing tools keep gate interception via
+      // `toolApproval` (#389, D0/Option C) — the bridge below is where
+      // `AgentEventBus.evaluateIntent` runs, once per call, before `execute`.
+      const bridge = createGateToolApproval({
+        bus: this.eventBus,
+        traceId: effectiveTraceId,
+        runId,
+        parentSpanId: rootSpanId,
+      });
+      const tools = this.convertExecutableTools(agent, toolExecutor, bridge.overlay, {
         traceId: effectiveTraceId,
         runId,
         parentSpanId: rootSpanId,
@@ -1183,6 +1210,7 @@ export class AgentRunner implements RunnerProtocol {
         messages,
         tools,
         stopWhen: isStepCount(options?.maxIterations ?? 10),
+        toolApproval: bridge.toolApproval,
         output: Output.object({ schema }),
       });
       const steps = result.steps ?? [];
@@ -1589,6 +1617,63 @@ export class AgentRunner implements RunnerProtocol {
             case "finish-step": {
               stepUsage = part.usage;
               stepFinishReason = part.finishReason;
+              break;
+            }
+            // #389: defensive cases only — `stream()` never sets `toolApproval`
+            // (the GATE-CHAIN INVARIANT keeps this path execute-less and
+            // gate-checked via `emitIntent` above), so these parts are
+            // unreachable today. Mapped explicitly so a future SDK-driven
+            // streaming path (should one ever pass `toolApproval` here)
+            // surfaces the tool-approval events rather than silently falling
+            // through the `default` skip below.
+            case "tool-approval-request": {
+              const reqEvent = createEvent("agent.tool.approval.request", {
+                traceId: effectiveTraceId,
+                runId,
+                parentSpanId: iterSpanId,
+                toolCallId: part.toolCall.toolCallId,
+                toolName: part.toolCall.toolName,
+                arguments: (part.toolCall.input ?? {}) as Record<string, unknown>,
+              });
+              await this.emit(reqEvent);
+              yield reqEvent;
+              break;
+            }
+            case "tool-approval-response": {
+              const respEvent = createEvent("agent.tool.approval.response", {
+                traceId: effectiveTraceId,
+                runId,
+                parentSpanId: iterSpanId,
+                toolCallId: part.toolCall.toolCallId,
+                toolName: part.toolCall.toolName,
+                approved: part.approved,
+                settledBy: "gate" as const,
+                ...(part.reason !== undefined ? { reason: part.reason } : {}),
+              });
+              await this.emit(respEvent);
+              yield respEvent;
+              break;
+            }
+            case "tool-output-denied": {
+              const rejEvent = createEvent("agent.tool.rejected", {
+                traceId: effectiveTraceId,
+                runId,
+                parentSpanId: iterSpanId,
+                toolName: part.toolName,
+                reason: "Denied by gate (toolApproval)",
+                gateName: "toolApproval",
+                gateCategory: "APPROVAL",
+                originalIntent: createEvent("agent.tool.intent", {
+                  traceId: effectiveTraceId,
+                  runId,
+                  parentSpanId: iterSpanId,
+                  toolCallId: part.toolCallId,
+                  toolName: part.toolName,
+                  arguments: {},
+                }),
+              });
+              await this.emit(rejEvent);
+              yield rejEvent;
               break;
             }
             case "abort": {
