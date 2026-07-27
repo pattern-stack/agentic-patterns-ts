@@ -29,6 +29,7 @@
 
 import { z } from "zod";
 
+import { BIFROST_GUARDRAILS_HEADER, BIFROST_VK_HEADER } from "./bifrost.js";
 import { PROVIDERS, type SupportedProvider, resolveTierAlias } from "./index.js";
 import { SUPPORTED_PROVIDERS } from "./types.js";
 import type { ResolvedLanguageModel } from "./types.js";
@@ -134,6 +135,32 @@ export interface GatewayConfig {
   readonly apiKeyEnv?: string;
   /** Extra request headers (e.g. a gateway routing / virtual-key header). */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Inline Bifrost virtual key, sent as `x-bf-vk` on every request through this
+   * gateway. A governed Bifrost 401s (`{"type":"virtual_key_required"}`) on ALL
+   * endpoints without it — this is the entry ticket, not an option.
+   *
+   * Orthogonal to `apiKey`/`Authorization`: `x-bf-vk` is Bifrost governance,
+   * `Authorization` is transport/proxy auth (Basic or Bearer). When both are
+   * configured, both are sent — a Basic-fronted governed Bifrost needs exactly
+   * that. Bifrost also accepts `Authorization: Bearer vk-*`, but this library
+   * does NOT auto-map `virtualKey` into `Authorization` — `x-bf-vk` is the
+   * canonical header and keeps `Authorization` free for a fronting proxy.
+   *
+   * Prefer {@link GatewayConfig.virtualKeyEnv} to keep the secret out of config
+   * files. Env: `AP_GATEWAY_VIRTUAL_KEY`.
+   */
+  readonly virtualKey?: string;
+  /** Name of an env var holding the virtual key (read at resolve time). Mirror of {@link GatewayConfig.apiKeyEnv}. */
+  readonly virtualKeyEnv?: string;
+  /**
+   * Default guardrail profile ids (e.g. Presidio profiles) sent as
+   * `x-bf-guardrail-ids` (comma-joined) on every request through this gateway.
+   * Override per run via `RunOptions.requestHeaders` / `bifrostRunHeaders`
+   * (per-call headers beat this provider-static default). Env:
+   * `AP_GATEWAY_GUARDRAIL_IDS` (comma list).
+   */
+  readonly guardrailIds?: readonly string[];
   /**
    * How to qualify a canonical id into the gateway's namespace. Two forms:
    *
@@ -415,6 +442,13 @@ async function buildFromGateway(
   // the caller should hear about whether or not the optional package is installed.
   const gatewayId = toGatewayModelId(modelId, gw);
   const apiKey = gw.apiKey ?? (gw.apiKeyEnv ? process.env[gw.apiKeyEnv] : undefined);
+  const virtualKey =
+    gw.virtualKey ?? (gw.virtualKeyEnv ? process.env[gw.virtualKeyEnv] : undefined);
+  const derivedHeaders: Record<string, string> = {
+    ...(virtualKey ? { [BIFROST_VK_HEADER]: virtualKey } : {}),
+    ...(gw.guardrailIds?.length ? { [BIFROST_GUARDRAILS_HEADER]: gw.guardrailIds.join(",") } : {}),
+  };
+  const headers = { ...derivedHeaders, ...gw.headers };
   const mod = await importOptional(
     "@ai-sdk/openai-compatible",
     "gateway routing (openai-compatible)",
@@ -423,7 +457,7 @@ async function buildFromGateway(
     name: "gateway",
     baseURL: gw.baseURL,
     ...(apiKey ? { apiKey } : {}),
-    ...(gw.headers ? { headers: gw.headers } : {}),
+    ...(Object.keys(headers).length ? { headers } : {}),
     // Provider-level in @ai-sdk/openai-compatible: gates whether the SDK SENDS the
     // json-schema `response_format` (default false → stripped). Opt-in per gateway.
     ...(gw.supportsStructuredOutputs ? { supportsStructuredOutputs: true } : {}),

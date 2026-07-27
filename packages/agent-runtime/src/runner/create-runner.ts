@@ -19,6 +19,7 @@
 import { spawn } from "node:child_process";
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";
+import { bifrostCorrelationHeaders } from "../providers/bifrost.js";
 import {
   PROVIDERS,
   PROVIDER_PRIORITY,
@@ -139,7 +140,9 @@ export interface RunnerSelection {
  * to derive `«vendor»/«model»` per id), `AP_GATEWAY_TIER_PROVIDER` (whose tier
  * map turns `haiku`/`sonnet`/`opus` into a real id — default `anthropic`),
  * `AP_GATEWAY_STRUCTURED_OUTPUTS` (1/true → the gateway forwards json-schema
- * structured outputs; see {@link GatewayConfig.supportsStructuredOutputs}).
+ * structured outputs; see {@link GatewayConfig.supportsStructuredOutputs}),
+ * `AP_GATEWAY_VIRTUAL_KEY` (Bifrost `x-bf-vk` — governed instances 401 without
+ * it), `AP_GATEWAY_GUARDRAIL_IDS` (comma list → Bifrost `x-bf-guardrail-ids`).
  * Returns undefined when no gateway URL is set — so setting one env var routes
  * every agent through the gateway, no code change.
  *
@@ -147,6 +150,10 @@ export interface RunnerSelection {
  * A Basic-auth gateway (e.g. a Bifrost deployment fronted by HTTP Basic, which 401s
  * on Bearer) instead takes `AP_GATEWAY_BASIC_USER` + `AP_GATEWAY_BASIC_PASS` — we send
  * a precomputed `Authorization: Basic <base64(user:pass)>` header and omit the apiKey.
+ *
+ * `AP_GATEWAY_VIRTUAL_KEY` is orthogonal to both: it is Bifrost governance
+ * (`x-bf-vk`), not transport/proxy auth, so it is sent ALONGSIDE either
+ * `Authorization` form when both are configured.
  */
 function envGateway(): GatewayConfig | undefined {
   const baseURL = process.env.AP_GATEWAY_BASE_URL;
@@ -168,6 +175,10 @@ function envGateway(): GatewayConfig | undefined {
           authorization: `Basic ${Buffer.from(`${basicUser}:${basicPass}`).toString("base64")}`,
         }
       : undefined;
+  const guardrailIds = (process.env.AP_GATEWAY_GUARDRAIL_IDS ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
   return {
     baseURL,
     ...(process.env.AP_GATEWAY_API_KEY ? { apiKey: process.env.AP_GATEWAY_API_KEY } : {}),
@@ -179,6 +190,10 @@ function envGateway(): GatewayConfig | undefined {
     ...(/^(1|true|yes)$/i.test(process.env.AP_GATEWAY_STRUCTURED_OUTPUTS ?? "")
       ? { supportsStructuredOutputs: true }
       : {}),
+    ...(process.env.AP_GATEWAY_VIRTUAL_KEY
+      ? { virtualKey: process.env.AP_GATEWAY_VIRTUAL_KEY }
+      : {}),
+    ...(guardrailIds.length ? { guardrailIds } : {}),
   };
 }
 
@@ -226,7 +241,13 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
       gateway,
     });
     return log(verbose, {
-      runner: new AgentRunner(resolver, opts.eventBus),
+      // #406: a gateway wires the Bifrost correlation-header factory
+      // automatically; it self-gates on `ctx.modelProvider`, so profile ids
+      // that escape-hatch to a direct provider are unaffected. No gateway →
+      // the plain 2-arg construction, unchanged.
+      runner: gateway
+        ? new AgentRunner(resolver, opts.eventBus, { requestHeaders: bifrostCorrelationHeaders })
+        : new AgentRunner(resolver, opts.eventBus),
       reason: gateway
         ? `resolving each agent's declared model per run (gateway ${gateway.baseURL})`
         : opts.modelsPath

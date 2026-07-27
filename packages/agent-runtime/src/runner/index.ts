@@ -3,7 +3,7 @@ export {
   ToolCallBlocked,
   modelSupportsToolsWithStructuredOutput,
 } from "./agent-runner.js";
-export type { AgentLike } from "./agent-runner.js";
+export type { AgentLike, AgentRunnerOptions, RunHeadersContext } from "./agent-runner.js";
 export { convertHistory } from "./message-utils.js";
 export {
   OpenObjectSchemaError,
