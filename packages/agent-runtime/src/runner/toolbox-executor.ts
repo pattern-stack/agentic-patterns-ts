@@ -13,8 +13,13 @@
  *   - play calls   → `playbook.execute(name, args)` (returns an `{ error }`
  *                    envelope rather than throwing — see `playbook.ts`)
  *
- * Routing plays through `playbook.execute` is the point: it keeps a
- * malformed/failing play call from aborting the runner loop (ADR 0002 D3).
+ * Routing plays through `playbook.execute` preserves the `{ error }` envelope
+ * that plays have always returned on failure (see
+ * `.ai-docs/specs/playbook-authoring-parity.md` D1) — a contract choice, not
+ * a dependency: the three `toolExecutor.execute` call sites in
+ * `agent-runner.ts` already wrap the call in try/catch, so a throwing play
+ * would not abort the runner loop either. The envelope is kept for backward
+ * compatibility and consistency with the tool-side contract, not necessity.
  * This mirrors the play-routing the SDK-bridge path already does in
  * `sdk-bridge.ts` `buildCapabilityServer`.
  *

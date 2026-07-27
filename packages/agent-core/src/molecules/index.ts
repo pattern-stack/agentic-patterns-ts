@@ -18,7 +18,7 @@ export type { ManualItem } from "./manual.js";
 
 export { Capability, capability } from "./capability.js";
 
-export { Playbook } from "./playbook.js";
+export { Playbook, definePlay, playbook } from "./playbook.js";
 export type { PlayDefinition } from "./playbook.js";
 
 export {
