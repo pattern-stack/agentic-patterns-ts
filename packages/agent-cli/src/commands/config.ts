@@ -54,6 +54,8 @@ export const TRACKED_ENV: readonly EnvVarSpec[] = [
     label: "Gateway tier map for opus|sonnet|haiku (default anthropic)",
     secret: false,
   },
+  { key: "AP_GATEWAY_VIRTUAL_KEY", label: "Bifrost virtual key (x-bf-vk)", secret: true },
+  { key: "AP_GATEWAY_GUARDRAIL_IDS", label: "Bifrost guardrail ids (comma list)", secret: false },
   { key: "AGENT_TIER", label: "Default tier (opus | sonnet | haiku)", secret: false },
   { key: "AGENT_MODEL", label: "Pinned model id (overrides tier)", secret: false },
 ];
