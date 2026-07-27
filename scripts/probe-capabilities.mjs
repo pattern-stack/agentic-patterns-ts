@@ -1,6 +1,13 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * scripts/probe-capabilities.mjs — #390 live capability probe + drift check.
+ *
+ * Bun-only, not plain Node — the run-guard at the bottom uses
+ * `import.meta.main` (a Bun / Node->=24 feature; under an older plain `node`
+ * it's `undefined`, so the script silently no-ops instead of running) and
+ * this file deep-imports bun's hoisted `node_modules` layout below. Always
+ * invoke via `bun run scripts/probe-capabilities.mjs` (as this doc comment
+ * and the CI job both do).
  *
  * Sibling of `scripts/runner-side-by-side.mjs`. Per provider whose env key is
  * SET, runs a minimal matrix against that provider's `tiers.haiku` default
@@ -10,6 +17,8 @@
  *   (b) tools + `Output.object` single call                -> toolsWithStructuredOutput
  *   (c) same with `strict: true` on the tool                -> strictSchemaMode
  *   (d) `reasoning` effort ladder (["low", "high"])          -> reasoningEffort
+ *       (best-effort only — see `probeReasoningEffort`'s doc comment for the
+ *       known "silently ignored option" limitation this can't fully close)
  *
  * `inputExamples` has NO probe step here on purpose (Gate 1.5 review note
  * 3): "honored vs silently stripped" isn't cleanly detectable from a single
@@ -129,23 +138,59 @@ async function probeToolsStructured(providerName, modelId, model, { strict }) {
   }
 }
 
+/**
+ * KNOWN LIMITATION (Gate 2.5 quality-review note — flagged, not fully
+ * closed): passing `reasoning: level` cannot distinguish "the provider
+ * actually reasoned at this level" from "the SDK/provider silently ignored
+ * an option it doesn't support" — many providers accept and drop unknown
+ * `CallSettings` rather than throwing. A bare accept-without-error is
+ * therefore NOT proof of support.
+ *
+ * Best-effort tightening: look for actual reasoning EVIDENCE in the
+ * response — non-empty `reasoningText`, or non-zero
+ * `usage.outputTokenDetails.reasoningTokens` — before counting a level as a
+ * confirmed accept. A level whose call succeeds but shows neither is
+ * reported as "uncertain", not folded into a clean PASS.
+ *
+ * This still isn't airtight (a provider could in principle reason without
+ * emitting a reasoning part or without token-level accounting for it), so
+ * treat "uncertain" as "needs a human look before transcribing 'yes' into
+ * MODEL_CAPABILITIES", not as a settled answer either way. No `reasoning`
+ * row is seeded yet (`reasoningEffort` is `unverified` for every family
+ * today), so this is a forward-looking guard for whoever seeds the first
+ * one, not a fix for anything currently in the map.
+ */
 async function probeReasoningEffort(providerName, modelId, model) {
   const levels = ["low", "high"];
   const accepted = [];
+  const uncertain = [];
   for (const level of levels) {
     try {
-      await generateText({ model, prompt: "2+2=?", reasoning: level });
-      accepted.push(level);
+      const result = await generateText({ model, prompt: "2+2=?", reasoning: level });
+      const reasoningTokens = result.usage?.outputTokenDetails?.reasoningTokens ?? 0;
+      const hasReasoningEvidence = Boolean(result.reasoningText) || reasoningTokens > 0;
+      if (hasReasoningEvidence) {
+        accepted.push(level);
+      } else {
+        uncertain.push(level);
+      }
     } catch {
       // Not accepted at this level — leave it out rather than guessing.
     }
   }
-  return row(
-    providerName,
-    modelId,
-    "reasoningEffort",
-    accepted.length > 0 ? `PASS (${accepted.join(",")})` : "FAIL (no levels accepted)",
-  );
+
+  if (accepted.length === 0 && uncertain.length === 0) {
+    return row(providerName, modelId, "reasoningEffort", "FAIL (no levels accepted)");
+  }
+  const uncertainNote =
+    uncertain.length > 0
+      ? `call(s) succeeded for [${uncertain.join(",")}] with no reasoning evidence (reasoningText/reasoningTokens) — provider may be silently ignoring the option; verify manually before seeding.`
+      : "";
+  const outcome =
+    accepted.length > 0
+      ? `PASS (${accepted.join(",")})${uncertain.length > 0 ? ` + UNCERTAIN (${uncertain.join(",")})` : ""}`
+      : `UNCERTAIN (${uncertain.join(",")})`;
+  return row(providerName, modelId, "reasoningEffort", outcome, uncertainNote);
 }
 
 /**
