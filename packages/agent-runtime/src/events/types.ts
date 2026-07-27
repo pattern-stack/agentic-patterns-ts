@@ -172,6 +172,36 @@ export interface GateDecisionEvent extends BaseEvent {
   readonly trail: readonly { gate: string; result: "allow" | "block" | "modified" }[];
 }
 
+// ---------------------------------------------------------------------------
+// Tool approval events (#389) — the `toolApproval` bridge's own SDK-approval
+// framing (requested/granted/denied), emitted ONLY on the runStructured()
+// capable path (spec #389 D0/Option C). This is UI framing layered ON TOP OF
+// `agent.gate.decision` above (the unchanged, OBSERVABILITY-profile decision
+// record exporters key on) — NOT a replacement for it. `run()`/`stream()`
+// never emit these; their approvals keep surfacing via the existing
+// `agent.input.request` / `agent.gate.decision` / `agent.tool.rejected`
+// vocabulary.
+// ---------------------------------------------------------------------------
+
+export interface ToolApprovalRequestEvent extends BaseEvent {
+  readonly type: "agent.tool.approval.request";
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly arguments: Record<string, unknown>;
+}
+
+export interface ToolApprovalResponseEvent extends BaseEvent {
+  readonly type: "agent.tool.approval.response";
+  readonly toolCallId: string;
+  readonly toolName: string;
+  readonly approved: boolean;
+  readonly reason?: string;
+  /** Audit + UI distinguish declined vs expired vs mechanical (mirrors GateEvaluation). */
+  readonly settledBy: "gate" | "human" | "timeout";
+  /** The HarnessDecision discriminant, when an approval gate decided. */
+  readonly decisionKind?: string;
+}
+
 export interface ToolCallStartEvent extends BaseEvent {
   readonly type: "agent.tool.start";
   readonly toolCallId: string;
@@ -545,6 +575,8 @@ export type AgentEvent =
   | ToolCallIntent
   | ToolCallRejectedEvent
   | GateDecisionEvent
+  | ToolApprovalRequestEvent
+  | ToolApprovalResponseEvent
   | ToolCallStartEvent
   | ToolCallEndEvent
   | ToolProgressEvent

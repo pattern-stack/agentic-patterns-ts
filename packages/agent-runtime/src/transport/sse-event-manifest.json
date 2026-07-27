@@ -29,6 +29,8 @@
     "thinking",
     "thinking.complete",
     "thinking.start",
+    "tool.approval.request",
+    "tool.approval.response",
     "tool.end",
     "tool.intent",
     "tool.progress",

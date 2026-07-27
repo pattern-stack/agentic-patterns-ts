@@ -23,7 +23,7 @@
     },
     "packages/agent-cli": {
       "name": "@agentic-patterns/cli",
-      "version": "0.34.0",
+      "version": "0.36.0",
       "bin": {
         "ap": "./dist/cli.js",
       },
@@ -66,7 +66,7 @@
     },
     "packages/agent-dashboard": {
       "name": "@agentic-patterns/dashboard",
-      "version": "0.10.1",
+      "version": "0.10.2",
       "dependencies": {
         "@xyflow/react": "^12.11.1",
         "lucide-react": "^1.21.0",
@@ -88,7 +88,7 @@
     },
     "packages/agent-runtime": {
       "name": "@agentic-patterns/runtime",
-      "version": "0.34.0",
+      "version": "0.36.0",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/provider": "^4.0.0",
@@ -127,7 +127,7 @@
     },
     "packages/agent-server": {
       "name": "@agentic-patterns/server",
-      "version": "0.34.0",
+      "version": "0.36.0",
       "dependencies": {
         "@agentic-patterns/core": "workspace:^",
         "@agentic-patterns/runtime": "workspace:^",

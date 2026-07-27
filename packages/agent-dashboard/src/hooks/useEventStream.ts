@@ -68,6 +68,11 @@ export function useEventStream(
         "claude_code.hook",
         "harness.native",
         "gate.decision",
+        // #389 — the toolApproval bridge's request/response pair, without
+        // which the capable-path approval events never reach this panel
+        // (EventSource has no wildcard — see the comment above).
+        "tool.approval.request",
+        "tool.approval.response",
         "step.start",
         "step.end",
         "tool.start",

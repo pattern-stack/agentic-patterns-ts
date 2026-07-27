@@ -83,6 +83,24 @@ export type ClientEvent =
       name: "tool.rejected";
       data: { tool_name: string; reason: string; gate_name: string };
     }
+  // Tool-approval SDK-framing pair (#389) — the `toolApproval` bridge's own
+  // requested/granted/denied events on the capable path. Layered ON TOP OF
+  // `gate.decision` below (unchanged), not a replacement for it.
+  | {
+      name: "tool.approval.request";
+      data: { tool_call_id: string; tool_name: string; arguments: unknown };
+    }
+  | {
+      name: "tool.approval.response";
+      data: {
+        tool_call_id: string;
+        tool_name: string;
+        approved: boolean;
+        settled_by: "gate" | "human" | "timeout";
+        reason?: string;
+        decision_kind?: string;
+      };
+    }
   | {
       name: "step.start";
       data: {
@@ -299,6 +317,8 @@ export const CLIENT_EVENT_NAMES = [
   "tool.end",
   "tool.rejected",
   "gate.decision",
+  "tool.approval.request",
+  "tool.approval.response",
   "step.start",
   "step.end",
   "iteration.start",

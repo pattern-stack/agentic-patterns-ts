@@ -6,13 +6,22 @@ import { ToolSchema } from "@agentic-patterns/core";
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import type { LanguageModelV3Content, LanguageModelV3Usage } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { AgentEventBus } from "../../events/agent-event-bus.js";
-import type { AgentEvent } from "../../events/types.js";
+import type { AgentEvent, ToolCallIntent } from "../../events/types.js";
+import type { Gate, GateResult } from "../../gates/base.js";
+import { createHumanInputApprovalGate } from "../../interaction/approval-gate.js";
+import { PendingInputRegistry } from "../../interaction/pending-input-registry.js";
+import { resetAdvisoryWarningsForTests } from "../../providers/capabilities.js";
 import { buildScopeHost, readScope } from "../../workflows/scope-host.js";
-import { AgentRunner, RunCancelledError, ToolCallBlocked } from "../agent-runner.js";
+import {
+  AgentRunner,
+  RunCancelledError,
+  ToolCallBlocked,
+  modelSupportsToolsWithStructuredOutput,
+} from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 import type { ToolExecutor } from "../types.js";
 
@@ -1598,6 +1607,148 @@ describe("AgentRunner", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // #390 — modelSupportsToolsWithStructuredOutput delegates to the capability
+  // map (providers/capabilities.ts); runStructured() consults the map for a
+  // once-per-(model x capability) advisory. Seed-parity: the delegate's truth
+  // table must match the pre-#390 hardcoded boolean EXACTLY, including the
+  // gemini-3.5-flash substring-vs-prefix quirk (Gate 1.5 review note 5).
+  // ---------------------------------------------------------------------------
+  describe("modelSupportsToolsWithStructuredOutput / capability map (#390)", () => {
+    afterEach(() => {
+      resetAdvisoryWarningsForTests();
+    });
+
+    describe("seed-parity: delegate matches the pre-#390 hardcoded truth table", () => {
+      it.each([
+        ["gpt-4o", true],
+        ["gpt-4o-mini", true],
+        ["gpt-4o-2024-08-06", true],
+        ["gpt-5", true],
+        ["gpt-5-mini", true],
+        ["gemini-3.5-flash", true],
+        ["bifrost:openai/gpt-4o", true],
+        ["gpt-4o:2024-08-06", true],
+        // adversarial substring — the pre-#390 gemini check was
+        // `bare.includes(...)`, so this historically returned true even
+        // though it doesn't START with the family prefix (review note 5).
+        ["x-gemini-3.5-flash", true],
+        // unknown / untested-at-the-boolean-level ids stay false.
+        ["claude-sonnet-4-5", false],
+        ["gemini-2.5-flash", false],
+        ["gemini-2.5-pro", false],
+        ["gemini-3.1-flash-lite", false],
+        ["some-totally-unknown-model", false],
+      ] as const)("%s -> %s", (modelId, expected) => {
+        expect(modelSupportsToolsWithStructuredOutput(modelId)).toBe(expected);
+      });
+    });
+
+    it("runStructured() with an unmapped model: emits exactly one advisory warn and still returns a valid object via 2-tier", async () => {
+      let llmCalls = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "some-totally-unknown-model",
+        doGenerate: async () => {
+          llmCalls++;
+          if (llmCalls === 1) {
+            return toolCallResult({ toolCallId: "tc-390-1", toolName: "search", input: {} }, 10, 5);
+          }
+          if (llmCalls === 2) {
+            return textResult("the answer is 42", 10, 5);
+          }
+          return textResult(JSON.stringify({ answer: "42" }), 10, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("search", "Search", z.object({}))];
+      const agent = makeAgent({
+        getModel: () => "some-totally-unknown-model",
+        getTools: () => tools,
+      });
+      const executor = makeToolExecutor(async () => ({ ok: true }));
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runner = new AgentRunner(model);
+      const schema = z.object({ answer: z.string() });
+
+      const result = await runner.runStructured(agent, "what is the answer?", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ answer: "42" });
+      expect(llmCalls).toBe(3); // tier-1 tool call, tier-1 text finish, tier-2 structured finish
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("unverified");
+      warn.mockRestore();
+
+      // Calling again with the SAME model id doesn't re-warn (once per key).
+      llmCalls = 0;
+      await runner.runStructured(agent, "what is the answer?", schema, { toolExecutor: executor });
+      const warn2 = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await runner.runStructured(agent, "what is the answer?", schema, { toolExecutor: executor });
+      expect(warn2).not.toHaveBeenCalled();
+      warn2.mockRestore();
+    });
+
+    it("runStructured() on a mapped-but-tools-incapable model (claude-sonnet-4-5, WITH tools): warns about the single-call round-trip and still 2-tiers (Gate 2.5 fix — this used to stay silent)", async () => {
+      // Before the Gate 2.5 re-key, the advisory checked `structuredOutput`
+      // unconditionally — verified "yes" for claude-, so this run got NO
+      // warning even though it silently drops to the slower 2-tier path.
+      // The advisory now consults `toolsWithStructuredOutput` when tools are
+      // present (the capability that actually governs this run's path), so
+      // this family — which WILL 2-tier — now warns.
+      let llmCalls = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "claude-sonnet-4-5",
+        doGenerate: async () => {
+          llmCalls++;
+          if (llmCalls === 1) {
+            return toolCallResult({ toolCallId: "tc-390-2", toolName: "search", input: {} }, 10, 5);
+          }
+          if (llmCalls === 2) {
+            return textResult("the answer is 42", 10, 5);
+          }
+          return textResult(JSON.stringify({ answer: "42" }), 10, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("search", "Search", z.object({}))];
+      const agent = makeAgent({ getModel: () => "claude-sonnet-4-5", getTools: () => tools });
+      const executor = makeToolExecutor(async () => ({ ok: true }));
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runner = new AgentRunner(model);
+      const schema = z.object({ answer: z.string() });
+
+      const result = await runner.runStructured(agent, "what is the answer?", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ answer: "42" });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain(
+        "NOT supporting the single-call tools+structured-output round-trip",
+      );
+      warn.mockRestore();
+    });
+
+    it("runStructured() on claude-sonnet-4-5 with NO tools: stays silent — structuredOutput itself is verified 'yes', so the no-tools path is fine", async () => {
+      const model = new MockLanguageModelV3({
+        modelId: "claude-sonnet-4-5",
+        doGenerate: async () => textResult(JSON.stringify({ answer: "42" }), 10, 5),
+      });
+      const agent = makeAgent({ getModel: () => "claude-sonnet-4-5", getTools: () => [] });
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runner = new AgentRunner(model);
+      const schema = z.object({ answer: z.string() });
+
+      const result = await runner.runStructured(agent, "what is the answer?", schema);
+
+      expect(result.object).toEqual({ answer: "42" });
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // ADR-0006 — render-artifact publication + preserved structured terminal
   // output. `RunOptions.publishArtifacts` gates `ToolExecutionContext.
   // publishArtifact`; a terminal tool's structured result is carried
@@ -1894,6 +2045,330 @@ describe("AgentRunner", () => {
         textTokens: 50,
         reasoningTokens: 0,
       });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // #389 — runStructured() capable path routes gate interception through the
+  // native `toolApproval` bridge instead of a pre-check inside `execute`.
+  // ---------------------------------------------------------------------------
+  describe("runStructured() capable path — toolApproval bridge (#389)", () => {
+    /** A minimal gate that always returns a fixed `GateResult`. */
+    function fixedGate(name: string, result: GateResult): Gate {
+      return {
+        category: 2,
+        name,
+        categoryName: "APPROVAL",
+        check: async () => result,
+        getBlockReason: () => "blocked",
+      };
+    }
+
+    function collectApprovalEvents(bus: AgentEventBus): { type: string }[] {
+      const order: { type: string }[] = [];
+      for (const type of [
+        "agent.tool.approval.request",
+        "agent.gate.decision",
+        "agent.tool.approval.response",
+        "agent.tool.start",
+        "agent.tool.rejected",
+      ] as const) {
+        bus.subscribe(type, (e) => order.push(e as AgentEvent));
+      }
+      return order as unknown as { type: string }[];
+    }
+
+    it("allow: tool runs, gate check happens ONCE (not twice, unlike the old emitIntent pre-check), events in order request -> gate.decision -> response -> tool.start", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-allow-1", toolName: "get_weather", input: { city: "NYC" } },
+              10,
+              5,
+            );
+          }
+          return textResult(JSON.stringify({ weather: "sunny" }), 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      let gateCheckCount = 0;
+      bus.addGate({
+        category: 2,
+        name: "CountingAllow",
+        categoryName: "APPROVAL",
+        check: async () => {
+          gateCheckCount++;
+          return { action: "allow" as const };
+        },
+        getBlockReason: () => "",
+      });
+      const order = collectApprovalEvents(bus);
+
+      let executedArgs: Record<string, unknown> | undefined;
+      const executor: ToolExecutor = {
+        execute: async (_name, args) => {
+          executedArgs = args;
+          return { weather: "sunny" };
+        },
+      };
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ weather: z.string() });
+      const result = await runner.runStructured(agent, "weather?", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ weather: "sunny" });
+      expect(executedArgs).toEqual({ city: "NYC" });
+      expect(gateCheckCount).toBe(1);
+      expect(order.map((e) => e.type)).toEqual([
+        "agent.tool.approval.request",
+        "agent.gate.decision",
+        "agent.tool.approval.response",
+        "agent.tool.start",
+      ]);
+    });
+
+    it("deny: model receives a native denial, the SDK loop continues, and the run completes — no ToolCallBlocked throw, no tool.start", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-deny-1", toolName: "dangerous_tool", input: {} },
+              10,
+              5,
+            );
+          }
+          // The loop continued after the denial (#389 D0/Option C) — the
+          // model gets another turn and produces the final structured output.
+          return textResult(JSON.stringify({ status: "done" }), 5, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("dangerous_tool", "Dangerous", z.object({}))];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      bus.addGate(fixedGate("BlockAll", { action: "block", reason: "Not allowed" }));
+      const order = collectApprovalEvents(bus);
+
+      let toolRan = false;
+      const executor = makeToolExecutor(async () => {
+        toolRan = true;
+        return { ok: true };
+      });
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ status: z.string() });
+
+      // #389 behavior-regression call-out: the capable path denial is a
+      // native `tool-output-denied`, never a `ToolCallBlocked` throw (that
+      // throw only ever guarded run()/stream()'s execute-less path).
+      const result = await runner.runStructured(agent, "do something dangerous", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ status: "done" });
+      expect(toolRan).toBe(false);
+      expect(callCount).toBe(2);
+      // A block additionally emits `agent.tool.rejected` (before the audit
+      // phase) — unchanged bus semantics, see agent-event-bus.ts's
+      // `_emitRejection`/`_runAuditPhase` ordering.
+      expect(order.map((e) => e.type)).toEqual([
+        "agent.tool.approval.request",
+        "agent.tool.rejected",
+        "agent.gate.decision",
+        "agent.tool.approval.response",
+      ]);
+    });
+
+    it("modify (rewriteInput): a NEW capability on the capable path — execute() dispatches with the REWRITTEN args, not the model's original ones", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-modify-1", toolName: "edit_tool", input: { text: "original" } },
+              10,
+              5,
+            );
+          }
+          return textResult(JSON.stringify({ ok: true }), 5, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("edit_tool", "Edit", z.object({ text: z.string() }))];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      bus.addGate({
+        category: 2,
+        name: "Rewriter",
+        categoryName: "APPROVAL",
+        check: async (event) => {
+          const intent = event as ToolCallIntent;
+          const rewritten: ToolCallIntent = { ...intent, arguments: { text: "REWRITTEN" } };
+          return {
+            action: "modify",
+            event: rewritten,
+            decision: { kind: "rewriteInput", updatedInput: { text: "REWRITTEN" } },
+          };
+        },
+        getBlockReason: () => "",
+      });
+
+      let executedArgs: Record<string, unknown> | undefined;
+      const executor: ToolExecutor = {
+        execute: async (_name, args) => {
+          executedArgs = args;
+          return { ok: true };
+        },
+      };
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ ok: z.boolean() });
+      const result = await runner.runStructured(agent, "edit it", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ ok: true });
+      // Execution used the REWRITTEN args...
+      expect(executedArgs).toEqual({ text: "REWRITTEN" });
+    });
+
+    it("abort mid-await (human gate pending): run terminates promptly, no ToolCallBlocked-style hang, registry cleaned up", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-abort-int-1", toolName: "risky_tool", input: {} },
+              10,
+              5,
+            );
+          }
+          return textResult(JSON.stringify({ status: "done" }), 5, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("risky_tool", "Risky", z.object({}))];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      const registry = new PendingInputRegistry();
+      const humanGate = createHumanInputApprovalGate({
+        bus,
+        registry,
+        tools: new Set(["risky_tool"]),
+      });
+      bus.addGate(humanGate);
+
+      const controller = new AbortController();
+      let toolRan = false;
+      const executor = makeToolExecutor(async () => {
+        toolRan = true;
+        return { ok: true };
+      });
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ status: z.string() });
+
+      const runPromise = runner.runStructured(agent, "do the risky thing", schema, {
+        toolExecutor: executor,
+        abortSignal: controller.signal,
+        pendingInputRegistry: registry,
+      });
+
+      // Wait until the human gate has genuinely registered the pending
+      // request (no human EVER answers in this test) — then abort. A real
+      // `generateText` round trip has more async hops than a direct bridge
+      // call, so poll across macrotask boundaries too (not just microtasks).
+      for (let i = 0; i < 200 && !registry.has("tc-abort-int-1"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(registry.has("tc-abort-int-1")).toBe(true);
+      controller.abort();
+
+      // Terminates promptly — races against a generous bound. Nothing in
+      // this test ever calls registry.resolve(), so a hang here would mean
+      // the abort wiring failed to unblock the pending human decision.
+      const TIMEOUT = Symbol("timeout");
+      const winner = await Promise.race([
+        runPromise.then(
+          (r) => r,
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(TIMEOUT), 1000)),
+      ]);
+      expect(winner).not.toBe(TIMEOUT);
+
+      expect(toolRan).toBe(false);
+      // No orphaned pending input — the registry entry was cleaned up.
+      expect(registry.has("tc-abort-int-1")).toBe(false);
+    });
+
+    it("a throwing gate: denied (fail-closed), the run completes without crashing", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-throw-int-1", toolName: "flaky_tool", input: {} },
+              10,
+              5,
+            );
+          }
+          // The loop continued after the gate-throw-turned-denial, exactly
+          // like a normal deny (#389 D0/Option C) — no crash, no throw out
+          // of runStructured().
+          return textResult(JSON.stringify({ status: "done" }), 5, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("flaky_tool", "Flaky", z.object({}))];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      bus.addGate({
+        category: 2,
+        name: "ThrowingGate",
+        categoryName: "APPROVAL",
+        check: async () => {
+          throw new Error("gate exploded");
+        },
+        getBlockReason: () => "unreachable",
+      });
+
+      let toolRan = false;
+      const executor = makeToolExecutor(async () => {
+        toolRan = true;
+        return { ok: true };
+      });
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ status: z.string() });
+
+      const result = await runner.runStructured(agent, "use the flaky tool", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ status: "done" });
+      expect(toolRan).toBe(false);
+      expect(callCount).toBe(2);
     });
   });
 });

@@ -30,6 +30,7 @@
 import { z } from "zod";
 
 import { PROVIDERS, type SupportedProvider, resolveTierAlias } from "./index.js";
+import { SUPPORTED_PROVIDERS } from "./types.js";
 import type { ResolvedLanguageModel } from "./types.js";
 
 /**
@@ -80,18 +81,12 @@ export function constantModelResolver(model: ResolvedLanguageModel): ModelResolv
 // ModelProfile — the serializable registry entry (also the models.yaml shape)
 // ---------------------------------------------------------------------------
 
-/** Provider kinds a profile may target — every {@link SupportedProvider}. */
-export const PROFILE_PROVIDERS = [
-  "anthropic",
-  "openai",
-  "google",
-  "groq",
-  "mistral",
-  "xai",
-  "deepseek",
-  "openrouter",
-  "ollama",
-] as const;
+/**
+ * Provider kinds a profile may target — every {@link SupportedProvider}.
+ * Re-exports `types.ts`'s {@link SUPPORTED_PROVIDERS} under this module's
+ * established name (kept for back-compat with existing imports).
+ */
+export const PROFILE_PROVIDERS = SUPPORTED_PROVIDERS;
 
 /**
  * A single model profile — serializable, so it round-trips through `models.yaml`

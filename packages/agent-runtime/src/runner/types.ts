@@ -8,6 +8,7 @@ import type { RenderContext, ToolExecutionContext } from "@agentic-patterns/core
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent, TokenUsageDetails } from "../events/types.js";
+import type { PendingInputRegistry } from "../interaction/pending-input-registry.js";
 
 // ---------------------------------------------------------------------------
 // AgentLike — canonical minimal agent shape at the runner protocol boundary
@@ -208,6 +209,20 @@ export interface RunOptions {
    * it isn't allowed to publish.
    */
   publishArtifacts?: boolean;
+  /**
+   * #389 fix-round — the SAME `PendingInputRegistry` instance a human-approval
+   * gate on `eventBus` uses, if any. Purely a cleanup optimization for
+   * `runStructured()`'s capable-path `toolApproval` bridge: when `abortSignal`
+   * fires while the bridge is mid-await on a human decision, it resolves its
+   * own await promptly (fail-closed deny) regardless, but WITHOUT this
+   * reference it cannot also settle the registry's own pending entry for that
+   * `toolCallId` — the entry then lingers until the human actually answers or
+   * the gate's own `timeoutMs` elapses. Passing it lets the bridge call the
+   * registry's existing `resolve()` directly, so an abort never orphans a
+   * pending human-input row. Omit if no human-approval gate is wired, or
+   * accept the (bounded, if the gate configured a `timeoutMs`) lingering entry.
+   */
+  pendingInputRegistry?: PendingInputRegistry;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,17 +21,30 @@ import type { LanguageModelV2, LanguageModelV3, LanguageModelV4 } from "@ai-sdk/
  */
 export type ResolvedLanguageModel = LanguageModelV2 | LanguageModelV3 | LanguageModelV4;
 
+/**
+ * Runtime array mirroring {@link SupportedProvider} — TS union types are
+ * erased at runtime, so anything needing the values themselves (a zod
+ * `z.enum()`, an iteration) needs this array instead of the type. Single
+ * source of truth for `model-resolver.ts`'s `PROFILE_PROVIDERS` and
+ * `capabilities.ts`'s provider enum — both import it from here (the leaf
+ * module in `providers/`) rather than from each other, to avoid a
+ * providers/index.ts -> capabilities.ts -> model-resolver.ts -> index.ts
+ * import cycle.
+ */
+export const SUPPORTED_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google",
+  "groq",
+  "mistral",
+  "xai",
+  "deepseek",
+  "openrouter",
+  "ollama",
+] as const;
+
 /** Supported provider identifiers. Matches directory / file names below. */
-export type SupportedProvider =
-  | "anthropic"
-  | "openai"
-  | "google"
-  | "groq"
-  | "mistral"
-  | "xai"
-  | "deepseek"
-  | "openrouter"
-  | "ollama";
+export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
 
 /**
  * Cross-provider tier selector.

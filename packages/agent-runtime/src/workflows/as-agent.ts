@@ -470,6 +470,11 @@ const RELAYED_STREAM_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEventTyp
   "agent.tool.progress",
   "agent.tool.end",
   "agent.tool.rejected",
+  // Tool-approval SDK-framing pair (#389) — a delegated/promoted sub-agent's
+  // capable-path approval must reach the parent conversation SSE; this relay
+  // is its ONLY route there (events not listed here die silently).
+  "agent.tool.approval.request",
+  "agent.tool.approval.response",
   // State-delta events (#226) — Backpack/Scratchpad mutations the observed
   // emission layer publishes. Relayed so the playground chat can render Delta
   // Frames + the Scratchpad rail live; the conversation SSE is this path's

@@ -23,6 +23,10 @@ const TYPE_TONES: Record<string, Tone> = {
   "agent.tool.intent": "accent",
   "agent.tool.rejected": "err",
   "agent.tool.progress": "accent",
+  // #389 — the toolApproval bridge's request event: always a pending-ask
+  // tone (the response event below is tone-branched on its own payload).
+  "agent.tool.approval.request": "warn",
+  "tool.approval.request": "warn",
   "agent.llm.start": "warn",
   "agent.llm.end": "warn",
   "agent.message.start": "ok",
@@ -38,8 +42,16 @@ const TYPE_TONES: Record<string, Tone> = {
   "agent.error": "err",
 };
 
-function toneForType(type: string): Tone {
-  return TYPE_TONES[type] ?? "mute";
+/**
+ * #389 — `tool.approval.response`'s tone depends on its own payload
+ * (`approved: true|false`), not just its type, so it can't live in the flat
+ * `TYPE_TONES` map above like every other row.
+ */
+function toneForEvent(event: StreamEvent): Tone {
+  if (event.type === "agent.tool.approval.response" || event.type === "tool.approval.response") {
+    return event.data.approved === false ? "err" : "ok";
+  }
+  return TYPE_TONES[event.type] ?? "mute";
 }
 
 function formatTime(timestamp: string): string {
@@ -142,7 +154,7 @@ export function EventStream({ events, height = "calc(100vh - 220px)" }: EventStr
               >
                 {formatTime(event.timestamp)}
               </span>
-              <Badge tone={toneForType(event.type)}>{event.type.replace("agent.", "")}</Badge>
+              <Badge tone={toneForEvent(event)}>{event.type.replace("agent.", "")}</Badge>
               <span
                 style={{
                   color: "var(--ink)",
