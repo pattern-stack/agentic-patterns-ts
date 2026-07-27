@@ -256,4 +256,175 @@ describe("createGateToolApproval", () => {
     expect(decisions).toHaveLength(1);
     expect(decisions[0]?.outcome).toBe("allow");
   });
+
+  // ---------------------------------------------------------------------------
+  // #389 fix-round — fail-closed posture: abort mid-decision, a throwing gate.
+  // ---------------------------------------------------------------------------
+
+  it("abort mid-await: fails closed (denied) promptly and cleans up the pending registry entry", async () => {
+    const bus = new AgentEventBus();
+    const registry = new PendingInputRegistry();
+    const humanGate = createHumanInputApprovalGate({
+      bus,
+      registry,
+      tools: new Set(["risky_tool"]),
+    });
+    bus.addGate(humanGate);
+
+    const responses: ToolApprovalResponseEvent[] = [];
+    bus.subscribe("agent.tool.approval.response", (e) =>
+      responses.push(e as ToolApprovalResponseEvent),
+    );
+
+    const controller = new AbortController();
+    const { toolApproval } = createGateToolApproval({
+      bus,
+      traceId: "trace-1",
+      runId: "run-1",
+      parentSpanId: "root-span",
+      abortSignal: controller.signal,
+      pendingInputRegistry: registry,
+    });
+
+    const outcomePromise = toolApproval({ toolCall: toolCall("tc-abort-1", "risky_tool") });
+
+    // Wait until the human gate has genuinely registered the pending
+    // request (no human ever answers in this test) — then abort.
+    await waitUntil(() => registry.has("tc-abort-1"));
+    expect(registry.has("tc-abort-1")).toBe(true);
+    controller.abort();
+
+    // Terminates promptly (bounded ticks, no hang until a human answers).
+    const outcome = await outcomePromise;
+    expect(outcome).toEqual({ type: "denied", reason: "Run aborted" });
+
+    // The registry entry is cleaned up — no orphaned pending input.
+    expect(registry.has("tc-abort-1")).toBe(false);
+
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toMatchObject({
+      approved: false,
+      reason: "Run aborted",
+      settledBy: "timeout",
+    });
+  });
+
+  it("abort mid-await with no pendingInputRegistry threaded: still resolves denied promptly (registry cleanup is best-effort)", async () => {
+    const bus = new AgentEventBus();
+    const registry = new PendingInputRegistry();
+    const humanGate = createHumanInputApprovalGate({
+      bus,
+      registry,
+      tools: new Set(["risky_tool"]),
+    });
+    bus.addGate(humanGate);
+
+    const controller = new AbortController();
+    const { toolApproval } = createGateToolApproval({
+      bus,
+      traceId: "trace-1",
+      runId: "run-1",
+      parentSpanId: "root-span",
+      abortSignal: controller.signal,
+      // pendingInputRegistry intentionally omitted.
+    });
+
+    const outcomePromise = toolApproval({ toolCall: toolCall("tc-abort-2", "risky_tool") });
+    await waitUntil(() => registry.has("tc-abort-2"));
+    controller.abort();
+
+    const outcome = await outcomePromise;
+    expect(outcome).toEqual({ type: "denied", reason: "Run aborted" });
+    // Without the registry reference, the entry lingers (documented
+    // best-effort trade-off) until the human answers or a gate timeoutMs.
+    expect(registry.has("tc-abort-2")).toBe(true);
+    registry.resolve("tc-abort-2", { decision: "deny" });
+  });
+
+  it("an already-aborted signal denies immediately, no evaluateIntent round trip needed", async () => {
+    const bus = new AgentEventBus();
+    const decisions: GateDecisionEvent[] = [];
+    bus.subscribe("agent.gate.decision", (e) => decisions.push(e as GateDecisionEvent));
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const { toolApproval } = createGateToolApproval({
+      bus,
+      traceId: "trace-1",
+      runId: "run-1",
+      parentSpanId: "root-span",
+      abortSignal: controller.signal,
+    });
+
+    const outcome = await toolApproval({ toolCall: toolCall("tc-abort-3", "safe_tool") });
+    expect(outcome).toEqual({ type: "denied", reason: "Run aborted" });
+    // The gate chain never actually ran — no gate.decision was published.
+    expect(decisions).toHaveLength(0);
+  });
+
+  it("a throwing gate: denied (fail-closed), error surfaced on the response event, run completes", async () => {
+    const bus = new AgentEventBus();
+    bus.addGate({
+      category: 2,
+      name: "ThrowingGate",
+      categoryName: "APPROVAL",
+      check: async () => {
+        throw new Error("boom: gate misconfigured");
+      },
+      getBlockReason: () => "unreachable",
+    });
+
+    const responses: ToolApprovalResponseEvent[] = [];
+    bus.subscribe("agent.tool.approval.response", (e) =>
+      responses.push(e as ToolApprovalResponseEvent),
+    );
+
+    const { toolApproval } = createGateToolApproval({
+      bus,
+      traceId: "trace-1",
+      runId: "run-1",
+      parentSpanId: "root-span",
+    });
+
+    // Does NOT reject — the callback itself never throws.
+    const outcome = await toolApproval({ toolCall: toolCall("tc-throw-1", "safe_tool") });
+    expect(outcome).toEqual({
+      type: "denied",
+      reason: "Gate evaluation failed: boom: gate misconfigured",
+    });
+    expect(responses).toHaveLength(1);
+    expect(responses[0]).toMatchObject({
+      approved: false,
+      reason: "Gate evaluation failed: boom: gate misconfigured",
+      settledBy: "gate",
+    });
+  });
+
+  it("a throwing gate that throws a non-Error value: still denies (String(err) fallback)", async () => {
+    const bus = new AgentEventBus();
+    bus.addGate({
+      category: 2,
+      name: "ThrowingGate",
+      categoryName: "APPROVAL",
+      check: async () => {
+        // Deliberately a non-Error throw — exercises the bridge's String(err) fallback.
+        throw "not an Error instance";
+      },
+      getBlockReason: () => "unreachable",
+    });
+
+    const { toolApproval } = createGateToolApproval({
+      bus,
+      traceId: "trace-1",
+      runId: "run-1",
+      parentSpanId: "root-span",
+    });
+
+    const outcome = await toolApproval({ toolCall: toolCall("tc-throw-2", "safe_tool") });
+    expect(outcome).toEqual({
+      type: "denied",
+      reason: "Gate evaluation failed: not an Error instance",
+    });
+  });
 });

@@ -12,6 +12,8 @@ import { z } from "zod";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent, ToolCallIntent } from "../../events/types.js";
 import type { Gate, GateResult } from "../../gates/base.js";
+import { createHumanInputApprovalGate } from "../../interaction/approval-gate.js";
+import { PendingInputRegistry } from "../../interaction/pending-input-registry.js";
 import { resetAdvisoryWarningsForTests } from "../../providers/capabilities.js";
 import { buildScopeHost, readScope } from "../../workflows/scope-host.js";
 import {
@@ -2244,6 +2246,129 @@ describe("AgentRunner", () => {
       expect(result.object).toEqual({ ok: true });
       // Execution used the REWRITTEN args...
       expect(executedArgs).toEqual({ text: "REWRITTEN" });
+    });
+
+    it("abort mid-await (human gate pending): run terminates promptly, no ToolCallBlocked-style hang, registry cleaned up", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-abort-int-1", toolName: "risky_tool", input: {} },
+              10,
+              5,
+            );
+          }
+          return textResult(JSON.stringify({ status: "done" }), 5, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("risky_tool", "Risky", z.object({}))];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      const registry = new PendingInputRegistry();
+      const humanGate = createHumanInputApprovalGate({
+        bus,
+        registry,
+        tools: new Set(["risky_tool"]),
+      });
+      bus.addGate(humanGate);
+
+      const controller = new AbortController();
+      let toolRan = false;
+      const executor = makeToolExecutor(async () => {
+        toolRan = true;
+        return { ok: true };
+      });
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ status: z.string() });
+
+      const runPromise = runner.runStructured(agent, "do the risky thing", schema, {
+        toolExecutor: executor,
+        abortSignal: controller.signal,
+        pendingInputRegistry: registry,
+      });
+
+      // Wait until the human gate has genuinely registered the pending
+      // request (no human EVER answers in this test) — then abort. A real
+      // `generateText` round trip has more async hops than a direct bridge
+      // call, so poll across macrotask boundaries too (not just microtasks).
+      for (let i = 0; i < 200 && !registry.has("tc-abort-int-1"); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(registry.has("tc-abort-int-1")).toBe(true);
+      controller.abort();
+
+      // Terminates promptly — races against a generous bound. Nothing in
+      // this test ever calls registry.resolve(), so a hang here would mean
+      // the abort wiring failed to unblock the pending human decision.
+      const TIMEOUT = Symbol("timeout");
+      const winner = await Promise.race([
+        runPromise.then(
+          (r) => r,
+          (e: unknown) => e,
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(TIMEOUT), 1000)),
+      ]);
+      expect(winner).not.toBe(TIMEOUT);
+
+      expect(toolRan).toBe(false);
+      // No orphaned pending input — the registry entry was cleaned up.
+      expect(registry.has("tc-abort-int-1")).toBe(false);
+    });
+
+    it("a throwing gate: denied (fail-closed), the run completes without crashing", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "gpt-4o",
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-throw-int-1", toolName: "flaky_tool", input: {} },
+              10,
+              5,
+            );
+          }
+          // The loop continued after the gate-throw-turned-denial, exactly
+          // like a normal deny (#389 D0/Option C) — no crash, no throw out
+          // of runStructured().
+          return textResult(JSON.stringify({ status: "done" }), 5, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("flaky_tool", "Flaky", z.object({}))];
+      const agent = makeAgent({ getModel: () => "gpt-4o", getTools: () => tools });
+
+      const bus = new AgentEventBus();
+      bus.addGate({
+        category: 2,
+        name: "ThrowingGate",
+        categoryName: "APPROVAL",
+        check: async () => {
+          throw new Error("gate exploded");
+        },
+        getBlockReason: () => "unreachable",
+      });
+
+      let toolRan = false;
+      const executor = makeToolExecutor(async () => {
+        toolRan = true;
+        return { ok: true };
+      });
+
+      const runner = new AgentRunner(model, bus);
+      const schema = z.object({ status: z.string() });
+
+      const result = await runner.runStructured(agent, "use the flaky tool", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ status: "done" });
+      expect(toolRan).toBe(false);
+      expect(callCount).toBe(2);
     });
   });
 });

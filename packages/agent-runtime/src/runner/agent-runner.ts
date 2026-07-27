@@ -33,7 +33,9 @@ import type {
   ToolExecutionContext,
   ToolSchema,
 } from "@agentic-patterns/core";
+import type { Context, InferToolSetContext } from "@ai-sdk/provider-utils";
 import {
+  type GenericToolApprovalFunction,
   type LanguageModelUsage,
   type ModelMessage,
   Output,
@@ -1196,6 +1198,11 @@ export class AgentRunner implements RunnerProtocol {
         traceId: effectiveTraceId,
         runId,
         parentSpanId: rootSpanId,
+        // #389 fix-round: forwarded so the bridge can fail-closed (deny)
+        // promptly on abort instead of hanging on a pending gate evaluation
+        // (see tool-approval-bridge.ts's "FAIL-CLOSED POSTURE" note).
+        abortSignal: options?.abortSignal,
+        pendingInputRegistry: options?.pendingInputRegistry,
       });
       const tools = this.convertExecutableTools(agent, toolExecutor, bridge.overlay, {
         traceId: effectiveTraceId,
@@ -1210,8 +1217,21 @@ export class AgentRunner implements RunnerProtocol {
         messages,
         tools,
         stopWhen: isStepCount(options?.maxIterations ?? 10),
-        toolApproval: bridge.toolApproval,
+        // #389 fix-round (nit): `satisfies` locks the hand-rolled
+        // `GateToolApprovalFn` (tool-approval-bridge.ts) against ai@7's own
+        // `toolApproval` callback shape AT THIS CALL SITE — an SDK release
+        // that changes the callback contract now fails typecheck here
+        // instead of silently drifting.
+        toolApproval: bridge.toolApproval satisfies GenericToolApprovalFunction<
+          ToolSet,
+          InferToolSetContext<ToolSet>,
+          Context
+        >,
         output: Output.object({ schema }),
+        // #389 fix-round: the capable path previously omitted this (contrast
+        // stream()'s forward below) — the SDK's own abort checks (model-call
+        // timeouts, tool-execution abort merge) now see it too.
+        abortSignal: options?.abortSignal,
       });
       const steps = result.steps ?? [];
       // v7: result.usage aggregates ALL steps (totalUsage is now a deprecated
