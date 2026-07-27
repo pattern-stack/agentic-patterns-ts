@@ -562,3 +562,191 @@ Implementation landed while #385 (*drop CJS output, require Node >= 22*) was mer
 3. **`shims: true` from #374 is gone from main, and that is the better outcome.** #385 dropped CJS output entirely, so the `createRequire(import.meta.url)` bug class is eliminated at the root rather than patched. The `check-dist-contract` guard added alongside that fix survived and was inverted by #385 — it now asserts the ESM entry loads *and* that no CJS artifacts are emitted.
 
 **Standing verdict unchanged.** The design (D1–D5, the central invariant, Correction #3's accepted residual) is untouched by any of this; only the release mechanics moved.
+
+---
+
+## Diff Review — Adherence
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff origin/main...HEAD` @ `8eb2611` (PR #392, 15 files, +1283/-67)
+**Against:** `.ai-docs/specs/playbook-authoring-parity.md` (static sections + all three Design Addenda, which are binding)
+**Verdict: PASS_WITH_NOTES**
+
+The spec was implemented essentially verbatim. The central invariant holds under inspection,
+not just under test: no code path validates a plain `PlayDefinition`'s `returns`. Every row of
+§ File-by-file change plan is present, every § Test plan bullet has a corresponding test
+(including all four added after Gate 1.5), and the release mechanics match Addendum 3. Three
+notes and one nit, none behavioral: a stale version string in the new docs section, one of the
+toolsmith's "two hand-casts" left in place, and two test-plan instructions honored in substance
+but not in letter.
+
+### The central invariant — verified, not assumed
+
+`Playbook.execute` (`playbook.ts:190-207`) parses `parameters`, calls `play.execute(parsed)`,
+JSON round-trips. It never touches `play.returns`. The only other consumer of `returns` is
+`getPlaySchemas` (`playbook.ts:141+`), which serializes it to JSON Schema. Validation exists
+**only** inside the closure `definePlay` builds (`playbook.ts:118-135`), so a play that was
+never passed through `definePlay` has no validating code in its call path at all.
+
+`playbook.test.ts:18-23` (`greet`, plain `PlayDefinition`, `returns: z.object({greeting})`,
+resolves the string `` `Hello, ${name}!` ``) is byte-unmodified — confirmed against
+`git diff origin/main...HEAD` — and `:111-115` still asserts `toBe("Hello, World!")`. Passing:
+core suite is 23/23 files green.
+
+### D1 — envelope, discriminated ✅
+
+- `isReturnsViolation` branch at `playbook.ts:200-203` sits **before** the generic
+  `err instanceof Error` reduction at `:204-205`. Order correct.
+- Message is play-named from the record key: `` `play '${name}' ${RETURNS_VIOLATION_PHRASE}: ${detail}` ``.
+- Still never throws: the branch `return`s a plain object; the whole body is inside the same
+  `try`; unknown-play returns before the `try` (`:192-194`).
+- Generic path byte-identical. Unknown play → `` `Unknown play: ${name}` `` (untouched, outside
+  the try). Param-validation failure → the `.parse()` at `:196` is inside the `try` exactly as
+  before, a `ZodError` carries no marker so `isReturnsViolation` is false and it falls to the
+  unchanged `{ error: message }`. Pinned by `playbook.test.ts:296-312`.
+- Envelope shape unchanged (`{ error: string }`); no `errorKind` added, per the deferral.
+
+### D2 — parse-then-serialize ✅
+
+Validation is `spec.returns.safeParseAsync(raw)` inside the `definePlay` closure
+(`playbook.ts:128`), i.e. on the live callback value; `Playbook.execute:198`'s
+`JSON.parse(JSON.stringify(...))` runs after. The caveat is in the docstring at
+`playbook.ts:63-71` ("**Validation precedes the JSON round-trip, not the value the host
+receives**", with the `z.date()` → ISO example). Pinned as behavior at `playbook.test.ts:128-134`.
+
+### D3 / D4 / D5 ✅
+
+- **D3** — `definePlay`'s `execute: (args: z.infer<P>) => Promise<z.input<R>>`; no `ctx`
+  parameter anywhere on the play side; `toolbox-executor.ts:138-140` still dispatches plays
+  without `ctx`.
+- **D4** — `return result.data` (`playbook.ts:134`), so Zod defaults/transforms/stripping are
+  emitted; asserted at `playbook.test.ts:216-229` (`kept: "K", stamped: "yes"`, extra key
+  stripped).
+- **D5** — `playbook()` at `playbook.ts:225-231` over a private `LiteralPlaybook`
+  (`:211-222`), record assigned by reference (no clone/freeze), `instanceof Playbook` holds.
+  All three mirror `LiteralToolbox`/`toolbox()` (`toolbox.ts:247-268`) structurally. Tests at
+  `playbook.test.ts:385-431` cover schemas/names/execute parity, `instanceof`, and
+  mutate-after-construction visibility.
+
+### The shared module ✅
+
+`molecules/returns-violation.ts` (new, 46 lines) holds `RETURNS_VIOLATION` (`:21`),
+`isReturnsViolation` (`:24`), `RETURNS_VIOLATION_PHRASE` (`:39`), `returnsViolation` (`:42`).
+Not exported from `molecules/index.ts` (which the diff touches, adding only `definePlay,
+playbook`), and `agent-core/package.json` publishes a single `"."` export subpath, so it is
+unreachable from outside the package.
+
+`grep -rn "agentic-patterns.core.returns-violation" --include=*.ts` returns **exactly one**
+source hit (`returns-violation.ts:21`); the other two hits are this spec and `handoff.md`.
+`grep -rn "output violated its returns schema" packages/*/src --include=*.ts` outside tests
+returns three hits: the constant itself plus two **docstring prose** mentions
+(`toolbox.ts:135`, `playbook.ts:79`) — no fifth construction site. All four real sites compose
+from the constant:
+
+| Site | Code |
+|---|---|
+| `defineTool` throw | `toolbox.ts:165-168` — `` `tool ${RETURNS_VIOLATION_PHRASE}: …` `` |
+| `Toolbox.execute` rename | `toolbox.ts:238` — `` `tool '${name}' ${RETURNS_VIOLATION_PHRASE}: …` `` |
+| `definePlay` throw | `playbook.ts:130-133` — `` `play ${RETURNS_VIOLATION_PHRASE}: …` `` |
+| `Playbook.execute` branch | `playbook.ts:202` — `` `play '${name}' ${RETURNS_VIOLATION_PHRASE}: …` `` |
+
+The tool-side hoist is behavior-preserving: both interpolations expand to the exact prior
+strings, and `__tests__/tool-authoring.test.ts` is untouched and green.
+
+### § File-by-file change plan — all 11 rows present
+
+| Row | Status |
+|---|---|
+| `returns-violation.ts` (new) | ✅ |
+| `toolbox.ts` — delete `:114-129`, import, use constructor + fragment | ✅ no behavior change |
+| `playbook.ts` — `definePlay`, `LiteralPlaybook`, `playbook()`, violation branch, D2 caveat, **`PlayDefinition.returns` docstring** | ✅ docstring rewritten at `:32-40` — now "On a plain object definition this is metadata only — output is never validated. Plays built with `definePlay` opt into runtime output validation", mirroring `toolbox.ts:76-79` as specified |
+| `molecules/index.ts` | ✅ `Playbook, definePlay, playbook`; violation module **not** exported |
+| `package.json` | ✅ `0.15.0 → 0.16.0` per Addendum 3 (not the superseded `0.14.0 → 0.15.0`) |
+| `CHANGELOG.md` | ✅ `## core 0.16.0` placed directly under `# Changelog`, matching `175f59a`'s placement |
+| `bun.lock` | ✅ workspace `version` field only |
+| `toolbox-executor.ts:17` | ✅ "ADR 0002 D3" replaced with a pointer to this spec's D1 (`:16-19`) |
+| `examples/agents/toolsmith/agent.ts` | ⚠️ migrated + `#266` placeholder comment dropped, but only one of the two hand-casts — see Note 2 |
+| `docs/authoring-a-toolbox.md` | ✅ "Authoring a play" section added (`:129-192`); non-goal paragraph narrowed to drop only the #266 sentence — **all three surviving non-goals verified present** at `:288-290` (camel↔snake mappers, `.describe()` compression, host-specific filter envelopes) ⚠️ version string, see Note 1 |
+| `packages/agent-core/README.md` | ✅ `:109-137` rewritten to `playbook()` + `definePlay` |
+
+### § Test plan — every bullet has a test
+
+`definePlay` parity: typed args (`playbook.test.ts:175-192`, `expectTypeOf`), parse-by-default
+with transforms/defaults/stripping (`:216-229`), `validateReturns: false` (`:231-243`),
+`displayType` passthrough (`:245-257`), no generic leak (`:194-204`,
+`expectTypeOf(def).toEqualTypeOf<PlayDefinition>()`).
+Violation semantics: play-named envelope + explicit `.resolves` (`:261-274`), names the record
+key (`:276-288`), ordinary throw unchanged (`:290-294`), unknown-play + param-validation
+byte-identical (`:296-312`).
+The four post-critique additions are all real and assert the right thing:
+- sdk-bridge `isError` — `packages/agent-runtime/src/runner/__tests__/sdk-bridge.test.ts` (new),
+  drives a violating `definePlay` through `buildCapabilityServer` over a **real** in-memory
+  MCP client/server pair (`InMemoryTransport.createLinkedPair`), asserting `result.isError === true`
+  rather than a rejection. Not a mock. Green.
+- direct `.execute()` throws — `playbook.test.ts:316-329`, `rejects.toThrow(/output violated…/)`.
+- inbound misattribution, toolbox-mediated — `:332-357`, asserts
+  `/^tool 'violating_tool' …/` **and** `not.toContain("outer_play")`. I traced the mechanics:
+  `Toolbox.execute:235-241` rethrows a fresh untagged `Error`, `definePlay`'s wrapper has no
+  try/catch so it propagates untouched, `Playbook.execute`'s guard is false → generic branch.
+- inbound misattribution, direct `.execute()` — `:359-383`, asserts
+  `/^play 'outer_play' …/`. The accepted, documented limitation, correctly pinned.
+
+D2 caveat pinned (`:128-134`). Cross-boundary: `toolbox-executor.test.ts:205-259` adds a real
+`Playbook`/`definePlay` envelope test and a real tool-wins-on-collision test; the pre-existing
+`:118-122` and `:146-159` tests are unmodified.
+
+**Gates run clean:** `bun run typecheck` 0 across all 5 packages; `bun run lint` 1 warning,
+pre-existing and in an untouched file (`contract-tests/cc/helpers.ts:205`);
+`check:model-facing-schemas` clean across `calculator/todo/writing-coach/toolsmith/ManualToolbox`
+— the CI gate on the migrated toolsmith play passes. Test suite: core 23/23, server 20/20,
+dashboard 65/65, cli 10/10, runtime 92/93 — the single failure is
+`claude-code-runner.test.ts` ("LLM connection failed"), a live-LLM integration test unrelated to
+and untouched by this diff.
+
+### Scope discipline ✅
+
+All 15 files map to a spec row or a test-plan bullet. No unrequested refactors, no drive-by
+edits, no files touched for an unspecified reason. The README's `analysis` → `analysisCapability`
+rename is forced by the new `const analysis = playbook(...)` binding in the same snippet.
+
+**Blockers (0):** _None._
+
+**Notes (3):**
+
+- [`docs/authoring-a-toolbox.md:133`] The new play section says "`definePlay` (core **0.15.0**,
+  issue #266)". This ships in **0.16.0** — `package.json` and `bun.lock` both say so, and
+  Addendum 3 §1 retargeted the bump precisely because #385 already published 0.15.0 without
+  `definePlay`. A reader who installs `@agentic-patterns/core@0.15.0` on this sentence's
+  authority gets a version where the symbol does not exist. The file's own convention
+  (`lintModelFacingSchema` (core 0.12.0, issue #265), `:196`) is the shipping version.
+  _Fix:_ `0.15.0` → `0.16.0`.
+
+- [`examples/agents/toolsmith/agent.ts:184`] The change-plan row says "drop **the two**
+  hand-casts"; the deleted NOTE comment named them explicitly ("plays still hand-cast both their
+  args and the results of `tools.execute(...)`"). Only the args cast went. The results cast
+  `` (await Promise.all([...])) as [{ slug: string }, { days: number }] `` survives. It is not
+  removable within this spec's scope — `Toolbox.execute` returns `Promise<unknown>`
+  (`toolbox.ts:227`) and `definePlay` types the play's own boundary, not its callees — so the
+  spec row overpromised rather than the implementation underdelivering. Flagging because the
+  row reads as unfinished. _Fix:_ leave the cast; add a one-line comment saying it is the
+  `Toolbox.execute: Promise<unknown>` residual, not play-side debt, so the next reader doesn't
+  re-open it.
+
+- [`packages/agent-core/src/molecules/__tests__/playbook.test.ts:18`] The § Test plan's
+  metadata-only regression-guard bullet ends "**Add an explicit comment saying so.**" No comment
+  was added — not on the `greet` fixture (`:18-23`) and not on `should execute a successful
+  play` (`:111-115`). The invariant is still enforced (the test passes, and it is the whole
+  point of D2), but the one thing that would stop a future editor from "tidying" `greet` into a
+  `definePlay` is missing. _Fix:_ two lines above `:18` naming it as the plain-`PlayDefinition`
+  metadata-only proof for #266/D2.
+
+**Nits (1):**
+
+- [`packages/agent-core/src/molecules/__tests__/playbook.test.ts:36`] The comment reads
+  "extends `returnDate` above rather than introducing a parallel one" — but `returnDateValidated`
+  **is** a parallel fixture sitting directly beneath `returnDate`. The engineering call is right
+  (converting `returnDate` itself would have destroyed the plain-play round-trip coverage at
+  `:117-121`); only the comment is wrong. _Fix:_ reword to "sibling of `returnDate`, kept
+  separate so the plain-play round-trip case survives."
+
+**Reviewed by:** reviewer agent · 2026-07-26 · lens=adherence
