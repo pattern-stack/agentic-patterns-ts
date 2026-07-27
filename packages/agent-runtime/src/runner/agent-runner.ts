@@ -1639,13 +1639,16 @@ export class AgentRunner implements RunnerProtocol {
               stepFinishReason = part.finishReason;
               break;
             }
-            // #389: defensive cases only — `stream()` never sets `toolApproval`
-            // (the GATE-CHAIN INVARIANT keeps this path execute-less and
-            // gate-checked via `emitIntent` above), so these parts are
-            // unreachable today. Mapped explicitly so a future SDK-driven
-            // streaming path (should one ever pass `toolApproval` here)
-            // surfaces the tool-approval events rather than silently falling
-            // through the `default` skip below.
+            // #389: KEEP — spec-mandated defensive cases (Approach step 7),
+            // deliberately unreachable until a streaming `toolApproval` path
+            // exists (Gate 2.5 quality flagged this as YAGNI; adherence
+            // confirmed it's what the spec requires — kept per spec).
+            // `stream()` never sets `toolApproval` (the GATE-CHAIN INVARIANT
+            // keeps this path execute-less and gate-checked via `emitIntent`
+            // above), so these parts are unreachable today. Mapped explicitly
+            // so a future SDK-driven streaming path (should one ever pass
+            // `toolApproval` here) surfaces the tool-approval events rather
+            // than silently falling through the `default` skip below.
             case "tool-approval-request": {
               const reqEvent = createEvent("agent.tool.approval.request", {
                 traceId: effectiveTraceId,
