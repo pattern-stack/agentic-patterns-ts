@@ -750,3 +750,153 @@ rename is forced by the new `const analysis = playbook(...)` binding in the same
   separate so the plain-play round-trip case survives."
 
 **Reviewed by:** reviewer agent · 2026-07-26 · lens=adherence
+
+## Diff Review — Quality
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff origin/main...HEAD` (branch `doug/266-playbook-authoring-parity`, PR #392, tip `a0af28c`)
+**Against:** `.claude/primitives/quality/strict.md` + `CLAUDE.md` conventions (spec-blind — the spec was not read)
+**Verdict:** REVISE
+
+Gates confirmed green at review time: `SKIP_SDK_TESTS=true bun run check` exits 0 (build, typecheck,
+biome, vitest across core/runtime/server/cli, plus `check-model-facing-schemas` clean).
+
+The implementation itself is sound. `definePlay` mirrors `defineTool` faithfully, the non-generic
+boundary holds (`dist/index.d.ts:6292-6304` declares `): PlayDefinition;` — no Zod generic leak),
+`playbook()` is a faithful sibling of `toolbox()`, `Playbook.execute` is genuinely total (every
+throw source — unknown play, `parameters.parse`, `play.execute`, the `JSON.stringify` round-trip —
+is inside the `try`), and the `returns-violation.ts` hoist is a clean, correctly-scoped factoring
+(imports nothing, same layer, absent from the barrel, unreachable through the `"."`-only exports
+map). No correctness defect was found in the shipped runtime behavior.
+
+What fails is the *justification layer*: the diff introduces a load-bearing rationale ("the
+never-throw contract, which `toolbox-executor.ts` and `sdk-bridge.ts` depend on") that is false at
+both named consumers, and builds a new test file around that false premise which passes under the
+exact regression it claims to pin.
+
+**Blockers (2):**
+
+- [`packages/agent-runtime/src/runner/__tests__/sdk-bridge.test.ts:1-11,35-55`] **The test cannot
+  fail — it passes identically under the regression it exists to catch.** Its header asserts "a
+  throwing `Playbook.execute` would REJECT inside the MCP tool handler instead of resolving with an
+  `isError` result." That is not true of MCP SDK 1.29.0: the `CallTool` request handler wraps the
+  whole tool invocation in `try/catch` and converts any throw into
+  `createToolError(...)` → `{ content: [{ type: "text", text: err.message }], isError: true }`
+  (`@modelcontextprotocol/sdk/dist/esm/server/mcp.js:135-141` and `:148-161`). Verified empirically:
+  a `Playbook` subclass overriding `execute` to `throw new Error("play 'bad_play' output violated
+  its returns schema: boom")`, driven through the same `buildCapabilityServer` + `InMemoryTransport`
+  client, resolved with
+  `{"content":[{"type":"text","text":"play 'bad_play' output violated its returns schema: boom"}],"isError":true}`
+  — which satisfies all three assertions (`isError === true`, text contains `bad_play`, text contains
+  `output violated its returns schema`). So this file buys zero regression protection while
+  documenting itself as the pin for D1. Under `quality_profile: strict` ("error paths covered"),
+  a non-discriminating test on a newly claimed error path is worse than none: it will be trusted.
+  · _Fix:_ make the assertion envelope-specific, which genuinely separates the two paths — the
+  envelope path serializes an object (`text` = `{"error":"play 'bad_play' …"}`), the throw path
+  yields a bare message string. Assert `JSON.parse(content[0].text)` matches
+  `{ error: expect.stringContaining("play 'bad_play' output violated its returns schema") }` and
+  that the parsed value is a non-null object. Alternatively delete the file: the real envelope
+  guarantee is already pinned by `toolbox-executor.test.ts`'s new `#266` block against the actual
+  `Playbook.execute`.
+
+- [`packages/agent-core/src/molecules/playbook.ts:169-173`] **False rationale, newly asserted and
+  propagated to three files.** "this boundary NEVER throws (`toolbox-executor.ts` and
+  `sdk-bridge.ts` both depend on that: routing plays through here is what keeps a malformed/failing
+  play from aborting the runner loop or rejecting inside an MCP tool handler)." Neither consumer
+  depends on it. All three `toolExecutor.execute` dispatch sites in `agent-runner.ts` already wrap
+  the call in `try/catch` and convert a throw into `{ error: err.message }` —
+  `agent-runner.ts:647-671`, `:985-1007`, `:1769-1793` — so a throwing play could not abort the
+  runner loop either. The MCP half is disproved above. The same claim is restated at
+  `packages/agent-runtime/src/runner/toolbox-executor.ts:16-21` ("Routing plays through
+  `playbook.execute` is the point: it keeps a malformed/failing play call from aborting the runner
+  loop") and shipped to consumers in `CHANGELOG.md:7` ("preserving the never-throw contract
+  `toolbox-executor.ts`/`sdk-bridge.ts` depend on"). The never-throw envelope is a perfectly good
+  design decision; the argument given for it is not, and a future reader will either add a
+  defensive `try/catch` that already exists or refuse a legitimate refactor on the strength of a
+  dependency that isn't there. Note the diff *increased* the claim's force: `toolbox-executor.ts`
+  previously cited "ADR 0002 D3" (which does not exist — `docs/adr/0002-primitive-knowledge-rework.md`
+  has no D3 and no mention of envelopes), and the fix replaced a dangling citation with a stronger
+  but incorrect assertion. · _Fix:_ restate as what it is — the `{ error }` envelope is the play
+  contract, chosen so plays surface failure to the model as a result rather than as a host-level
+  error; both hosts are independently throw-tolerant, so this is a contract choice, not a
+  dependency. Drop "both depend on that" from all three sites.
+
+**Notes (6):**
+
+- [`docs/authoring-a-toolbox.md:184-189`] The new "Tool-wins-on-collision" paragraph is wrong in
+  three ways, and the error direction is toward a crash. (a) "can't both be registered" — both
+  *are* registered; `toolbox-executor.ts:99-122` builds two parallel maps and the play is merely
+  shadowed at dispatch. (b) The rule is path-dependent, not universal: on the SDK-bridge path a
+  same-named tool and play is **fatal**, not tool-wins — verified by building a `Capability` whose
+  toolbox and playbook both expose `echo` and calling `buildCapabilityServer`, which threw
+  `Tool echo is already registered` before the server could be constructed. A reader who follows
+  this paragraph's "the toolbox tool wins" will hit a hard throw at capability-build time on the
+  Claude-Code path. (c) "name a play distinctly from any tool **in the same capability**" is
+  under-scoped: `toolLookup` and `playLookup` are agent-wide flat maps accumulated across *all*
+  capabilities (`toolbox-executor.ts:103-122`), so a tool in capability B shadows a play in
+  capability A. `toolbox-executor.ts:23-30` states all of this correctly; the new doc lost the
+  nuance it was summarizing.
+
+- [`docs/authoring-a-toolbox.md:133`] Wrong version attribution: "`definePlay` (core 0.15.0, issue
+  #266)". This ships in **0.16.0** — `packages/agent-core/package.json:3` and `CHANGELOG.md:3` both
+  say so, and 0.15.0 is precisely the version this diff supersedes. The adjacent
+  `lintModelFacingSchema` sentence (`:249`) uses the same "(core 0.12.0, issue #265)" form, so the
+  convention is to name the shipping version.
+
+- [`docs/authoring-a-toolbox.md:161-163`] Inverted sentence vs. the source of truth. Doc: "…would be
+  indistinguishable from 'validation not configured' — exactly the plain-`PlayDefinition` behavior
+  this factory exists to opt **into**." `playbook.ts:60-63` says "opt **out of**", which is the
+  correct sense. As published, the doc claims the factory exists to opt into having no validation —
+  the opposite of what `definePlay` does.
+
+- [`packages/agent-core/src/molecules/__tests__/playbook.test.ts:180-183`] False comment inside the
+  test that reads most like a spec of the API: "Post-parse types: the default has been applied by
+  definePlay's own parsing — args arrive typed, no cast needed." `definePlay` performs **no**
+  parameter parsing — `playbook.ts:103-104` only casts (`args as z.infer<P>`); the parse happens at
+  `Playbook.execute` (`playbook.ts:196`), exactly as `definePlay`'s own docblock says ("the host
+  boundary … already parses them, so this is type-level only"). The assertion only holds because
+  the test routes through `pb.execute(...)`. The diff's own direct-execute test (`:325-338`) is the
+  counterexample: `def.execute({})` receives unparsed args, so `args.title` would be `undefined` at
+  runtime while statically typed `string`. Reword to credit `Playbook.execute`, which is the thing
+  a reader needs to know.
+
+- [`packages/agent-core/src/molecules/playbook.ts:49-50`] Self-inflicted stale line citation: "minus
+  `terminal` (plays are deliberately never terminal, `:57-61`)". On `origin/main`, `:57-61` *was*
+  the `getPlaySchemas` terminal comment; this diff inserted ~85 lines above it, so the citation now
+  points into `definePlay`'s own docblock. The intended target is now `:143-147`. Same class at
+  `playbook.test.ts:348` — "toolbox.ts:250-257 strips the tag" — the strip is at `toolbox.ts:235-243`
+  after the hoist removed 17 lines. Line-number citations in long-lived comments invalidate
+  themselves on the very commit that adds them; prefer symbol names (`getPlaySchemas`,
+  `Toolbox.execute`'s `isReturnsViolation` branch).
+
+- [`packages/agent-core/src/molecules/playbook.ts:98-123` / `toolbox.ts:153-181`] The thing that
+  will age badly. The two wrapper bodies are ~90% identical — same `validateReturns ?? true`
+  default, same `safeParseAsync`, same tagged throw, same conditional optional-field copies — and
+  the diff hoisted only the *tag* into `returns-violation.ts`, not the *wrapper*. The two are
+  already drifting in this same commit: `toolbox.ts:127-128` says the parsed value "is what the
+  host receives", `playbook.ts:57-58` says it "is what validation sees". The next change to
+  validation semantics has to land twice and will drift again. A
+  `parseReturns(kind: "tool" | "play", schema, raw)` helper alongside `returnsViolation` would
+  collapse both to one line and leave only the genuine differences (`ctx`, `terminal`).
+
+**Nits (3):**
+
+- [`packages/agent-core/src/molecules/playbook.ts:57-58`] "the parsed `z.output<R>` value … is what
+  validation sees" is circular — the parsed value is validation's *output*, not its input.
+  `defineTool`'s "is what the host receives" is accurate for tools; the accurate play-side statement
+  is "…is what `Playbook.execute` then JSON round-trips."
+
+- [`CHANGELOG.md:3`] `## core 0.16.0 (2026-07-26)` is placed **above** `## Unreleased` (`:12`). Every
+  prior release sits below Unreleased in reverse-chronological order — `core 0.12.0` (`:53`) sits
+  under `0.27.0` (`:30`). As written, the unreleased runtime/server work reads as newer than a dated
+  release.
+
+- [`packages/agent-core/src/molecules/returns-violation.ts:24-29`] `isReturnsViolation` widens to
+  `err is Error & { cause: unknown }` on a check that only requires `typeof err === "object"`. Now
+  that the symbol is `Symbol.for`-global *and* the guard is a shared module, the surface for a
+  foreign object carrying the tag is slightly wider; `playbook.ts:201` would then read `.message`
+  off a non-Error and emit `"play 'x' output violated its returns schema: undefined"`. Hoisted
+  verbatim, so pre-existing — but the hoist is the natural moment to add `err instanceof Error &&`
+  or narrow the predicate to `object`.
+
+**Reviewed by:** reviewer agent · 2026-07-27 · lens=quality (spec-blind)
