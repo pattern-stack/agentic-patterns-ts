@@ -11,6 +11,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
+import { resetAdvisoryWarningsForTests } from "../../providers/capabilities.js";
 import { AgentRunner } from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 import {
@@ -51,6 +52,11 @@ const WIRE_SEAM_REMEDY =
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // #390: runStructured() also fires the once-per-(model x capability)
+  // capability-map advisory now; reset its memory so it doesn't silently go
+  // quiet in later tests that reuse "test-model" (see
+  // resetAdvisoryWarningsForTests's doc comment).
+  resetAdvisoryWarningsForTests();
 });
 
 // ---------------------------------------------------------------------------
@@ -209,8 +215,14 @@ describe("AgentRunner.runStructured open-object guard", () => {
     expect((result.object as { body: Record<string, string> }).body).toEqual({
       anything: "goes",
     });
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain(WIRE_SEAM_REMEDY);
+    // #390: runStructured() also fires the capability-map's own once-per-key
+    // advisory for "test-model" (unmapped -> "unverified, conservative
+    // path"), a second, unrelated console.warn — so this asserts the
+    // wire-seam warning specifically, not the total warn count.
+    const wireSeamCalls = warn.mock.calls.filter((args) =>
+      String(args[0]).includes(WIRE_SEAM_REMEDY),
+    );
+    expect(wireSeamCalls).toHaveLength(1);
   });
 
   it("runs closed schemas untouched", async () => {

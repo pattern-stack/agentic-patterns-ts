@@ -6,13 +6,19 @@ import { ToolSchema } from "@agentic-patterns/core";
 import type { ToolExecutionContext } from "@agentic-patterns/core";
 import type { LanguageModelV3Content, LanguageModelV3Usage } from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { AgentEvent } from "../../events/types.js";
+import { resetAdvisoryWarningsForTests } from "../../providers/capabilities.js";
 import { buildScopeHost, readScope } from "../../workflows/scope-host.js";
-import { AgentRunner, RunCancelledError, ToolCallBlocked } from "../agent-runner.js";
+import {
+  AgentRunner,
+  RunCancelledError,
+  ToolCallBlocked,
+  modelSupportsToolsWithStructuredOutput,
+} from "../agent-runner.js";
 import type { AgentLike } from "../agent-runner.js";
 import type { ToolExecutor } from "../types.js";
 
@@ -1594,6 +1600,124 @@ describe("AgentRunner", () => {
         // Only tier 1's single LLM call happened — tier 2 was never reached.
         expect(llmCalls).toBe(1);
       });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // #390 — modelSupportsToolsWithStructuredOutput delegates to the capability
+  // map (providers/capabilities.ts); runStructured() consults the map for a
+  // once-per-(model x capability) advisory. Seed-parity: the delegate's truth
+  // table must match the pre-#390 hardcoded boolean EXACTLY, including the
+  // gemini-3.5-flash substring-vs-prefix quirk (Gate 1.5 review note 5).
+  // ---------------------------------------------------------------------------
+  describe("modelSupportsToolsWithStructuredOutput / capability map (#390)", () => {
+    afterEach(() => {
+      resetAdvisoryWarningsForTests();
+    });
+
+    describe("seed-parity: delegate matches the pre-#390 hardcoded truth table", () => {
+      it.each([
+        ["gpt-4o", true],
+        ["gpt-4o-mini", true],
+        ["gpt-4o-2024-08-06", true],
+        ["gpt-5", true],
+        ["gpt-5-mini", true],
+        ["gemini-3.5-flash", true],
+        ["bifrost:openai/gpt-4o", true],
+        ["gpt-4o:2024-08-06", true],
+        // adversarial substring — the pre-#390 gemini check was
+        // `bare.includes(...)`, so this historically returned true even
+        // though it doesn't START with the family prefix (review note 5).
+        ["x-gemini-3.5-flash", true],
+        // unknown / untested-at-the-boolean-level ids stay false.
+        ["claude-sonnet-4-5", false],
+        ["gemini-2.5-flash", false],
+        ["gemini-2.5-pro", false],
+        ["gemini-3.1-flash-lite", false],
+        ["some-totally-unknown-model", false],
+      ] as const)("%s -> %s", (modelId, expected) => {
+        expect(modelSupportsToolsWithStructuredOutput(modelId)).toBe(expected);
+      });
+    });
+
+    it("runStructured() with an unmapped model: emits exactly one advisory warn and still returns a valid object via 2-tier", async () => {
+      let llmCalls = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "some-totally-unknown-model",
+        doGenerate: async () => {
+          llmCalls++;
+          if (llmCalls === 1) {
+            return toolCallResult({ toolCallId: "tc-390-1", toolName: "search", input: {} }, 10, 5);
+          }
+          if (llmCalls === 2) {
+            return textResult("the answer is 42", 10, 5);
+          }
+          return textResult(JSON.stringify({ answer: "42" }), 10, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("search", "Search", z.object({}))];
+      const agent = makeAgent({
+        getModel: () => "some-totally-unknown-model",
+        getTools: () => tools,
+      });
+      const executor = makeToolExecutor(async () => ({ ok: true }));
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runner = new AgentRunner(model);
+      const schema = z.object({ answer: z.string() });
+
+      const result = await runner.runStructured(agent, "what is the answer?", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ answer: "42" });
+      expect(llmCalls).toBe(3); // tier-1 tool call, tier-1 text finish, tier-2 structured finish
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("unverified");
+      warn.mockRestore();
+
+      // Calling again with the SAME model id doesn't re-warn (once per key).
+      llmCalls = 0;
+      await runner.runStructured(agent, "what is the answer?", schema, { toolExecutor: executor });
+      const warn2 = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await runner.runStructured(agent, "what is the answer?", schema, { toolExecutor: executor });
+      expect(warn2).not.toHaveBeenCalled();
+      warn2.mockRestore();
+    });
+
+    it("runStructured() on a mapped-but-tools-incapable model (claude-sonnet-4-5): stays silent (structuredOutput is verified 'yes') and still 2-tiers", async () => {
+      let llmCalls = 0;
+      const model = new MockLanguageModelV3({
+        modelId: "claude-sonnet-4-5",
+        doGenerate: async () => {
+          llmCalls++;
+          if (llmCalls === 1) {
+            return toolCallResult({ toolCallId: "tc-390-2", toolName: "search", input: {} }, 10, 5);
+          }
+          if (llmCalls === 2) {
+            return textResult("the answer is 42", 10, 5);
+          }
+          return textResult(JSON.stringify({ answer: "42" }), 10, 5);
+        },
+      });
+      const tools = [ToolSchema.fromZod("search", "Search", z.object({}))];
+      const agent = makeAgent({ getModel: () => "claude-sonnet-4-5", getTools: () => tools });
+      const executor = makeToolExecutor(async () => ({ ok: true }));
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const runner = new AgentRunner(model);
+      const schema = z.object({ answer: z.string() });
+
+      const result = await runner.runStructured(agent, "what is the answer?", schema, {
+        toolExecutor: executor,
+      });
+
+      expect(result.object).toEqual({ answer: "42" });
+      // toolsWithStructuredOutput is verified "no" for claude- -> 2-tier, but
+      // structuredOutput (what adviseStructuredRun checks) is verified "yes"
+      // -> no advisory warn is the CORRECT, non-silent-failure behavior here.
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
   });
 

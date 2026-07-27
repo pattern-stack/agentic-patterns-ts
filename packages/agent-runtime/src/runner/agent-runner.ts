@@ -46,6 +46,11 @@ import {
   createEvent,
 } from "../events/types.js";
 import {
+  adviseStructuredRun,
+  bareModelId,
+  getModelCapabilities,
+} from "../providers/capabilities.js";
+import {
   type ModelResolver,
   constantModelResolver,
   isModelResolver,
@@ -112,28 +117,37 @@ export class RunCancelledError extends Error {
  * Does this model support a SINGLE-CALL tools + structured-output round-trip
  * (`experimental_output` while a tool loop runs)?
  *
+ * @deprecated Superseded by the capability map in `providers/capabilities.ts`
+ * (`getModelCapabilities(id)?.toolsWithStructuredOutput`), which additionally
+ * carries provenance (`verifiedBy`/`lastVerified`) and answers more questions
+ * than this one boolean (native structured output, `strict` mode,
+ * `inputExamples`, reasoning-effort levels — see #390). Kept as a public
+ * export (`runner/index.ts`) for back-compat; delegates to the map.
+ *
  * Conservative, additive, empirically seeded (DESIGN §9.5). CAPABLE iff the
- * resolved model id matches one of the verified-good families below; EVERY
- * other id — including unknown ids and untested providers (anthropic, gemini
- * ≤3.1 / 2.5) — returns `false`, routing to the model-safe 2-tier path.
+ * resolved model id matches one of the verified-good families in the map;
+ * EVERY other id — including unknown ids and untested providers (anthropic,
+ * gemini ≤3.1 / 2.5) — returns `false`, routing to the model-safe 2-tier
+ * path.
  *
  * Correctness never depends on this flag (the 2-tier fallback is always
  * correct); it only decides whether a round-trip can be saved.
+ *
+ * PARITY NOTE (Gate 1.5 review note 5): the pre-#390 implementation checked
+ * gemini-3.5-flash with `bare.includes(...)` — a SUBSTRING check, not a
+ * prefix match — so an adversarial id like "x-gemini-3.5-flash" historically
+ * returned `true` even though it doesn't start with the family prefix. The
+ * capability map itself uses longest-PREFIX matching
+ * ({@link getModelCapabilities}); the substring fallback below preserves the
+ * exact historical (looser) gemini behavior so this delegate's truth table
+ * stays byte-for-byte identical to the pre-#390 function, not merely
+ * equivalent on real dispatched ids.
  */
 export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean {
-  const id = modelId.toLowerCase();
-  // Strip any gateway/provider prefix (e.g. "bifrost:openai/gpt-4o" → "gpt-4o",
-  // "openai/gpt-5" → "gpt-5") so the family match works on the bare model name.
-  // Split on "/" only (NOT ":") so a version tag like "gpt-4o:2024-08-06"
-  // keeps its family prefix instead of collapsing to the version.
-  const bare = id.split("/").pop() ?? id;
-  return (
-    // openai/gpt-4o*  (gpt-4o, gpt-4o-mini, gpt-4o-2024-…)
-    bare.startsWith("gpt-4o") ||
-    // openai/gpt-5*
-    bare.startsWith("gpt-5") || // gemini 3.5 flash (NOT gemini 3.1 / 2.5)
-    bare.includes("gemini-3.5-flash")
-  );
+  if (getModelCapabilities(modelId)?.toolsWithStructuredOutput.support === "yes") {
+    return true;
+  }
+  return bareModelId(modelId).includes("gemini-3.5-flash");
 }
 
 // ---------------------------------------------------------------------------
@@ -1098,6 +1112,11 @@ export class AgentRunner implements RunnerProtocol {
 
     const model = await this._resolver.resolve(agent.getModel());
     const modelName = model.modelId;
+    // Advisory-only (#390): warns once per (model x capability) when the map
+    // knows this model doesn't (or might not) support native structured
+    // output. Never affects control flow — path selection below is
+    // unchanged and the 2-tier fallback stays the always-correct path.
+    adviseStructuredRun(modelName);
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
     const instructions = agent.renderInitialPrompt(this._renderCtx(options));

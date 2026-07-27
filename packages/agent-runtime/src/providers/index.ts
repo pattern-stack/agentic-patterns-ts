@@ -13,6 +13,32 @@
  */
 
 export type { ProviderProtocol, ProviderTier, SupportedProvider } from "./types.js";
+
+// Model capability map (#390) — Zod-schema'd, provenance-carrying knowledge
+// of which V4 SDK-level knobs each model family honors. See capabilities.ts
+// for the full design; consumed by `runStructured()` for advisory warnings.
+export {
+  CapabilityValueSchema,
+  MODEL_CAPABILITIES,
+  ModelCapabilitiesSchema,
+  ReasoningEffortCapabilitySchema,
+  ReasoningEffortLevelSchema,
+  SupportSchema,
+  VerificationSchema,
+  adviseStructuredRun,
+  adviseStructuredRunFor,
+  bareModelId,
+  getModelCapabilities,
+} from "./capabilities.js";
+export type {
+  CapabilityValue,
+  ModelCapabilities,
+  ReasoningEffortCapability,
+  ReasoningEffortLevel,
+  Support,
+  Verification,
+} from "./capabilities.js";
+
 export { anthropicProvider } from "./anthropic.js";
 export { openaiProvider } from "./openai.js";
 export { googleProvider } from "./google.js";
