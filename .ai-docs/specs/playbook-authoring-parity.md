@@ -900,3 +900,87 @@ exact regression it claims to pin.
   or narrow the predicate to `object`.
 
 **Reviewed by:** reviewer agent · 2026-07-27 · lens=quality (spec-blind)
+
+### Diff Review — Quality · Gate 2.5 re-check
+<!-- written by: reviewer · gate 2.5 re-check · /sdlc:review · lens=quality -->
+
+**Target:** `git diff a0af28c..HEAD` (branch tip `3eef4b4`)
+**Against:** `.claude/primitives/quality/strict.md` + `CLAUDE.md` conventions (still spec-blind)
+**Verdict:** REVISE — 1 new blocker, introduced by the fix for note N1
+
+**Both original blockers are genuinely fixed.** Verified independently, not accepted on report.
+
+- **B1 — `sdk-bridge.test.ts` now discriminates.** Ran the mutation myself: replaced
+  `Playbook.execute`'s violation-branch `return { error: … }` with `throw new Error(…)`, rebuilt core
+  (`bun run --filter=@agentic-patterns/core build` → exit 0, so a real behavioral mutation, not a
+  syntax error), and the test failed with
+  `SyntaxError: Unexpected token 'p', "play 'bad_"... is not valid JSON`. Restored, rebuilt, test
+  green, `git status` clean. The assertion is belt-and-braces: `JSON.parse` rejects a bare thrown
+  message, and even a message that happened to be valid JSON would fail the
+  `toEqual({ error: … })` shape check. No remaining path passes under a throwing implementation.
+- **B2 — the corrected rationale is true.** Checked every factual claim at all three sites
+  (`playbook.ts:168-180`, `toolbox-executor.ts:16-22`, `CHANGELOG.md:7`): "three
+  `toolExecutor.execute` call sites in `agent-runner.ts`" — exactly three (`:649`, `:988`, `:1771`),
+  all try/caught; "the MCP SDK's `CallTool` handler already converts any thrown error into its own
+  `isError` result" — true; "`sdk-bridge.ts` sniffs `\"error\" in result`" — true
+  (`sdk-bridge.ts:81`); "`toolbox-executor.test.ts`'s play-dispatch block" — exists. No surviving
+  overclaim, and it did not swing to a new false assertion the way the previous attempt did. The
+  framing is now correct: contract choice, not dependency.
+
+**Blockers (1):**
+
+- [`docs/authoring-a-toolbox.md:185`] **The fix for N1 got the path attribution backwards in its own
+  headline.** The bold lead-in reads "**Tool-wins-on-collision — Claude Code path only.**" and the
+  very next clause reads "On the ToolboxExecutor path…". Those are not the same path, and the label
+  names the wrong one. `buildAgentServers` (the SDK-bridge path) has exactly one consumer —
+  `claude-code-runner.ts:263` — so the SDK-bridge path **is** the Claude Code path; and
+  `claude-code-runner.ts:19` states outright that "Claude Code manages its own tool loop;
+  `toolExecutor` is unused", so `toolLookup`/`playLookup` shadowing can never occur there. The
+  paragraph therefore labels the shadowing rule "Claude Code path only" and then, two paragraphs
+  later, correctly explains that on that same path the collision is *fatal* rather than shadowing —
+  the doc contradicts itself. This reintroduces exactly the harm N1 identified, in the fatal
+  direction: a Claude Code consumer skimming bold lead-ins is told the tool quietly wins when in
+  fact `buildCapabilityServer` hard-throws `Tool <name> is already registered` at capability-build
+  time. The body text of both paragraphs is otherwise accurate — I re-verified the agent-wide flat
+  maps (`toolbox-executor.ts:103-122`), the order-independence of tool-vs-play precedence, and the
+  fatal SDK-bridge case — so this is a label defect, not a content defect. · _Fix:_ retitle to
+  "**Tool-wins-on-collision — ToolboxExecutor (AgentRunner) path.**" and make the second lead-in
+  "**On the SDK-bridge path (Claude Code) this same collision is FATAL, not shadowing.**"
+
+**Notes (0 new).** Carried forward, still unfixed — the re-check request stated all 6 notes and 3
+nits were actioned; four were not. All are non-gating, but the record should be accurate:
+
+- N6 (`playbook.ts:98-123` / `toolbox.ts:153-181`) — the `definePlay`/`defineTool` wrapper
+  duplication is untouched; no shared helper was added (`returns-violation.ts` still exports the
+  same four symbols) and `toolbox.ts` is not in this diff. The docblock drift I cited persists
+  verbatim.
+- Nit 1 (`playbook.ts:57-58`) — "is what validation sees" unchanged.
+- Nit 2 (`CHANGELOG.md:3`) — `## core 0.16.0` still sits above `## Unreleased` (`:12`).
+- Nit 3 (`returns-violation.ts:24-29`) — `isReturnsViolation`'s predicate widening unchanged.
+
+Deferring these is a legitimate call; claiming them fixed is not.
+
+**Nits (1 new):**
+
+- [`packages/agent-core/src/molecules/playbook.ts:80`] Stale cross-reference by name: "see
+  `Playbook.execute`'s never-throw contract". That docblock no longer uses the term — B2's fix
+  reframed it as "a play contract choice, not a dependency". The pointed-at behavior is still real
+  (violations genuinely never escape `Playbook.execute`), so only the name dangles. Reword to "see
+  `Playbook.execute`'s envelope contract".
+
+**Nothing else new was introduced.** Checked every other hunk in `a0af28c..HEAD` for the
+fresh-error pattern: the N4 rewrite (`playbook.test.ts:184-192`) is now accurate and correctly
+credits `Playbook.execute`; the N5 rewrites replaced both stale line citations with symbol
+references (`getPlaySchemas`, "its `isReturnsViolation` branch") — the only surviving line citation
+in branch-touched source, `sdk-bridge.test.ts:4` → `sdk-bridge.ts:79-84`, is still correct; the new
+`greet` fixture comment is load-bearing and true (`returns` declares
+`z.object({ greeting })` while `execute` returns a bare string, which is exactly what proves
+`returns` stays metadata-only on a plain play), and its `"### The central invariant"` citation
+resolves to a real heading; the new `examples/agents/toolsmith/agent.ts:181-185` comment is accurate
+(`Toolbox.execute` is indeed `Promise<unknown>`); the version attribution now reads 0.16.0 with no
+0.15.0 references left anywhere in `docs/`, `README`s, or `CHANGELOG.md`; and the sdk-bridge test
+header's MCP SDK citation (`mcp.js:135-161`, SDK 1.29.0) checks out against the installed dep. No
+test was weakened elsewhere — `sdk-bridge.test.ts` is strictly stronger, and no assertion was
+removed from `playbook.test.ts` or `toolbox-executor.test.ts`.
+
+**Re-checked by:** reviewer agent · 2026-07-27 · lens=quality (spec-blind) · re-check 1
