@@ -363,6 +363,8 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.tool.intent":
       case "agent.tool.rejected":
       case "agent.gate.decision":
+      case "agent.tool.approval.request":
+      case "agent.tool.approval.response":
       case "agent.tool.progress":
       case "agent.step.start":
       case "agent.step.end":

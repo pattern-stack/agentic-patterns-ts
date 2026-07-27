@@ -123,6 +123,8 @@ export type SSEEventName =
   | "tool.end"
   | "tool.rejected"
   | "gate.decision"
+  | "tool.approval.request"
+  | "tool.approval.response"
   | "step.start"
   | "step.end"
   | "iteration.start"
@@ -180,6 +182,8 @@ export const SSE_WIRE_EVENT_NAMES = [
   "tool.end",
   "tool.rejected",
   "gate.decision",
+  "tool.approval.request",
+  "tool.approval.response",
   "step.start",
   "step.end",
   "iteration.start",
@@ -375,6 +379,26 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
           trail: event.trail,
         },
       };
+    case "agent.tool.approval.request":
+      return {
+        name: "tool.approval.request",
+        payload: {
+          tool_call_id: event.toolCallId,
+          tool_name: event.toolName,
+          arguments: event.arguments,
+        },
+      };
+    case "agent.tool.approval.response": {
+      const payload: Record<string, unknown> = {
+        tool_call_id: event.toolCallId,
+        tool_name: event.toolName,
+        approved: event.approved,
+        settled_by: event.settledBy,
+      };
+      if (event.reason !== undefined) payload.reason = event.reason;
+      if (event.decisionKind !== undefined) payload.decision_kind = event.decisionKind;
+      return { name: "tool.approval.response", payload };
+    }
     case "agent.iteration.start":
       return {
         name: "iteration.start",
@@ -603,6 +627,8 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.tool.end": "tool.end",
   "agent.tool.rejected": "tool.rejected",
   "agent.gate.decision": "gate.decision",
+  "agent.tool.approval.request": "tool.approval.request",
+  "agent.tool.approval.response": "tool.approval.response",
   "agent.step.start": "step.start",
   "agent.step.end": "step.end",
   "agent.iteration.start": "iteration.start",

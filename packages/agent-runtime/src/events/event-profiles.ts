@@ -45,6 +45,12 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     "agent.tool.start",
     "agent.tool.end",
     "agent.tool.progress",
+    // Tool-approval SDK-framing pair (#389) — the `toolApproval` bridge's
+    // requested/granted/denied events on the capable path. UI-facing by
+    // design; `agent.gate.decision` below (OBSERVABILITY) stays the
+    // exporter-facing decision record — deliberately NOT duplicated here.
+    "agent.tool.approval.request",
+    "agent.tool.approval.response",
     // Step / delegation spans (#226) — previously in NO profile, so
     // profile-attached exporters (admin collector, SSE broadcast, SQLite)
     // never saw a stage boundary.
@@ -106,6 +112,9 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     "agent.tool.end",
     "agent.tool.progress",
     "agent.gate.decision",
+    // Tool-approval SDK-framing pair (#389) — see the UX profile's comment above.
+    "agent.tool.approval.request",
+    "agent.tool.approval.response",
     // Harness-native passthrough envelope (#323/#324) — compaction boundaries,
     // subagent/task progress, rate-limit notices. Debug-only: high-volume,
     // harness-specific detail most consumers never need.
