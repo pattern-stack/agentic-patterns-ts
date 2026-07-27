@@ -13,6 +13,7 @@ import {
   REQUEST_ID_HEADER,
   bifrostCorrelationHeaders,
   bifrostRunHeaders,
+  sanitizeHeaderKey,
   sanitizeHeaderValue,
 } from "../bifrost.js";
 
@@ -30,7 +31,10 @@ describe("sanitizeHeaderValue", () => {
   });
 
   it("trims leading/trailing dashes produced by sanitization", () => {
-    expect(sanitizeHeaderValue("leading and trailing")).toBe("leading and trailing");
+    // \u0001 (a control char) sanitizes to "-" at each end; assert the trim
+    // branch actually strips those (the runs-collapse test above never
+    // exercises ^-+|-+$ since its dashes never land at the edges).
+    expect(sanitizeHeaderValue("\u0001leading and trailing\u0001")).toBe("leading and trailing");
   });
 
   it("caps at 128 chars", () => {
@@ -86,10 +90,15 @@ describe("bifrostCorrelationHeaders", () => {
     expect(headers[`${BIFROST_DIM_PREFIX}agent`]).toBe("pla-ner -n-code");
   });
 
-  it("gates on any provider starting with 'gateway', not just 'gateway.chat' exactly", () => {
+  it("gates on any provider starting with 'gateway.', not just 'gateway.chat' exactly", () => {
     expect(bifrostCorrelationHeaders({ ...base, modelProvider: "gateway.completion" })).not.toEqual(
       {},
     );
+  });
+
+  it("does NOT gate in on a bare 'gateway' or a same-prefix-but-different provider", () => {
+    expect(bifrostCorrelationHeaders({ ...base, modelProvider: "gateway" })).toEqual({});
+    expect(bifrostCorrelationHeaders({ ...base, modelProvider: "gatewayx.chat" })).toEqual({});
   });
 });
 
@@ -119,6 +128,49 @@ describe("bifrostRunHeaders", () => {
       [BIFROST_GUARDRAILS_HEADER]: "a,b",
       [`${BIFROST_DIM_PREFIX}customer`]: "acme",
     });
+  });
+
+  it("sanitizes an invalid dims KEY instead of throwing at fetch time", () => {
+    // A raw space/colon/unicode in a header NAME (not just a value) makes
+    // Headers/fetch throw a TypeError — this is the caller-supplied-key path,
+    // so it must never reach the wire unsanitized.
+    expect(() => bifrostRunHeaders({ dims: { "customer id: ünïcode": "acme" } })).not.toThrow();
+    expect(bifrostRunHeaders({ dims: { "customer id: ünïcode": "acme" } })).toEqual({
+      [`${BIFROST_DIM_PREFIX}customer-id-n-code`]: "acme",
+    });
+  });
+
+  it("lowercases a mixed-case dims key", () => {
+    expect(bifrostRunHeaders({ dims: { Customer: "acme" } })).toEqual({
+      [`${BIFROST_DIM_PREFIX}customer`]: "acme",
+    });
+  });
+});
+
+describe("sanitizeHeaderKey", () => {
+  it("passes a lowercase alphanumeric-dash key through untouched", () => {
+    expect(sanitizeHeaderKey("customer-id")).toBe("customer-id");
+  });
+
+  it("lowercases mixed-case input", () => {
+    expect(sanitizeHeaderKey("Customer-ID")).toBe("customer-id");
+  });
+
+  it("replaces anything outside [a-z0-9-] with -, including spaces/colons/unicode", () => {
+    expect(sanitizeHeaderKey("customer id: ünïcode")).toBe("customer-id-n-code");
+  });
+
+  it("collapses runs of dashes and trims leading/trailing dashes", () => {
+    expect(sanitizeHeaderKey(" :: customer :: ")).toBe("customer");
+  });
+
+  it("caps at 128 chars", () => {
+    expect(sanitizeHeaderKey("x".repeat(200))).toHaveLength(128);
+  });
+
+  it("is deterministic", () => {
+    const input = "Same Input, Twice";
+    expect(sanitizeHeaderKey(input)).toBe(sanitizeHeaderKey(input));
   });
 });
 

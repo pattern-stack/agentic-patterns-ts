@@ -250,6 +250,32 @@ export class AgentRunner implements RunnerProtocol {
     return { ...factoryHeaders, ...perRunHeaders };
   }
 
+  /**
+   * Builds the {@link RunHeadersContext} for this run/call from the already-
+   * resolved `agent`/`model`/`runId`/`traceId`, then delegates to
+   * {@link _callHeaders}. Shared by `run()`, `runStructured()`, and `stream()`
+   * (each computes this once per run, right after model resolution, and
+   * reuses it across their own iteration/tier loops).
+   */
+  private _resolveCallHeaders(
+    agent: AgentLike,
+    model: ResolvedLanguageModel,
+    runId: string,
+    traceId: string,
+    options?: RunOptions,
+  ): Record<string, string | undefined> | undefined {
+    return this._callHeaders(
+      {
+        runId,
+        traceId,
+        agentName: agent.role.name,
+        modelId: model.modelId,
+        modelProvider: model.provider,
+      },
+      options,
+    );
+  }
+
   private get eventBus(): AgentEventBus {
     if (!this._eventBus) {
       this._eventBus = getAgentEventBus();
@@ -454,16 +480,7 @@ export class AgentRunner implements RunnerProtocol {
     const modelName = model.modelId;
     // #406: computed once per run (context is stable within a run), reused
     // across iterations below.
-    const callHeaders = this._callHeaders(
-      {
-        runId,
-        traceId: effectiveTraceId,
-        agentName: agent.role.name,
-        modelId: model.modelId,
-        modelProvider: model.provider,
-      },
-      options,
-    );
+    const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -1206,16 +1223,7 @@ export class AgentRunner implements RunnerProtocol {
     const modelName = model.modelId;
     // #406: computed once per run, reused across the single-call / capable /
     // 2-tier paths below.
-    const callHeaders = this._callHeaders(
-      {
-        runId,
-        traceId: effectiveTraceId,
-        agentName: agent.role.name,
-        modelId: model.modelId,
-        modelProvider: model.provider,
-      },
-      options,
-    );
+    const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
     // Advisory-only (#390): warns once per (model x capability) when the map
@@ -1499,16 +1507,7 @@ export class AgentRunner implements RunnerProtocol {
     const modelName = model.modelId;
     // #406: computed once per run (parity with run()/runStructured()), reused
     // across iterations below.
-    const callHeaders = this._callHeaders(
-      {
-        runId,
-        traceId: effectiveTraceId,
-        agentName: agent.role.name,
-        modelId: model.modelId,
-        modelProvider: model.provider,
-      },
-      options,
-    );
+    const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     // AgentLike.getTools() returns unknown[] at the protocol boundary; cast
     // per the run()/runStructured() precedent — #117 needs `.name` for
     // agentConfig.tools (parity with the other two paths).

@@ -43,6 +43,7 @@ const MAX_HEADER_VALUE_LENGTH = 128;
 // (`AgentLike.role.name`), so this can't assume ASCII input.
 const NON_PRINTABLE_ASCII = /[^\x20-\x7E]/g;
 const REPEATED_DASHES = /-{2,}/g;
+const TRIM_DASHES = /^-+|-+$/g;
 
 /**
  * Make a string safe to use as an HTTP header value: replace non-printable-ASCII
@@ -52,7 +53,29 @@ const REPEATED_DASHES = /-{2,}/g;
  */
 export function sanitizeHeaderValue(value: string): string {
   const replaced = value.replace(NON_PRINTABLE_ASCII, "-").replace(REPEATED_DASHES, "-");
-  const trimmed = replaced.replace(/^-+|-+$/g, "");
+  const trimmed = replaced.replace(TRIM_DASHES, "");
+  return trimmed.slice(0, MAX_HEADER_VALUE_LENGTH);
+}
+
+// Header NAMES are a stricter token than values: restrict to lowercase
+// alphanumerics + dashes so a caller-supplied `dims` key can never produce an
+// invalid header name (fetch/Headers throws a TypeError on e.g. spaces,
+// colons, or unicode in a header name — unlike an invalid VALUE, which most
+// runtimes just pass through byte-for-byte).
+const INVALID_HEADER_KEY_CHARS = /[^a-z0-9-]/g;
+
+/**
+ * Make a string safe to use as (a suffix of) an HTTP header NAME: lowercase,
+ * replace anything outside `[a-z0-9-]` with `-`, collapse runs of dashes, trim
+ * leading/trailing dashes, and cap at {@link MAX_HEADER_VALUE_LENGTH} chars.
+ * Deterministic — same input always yields the same output.
+ */
+export function sanitizeHeaderKey(key: string): string {
+  const replaced = key
+    .toLowerCase()
+    .replace(INVALID_HEADER_KEY_CHARS, "-")
+    .replace(REPEATED_DASHES, "-");
+  const trimmed = replaced.replace(TRIM_DASHES, "");
   return trimmed.slice(0, MAX_HEADER_VALUE_LENGTH);
 }
 
@@ -75,7 +98,10 @@ export function sanitizeHeaderValue(value: string): string {
  * Basic-fronted, ungoverned Bifrost.
  */
 export function bifrostCorrelationHeaders(ctx: RunHeadersContext): Record<string, string> {
-  if (!ctx.modelProvider?.startsWith("gateway")) return {};
+  // `.` (not just the "gateway" prefix) so a hypothetical direct provider
+  // literally named e.g. "gatewayx" can never accidentally self-gate in —
+  // "gateway.chat" is createOpenAICompatible's actual `${name}.${modelType}` shape.
+  if (!ctx.modelProvider?.startsWith("gateway.")) return {};
 
   const headers: Record<string, string> = {
     [REQUEST_ID_HEADER]: ctx.runId,
@@ -117,7 +143,7 @@ export function bifrostRunHeaders(opts: {
     headers[BIFROST_GUARDRAILS_HEADER] = opts.guardrailIds.join(",");
   }
   for (const [key, value] of Object.entries(opts.dims ?? {})) {
-    headers[`${BIFROST_DIM_PREFIX}${key}`] = sanitizeHeaderValue(value);
+    headers[`${BIFROST_DIM_PREFIX}${sanitizeHeaderKey(key)}`] = sanitizeHeaderValue(value);
   }
   return headers;
 }
