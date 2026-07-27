@@ -2372,3 +2372,111 @@ describe("AgentRunner", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-call request headers (#406 — gateway virtual key / guardrail / run
+// correlation seam). MockLanguageModelV3.doGenerate receives the same
+// LanguageModelV4CallOptions AgentRunner passes, including `options.headers`.
+// ---------------------------------------------------------------------------
+
+describe("AgentRunner — requestHeaders (#406)", () => {
+  it("factory receives the minted runId + agent.role.name; doGenerate receives the headers", async () => {
+    let captured: Record<string, string | undefined> | undefined;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        captured = options.headers;
+        return textResult("ok", 1, 1);
+      },
+    });
+    const factoryCalls: Array<{ runId: string; agentName: string; modelProvider: string }> = [];
+    const runner = new AgentRunner(model, undefined, {
+      requestHeaders: (ctx) => {
+        factoryCalls.push({
+          runId: ctx.runId,
+          agentName: ctx.agentName,
+          modelProvider: ctx.modelProvider,
+        });
+        return { "x-bf-dim-agent": ctx.agentName, "x-request-id": ctx.runId };
+      },
+    });
+    const agent = makeAgent({ role: { name: "planner" } });
+
+    await runner.run(agent, "hi");
+
+    expect(factoryCalls).toHaveLength(1);
+    expect(factoryCalls[0]?.agentName).toBe("planner");
+    expect(factoryCalls[0]?.runId).toBeTruthy();
+    // ai@7 wraps per-call headers via withUserAgentSuffix, so the mock also
+    // sees a "user-agent" key — assert our headers are present, not exact
+    // object equality (see the "neither configured" regression-guard test
+    // below for the full explanation).
+    expect(captured).toMatchObject({
+      "x-bf-dim-agent": "planner",
+      "x-request-id": factoryCalls[0]?.runId,
+    });
+  });
+
+  it("RunOptions.requestHeaders beats the factory's output on key collision", async () => {
+    let captured: Record<string, string | undefined> | undefined;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        captured = options.headers;
+        return textResult("ok", 1, 1);
+      },
+    });
+    const runner = new AgentRunner(model, undefined, {
+      requestHeaders: () => ({ "x-bf-guardrail-ids": "default-profile", "x-bf-dim-run": "r" }),
+    });
+    const agent = makeAgent();
+
+    await runner.run(agent, "hi", { requestHeaders: { "x-bf-guardrail-ids": "pii-strict" } });
+
+    expect(captured?.["x-bf-guardrail-ids"]).toBe("pii-strict"); // per-run wins
+    expect(captured?.["x-bf-dim-run"]).toBe("r"); // non-colliding factory key survives
+  });
+
+  it("neither configured → captured headers carry no x-bf-*/x-request-id correlation keys", async () => {
+    let captured: Record<string, string | undefined> | undefined;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        captured = options.headers;
+        return textResult("ok", 1, 1);
+      },
+    });
+    const runner = new AgentRunner(model); // 2-arg construction — no requestHeaders factory
+    const agent = makeAgent();
+
+    await runner.run(agent, "hi");
+
+    // ai@7 unconditionally wraps per-call headers via withUserAgentSuffix, so
+    // MockLanguageModelV3's doGenerate never literally sees `undefined` — the
+    // regression guard is that no Bifrost correlation/guardrail key leaked in,
+    // not that the field is strictly absent (Gate 1.5 review note).
+    const keys = Object.keys(captured ?? {});
+    expect(keys.some((k) => k.startsWith("x-bf-") || k === "x-request-id")).toBe(false);
+  });
+
+  it("runStructured() threads the same headers (no-tools single-call path)", async () => {
+    let captured: Record<string, string | undefined> | undefined;
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        captured = options.headers;
+        return {
+          content: [{ type: "text", text: JSON.stringify({ ok: true }) }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usageV3(1, 1),
+          warnings: [],
+        } satisfies V3Result;
+      },
+    });
+    const runner = new AgentRunner(model, undefined, {
+      requestHeaders: () => ({ "x-bf-vk": "vk-1" }),
+    });
+    const agent = makeAgent();
+    const schema = z.object({ ok: z.boolean() });
+
+    await runner.runStructured(agent, "hi", schema);
+
+    expect(captured?.["x-bf-vk"]).toBe("vk-1");
+  });
+});
