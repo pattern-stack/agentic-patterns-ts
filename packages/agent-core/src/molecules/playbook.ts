@@ -47,8 +47,8 @@ export interface PlayDefinition {
  * Define a schema-typed play while returning the framework's stable,
  * non-generic `PlayDefinition` surface — the play-side counterpart of
  * `defineTool` (`toolbox.ts`), minus `terminal` (plays are deliberately never
- * terminal, `:57-61`) and minus `ctx` (plays don't get `ToolExecutionContext`
- * — out of scope, ADR 0005 precedent).
+ * terminal, see the comment in `getPlaySchemas` below) and minus `ctx` (plays
+ * don't get `ToolExecutionContext` — out of scope, ADR 0005 precedent).
  *
  * Arguments arrive contextually typed from `parameters` (`z.infer<P>`) — the
  * host boundary (`Playbook.execute`) already parses them, so this is
@@ -165,12 +165,19 @@ export abstract class Playbook {
    * Execute a play by name.
    *
    * Validates args via Zod. On success, returns JSON-safe result.
-   * On error (unknown play, validation failure, execution error),
-   * returns `{ error: message }` envelope instead of throwing — this
-   * boundary NEVER throws (`toolbox-executor.ts` and `sdk-bridge.ts` both
-   * depend on that: routing plays through here is what keeps a
-   * malformed/failing play from aborting the runner loop or rejecting inside
-   * an MCP tool handler).
+   * On error (unknown play, validation failure, execution error), returns
+   * `{ error: message }` envelope instead of throwing. This is a play
+   * contract choice, not a dependency of either named consumer: the three
+   * `toolExecutor.execute` call sites in `agent-runner.ts` already wrap the
+   * call in try/catch, and the MCP SDK's `CallTool` handler already converts
+   * any thrown error into its own `isError` result. Neither would break if
+   * this method threw instead. The envelope is kept because it is (a) the
+   * observable behavior every existing play has always had and that tests
+   * pin (`toolbox-executor.test.ts`'s play-dispatch block,
+   * `playbook.test.ts`), (b) the payload shape `sdk-bridge.ts` sniffs for
+   * (`"error" in result`) when deciding a tool call's `isError`, and (c)
+   * consistent with the rest of the play contract — a returns-violation
+   * isn't special enough to be the one error that breaks the pattern.
    *
    * This boundary owns the play's name (the record key), so it is also where
    * `definePlay` return-schema violations gain their uniform, play-named

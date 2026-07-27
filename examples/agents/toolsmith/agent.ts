@@ -178,6 +178,11 @@ class ToolsmithPlaybook extends Playbook {
         }),
         returns: Slug.merge(DaySpan),
         execute: async ({ title, from, to }) => {
+          // NOTE: `Toolbox.execute` returns `Promise<unknown>` — `definePlay`
+          // types this play's own boundary (`args`/`returns`), not its
+          // callees, so the result of calling into another tool still needs
+          // a hand cast. Not play-side debt; residual from the callee's
+          // erased return type.
           const [{ slug }, { days }] = (await Promise.all([
             tools.execute("slugify", { text: title }),
             tools.execute("date_diff", { from, to }),

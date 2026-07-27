@@ -15,6 +15,11 @@ class TestPlaybook extends Playbook {
   readonly name = "test-playbook";
   readonly description = "A test playbook";
   readonly plays: Record<string, PlayDefinition> = {
+    // Load-bearing regression guard for #266/D2 — a plain (non-`definePlay`)
+    // `PlayDefinition` with a `returns` schema. Do NOT convert this to
+    // `definePlay`: its entire purpose is to prove `returns` stays
+    // metadata-only (never validated) on a play that wasn't built through the
+    // factory. See "the central invariant" section of the #266 spec.
     greet: {
       description: "Greet someone",
       parameters: z.object({ name: z.string() }),
@@ -33,10 +38,11 @@ class TestPlaybook extends Playbook {
       parameters: z.object({}),
       execute: async () => ({ date: new Date("2025-01-01T00:00:00.000Z") }),
     },
-    // D2 caveat fixture — extends `returnDate` above rather than introducing
-    // a parallel one. Same Date-round-tripping shape, but `definePlay`-built,
-    // so it pins that validation runs on the LIVE `Date` (before the
-    // JSON round-trip flattens it to an ISO string).
+    // D2 caveat fixture — sibling of `returnDate` above, kept separate so the
+    // plain-play round-trip case survives, rather than converting
+    // `returnDate` itself. Same Date-round-tripping shape, but
+    // `definePlay`-built, so it pins that validation runs on the LIVE `Date`
+    // (before the JSON round-trip flattens it to an ISO string).
     returnDateValidated: definePlay({
       description: "Returns a date object, validated against `returns` before serialization",
       parameters: z.object({}),
@@ -178,8 +184,12 @@ describe("definePlay", () => {
       parameters: z.object({ name: z.string(), title: z.string().default("friend") }),
       returns: z.object({ greeting: z.string() }),
       execute: async (args) => {
-        // Post-parse types: the default has been applied by definePlay's own
-        // parsing — args arrive typed, no cast needed.
+        // Post-parse types: this test routes through `pb.execute(...)`, so
+        // `Playbook.execute`'s own `parameters.parse()` has already applied
+        // the default before this callback runs — args arrive typed, no cast
+        // needed. `definePlay` itself does no parameter parsing (see its
+        // docblock); calling `def.execute(...)` directly, as the direct-call
+        // tests below do, receives unparsed args.
         expectTypeOf(args.name).toEqualTypeOf<string>();
         expectTypeOf(args.title).toEqualTypeOf<string>();
         return { greeting: `Hello, ${args.title} ${args.name}!` };
@@ -345,9 +355,10 @@ describe("Correction #3 — inbound returns-violation misattribution", () => {
         parameters: z.object({}),
         returns: z.object({ count: z.number() }),
         execute: async () => {
-          // Routed through Toolbox.execute — toolbox.ts:250-257 strips the tag
-          // before rethrowing, so this is NOT tagged by the time it reaches
-          // outer_play's own catch (inside definePlay's wrapper) or Playbook.execute.
+          // Routed through Toolbox.execute — its isReturnsViolation branch
+          // strips the tag before rethrowing, so this is NOT tagged by the
+          // time it reaches outer_play's own catch (inside definePlay's
+          // wrapper) or Playbook.execute.
           return (await tb.execute("violating_tool", {})) as { count: number };
         },
       }),

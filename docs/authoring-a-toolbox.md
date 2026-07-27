@@ -130,7 +130,7 @@ instead of from a build-time closure.
 
 Plays are like tools but with error-envelope semantics: a `Playbook` never throws from `execute` —
 unknown play, parameter-validation failure, and execution error all come back as `{ error: message
-}` instead. `definePlay` (core 0.15.0, issue #266) is the play-side counterpart of `defineTool`:
+}` instead. `definePlay` (core 0.16.0, issue #266) is the play-side counterpart of `defineTool`:
 args arrive typed, the return value is compile-checked against `returns`, and output is validated
 by default.
 
@@ -160,7 +160,7 @@ What's different from `defineTool`:
 
 - **`returns` is REQUIRED**, not optional. A `definePlay` with no `returns` would be
   indistinguishable from "validation not configured" — exactly the plain-`PlayDefinition` behavior
-  this factory exists to opt into.
+  this factory exists to opt out of.
 - **No `terminal`.** Plays are deliberately never terminal.
 - **No `ctx`.** Plays don't receive `ToolExecutionContext` — out of scope for #266 (ADR 0005
   precedent); `execute` takes only the parsed args.
@@ -182,11 +182,21 @@ the round-trip then flattens it to an ISO string. If the post-serialization shap
 `returns` exactly, declare a shape-preserving transform (e.g. `z.date().transform((d) =>
 d.toISOString())`) rather than relying on the raw type.
 
-**Tool-wins-on-collision.** When an agent's runner dispatches a tool call by name, a toolbox tool
-and a playbook play with the same name can't both be registered — the toolbox tool wins
-(`packages/agent-runtime/src/runner/toolbox-executor.ts`'s `toolLookup` is checked before
-`playLookup`). This is deterministic regardless of capability registration order; name a play
-distinctly from any tool in the same capability to avoid relying on it.
+**Tool-wins-on-collision — Claude Code path only.** On the ToolboxExecutor path (used when the
+runner dispatches a tool call by name), a toolbox tool and a playbook play with the same name are
+both registered fine — `toolLookup` and `playLookup` (in
+`packages/agent-runtime/src/runner/toolbox-executor.ts`) are agent-wide flat maps accumulated
+across every capability, not scoped to one capability — but at dispatch `toolLookup` is checked
+before `playLookup`, so the play is silently shadowed. This is deterministic regardless of
+capability registration order, and applies across capabilities too: a tool in one capability
+shadows a same-named play in a different one.
+
+**On the SDK-bridge path this same collision is FATAL, not shadowing.** `buildCapabilityServer`
+registers each capability's tools and plays as SDK tools on one MCP server; if a toolbox tool and a
+playbook play share a name, server construction throws (`Tool <name> is already registered`) before
+the server exists — there is no "wins", just a hard failure at capability-build time. Name every
+play distinctly from every tool reachable by the agent (not just within the same capability) to
+avoid both failure modes.
 
 `playbook(name, description, plays)` mirrors `toolbox(...)` — a literal `Playbook` over a static
 play record, record retained by reference, `instanceof Playbook` holds.
