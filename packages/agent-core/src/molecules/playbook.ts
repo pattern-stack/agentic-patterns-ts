@@ -77,7 +77,7 @@ export interface PlayDefinition {
  *
  * Validation failures are tagged and renamed by `Playbook.execute(name, ...)`
  * (`play '<name>' output violated its returns schema: ...`), never thrown
- * past that boundary — see `Playbook.execute`'s never-throw contract. Calling
+ * past that boundary — see `Playbook.execute`'s envelope contract. Calling
  * `.execute()` on the returned `PlayDefinition` directly, bypassing a
  * `Playbook`, DOES throw the tagged violation — that is outside the
  * supported path (see `Playbook.execute`'s docs on inbound misattribution).

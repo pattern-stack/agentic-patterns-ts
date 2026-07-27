@@ -182,7 +182,7 @@ the round-trip then flattens it to an ISO string. If the post-serialization shap
 `returns` exactly, declare a shape-preserving transform (e.g. `z.date().transform((d) =>
 d.toISOString())`) rather than relying on the raw type.
 
-**Tool-wins-on-collision — Claude Code path only.** On the ToolboxExecutor path (used when the
+**Tool-wins-on-collision — ToolboxExecutor (AgentRunner) path.** On that path (used when the
 runner dispatches a tool call by name), a toolbox tool and a playbook play with the same name are
 both registered fine — `toolLookup` and `playLookup` (in
 `packages/agent-runtime/src/runner/toolbox-executor.ts`) are agent-wide flat maps accumulated
@@ -191,7 +191,7 @@ before `playLookup`, so the play is silently shadowed. This is deterministic reg
 capability registration order, and applies across capabilities too: a tool in one capability
 shadows a same-named play in a different one.
 
-**On the SDK-bridge path this same collision is FATAL, not shadowing.** `buildCapabilityServer`
+**On the SDK-bridge path (Claude Code) this same collision is FATAL, not shadowing.** `buildCapabilityServer`
 registers each capability's tools and plays as SDK tools on one MCP server; if a toolbox tool and a
 playbook play share a name, server construction throws (`Tool <name> is already registered`) before
 the server exists — there is no "wins", just a hard failure at capability-build time. Name every
