@@ -1118,6 +1118,39 @@ function ErrorPart({ errorType, message }: { errorType: string; message: string 
   );
 }
 
+/* ── guardrail redaction (#407) ───────────────────────────────────────────────
+ * PII-redaction notice. The user-visible "redacted" badge is deliberately
+ * GATED on `source !== "placeholders"` — a raw regex hit alone can
+ * false-positive on legit uppercase-acronym citations (`[RFC-2119]`,
+ * `[ISSUE-407]`); only a `bifrost_metadata`-confirmed source ("metadata" /
+ * "both") renders the badge. A placeholders-only hit renders nothing (the
+ * event is still recorded — see EventStream — just not surfaced as a chat
+ * claim that PII was redacted). */
+function GuardrailRedactionPart({
+  part,
+}: { part: Extract<Part, { kind: "guardrail_redaction" }> }) {
+  if (part.source === "placeholders") return null;
+  return (
+    <div
+      className="chat-redaction"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "6px 11px",
+        fontSize: "var(--fz-tiny)",
+        color: "var(--mute)",
+        borderLeft: "2px solid var(--warn, #d9a441)",
+      }}
+    >
+      <span aria-hidden>◐</span>
+      <span>
+        PII redacted · {part.totalEntities} {part.totalEntities === 1 ? "entity" : "entities"}
+      </span>
+    </div>
+  );
+}
+
 /* ── dispatcher ─────────────────────────────────────────────────────────────*/
 export function PartView({
   part,
@@ -1151,6 +1184,8 @@ export function PartView({
       return <AnswerPart value={part.value} />;
     case "error":
       return <ErrorPart errorType={part.errorType} message={part.message} />;
+    case "guardrail_redaction":
+      return <GuardrailRedactionPart part={part} />;
     default:
       return null;
   }

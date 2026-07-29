@@ -73,6 +73,10 @@ export function useEventStream(
         // (EventSource has no wildcard — see the comment above).
         "tool.approval.request",
         "tool.approval.response",
+        // #407 — Bifrost gateway guardrail events (violation/redaction), same
+        // "EventSource has no wildcard" rationale as the pair above.
+        "guardrail.violation",
+        "guardrail.redaction",
         "step.start",
         "step.end",
         "tool.start",

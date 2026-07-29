@@ -101,6 +101,31 @@ export type ClientEvent =
         decision_kind?: string;
       };
     }
+  // Bifrost gateway guardrail events (#407) — a configured guardrail blocked
+  // the request, or Presidio-style PII redaction was detected on a gateway
+  // response. `entities` is ALWAYS counts by type, never raw redacted values.
+  | {
+      name: "guardrail.violation";
+      data: {
+        action: "blocked";
+        message: string;
+        status_code?: number;
+        bifrost_type?: string;
+        guardrail_id?: string;
+        category?: string;
+        severity?: string;
+        provider?: string;
+      };
+    }
+  | {
+      name: "guardrail.redaction";
+      data: {
+        entities: Record<string, number>;
+        total_entities: number;
+        source: "placeholders" | "metadata" | "both";
+        provider?: string;
+      };
+    }
   | {
       name: "step.start";
       data: {
@@ -255,6 +280,8 @@ export type ClientEvent =
         finish_reason: string;
         /** #388: per-call cache/reasoning detail — absent ≠ zero. */
         usage_details?: UsageDetailsWire;
+        /** #407: which provider actually served a gateway response. */
+        gateway?: { provider?: string; requestedModel?: string; servedModel?: string };
       };
     }
   // Claude Code hook passthrough (#286) — SDK hook fired during a CC run.
@@ -319,6 +346,8 @@ export const CLIENT_EVENT_NAMES = [
   "gate.decision",
   "tool.approval.request",
   "tool.approval.response",
+  "guardrail.violation",
+  "guardrail.redaction",
   "step.start",
   "step.end",
   "iteration.start",
