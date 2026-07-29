@@ -202,6 +202,39 @@ export interface ToolApprovalResponseEvent extends BaseEvent {
   readonly decisionKind?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Gateway guardrail events (#407) — Bifrost governance responses surfaced as
+// first-class events, per the #389 event-plumbing checklist. Both register in
+// UX + DEBUG only (event-profiles.ts); violations also reach OBSERVABILITY
+// via the enriched `agent.error` (see agent-runner.ts's `_gatewayAwareError`).
+// ---------------------------------------------------------------------------
+
+/** A configured Bifrost guardrail blocked the request (446, or
+ *  `error.type: "guardrail_violation"` — PROVISIONAL, see `providers/bifrost.ts`
+ *  § Provisional-shape discipline). Emitted BEFORE the enriched `agent.error`. */
+export interface GuardrailViolationEvent extends BaseEvent {
+  readonly type: "agent.guardrail.violation";
+  readonly action: "blocked";
+  readonly message: string;
+  readonly statusCode?: number;
+  readonly bifrostType?: string;
+  readonly guardrailId?: string;
+  readonly category?: string;
+  readonly severity?: string;
+  readonly provider?: string;
+}
+
+/** Presidio-style PII redaction detected on a gateway response — in-band
+ *  `[ENTITY_TYPE-#]` placeholders and/or `bifrost_metadata` confirmation. */
+export interface GuardrailRedactionEvent extends BaseEvent {
+  readonly type: "agent.guardrail.redaction";
+  /** Entity type -> count. NEVER raw redacted values — counts only. */
+  readonly entities: Readonly<Record<string, number>>;
+  readonly totalEntities: number;
+  readonly source: "placeholders" | "metadata" | "both";
+  readonly provider?: string;
+}
+
 export interface ToolCallStartEvent extends BaseEvent {
   readonly type: "agent.tool.start";
   readonly toolCallId: string;
@@ -305,6 +338,18 @@ export interface LLMCallEndEvent extends BaseEvent {
    * {@link TokenUsageDetails}.
    */
   readonly usageDetails?: TokenUsageDetails;
+  /**
+   * Which provider actually served a gateway response (#407) — e.g. a
+   * Bifrost `extra_fields.provider`/`resolved_model_used` passthrough.
+   * Declared structurally (not imported from `providers/bifrost.ts`) so
+   * events stay provider-agnostic; absent for non-gateway models and
+   * gateways that report no attribution.
+   */
+  readonly gateway?: {
+    readonly provider?: string;
+    readonly requestedModel?: string;
+    readonly servedModel?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -577,6 +622,8 @@ export type AgentEvent =
   | GateDecisionEvent
   | ToolApprovalRequestEvent
   | ToolApprovalResponseEvent
+  | GuardrailViolationEvent
+  | GuardrailRedactionEvent
   | ToolCallStartEvent
   | ToolCallEndEvent
   | ToolProgressEvent

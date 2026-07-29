@@ -51,6 +51,13 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     // exporter-facing decision record — deliberately NOT duplicated here.
     "agent.tool.approval.request",
     "agent.tool.approval.response",
+    // Bifrost gateway guardrail events (#407) — UI-facing by design (the
+    // dashboard badges a violation/redaction on the affected message).
+    // Violations ALSO reach OBSERVABILITY via the enriched `agent.error`
+    // below — not duplicated here; a dedicated redaction exporter mapping is
+    // deferred (spec 407 § Open question 2).
+    "agent.guardrail.violation",
+    "agent.guardrail.redaction",
     // Step / delegation spans (#226) — previously in NO profile, so
     // profile-attached exporters (admin collector, SSE broadcast, SQLite)
     // never saw a stage boundary.
@@ -115,6 +122,9 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     // Tool-approval SDK-framing pair (#389) — see the UX profile's comment above.
     "agent.tool.approval.request",
     "agent.tool.approval.response",
+    // Bifrost gateway guardrail events (#407) — see the UX profile's comment above.
+    "agent.guardrail.violation",
+    "agent.guardrail.redaction",
     // Harness-native passthrough envelope (#323/#324) — compaction boundaries,
     // subagent/task progress, rate-limit notices. Debug-only: high-volume,
     // harness-specific detail most consumers never need.

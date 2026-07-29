@@ -10,6 +10,8 @@
     "done",
     "error",
     "gate.decision",
+    "guardrail.redaction",
+    "guardrail.violation",
     "harness.native",
     "input.request",
     "iteration.end",

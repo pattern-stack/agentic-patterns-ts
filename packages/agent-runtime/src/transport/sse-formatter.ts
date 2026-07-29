@@ -125,6 +125,8 @@ export type SSEEventName =
   | "gate.decision"
   | "tool.approval.request"
   | "tool.approval.response"
+  | "guardrail.violation"
+  | "guardrail.redaction"
   | "step.start"
   | "step.end"
   | "iteration.start"
@@ -184,6 +186,8 @@ export const SSE_WIRE_EVENT_NAMES = [
   "gate.decision",
   "tool.approval.request",
   "tool.approval.response",
+  "guardrail.violation",
+  "guardrail.redaction",
   "step.start",
   "step.end",
   "iteration.start",
@@ -399,6 +403,28 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
       if (event.decisionKind !== undefined) payload.decision_kind = event.decisionKind;
       return { name: "tool.approval.response", payload };
     }
+    case "agent.guardrail.violation": {
+      const payload: Record<string, unknown> = {
+        action: event.action,
+        message: event.message,
+      };
+      if (event.statusCode !== undefined) payload.status_code = event.statusCode;
+      if (event.bifrostType !== undefined) payload.bifrost_type = event.bifrostType;
+      if (event.guardrailId !== undefined) payload.guardrail_id = event.guardrailId;
+      if (event.category !== undefined) payload.category = event.category;
+      if (event.severity !== undefined) payload.severity = event.severity;
+      if (event.provider !== undefined) payload.provider = event.provider;
+      return { name: "guardrail.violation", payload };
+    }
+    case "agent.guardrail.redaction": {
+      const payload: Record<string, unknown> = {
+        entities: event.entities,
+        total_entities: event.totalEntities,
+        source: event.source,
+      };
+      if (event.provider !== undefined) payload.provider = event.provider;
+      return { name: "guardrail.redaction", payload };
+    }
     case "agent.iteration.start":
       return {
         name: "iteration.start",
@@ -436,6 +462,9 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
           duration_ms: event.durationMs,
           finish_reason: event.finishReason,
           ...(llmEndUsageDetails ? { usage_details: llmEndUsageDetails } : {}),
+          // #407: additive gateway-attribution passthrough — no wire-name
+          // impact, so no manifest change from this key alone.
+          ...(event.gateway ? { gateway: event.gateway } : {}),
         },
       };
     }
@@ -629,6 +658,8 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.gate.decision": "gate.decision",
   "agent.tool.approval.request": "tool.approval.request",
   "agent.tool.approval.response": "tool.approval.response",
+  "agent.guardrail.violation": "guardrail.violation",
+  "agent.guardrail.redaction": "guardrail.redaction",
   "agent.step.start": "step.start",
   "agent.step.end": "step.end",
   "agent.iteration.start": "iteration.start",
