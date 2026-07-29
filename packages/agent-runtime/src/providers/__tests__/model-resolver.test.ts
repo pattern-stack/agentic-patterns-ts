@@ -20,7 +20,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentRunner } from "../../runner/agent-runner.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { createRunner } from "../../runner/create-runner.js";
-import { BIFROST_GUARDRAILS_HEADER, BIFROST_VK_HEADER } from "../bifrost.js";
+import {
+  BIFROST_GUARDRAILS_HEADER,
+  BIFROST_VK_HEADER,
+  BifrostGuardrailViolationError,
+  BifrostVirtualKeyRequiredError,
+  attributionFromProviderMetadata,
+  classifyBifrostError,
+} from "../bifrost.js";
 import {
   anthropicProvider,
   googleProvider,
@@ -515,6 +522,129 @@ describe("Bifrost wire shapes (#406) — captured 2026-07-27 live probes", () =>
     await expect(model.doGenerate(callOptions())).rejects.toThrow(
       /Provider 'gemini' is not allowed for this virtual key/,
     );
+  });
+
+  // #407 — live-captured 2026-07-29 (an expired vk against the user's live
+  // instance): distinct from provider_blocked — the KEY is the problem.
+  it("403 virtual_key_blocked surfaces Bifrost's error message", async () => {
+    stubFetchCapturingHeaders(
+      {
+        type: "virtual_key_blocked",
+        is_bifrost_error: false,
+        status_code: 403,
+        error: { message: "Virtual key has expired" },
+        extra_fields: {
+          routing_info: {},
+          provider: "openai",
+          original_model_requested: "gpt-4o-mini",
+          resolved_model_used: "gpt-4o-mini",
+          request_type: "chat_completion",
+        },
+      },
+      403,
+    );
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", virtualKey: "vk-expired" },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o-mini");
+    await expect(model.doGenerate(callOptions())).rejects.toThrow(/Virtual key has expired/);
+  });
+
+  // #407 — pins that the raw Bifrost envelope survives into
+  // `APICallError.responseBody` through the REAL @ai-sdk/openai-compatible
+  // adapter (not a hand-rolled fixture) — the exact seam `classifyBifrostError`
+  // depends on (fact 2: `.data` has the envelope stripped).
+  it("the raw body survives into APICallError.responseBody through the real adapter (401)", async () => {
+    stubFetchCapturingHeaders(
+      {
+        type: "virtual_key_required",
+        is_bifrost_error: false,
+        status_code: 401,
+        error: {
+          message: "virtual key is required. Provide a virtual key via the x-bf-vk header.",
+        },
+      },
+      401,
+    );
+    const r = new HybridModelResolver({ gateway: { baseURL: "https://gw.example/v1" } });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    let caught: unknown;
+    try {
+      await model.doGenerate(callOptions());
+    } catch (e) {
+      caught = e;
+    }
+    const classified = classifyBifrostError(caught);
+    expect(classified).toBeInstanceOf(BifrostVirtualKeyRequiredError);
+    expect(classified?.statusCode).toBe(401);
+  });
+
+  // #407 — PROVISIONAL fixture (docs-derived, not live-captured — see spec
+  // 407 § Provisional-shape discipline). Pins the 446 shape through the same
+  // real-adapter seam.
+  it("446 guardrail_violation classifies through the real adapter — PROVISIONAL fixture", async () => {
+    stubFetchCapturingHeaders(
+      {
+        type: "guardrail_violation",
+        is_bifrost_error: true,
+        status_code: 446,
+        error: {
+          message: "Request blocked by guardrail: pii-strict",
+          guardrail_id: "pii-strict",
+          category: "pii",
+          severity: "high",
+          action: "block",
+        },
+      },
+      446,
+    );
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", virtualKey: "vk-123" },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    let caught: unknown;
+    try {
+      await model.doGenerate(callOptions());
+    } catch (e) {
+      caught = e;
+    }
+    const classified = classifyBifrostError(caught);
+    expect(classified).toBeInstanceOf(BifrostGuardrailViolationError);
+  });
+});
+
+describe("bifrostMetadataExtractor wiring (#407) — buildFromGateway settings-capture", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("metadataExtractor is wired: a Bifrost-shaped success body surfaces providerMetadata.gateway", async () => {
+    stubFetchCapturingHeaders({
+      ...okChatBody(),
+      extra_fields: { provider: "openai", resolved_model_used: "gpt-4o-mini" },
+    });
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", virtualKey: "vk-123" },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    const result = await model.doGenerate(callOptions());
+    expect(result.providerMetadata?.gateway).toMatchObject({
+      provider: "openai",
+      resolved_model_used: "gpt-4o-mini",
+    });
+  });
+
+  it("a non-Bifrost success body produces no attribution delta (#406 byte-for-byte invariant guard)", async () => {
+    stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({ gateway: { baseURL: "https://gw.example/v1" } });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    const result = await model.doGenerate(callOptions());
+    // openai-compatible always seeds `providerMetadata[metadataKey]` with `{}`
+    // (dist/index.js:663-666) — the extractor itself correctly contributed
+    // nothing on top, which is what `attributionFromProviderMetadata` /
+    // `hasBifrostRedactionMetadata` gate on (see bifrost.test.ts).
+    expect(result.providerMetadata?.gateway).toEqual({});
+    expect(attributionFromProviderMetadata(result.providerMetadata)).toBeUndefined();
   });
 });
 
