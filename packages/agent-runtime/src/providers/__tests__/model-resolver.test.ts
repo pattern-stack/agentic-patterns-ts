@@ -9,12 +9,18 @@
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type {
+  LanguageModelV4,
+  LanguageModelV4CallOptions,
+  LanguageModelV4Prompt,
+} from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentRunner } from "../../runner/agent-runner.js";
 import type { AgentLike } from "../../runner/agent-runner.js";
 import { createRunner } from "../../runner/create-runner.js";
+import { BIFROST_GUARDRAILS_HEADER, BIFROST_VK_HEADER } from "../bifrost.js";
 import {
   anthropicProvider,
   googleProvider,
@@ -306,6 +312,209 @@ describe("GatewayConfig — gateway routing", () => {
     const { source, reason } = await createRunner({ verbose: false });
     expect(source).toBe("model-resolver");
     expect(reason).toContain("gateway https://gw.example/v1");
+  });
+});
+
+// --- Bifrost header injection (#406) ----------------------------------------
+//
+// Mechanism: build the model through HybridModelResolver (real
+// @ai-sdk/openai-compatible adapter, no profile/mock), stub global fetch to
+// capture the outgoing Request and return a minimal valid chat-completion
+// body, then call model.doGenerate(...) and assert on the captured headers.
+// Same spirit as the "(real adapter, no network)" test above.
+
+/** Minimal LanguageModelV4CallOptions — enough to drive doGenerate. */
+function callOptions(): LanguageModelV4CallOptions {
+  const prompt: LanguageModelV4Prompt = [{ role: "user", content: [{ type: "text", text: "hi" }] }];
+  return { prompt };
+}
+
+/**
+ * `HybridModelResolver.resolve()` types its return as the cross-version
+ * `ResolvedLanguageModel` union, but `buildFromGateway` concretely builds via
+ * `@ai-sdk/openai-compatible`'s `createOpenAICompatible`, which implements
+ * `LanguageModelV4` (verified — Gate 1.5 review). Narrow here so
+ * `doGenerate` can be called with a single, non-union call-options type.
+ */
+async function resolveGatewayModel(
+  r: HybridModelResolver,
+  modelId: string,
+): Promise<LanguageModelV4> {
+  return (await r.resolve(modelId)) as unknown as LanguageModelV4;
+}
+
+/** A schema-valid (OpenAICompatibleChatResponseSchema) minimal success body. */
+function okChatBody() {
+  return {
+    id: "cmpl-1",
+    created: 1700000000,
+    model: "test-model",
+    choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+    usage: {},
+  };
+}
+
+/** Stub global fetch; captures the last call's headers. Returns a getter. */
+function stubFetchCapturingHeaders(body: unknown, status = 200) {
+  let capturedHeaders: Record<string, string> | undefined;
+  const fetchMock = vi.fn(async (_url: unknown, init?: { headers?: Record<string, string> }) => {
+    capturedHeaders = init?.headers;
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return () => capturedHeaders;
+}
+
+describe("Bifrost header injection (#406) — presence/absence matrix", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("virtualKey set, no guardrails, no apiKey → x-bf-vk present, no Authorization", async () => {
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", virtualKey: "vk-123" },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await model.doGenerate(callOptions());
+    const headers = getHeaders();
+    expect(headers?.[BIFROST_VK_HEADER]).toBe("vk-123");
+    expect(headers?.authorization).toBeUndefined();
+  });
+
+  it("virtualKey + Basic (via gw.headers) → BOTH sent (orthogonal layers)", async () => {
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({
+      gateway: {
+        baseURL: "https://gw.example/v1",
+        virtualKey: "vk-123",
+        headers: { authorization: "Basic dXNlcjpwYXNz" },
+      },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await model.doGenerate(callOptions());
+    const headers = getHeaders();
+    expect(headers?.[BIFROST_VK_HEADER]).toBe("vk-123");
+    expect(headers?.authorization).toBe("Basic dXNlcjpwYXNz");
+  });
+
+  it("nothing configured → no x-bf-* header, no headers key shape change (non-Bifrost untouched)", async () => {
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({ gateway: { baseURL: "https://gw.example/v1" } });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await model.doGenerate(callOptions());
+    const headers = getHeaders();
+    expect(Object.keys(headers ?? {}).some((k) => k.startsWith("x-bf-"))).toBe(false);
+  });
+
+  it('guardrailIds ["a","b"] → x-bf-guardrail-ids: "a,b"', async () => {
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", guardrailIds: ["a", "b"] },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await model.doGenerate(callOptions());
+    expect(getHeaders()?.[BIFROST_GUARDRAILS_HEADER]).toBe("a,b");
+  });
+
+  it("explicit gw.headers[x-bf-vk] wins over the derived virtualKey", async () => {
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({
+      gateway: {
+        baseURL: "https://gw.example/v1",
+        virtualKey: "vk-derived",
+        headers: { [BIFROST_VK_HEADER]: "vk-explicit" },
+      },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await model.doGenerate(callOptions());
+    expect(getHeaders()?.[BIFROST_VK_HEADER]).toBe("vk-explicit");
+  });
+
+  it("virtualKeyEnv is read at resolve time (mirror of apiKeyEnv)", async () => {
+    vi.stubEnv("BF_VK", "vk-from-env");
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", virtualKeyEnv: "BF_VK" },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await model.doGenerate(callOptions());
+    expect(getHeaders()?.[BIFROST_VK_HEADER]).toBe("vk-from-env");
+  });
+
+  it("createRunner + envGateway wires AP_GATEWAY_VIRTUAL_KEY / AP_GATEWAY_GUARDRAIL_IDS end-to-end", async () => {
+    vi.stubEnv("AP_GATEWAY_BASE_URL", "https://gw.example/v1");
+    vi.stubEnv("AP_GATEWAY_VIRTUAL_KEY", "vk-env");
+    vi.stubEnv("AP_GATEWAY_GUARDRAIL_IDS", "a, b,"); // trims + drops empties
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+
+    const { runner } = await createRunner({ verbose: false });
+    const agent = makeAgent(() => "gpt-4o");
+    await runner.run(agent, "hi");
+
+    const headers = getHeaders();
+    expect(headers?.[BIFROST_VK_HEADER]).toBe("vk-env");
+    expect(headers?.[BIFROST_GUARDRAILS_HEADER]).toBe("a,b");
+    // The gateway also auto-wires the correlation factory (self-gates on
+    // provider "gateway.chat") — run correlation rides along for free.
+    expect(headers?.["x-request-id"]).toBeTruthy();
+  });
+
+  it("unset AP_GATEWAY_VIRTUAL_KEY / AP_GATEWAY_GUARDRAIL_IDS → keys absent", async () => {
+    vi.stubEnv("AP_GATEWAY_BASE_URL", "https://gw.example/v1");
+    const getHeaders = stubFetchCapturingHeaders(okChatBody());
+
+    const { runner } = await createRunner({ verbose: false });
+    const agent = makeAgent(() => "gpt-4o");
+    await runner.run(agent, "hi");
+
+    const headers = getHeaders();
+    expect(headers?.[BIFROST_VK_HEADER]).toBeUndefined();
+    expect(headers?.[BIFROST_GUARDRAILS_HEADER]).toBeUndefined();
+  });
+});
+
+describe("Bifrost wire shapes (#406) — captured 2026-07-27 live probes", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("401 virtual_key_required surfaces Bifrost's error message", async () => {
+    stubFetchCapturingHeaders(
+      {
+        type: "virtual_key_required",
+        error: {
+          message: "virtual key is required. Provide a virtual key via the x-bf-vk header.",
+        },
+      },
+      401,
+    );
+    const r = new HybridModelResolver({ gateway: { baseURL: "https://gw.example/v1" } });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await expect(model.doGenerate(callOptions())).rejects.toThrow(
+      /virtual key is required\. Provide a virtual key via the x-bf-vk header\./,
+    );
+  });
+
+  it("403 provider_blocked surfaces Bifrost's error message", async () => {
+    stubFetchCapturingHeaders(
+      {
+        type: "provider_blocked",
+        error: { message: "Provider 'gemini' is not allowed for this virtual key" },
+        extra_fields: {},
+      },
+      403,
+    );
+    const r = new HybridModelResolver({
+      gateway: { baseURL: "https://gw.example/v1", virtualKey: "vk-123" },
+    });
+    const model = await resolveGatewayModel(r, "gpt-4o");
+    await expect(model.doGenerate(callOptions())).rejects.toThrow(
+      /Provider 'gemini' is not allowed for this virtual key/,
+    );
   });
 });
 

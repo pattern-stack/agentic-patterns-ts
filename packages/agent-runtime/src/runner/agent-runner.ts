@@ -162,6 +162,39 @@ export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean
 }
 
 // ---------------------------------------------------------------------------
+// Per-run request headers (#406 — gateway correlation / guardrail seam)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-run context handed to an {@link AgentRunnerOptions.requestHeaders}
+ * factory. `runId` is minted INSIDE `run()`/`stream()`/`runStructured()`
+ * (`generateId()`) and is therefore unknowable to the caller ahead of time —
+ * this is why the seam is a factory (called once the runId exists) rather
+ * than a static value passed at construction.
+ */
+export interface RunHeadersContext {
+  runId: string;
+  traceId: string;
+  agentName: string;
+  modelId: string | undefined;
+  modelProvider: string;
+}
+
+/** Constructor options for {@link AgentRunner}. */
+export interface AgentRunnerOptions {
+  /**
+   * Generic, gateway-agnostic seam: computes per-run HTTP headers to forward
+   * to every provider call this run makes, given {@link RunHeadersContext}.
+   * `createRunner` wires `bifrostCorrelationHeaders` (`providers/bifrost.ts`)
+   * automatically whenever a gateway is configured; that factory self-gates on
+   * `ctx.modelProvider` so non-gateway/profile-escape-hatch models are
+   * unaffected. Merged UNDER `RunOptions.requestHeaders` (per-run beats
+   * per-runner-instance).
+   */
+  requestHeaders?: (ctx: RunHeadersContext) => Record<string, string | undefined>;
+}
+
+// ---------------------------------------------------------------------------
 // AgentRunner
 // ---------------------------------------------------------------------------
 
@@ -179,6 +212,7 @@ export function modelSupportsToolsWithStructuredOutput(modelId: string): boolean
 export class AgentRunner implements RunnerProtocol {
   private _eventBus: AgentEventBus | undefined;
   private readonly _resolver: ModelResolver;
+  private readonly _requestHeaders: AgentRunnerOptions["requestHeaders"];
 
   /**
    * @param model A {@link ModelResolver} — the runner resolves `agent.getModel()`
@@ -186,10 +220,60 @@ export class AgentRunner implements RunnerProtocol {
    *   concrete {@link ResolvedLanguageModel}, which is wrapped in a
    *   {@link constantModelResolver} so the model is pinned regardless of what the
    *   agent declares (back-compat; the path tests use with `MockLanguageModelV3`).
+   * @param opts Optional runner-level configuration (#406: `requestHeaders`
+   *   factory). Backwards-compatible — existing 2-arg callers are unaffected.
    */
-  constructor(model: ResolvedLanguageModel | ModelResolver, eventBus?: AgentEventBus) {
+  constructor(
+    model: ResolvedLanguageModel | ModelResolver,
+    eventBus?: AgentEventBus,
+    opts?: AgentRunnerOptions,
+  ) {
     this._resolver = isModelResolver(model) ? model : constantModelResolver(model);
     this._eventBus = eventBus;
+    this._requestHeaders = opts?.requestHeaders;
+  }
+
+  /**
+   * Computed per-call HTTP headers for this run: `RunOptions.requestHeaders`
+   * merged OVER the runner-level `requestHeaders` factory's output. Returns
+   * `undefined` when neither source is configured, so the no-config path
+   * passes no `headers` key to `generateText`/`streamText` at all — existing
+   * callers (and their `MockLanguageModelV3` assertions) see no change.
+   */
+  private _callHeaders(
+    ctx: RunHeadersContext,
+    options?: RunOptions,
+  ): Record<string, string | undefined> | undefined {
+    const factoryHeaders = this._requestHeaders?.(ctx);
+    const perRunHeaders = options?.requestHeaders;
+    if (!factoryHeaders && !perRunHeaders) return undefined;
+    return { ...factoryHeaders, ...perRunHeaders };
+  }
+
+  /**
+   * Builds the {@link RunHeadersContext} for this run/call from the already-
+   * resolved `agent`/`model`/`runId`/`traceId`, then delegates to
+   * {@link _callHeaders}. Shared by `run()`, `runStructured()`, and `stream()`
+   * (each computes this once per run, right after model resolution, and
+   * reuses it across their own iteration/tier loops).
+   */
+  private _resolveCallHeaders(
+    agent: AgentLike,
+    model: ResolvedLanguageModel,
+    runId: string,
+    traceId: string,
+    options?: RunOptions,
+  ): Record<string, string | undefined> | undefined {
+    return this._callHeaders(
+      {
+        runId,
+        traceId,
+        agentName: agent.role.name,
+        modelId: model.modelId,
+        modelProvider: model.provider,
+      },
+      options,
+    );
   }
 
   private get eventBus(): AgentEventBus {
@@ -394,6 +478,9 @@ export class AgentRunner implements RunnerProtocol {
     // modelId — the id actually dispatched.
     const model = await this._resolver.resolve(agent.getModel());
     const modelName = model.modelId;
+    // #406: computed once per run (context is stable within a run), reused
+    // across iterations below.
+    const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -502,6 +589,7 @@ export class AgentRunner implements RunnerProtocol {
           instructions,
           messages,
           tools: hasTools ? tools : undefined,
+          headers: callHeaders,
         });
       } catch (e: unknown) {
         const llmDuration = Date.now() - llmStartTime;
@@ -1133,6 +1221,9 @@ export class AgentRunner implements RunnerProtocol {
 
     const model = await this._resolver.resolve(agent.getModel());
     const modelName = model.modelId;
+    // #406: computed once per run, reused across the single-call / capable /
+    // 2-tier paths below.
+    const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
     // Advisory-only (#390): warns once per (model x capability) when the map
@@ -1182,6 +1273,7 @@ export class AgentRunner implements RunnerProtocol {
         instructions,
         messages,
         output: Output.object({ schema }),
+        headers: callHeaders,
       });
       totalInputTokens = result.usage?.inputTokens ?? 0;
       totalOutputTokens = result.usage?.outputTokens ?? 0;
@@ -1232,6 +1324,7 @@ export class AgentRunner implements RunnerProtocol {
         // stream()'s forward below) — the SDK's own abort checks (model-call
         // timeouts, tool-execution abort merge) now see it too.
         abortSignal: options?.abortSignal,
+        headers: callHeaders,
       });
       const steps = result.steps ?? [];
       // v7: result.usage aggregates ALL steps (totalUsage is now a deprecated
@@ -1333,6 +1426,7 @@ export class AgentRunner implements RunnerProtocol {
             },
           ],
           output: Output.object({ schema }),
+          headers: callHeaders,
         });
         totalInputTokens += tier2.usage?.inputTokens ?? 0;
         totalOutputTokens += tier2.usage?.outputTokens ?? 0;
@@ -1411,6 +1505,9 @@ export class AgentRunner implements RunnerProtocol {
 
     const model = await this._resolver.resolve(agent.getModel());
     const modelName = model.modelId;
+    // #406: computed once per run (parity with run()/runStructured()), reused
+    // across iterations below.
+    const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     // AgentLike.getTools() returns unknown[] at the protocol boundary; cast
     // per the run()/runStructured() precedent — #117 needs `.name` for
     // agentConfig.tools (parity with the other two paths).
@@ -1529,6 +1626,7 @@ export class AgentRunner implements RunnerProtocol {
         // an `AbortError` (caught around the drain loop below) — both routes
         // land in the same cancel-and-return block.
         abortSignal: options?.abortSignal,
+        headers: callHeaders,
       });
 
       let iterText = "";

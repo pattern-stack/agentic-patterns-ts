@@ -223,6 +223,17 @@ export interface RunOptions {
    * accept the (bounded, if the gate configured a `timeoutMs`) lingering entry.
    */
   pendingInputRegistry?: PendingInputRegistry;
+  /**
+   * Per-run HTTP headers forwarded to every provider call this run makes.
+   * Merged OVER any runner-level `requestHeaders` factory output
+   * (`AgentRunnerOptions.requestHeaders`) — a key set here wins on collision.
+   * Per-call headers also beat provider-static headers set at model-creation
+   * time (`GatewayConfig.headers`/derived vk/guardrail headers) downstream,
+   * via `@ai-sdk/openai-compatible`'s `combineHeaders` — so this is the
+   * per-run override seam (e.g. pin a different `x-bf-guardrail-ids` for one
+   * run via `bifrostRunHeaders`). Inert for non-HTTP providers (SDK contract).
+   */
+  requestHeaders?: Readonly<Record<string, string | undefined>>;
 }
 
 // ---------------------------------------------------------------------------

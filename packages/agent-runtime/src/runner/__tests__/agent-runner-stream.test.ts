@@ -1133,3 +1133,45 @@ describe("AgentRunner.stream()", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-call request headers (#406) — stream() path parity with run()/runStructured()
+// ---------------------------------------------------------------------------
+
+describe("AgentRunner.stream() — requestHeaders (#406)", () => {
+  it("forwards factory + per-run headers into streamText's doStream call", async () => {
+    let captured: Record<string, string | undefined> | undefined;
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        captured = options.headers;
+        return {
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({ type: "text-start", id: TXT });
+              controller.enqueue({ type: "text-delta", id: TXT, delta: "hi" });
+              controller.enqueue({ type: "text-end", id: TXT });
+              controller.enqueue({
+                type: "finish",
+                finishReason: finishReasonV3("stop"),
+                usage: usageV3(1, 1),
+              });
+              controller.close();
+            },
+          }),
+        };
+      },
+    });
+    const runner = new AgentRunner(model, undefined, {
+      requestHeaders: (ctx) => ({ "x-request-id": ctx.runId }),
+    });
+    const agent = makeAgent();
+
+    await collectStream(
+      runner.stream(agent, "Hi", { requestHeaders: { "x-bf-guardrail-ids": "pii-strict" } }),
+    );
+
+    expect(captured?.["x-bf-guardrail-ids"]).toBe("pii-strict");
+    expect(captured?.["x-request-id"]).toBeTruthy();
+  });
+});
