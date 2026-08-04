@@ -207,16 +207,6 @@ const BifrostErrorEnvelopeSchema = z.object({
 
 type BifrostErrorEnvelope = z.infer<typeof BifrostErrorEnvelopeSchema>;
 
-/** `error.type` values Bifrost is known to send (live-captured except
- *  `guardrail_violation`, PROVISIONAL). Anything else still classifies (via
- *  `is_bifrost_error` or a 446 status) into the base {@link BifrostError}. */
-const RECOGNIZED_BIFROST_TYPES = new Set([
-  "virtual_key_required",
-  "provider_blocked",
-  "virtual_key_blocked",
-  "guardrail_violation",
-]);
-
 interface BifrostErrorOptions {
   readonly statusCode?: number;
   readonly bifrostType?: string;
@@ -296,6 +286,74 @@ export class BifrostGuardrailViolationError extends BifrostError {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Message trust boundary (#407 Gate 2.5 quality note)
+// ---------------------------------------------------------------------------
+
+/**
+ * TRUST BOUNDARY: Bifrost's free-text `error.message` is NOT guaranteed to
+ * be redaction-safe — unlike the counts-only `agent.guardrail.redaction`
+ * channel (entity TYPE + count, never raw values), a guardrail's message is
+ * provider-authored prose that could in principle echo triggering content
+ * (e.g. a hypothetical "blocked: detected SSN 123-45-6789"). Every raw
+ * message forwarded onto an event is capped at this length as a defensive
+ * measure; the widely-surfaced `agent.guardrail.violation` event additionally
+ * prefers {@link violationSummaryMessage}'s structured summary over the raw
+ * text entirely when one is available.
+ */
+export const MAX_ERROR_MESSAGE_LENGTH = 500;
+
+/** Cap `message` at {@link MAX_ERROR_MESSAGE_LENGTH}, marking truncation
+ *  explicitly rather than silently clipping. */
+export function truncateMessage(message: string, max: number = MAX_ERROR_MESSAGE_LENGTH): string {
+  return message.length > max ? `${message.slice(0, max)}… [truncated]` : message;
+}
+
+/**
+ * A safe, structured-field-derived summary for a guardrail violation —
+ * PREFERRED over the gateway's free-text message on the
+ * `agent.guardrail.violation` event (see {@link MAX_ERROR_MESSAGE_LENGTH}'s
+ * trust-boundary note). `undefined` when no structured field is available to
+ * summarize from (all of `guardrailId`/`category`/`severity` are
+ * PROVISIONAL/optional) — the caller falls back to the capped raw message.
+ */
+export function violationSummaryMessage(err: BifrostGuardrailViolationError): string | undefined {
+  const bits: string[] = [];
+  if (err.category) bits.push(err.category);
+  if (err.severity) bits.push(err.severity);
+  if (err.guardrailId) bits.push(err.guardrailId);
+  return bits.length > 0 ? `Guardrail policy violation: ${bits.join(" / ")}` : undefined;
+}
+
+/**
+ * Maps a live-captured `error.type` string to its typed error class — the
+ * SINGLE SOURCE OF TRUTH {@link RECOGNIZED_BIFROST_TYPES} and
+ * {@link classifyBifrostError}'s dispatch both derive from (Gate 2.5 quality
+ * nit: previously enumerated separately in two places, able to drift). A 5th
+ * live-captured type needs editing in exactly this one place.
+ *
+ * `guardrail_violation` is deliberately NOT a key here — it's handled
+ * separately via `isGuardrail446` in `classifyBifrostError`, since a bare 446
+ * status also routes there regardless of `type`.
+ */
+const BIFROST_ERROR_CLASS_BY_TYPE: Readonly<
+  Record<string, new (message: string, opts: BifrostErrorOptions) => BifrostError>
+> = {
+  virtual_key_required: BifrostVirtualKeyRequiredError,
+  provider_blocked: BifrostProviderBlockedError,
+  virtual_key_blocked: BifrostVirtualKeyBlockedError,
+};
+
+/** `error.type` values Bifrost is known to send (live-captured except
+ *  `guardrail_violation`, PROVISIONAL). Anything else still classifies (via
+ *  `is_bifrost_error` or a 446 status) into the base {@link BifrostError}.
+ *  Derived from {@link BIFROST_ERROR_CLASS_BY_TYPE} + the guardrail type, so
+ *  the two enumerations can't drift apart. */
+const RECOGNIZED_BIFROST_TYPES = new Set([
+  ...Object.keys(BIFROST_ERROR_CLASS_BY_TYPE),
+  "guardrail_violation",
+]);
+
 /** Extract the guardrail detail fields, preferring the (docs-specified)
  *  nested `error.*` location and falling back to top-level — PROVISIONAL,
  *  see {@link BifrostGuardrailViolationError}. */
@@ -359,16 +417,10 @@ export function classifyBifrostError(e: unknown): BifrostError | undefined {
     if (isGuardrail446) {
       return new BifrostGuardrailViolationError(message, { ...base, ...guardrailDetail(envelope) });
     }
-    switch (envelope.type) {
-      case "virtual_key_required":
-        return new BifrostVirtualKeyRequiredError(message, base);
-      case "provider_blocked":
-        return new BifrostProviderBlockedError(message, base);
-      case "virtual_key_blocked":
-        return new BifrostVirtualKeyBlockedError(message, base);
-      default:
-        return new BifrostError(message, base);
-    }
+    const ErrorClass =
+      (envelope.type !== undefined ? BIFROST_ERROR_CLASS_BY_TYPE[envelope.type] : undefined) ??
+      BifrostError;
+    return new ErrorClass(message, base);
   } catch {
     // Classification must never throw — any unexpected shape falls back to
     // the caller's generic error path.

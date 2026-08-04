@@ -17,6 +17,7 @@ import {
   BifrostProviderBlockedError,
   BifrostVirtualKeyBlockedError,
   BifrostVirtualKeyRequiredError,
+  MAX_ERROR_MESSAGE_LENGTH,
   REDACTION_PLACEHOLDER_PATTERN,
   REQUEST_ID_HEADER,
   attributionFromProviderMetadata,
@@ -28,6 +29,8 @@ import {
   sanitizeHeaderKey,
   sanitizeHeaderValue,
   scanRedactionPlaceholders,
+  truncateMessage,
+  violationSummaryMessage,
 } from "../bifrost.js";
 
 describe("sanitizeHeaderValue", () => {
@@ -372,6 +375,57 @@ describe("classifyBifrostError", () => {
     expect(classified).not.toBeInstanceOf(BifrostVirtualKeyRequiredError);
     expect(classified).not.toBeInstanceOf(BifrostProviderBlockedError);
     expect(classified).not.toBeInstanceOf(BifrostGuardrailViolationError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// truncateMessage / violationSummaryMessage (#407 Gate 2.5 quality fix round)
+// ---------------------------------------------------------------------------
+
+describe("truncateMessage", () => {
+  it("passes a short message through unchanged", () => {
+    expect(truncateMessage("Virtual key has expired")).toBe("Virtual key has expired");
+  });
+
+  it("caps at MAX_ERROR_MESSAGE_LENGTH and marks truncation explicitly", () => {
+    const long = "x".repeat(MAX_ERROR_MESSAGE_LENGTH + 50);
+    const truncated = truncateMessage(long);
+    expect(truncated.startsWith("x".repeat(MAX_ERROR_MESSAGE_LENGTH))).toBe(true);
+    expect(truncated).toContain("[truncated]");
+    expect(truncated.length).toBeLessThan(long.length);
+  });
+
+  it("respects a custom cap", () => {
+    expect(truncateMessage("hello world", 5)).toBe("hello… [truncated]");
+  });
+});
+
+describe("violationSummaryMessage", () => {
+  it("prefers a structured summary over the raw message when detail fields are present", () => {
+    const err = new BifrostGuardrailViolationError("Request blocked by guardrail: pii-strict", {
+      statusCode: 446,
+      envelope: {},
+      cause: new Error("cause"),
+      guardrailId: "pii-strict",
+      category: "pii",
+      severity: "high",
+    });
+    const summary = violationSummaryMessage(err);
+    expect(summary).toBeDefined();
+    expect(summary).toContain("pii");
+    expect(summary).toContain("high");
+    expect(summary).toContain("pii-strict");
+    // Never the raw provider text — the trust-boundary point of this helper.
+    expect(summary).not.toBe(err.message);
+  });
+
+  it("returns undefined when no structured detail field is present (shape drift) — caller falls back to the capped raw message", () => {
+    const err = new BifrostGuardrailViolationError("blocked", {
+      statusCode: 446,
+      envelope: {},
+      cause: new Error("cause"),
+    });
+    expect(violationSummaryMessage(err)).toBeUndefined();
   });
 });
 

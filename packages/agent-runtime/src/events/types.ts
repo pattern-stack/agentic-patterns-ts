@@ -211,7 +211,16 @@ export interface ToolApprovalResponseEvent extends BaseEvent {
 
 /** A configured Bifrost guardrail blocked the request (446, or
  *  `error.type: "guardrail_violation"` — PROVISIONAL, see `providers/bifrost.ts`
- *  § Provisional-shape discipline). Emitted BEFORE the enriched `agent.error`. */
+ *  § Provisional-shape discipline). Emitted BEFORE the enriched `agent.error`.
+ *
+ *  TRUST BOUNDARY (Gate 2.5 quality note): `message` prefers a structured
+ *  summary derived from `category`/`severity`/`guardrailId` (see
+ *  `providers/bifrost.ts`'s `violationSummaryMessage`) over Bifrost's raw
+ *  free-text `error.message` — the free text is provider-authored prose that
+ *  is NOT guaranteed redaction-safe the way the counts-only
+ *  `GuardrailRedactionEvent` is. When no structured field is available to
+ *  summarize from, `message` falls back to the raw text, capped at
+ *  `MAX_ERROR_MESSAGE_LENGTH` (`providers/bifrost.ts`). */
 export interface GuardrailViolationEvent extends BaseEvent {
   readonly type: "agent.guardrail.violation";
   readonly action: "blocked";
@@ -225,7 +234,16 @@ export interface GuardrailViolationEvent extends BaseEvent {
 }
 
 /** Presidio-style PII redaction detected on a gateway response — in-band
- *  `[ENTITY_TYPE-#]` placeholders and/or `bifrost_metadata` confirmation. */
+ *  `[ENTITY_TYPE-#]` placeholders and/or `bifrost_metadata` confirmation.
+ *
+ *  CARDINALITY (Gate 2.5 quality note): one event per SCAN BOUNDARY, not per
+ *  response — the boundary differs by entrypoint. `AgentRunner.run()` scans
+ *  after every LLM call, so a multi-iteration tool loop can emit several of
+ *  these per run; `stream()` scans the FULL accumulated text once, right
+ *  before the terminal `message.complete`; `runStructured()` scans the
+ *  finalized structured output once, post-validation. A consumer counting
+ *  redaction events across entrypoints should account for this — do not
+ *  assume "one redaction event == one LLM response". */
 export interface GuardrailRedactionEvent extends BaseEvent {
   readonly type: "agent.guardrail.redaction";
   /** Entity type -> count. NEVER raw redacted values — counts only. */

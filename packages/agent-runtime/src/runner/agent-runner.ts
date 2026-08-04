@@ -65,6 +65,8 @@ import {
   classifyBifrostError,
   hasBifrostRedactionMetadata,
   scanRedactionPlaceholders,
+  truncateMessage,
+  violationSummaryMessage,
 } from "../providers/bifrost.js";
 import {
   adviseStructuredRun,
@@ -462,12 +464,19 @@ export class AgentRunner implements RunnerProtocol {
 
     let violationEvent: GuardrailViolationEvent | undefined;
     if (classified instanceof BifrostGuardrailViolationError) {
+      // TRUST BOUNDARY (Gate 2.5 quality note): prefer a structured summary
+      // over Bifrost's free-text message on this widely-surfaced event —
+      // the free text is provider-authored prose, not guaranteed
+      // redaction-safe the way the counts-only redaction channel is. Falls
+      // back to the (capped) raw message only when no structured field is
+      // available to summarize from. See providers/bifrost.ts's
+      // MAX_ERROR_MESSAGE_LENGTH doc comment.
       violationEvent = createEvent("agent.guardrail.violation", {
         traceId: scope.traceId,
         runId: scope.runId,
         parentSpanId: scope.parentSpanId,
         action: "blocked",
-        message: classified.message,
+        message: violationSummaryMessage(classified) ?? truncateMessage(classified.message),
         ...(classified.statusCode !== undefined ? { statusCode: classified.statusCode } : {}),
         ...(classified.bifrostType !== undefined ? { bifrostType: classified.bifrostType } : {}),
         ...(classified.guardrailId !== undefined ? { guardrailId: classified.guardrailId } : {}),
@@ -484,19 +493,28 @@ export class AgentRunner implements RunnerProtocol {
       runId: scope.runId,
       parentSpanId: scope.parentSpanId,
       errorType: err.name,
-      message: err.message,
+      // TRUST BOUNDARY (Gate 2.5 quality note): capped defensively — this is
+      // the lower-level, less widely-surfaced sibling of the violation event
+      // above, which prefers a structured summary instead. Surfacing the
+      // provider's raw error message here is pre-existing generic-error
+      // behavior (unchanged for non-Bifrost errors); the cap is new.
+      message: truncateMessage(err.message),
       recoverable: false,
       context: classified
         ? {
-            statusCode: classified.statusCode,
-            bifrostType: classified.bifrostType,
-            provider: classified.provider,
+            ...(classified.statusCode !== undefined ? { statusCode: classified.statusCode } : {}),
+            ...(classified.bifrostType !== undefined
+              ? { bifrostType: classified.bifrostType }
+              : {}),
+            ...(classified.provider !== undefined ? { provider: classified.provider } : {}),
             ...(classified instanceof BifrostGuardrailViolationError
               ? {
-                  guardrailId: classified.guardrailId,
-                  category: classified.category,
-                  severity: classified.severity,
-                  action: classified.action,
+                  ...(classified.guardrailId !== undefined
+                    ? { guardrailId: classified.guardrailId }
+                    : {}),
+                  ...(classified.category !== undefined ? { category: classified.category } : {}),
+                  ...(classified.severity !== undefined ? { severity: classified.severity } : {}),
+                  ...(classified.action !== undefined ? { action: classified.action } : {}),
                 }
               : {}),
           }
