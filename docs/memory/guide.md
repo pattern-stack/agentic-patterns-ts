@@ -1,0 +1,631 @@
+# Memory — developer guide
+
+> **Status: DESIGN PREVIEW** — this documents the behavior specified in ADR-0007/ADR-0008.
+> Nothing on this page is implemented yet; it exists so the design can be read, used on paper,
+> and criticized before we build.
+
+How to give an agent cross-session memory: wire a store, scope it, let the agent read and write
+it, and — when a memory has earned it — compile it into the agent's composition. Sources:
+[ADR-0007](../adr/0007-memory-store.md) (the store) and
+[ADR-0008](../adr/0008-compositional-memory.md) (the compositional layer). Where this guide had
+to guess at a surface the ADRs leave open, the guess is marked and the gap is listed in
+[open design questions](#open-design-questions-surfaced-while-writing-this) at the bottom.
+
+## The mental model
+
+Two layers, one store.
+
+**The store (ADR-0007)** is a scoped, invalidation-first system of record. A `MemoryRecord` is a
+natural-language fact with provenance and validity — no embeddings, no salience scores, no decay
+math. Records are partitioned by a flat string-map **scope** (`{ tenant: "acme", user: "u_42" }`)
+with subset-match search semantics, and curated by **invalidation**, never destructive overwrite:
+correcting a fact writes a new record with `supersedes`, and the old one survives as an audit
+trail. The store reaches the agent through two surfaces:
+
+- **Turn-1 recall** — before the first render, the host assembles a budget-capped block
+  (profile records first, then search hits against the first user message) and injects it via
+  `RenderContext.recall`. The agent is *told* what it remembers.
+- **The toolbox** — `memory_save` / `memory_search` / `memory_list` / `memory_invalidate`, bound
+  to the conversation's scope at instantiate time. The agent *manages* what it remembers.
+
+**The compositional layer (ADR-0008)** is what no other surveyed framework has. This framework's
+agent anatomy is typed — `Background` is what the agent knows, `Judgment` is how it decides,
+`Example` is what has worked, `Awareness` is what it can find out. A memory record may carry a
+typed `target` naming one of those slots. Once such a record is **promoted**, `applyMemoryOverlay`
+folds it into the `AgentConfig` at the instantiate seam: a learned project fact renders under the
+same `Background` heading as authored context; a lesson from a failed run compiles into an
+`Example` on the relevant `Judgment`. The agent doesn't read its diary each morning — **it wakes
+up already changed.**
+
+That gives every memory one of two standings:
+
+| Tier | Where it appears | What the agent experiences |
+|---|---|---|
+| **Recall tier** | The turn-1 recall block + toolbox search results | "Here is what you remembered" — visibly memory, quoted at the agent |
+| **Promoted tier** | Compiled into the composition via `applyMemoryOverlay` | Indistinguishable from authored config in the prompt — part of the self |
+
+Every untargeted record lives in the recall tier forever, and that's fine — most memories are
+session-relevant context, not identity changes. A *targeted* record starts as a **candidate**
+(recall tier, `target` attached as a proposal) and moves to the promoted tier only through a
+gated promotion act. In the tooling the two tiers stay fully distinguishable: promoted lines
+carry `source: "memory"` attribution with `memoryIds`, so "why does the agent believe X?"
+resolves prompt line → record → `provenance.conversationId` → the conversation that taught it.
+
+## Quickstart
+
+### 1. Wire a store
+
+`loadMemoryStore()` follows the `load.ts` optional-dep convention: durable SQLite when a driver
+is available (`bun:sqlite` under Bun, `better-sqlite3` under Node), otherwise you fall back to
+the in-memory store yourself. Memory gets **its own SQLite file** — it is a system of record, not
+telemetry, and must never inherit the event store's retention pruning.
+
+```typescript
+import { InMemoryMemoryStore, loadMemoryStore } from "@agentic-patterns/runtime";
+
+const store =
+  (await loadMemoryStore({ path: "./data/memory.sqlite" })) ?? new InMemoryMemoryStore();
+
+store.capabilities(); // { search: "keyword" } — the SQLite reference backend is FTS5/bm25
+```
+
+The protocol is six methods, all async:
+
+```typescript
+interface MemoryStore {
+  write(inputs: MemoryWriteInput[]): Promise<MemoryRecord[]>;
+  search(q: MemorySearchQuery): Promise<MemoryHit[]>;
+  get(id: string): Promise<MemoryRecord | null>;
+  invalidate(id: string, reason?: string): Promise<void>;
+  delete(id: string): Promise<void>;   // true forgetting — never exposed to the agent
+  capabilities(): MemoryStoreCapabilities;
+}
+```
+
+Any backend that passes `runMemoryStoreConformance(makeStore)` — an exported vitest
+`describe`-factory — honors the same contract. That's the whole portability story: the
+SQLite→Postgres path is a conformance run, not a rewrite.
+
+### 2. Scope it from SessionScope
+
+The framework does not invent identity. You declare a `SessionScope` (ADR-0005) as usual, then
+decide which of its fields form the memory partition key. Keep that mapping in one named
+function — it is the single most consequential decision you'll make (see
+[recall tuning](#recall-tuning) for the patterns it unlocks).
+
+```typescript
+import { SessionScope, scopeItem, type ScopeValue } from "@agentic-patterns/core";
+import { z } from "zod";
+
+const supportScope = new SessionScope({
+  tenant: scopeItem(z.string().min(1), { description: "Tenant slug" }),
+  user: scopeItem(z.string().min(1), { description: "Acting user id" }),
+  tier: scopeItem(z.enum(["free", "pro", "enterprise"])),
+});
+
+type SupportScope = ScopeValue<typeof supportScope>;
+
+/** Which scope fields partition memory. `tier` deliberately excluded — it's
+ *  an input, not an identity, and a tier upgrade must not orphan memories. */
+function memoryScope(s: SupportScope): Record<string, string> {
+  return { tenant: s.tenant, user: s.user };
+}
+```
+
+### 3. Attach the toolbox at the instantiate seam
+
+`MemoryToolbox` captures its partition scope **at construction**, which is why it belongs inside
+your `instantiate` hook (ADR-0004): a memory tool physically cannot write outside its
+conversation's partition, even if the model asks it to. The toolbox ships with a Manual carrying
+the standing "you have memory" instruction and the curation protocol (save with `supersedes` when
+correcting) — extend it with your own guidance (see
+[deciding what to remember](#deciding-what-to-remember)).
+
+```typescript
+import { AgentBuilder, Awareness } from "@agentic-patterns/core";
+import { MemoryToolbox } from "@agentic-patterns/runtime";
+
+function buildSupportAgent(s: SupportScope) {
+  const memory = new MemoryToolbox({ store, scope: memoryScope(s) });
+
+  return new AgentBuilder(buildSupportRole(memory))
+    // Renders RenderContext.recall when the host supplies it; silent otherwise.
+    // The `fromScope` sibling — no new Section subclass, no render impurity.
+    .withAwareness(Awareness.fromRecall())
+    .withMission(supportMission)
+    .build();
+}
+
+export default {
+  id: "support",
+  name: "Support",
+  agent: buildSupportAgent(DEFAULT_SCOPE),
+  scope: supportScope,
+  instantiate: async (context?: Record<string, unknown>) =>
+    buildSupportAgent(supportScope.parse({ ...DEFAULT_SCOPE, ...(context ?? {}) })),
+};
+```
+
+Note `delete` is not in the toolbox — the agent can invalidate (audit trail survives) but never
+truly forget; forgetting is a host/privacy operation you call on the store directly.
+
+### 4. Enable turn-1 recall
+
+Render purity is a hard gate: the renderer never fetches. The **host** assembles recall before
+rendering and passes the finished block in. Self-hosting the runner, that looks like:
+
+```typescript
+import { assembleRecall } from "@agentic-patterns/runtime";
+
+const recall = await assembleRecall(store, {
+  scope: memoryScope(s),
+  query: firstUserText,     // optional — without it, profile + recency listing only
+  budgetChars: 4_000,       // character budget, deterministic and model-agnostic
+});
+// Profile-kind records first, then search hits; capped; truncation marked, never silent.
+// Emits agent.memory.recall { count, bytes, truncated }.
+
+const prompt = agent.renderInitialPrompt({ scope: s, recall: recall.block });
+```
+
+Under the server, recall assembly is the host's job at conversation creation, driven by the same
+registration that carries `instantiate` — the exact registration seam is still open (see
+question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs go through the
+toolbox.
+
+Everything above is observable from day one: `agent.memory.write`, `agent.memory.search`, and
+`agent.memory.recall` flow through the standard event spine to exporters and the dashboard.
+
+## Deciding what to remember
+
+Memory is the *fourth* place context can live, and it is the most expensive one — every record
+is a future recall candidate competing for a character budget. Route information to the cheapest
+home that serves it:
+
+| You have… | Put it in… | Why |
+|---|---|---|
+| Who this run acts for (tenant id, user id, plan tier, region) | `SessionScope` | The host already knows it, validated per conversation. Inputs are not learnings. |
+| Stable truths known at authoring time (team conventions, project facts) | Authored `Background` | Authored config always wins over memory; don't launder authorship through the store. |
+| What was said earlier in *this* conversation | Conversation history | It's already in context. A memory restating the transcript is pure budget waste. |
+| Intermediate working state during a run | `Scratchpad` | Run-scoped and ephemeral by design. |
+| A durable fact learned in-session about a user/tenant/project | `MemoryStore` — `kind: "fact"` or `"preference"` | This is exactly what memory is for. |
+| What happened and what it taught you | `MemoryStore` — `kind: "episode"` | Recallable now; promotable into an `Example` later. |
+| The five-line always-relevant summary of a user | `MemoryStore` — `kind: "profile"` | Injected first every session, before any search runs. Keep it tiny. |
+| A learning that should change how the agent *behaves*, not just what it's told | A record with a `target` | Candidate for promotion into the composition — see the next section. |
+
+### Choosing a kind
+
+| `kind` | Use for | Recall behavior |
+|---|---|---|
+| `fact` | Atomic, declarative, still-true-next-week statements | Search-ranked |
+| `preference` | User/tenant tastes and choices | Search-ranked |
+| `episode` | Outcomes: what was tried, what happened, the lesson | Search-ranked; the raw material for `example` targets |
+| `profile` | The compact standing summary of a scope | Always injected first, ahead of search hits — the two-tier "small always-in-context" tier |
+
+Rules of thumb that survive contact with real stores:
+
+- **One fact per record.** `search` ranks records, not sentences; a paragraph of five facts is
+  recalled all-or-nothing and superseded all-or-nothing.
+- **Write content that stands alone.** `content` is prompt-ready natural language. "The user
+  prefers the second option" is garbage a week later; "Dana prefers staging deploys announced in
+  #ops before they start" survives.
+- **Correct, don't accumulate.** A contradiction means a `write` with `supersedes` — the store
+  atomically invalidates the old record and links the chain. Two live contradictory records is a
+  curation failure the gardening pass will flag at you.
+- **Set a `target` only when the memory should change the agent.** Most memories inform sessions;
+  they need no target. Target the ones that are really rules, examples, settled background, or
+  discovered sources — and accept that a target is a *proposal*, not a promotion.
+- **Keep `profile` records brutally short.** They spend recall budget in every single session of
+  their scope, before relevance ranking gets a vote.
+
+### Writing the Manual that makes the agent save well
+
+v1 has **no automatic capture** — a session that never calls `memory_save` leaves no memory. The
+quality of your agent's memory is therefore mostly the quality of the standing instructions you
+give it. The `MemoryToolbox` Manual carries the baseline ("you have memory", the `supersedes`
+protocol); layer your domain's save policy on top:
+
+```typescript
+import { TextManual } from "@agentic-patterns/core";
+
+const memoryManual = new TextManual(
+  "memory-policy",
+  [
+    "You have persistent memory scoped to this user. What you recalled at the start of this",
+    "conversation is already in your context — do not search for it again.",
+    "",
+    "Save a memory (memory_save) when you learn something durable:",
+    "- a preference the user states or demonstrates ('always cc legal on renewals'),",
+    "- a fact about their environment that will still be true next week,",
+    "- the outcome of an approach you tried — what worked, what failed, and why.",
+    "",
+    "Do NOT save:",
+    "- anything already visible in this conversation or in your recall block,",
+    "- secrets, credentials, or tokens of any kind,",
+    "- transient state ('the build is currently red'),",
+    "- restatements of instructions you were just given.",
+    "",
+    "Write one fact per record, in plain declarative language that makes sense without this",
+    "conversation. Before saving something you suspect you already know, memory_search first.",
+    "When new information contradicts an existing memory, save the correction with `supersedes`",
+    "set to the old record's id — never leave both standing.",
+  ].join("\n"),
+);
+```
+
+The failure modes to write against are asymmetric: an agent that saves too little just stays
+forgetful; an agent that saves transcript restatements poisons its own recall budget in every
+future session. Bias the instructions toward *selective* saving, and let the gardening pass
+catch duplicates rather than relying on it.
+
+## Targets and promotion
+
+A `target` is a typed pointer into the agent's anatomy — a discriminated union naming the slot a
+matured memory should compile into:
+
+```typescript
+type MemoryTarget =
+  | { primitive: "background"; section: "teamContext" | "projectContext"
+                                      | "conventions" | "currentState"; key: string }
+  | { primitive: "judgment";   domain: string; slot: "heuristics" }
+  | { primitive: "example";    judgmentDomain: string }  // compiles to an Example on that Judgment
+  | { primitive: "awareness" }                            // content parsed as a domain entry
+  | { primitive: "manual";     capability: string; section: "workflows" };  // later phase
+```
+
+```typescript
+await store.write([
+  {
+    scope: { tenant: "acme" },
+    kind: "fact",
+    content: "Staging deploys freeze on the last business day of each month.",
+    target: { primitive: "background", section: "conventions", key: "deployFreeze" },
+  },
+  {
+    scope: { tenant: "acme" },
+    kind: "episode",
+    content:
+      "Escalating a P1 without checking the status page first duplicated an incident thread; " +
+      "checking status.acme.dev first avoided it the next three times.",
+    target: { primitive: "judgment", domain: "triage", slot: "heuristics" },
+  },
+]);
+```
+
+A targeted record is a **candidate**: it reaches the agent through the recall surfaces like any
+other record — visible *as memory* — until promotion moves it into the overlay. Promotion is
+tiered by blast radius:
+
+| Tier | Targets | Bar to promote |
+|---|---|---|
+| **Auto** | `background.*`, `awareness` domains | Written + reconciled. No approval; audited via events. |
+| **Earned** | `judgment.heuristics`, `example` | Recurrence (≥N supporting episodes, default N=2) **or** eval-pass (suite green on `config′`), through the gate chain. |
+| **Guarded** | `judgment.constraints`, `escalationTriggers`, `recovery` | Human approval (`HumanApprovalGate`) — these change what the agent refuses or escalates. |
+| **Locked (v1)** | `persona`, `tone`, `methodology`, `mission`, *new* judgment domains | Not promotable. Identity is authored. |
+
+Note the asymmetry in the target union: v1 targets can only *append* heuristics to an **existing**
+judgment domain — a memory may not create a new domain. Structural change is reserved for humans.
+
+Promotion runs as a Play through the gate chain; the earned tier's thresholds
+(`recurrenceThreshold`, whether eval-gating is required) are Play configuration. Eval-gated
+promotion is the differentiating loop: because agents are pure config, the Play can run your eval
+suite against `config` and `config′` and require non-regression before a learned heuristic
+sticks. Self-improvement becomes measured, reviewable, and reversible — not "edit MEMORY.md and
+hope."
+
+At each instantiate, `applyMemoryOverlay(config, records)` — a pure core function — folds the
+scope's *promoted, valid* records into the authored `AgentConfig`:
+
+- **Authored config always wins.** A learned `background` entry colliding with an authored key is
+  dropped from the overlay and flagged by lint — never overwrites.
+- Merge rules per primitive: `background` entries insert under their section keyed by `key`;
+  `judgment` heuristics and `example`s append to the existing judgment with matching domain;
+  `awareness` domains append.
+- Conflicts between learned records resolve by `createdAt` (older wins) and are reported, never
+  silently dropped.
+- The stored authored `AgentConfig` is **never mutated**. The overlay is a derived view,
+  recomputed each instantiate from the store's current valid records — which is exactly what
+  makes rollback a one-liner (next section).
+
+**A candidate that never promotes is not a bug.** It stays recall-tier forever: still findable,
+still injected when relevant, just never part of the self. That is the correct failure mode —
+slow growth beats bad growth.
+
+## Recall tuning
+
+### Budgets
+
+Recall is capped by a **character** budget — deterministic and model-agnostic, deliberately not
+tokens. Assembly order is fixed: profile records for the scope first, then search hits against
+the first user text, cut at the budget with truncation *marked* in the block and reported on the
+`agent.memory.recall` event (`{ count, bytes, truncated }`). Watch that event in the dashboard:
+a permanently-true `truncated` flag means your profile tier has bloated or your agents save too
+liberally — fix the write side before raising the budget.
+
+### Profile records
+
+`kind: "profile"` is the two-tier answer without a separate block subsystem: the small
+always-injected tier. Maintain at most a handful per scope, and prefer *replacing* a profile
+record (`supersedes`) over accumulating several — they all spend budget before relevance ranking
+applies to anything else.
+
+### Scoping patterns
+
+Search filters use **subset-match**: a filter matches every record whose scope contains all of
+the filter's pairs. Narrower filters match fewer records; a record's extra scope keys never
+exclude it from broader filters.
+
+```typescript
+// Personal memory: written and read at { tenant, user }.
+await store.search({ query: q, scope: { tenant: "acme", user: "u_42" } });
+
+// Team-shared memory: written at { tenant } only — matched by ANY filter
+// that includes tenant: "acme"... including other users' filters. See below.
+await store.write([{ scope: { tenant: "acme" }, kind: "fact", content: "…" }]);
+```
+
+The subtlety: subset-match composes *downward*, not sideways. A filter of `{ tenant: "acme" }`
+matches tenant-wide records **and every user's personal records** in that tenant — there is no
+way to say "records scoped *exactly* `{ tenant }`". So the common "shared + mine, but not
+theirs" recall needs a convention plus two searches:
+
+```typescript
+// Convention: shared records carry an explicit audience key.
+await store.write([{ scope: { tenant: "acme", audience: "team" }, kind: "fact", content: "…" }]);
+
+// Recall = union of two subset filters:
+const mine = await store.search({ query: q, scope: { tenant: "acme", user: "u_42" } });
+const ours = await store.search({ query: q, scope: { tenant: "acme", audience: "team" } });
+```
+
+(This is awkward enough to be question 7 below.) Two guardrails regardless of pattern: an empty
+filter matches **everything** — the toolbox never exposes an unscoped search, and your host code
+shouldn't either — and scope values are canonical sorted-key strings, so pick stable ids
+(`u_42`), not display names.
+
+### includeInvalidated
+
+Invalidated records are excluded from search by default. Pass `includeInvalidated: true` to see
+the full chain — superseded versions, invalidation reasons — for audit, debugging, and "what did
+it used to believe" queries. Never enable it on the recall path; recall is for current truth.
+
+Omitting `query` entirely turns `search` into a filtered, recency-ordered listing — that's what
+backs `memory_list` and your admin surfaces.
+
+## Evolution operations
+
+### Reading the ledger
+
+Every change to what an agent *is* emits a typed event through the standard spine:
+
+- `agent.memory.promote` / `agent.memory.demote` — a record entered/left the promoted tier, with
+  human-readable content and provenance.
+- `agent.memory.overlay` — per-instantiate summary: record count, bytes per primitive,
+  dropped-conflict count. This is the heartbeat; alert on a dropped-conflict count that stops
+  being zero.
+
+Because overlays are derived views over invalidation-first records, the ledger fully determines
+history: **which records were valid + promoted at time T fully determines the composition at
+time T.** Point-in-time reconstruction is a replay, not an archaeology project.
+
+### Communicating learnings
+
+"What did you learn this week?" is a query, not a feature: promote events since T, each carrying
+content and provenance. Agents get the same view via the toolbox's `memory_learnings`, so an
+agent can *tell the user* how it has changed — with every claim traceable to the conversation
+that taught it.
+
+### Rolling back a bad learning
+
+```typescript
+await store.invalidate(recordId, "heuristic caused over-escalation of routine tickets");
+// Done. The next instantiate compiles without it — no migration, no config surgery.
+```
+
+Demotion mirrors promotion automatically: an invalidated record leaves the overlay at the next
+instantiate and emits `agent.memory.demote`. If the record was superseded rather than plainly
+wrong, prefer the `supersedes` write — the correction and the retirement land in one atomic act
+and the chain records *why*.
+
+### Answering "why does the agent believe X?"
+
+Prompt fragments carry attribution: `source: "role" | "instance" | "memory"`, with `memoryIds`
+on memory-derived fragments. The chain is mechanical: prompt line → `memoryIds` → record →
+`provenance.conversationId` / `runId` → the stored conversation. The dashboard's section
+attribution surface (Playground lens) renders it. No surveyed memory system has line-level
+attribution; use it — it is what makes letting agents evolve tolerable.
+
+## Governance
+
+Agents must grow naturally, not malignantly. Three mechanisms, all mandatory in the design:
+
+### Budgets
+
+`applyMemoryOverlay` enforces per-primitive character budgets. An over-budget record **falls back
+to the recall tier** — never silently discarded — and truncation is marked. A composition-wide
+ceiling triggers a hard lint failure long before you hit context limits. If lint starts failing,
+the fix is curation (below), not raising the ceiling.
+
+### Contradiction conflicts
+
+Promotion into a judgment slot requires a reconciliation search over the same domain first. A
+candidate that contradicts an existing heuristic or constraint **cannot auto-promote** — it
+surfaces as a conflict with two resolutions:
+
+- **Agent-proposed:** the candidate supersedes the old record (invalidation chain, audit trail
+  intact), and promotion re-runs clean.
+- **Human pick:** curation UI/review chooses which survives.
+
+Authored-vs-learned conflicts never reach a choice: authored wins, always, and the collision is
+reported. Be honest with yourself about the detection quality — it is lexical/search-grade, not
+semantic proof. It narrows the window; gardening and human review close it.
+
+### The gardening pass
+
+A periodic curation pass — a Play, run on the jobs tier in production, invocable manually in the
+framework tier. It **proposes**; the same gate tiers approve. No opaque auto-rewriting — that is
+the documented trust failure this design exists to avoid. One pass:
+
+- dedupes near-identical records and proposes merges for fragmenting entries,
+- proposes invalidation of stale `currentState`-targeted facts,
+- re-runs evals on earned-tier promotions (a heuristic that no longer passes gets flagged),
+- emits the composition health report.
+
+### Reading lintComposition output
+
+`lintComposition` is the health report backing the gardening pass and your CI:
+
+| Section | What it tells you | What to do |
+|---|---|---|
+| Size per primitive | Overlay chars per slot vs budget | Approaching budget → curate before promotion stalls; ceiling breach is a hard failure |
+| Conflict list | Authored-key collisions + learned-vs-learned conflicts | Collisions with authored keys mean the agent keeps re-learning something you already wrote — either author it properly or fix the target key |
+| Unused-recall stats | Records that never surface in recall | Candidates for invalidation; also a signal your agent saves things nothing ever asks about |
+| Staleness candidates | Old `currentState` facts, expired-adjacent records | Approve the proposed invalidations or refresh the facts |
+
+## Limits (v1)
+
+Stated rather than hidden, mirroring the ADRs:
+
+- **No automatic capture.** A session that never calls `memory_save` leaves no memory. Lifecycle-
+  hooked capture and background extraction need the daemon/jobs tiers (later milestones). Your
+  Manual is the capture mechanism — write it accordingly.
+- **Keyword search only in the reference backends** (FTS5/bm25). No semantic/vector search until
+  the Postgres/pgvector backend; the `capabilities()` flag exists so it can exceed the reference
+  without breaking the contract.
+- **Recall injects at turn 1 only.** Long conversations rely on the toolbox; per-turn
+  re-injection waits for AgencyHost.
+- **Multi-agent sharing is by overlapping scope only** — no attach-by-reference memory blocks.
+- **`expiresAt` is filtered at read; nothing sweeps expired rows** (no scheduler in the framework
+  tier).
+- **Promotable targets are `background`, `awareness`, `judgment.heuristics`, `example` only.**
+  Constraints/escalation/recovery are human-gated; persona, tone, methodology, mission, and *new*
+  judgment domains are not promotable at all.
+- **No skill synthesis.** A learned procedure lands as prose (`manual.workflows`, later phase)
+  before it ever lands as executable code.
+- **Contradiction detection is search-grade, not semantic.** Gardening + human review are the
+  backstop.
+- **Character budgets are blunt** versus token budgets; accepted for determinism.
+- **CC-runner attribution is limited** to what the prompt carries; the ledger stays complete
+  server-side.
+
+## Open design questions surfaced while writing this
+
+Writing this guide as if the system existed forced concrete answers the ADRs don't give. Each
+item below is a place where the docs above had to guess, hedge, or gloss:
+
+1. **Where does "promoted" live?** `MemoryRecord` (ADR-0007) has no promotion-state field, yet
+   `applyMemoryOverlay` needs a *bounded store query* for "valid + promoted records for scope"
+   at every instantiate (ADR-0008 cost note). Is promotion a record field (breaking to add later
+   — the exact reason `target` was reserved early), a separate store table, or derived by ledger
+   replay (too expensive per instantiate)? The ADRs imply both "the events are the source of
+   truth" and "the store knows"; those need reconciling.
+
+2. **`MemoryWriteInput` is named but never specified.** Which fields are author-writable? Can a
+   write set `id`, `createdAt`, `expiresAt`? Is `scope` on the input at all when writing through
+   `MemoryToolbox` (which binds scope at construction), or forced? And critically: does
+   `memory_save` expose `target` to the *model*, letting the agent propose its own promotion
+   targets, or are targets host/curation-assigned only? The quickstart and targets sections above
+   assume host writes can set everything and stay silent on the model-facing arg surface.
+
+3. **`Awareness.fromRecall`'s signature and formatting ownership.** `fromScope` takes
+   `(scopeLike, fn, base)`; the guide guessed `fromRecall()` takes nothing and renders a
+   preformatted block. Who owns the ADK-style formatting discipline (delimited block, timestamped
+   entries) — the runtime assembler or the render fn? If the assembler, `RenderContext.recall` is
+   a finished string; if the renderer, recall must cross the seam structured, which touches core.
+
+4. **Recall budget configuration and default.** Neither ADR names the knob's home (registration
+   field? runner option? assembler argument?) nor a default number. The guide invented
+   `budgetChars: 4_000` on an invented `assembleRecall` options bag.
+
+5. **The server-path memory seam.** ADR-0007 says "the runtime host assembles recall before
+   rendering," but nothing tells the server a registration *has* memory. Is there a registration
+   field (`memory: { store, scope: mapFn, budget }`)? Does conversation creation fail (like
+   `instantiate` 502) when the store errors, or degrade to no recall? The quickstart shows only
+   the self-hosted path because the server wiring is unspecifiable.
+
+6. **SessionScope → memory scope stringification.** Memory scope is `Record<string, string>`;
+   SessionScope fields can be any Zod type (numbers, enums, emails). Who stringifies, is the
+   mapping declared anywhere machine-readable (dashboard, conformance, gardening all want to know
+   the partition key shape), or is it forever an ad hoc function per registration as the guide
+   shows?
+
+7. **"Shared + mine, not theirs" is not expressible in one query.** Subset-match makes
+   `{ tenant }` match every user's personal records too; there is no "scope is exactly X" or
+   "key absent" operator. The guide had to invent an `audience: "team"` sentinel-key convention
+   plus a two-search union. Either bless a convention in the docs/toolbox, or add an exact-scope
+   / key-absence query capability — ADR-0007 currently presents broad-filter over-matching as
+   purely a feature.
+
+8. **How do candidates accrue recurrence evidence?** Earned-tier promotion needs "≥N supporting
+   episodes," but nothing defines a *supporting episode* or where the count lives. Candidates
+   reach the agent only via relevance-ranked, budget-capped recall — a candidate heuristic that
+   never surfaces can never be corroborated. Is recurrence "N near-duplicate records written"
+   (in tension with dedupe-on-write curation), an explicit link between records, or a gardening
+   judgment call?
+
+9. **Threshold and eval-suite wiring for promotion Plays.** Where does `N` live (per agent? per
+   Play invocation? per target tier?), and how does the promotion Play locate "the agent's eval
+   suite"? Is eval-gating an alternative to recurrence (the ADR says "or") or configurable as
+   an additional requirement?
+
+10. **Older-wins conflict resolution cuts against invalidation-first.** ADR-0008 resolves
+    learned-vs-learned overlay conflicts by `createdAt`, *older* wins. But ADR-0007's whole
+    curation stance is that newer corrections supersede older facts. If two valid promoted
+    records conflict, the newer one is more likely right — older-wins is only obviously correct
+    as a determinism tiebreak. Should conflict resolution instead force the pair into the
+    contradiction-conflict flow (neither wins until curated)?
+
+11. **How does prose become a structured `Example`?** `Example` has `scenario` / good / bad /
+    `reasoning` fields; a `MemoryRecord` has one `content` string. The `example` target promises
+    episodic memory "compiled, not retold" — but who parses the string into the structure inside
+    a *pure, deterministic* fold? Same problem for `awareness` ("content parsed as domain entry"
+    — `AwarenessDomain` needs `name`/`description`/`accessMethod`). Structured targets likely
+    need a structured payload on the record, not parsing.
+
+12. **`applyMemoryOverlay`'s return shape.** The ADR writes `→ config′` yet requires conflicts
+    to be "reported, never silently dropped" and budget spill to be marked — and a pure core
+    function can't emit events. The result must carry a report
+    (`{ config, conflicts, spilled, … }`); the exact shape, and how the runtime turns it into
+    the `agent.memory.overlay` event, is unspecified.
+
+13. **Where does `memory_learnings` read from?** It's described as a toolbox view over promote
+    events, but the `MemoryStore` protocol has no event-history API, and the telemetry
+    `EventStore` is retention-pruned, optional, and deliberately decoupled from memory. If the
+    ledger's durable home is the telemetry store, point-in-time replay and `memory_learnings`
+    both inherit telemetry retention — contradicting the "system of record" stance. The ledger
+    needs a named durable home.
+
+14. **Is demotion gated?** Promotion into guarded slots requires human approval, but
+    `memory_invalidate` is on the agent toolbox, and demotion is automatic at next instantiate.
+    An agent can therefore unilaterally remove a human-approved constraint from its own overlay
+    by invalidating the backing record. Symmetric gating (invalidation of a guarded-tier
+    *promoted* record requires the same gate) seems necessary.
+
+15. **Expiry breaks ledger completeness.** An `expiresAt` on a promoted record silently drops it
+    from the overlay at the next instantiate (filtered at read) with no `agent.memory.demote`
+    event — so "replay the ledger to reconstruct time T" is wrong for expiring records unless
+    expiry either emits events or is banned on promoted/targeted records.
+
+16. **`lintComposition` invocation and failure semantics.** "A composition-wide ceiling triggers
+    a hard lint failure" — where? At instantiate (conversation creation 502s because the agent
+    learned too much?), in CI, or only inside the gardening report? Its input (config + records?
+    a store handle?) and output schema are unspecified; the guide's table is inferred from the
+    prose list.
+
+17. **Units drift: chars vs bytes.** Budgets are characters (recall cap, per-primitive overlay
+    budgets); events report bytes (`agent.memory.recall`, overlay's "bytes per primitive").
+    Multi-byte content makes these visibly diverge on the dashboard. Pick one unit or report
+    both.
+
+18. **Toolbox packaging.** Is `MemoryToolbox` a `Toolbox` (author wraps it in a `Capability` and
+    supplies/merges the Manual) or a ready-made `Capability` with its Manual attached? The ADR
+    says the *Manual* carries the standing instruction, implying a capability-shaped bundle; the
+    name says toolbox. This decides how an author's own save-policy manual (section above)
+    composes with the built-in one, and matters for the global tool-name collision rules
+    (`memory_*` names must not collide with plays on the SDK-bridge path).
+
+19. **Turn-1 recall query source.** "Search the first user text" assumes the first user message
+    exists before instantiate/render. Conversation creation (where instantiate runs and the
+    agent binds) can happen before any user message is sent — so recall assembly must happen at
+    first-run time, not conversation-creation time, or the query is empty. The seam ordering
+    (instantiate → bind → first message → assemble → render) deserves explicit specification.
