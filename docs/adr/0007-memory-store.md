@@ -71,10 +71,14 @@ In-repo constraints that shaped the design (verified this session):
      createdAt: string; updatedAt: string;          // ISO 8601
      invalidAt?: string; supersededBy?: string;     // invalidation chain
      expiresAt?: string;                            // optional TTL (host-enforced)
+     target?: MemoryTarget;                         // optional typed pointer into the
+                                                    // agent's composition — see ADR-0008
    }
    ```
 
    No confidence/salience fields and no decay function — the field's consensus regret. `kind: "profile"` is the two-tier answer: profile records are the small always-injected tier (LangMem's profile, Letta's blocks, flattened into the same store rather than a parallel block system).
+
+   `target` is reserved now because it is breaking to add later: [ADR-0008](0008-compositional-memory.md) promotes matured memories out of the recall blob and *into* the agent's composition (a `Background` entry, a `Judgment` heuristic, an `Example`, an `Awareness` domain). In this ADR's scope, `target` is stored and returned untouched; untargeted records — all of v1 — behave exactly as described here. ADR-0008 also extends prompt-section attribution (`AgentPromptSectionData.source`) with a `"memory"` source carrying record ids, so learned prompt lines trace to the record — and through `provenance` — to the conversation that taught them.
 
 8. **Two recall surfaces, both budget-capped.**
    - **Turn-1 injection (the `preload` analog):** the runtime host assembles recall *before* rendering — profile-kind records for the scope first, then `search(firstUserText, scope)` hits — caps it by a character budget, and passes the finished block via `RenderContext.recall`. Core renders it through an `Awareness.fromRecall` instance fn, mirroring `Awareness.fromScope` (ADR-0005's prompt seam; no new `Section` subclass). Truncation is marked, never silent (house rule, events/types.ts byte-cap precedent). Character budget, not tokens: model-agnostic, deterministic, and what OpenClaw/Hermes ship.
@@ -141,7 +145,8 @@ emit agent.memory.recall {count, bytes, truncated}
 
 ## Follow-ups
 
-1. **Phase 2 — capture & consolidation:** session auto-capture on conversation close (AgencyHost lifecycle, program M3), background reconciliation as a Play (mem0 ADD/UPDATE/INVALIDATE/NOOP shape, invalidation-first), expiry sweeping via the jobs tier.
-2. **Phase 3 — production backend:** codegen-patterns `memory` subsystem (drizzle/Postgres, tsvector; pgvector unlocks `search: "semantic"`), importing the conformance kit. Un-parks the knowledge-family vector stub.
-3. **Dashboard:** a memory lens (recall events already carry counts/bytes/truncation).
-4. Sibling #120 (`ArtifactStore`) remains separate and unblocked by this ADR.
+1. **[ADR-0008 — Compositional memory](0008-compositional-memory.md):** the layer above this store — matured memories compile into the agent's composition (typed `target`s, `applyMemoryOverlay`, tiered promotion gates, the evolution ledger). This ADR is its substrate; nothing here changes when 0008 lands.
+2. **Phase 2 — capture & consolidation:** session auto-capture on conversation close (AgencyHost lifecycle, program M3), background reconciliation as a Play (mem0 ADD/UPDATE/INVALIDATE/NOOP shape, invalidation-first), expiry sweeping via the jobs tier.
+3. **Phase 3 — production backend:** codegen-patterns `memory` subsystem (drizzle/Postgres, tsvector; pgvector unlocks `search: "semantic"`), importing the conformance kit. Un-parks the knowledge-family vector stub.
+4. **Dashboard:** a memory lens (recall events already carry counts/bytes/truncation).
+5. Sibling #120 (`ArtifactStore`) remains separate and unblocked by this ADR.
