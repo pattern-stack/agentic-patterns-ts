@@ -61,12 +61,13 @@ the in-memory store yourself. Memory gets **its own SQLite file** — it is a sy
 telemetry, and must never inherit the event store's retention pruning.
 
 ```typescript
-import { InMemoryMemoryStore, loadMemoryStore } from "@agentic-patterns/runtime";
+import { loadMemoryStore } from "@agentic-patterns/runtime";
 
-const store =
-  (await loadMemoryStore({ path: "./data/memory.sqlite" })) ?? new InMemoryMemoryStore();
+// `store` is ALWAYS usable — when `unavailable` it is already the
+// InMemoryMemoryStore fallback; `reason` says why (CLI-banner material).
+const { store, unavailable, reason } = await loadMemoryStore({ path: "./data/memory.sqlite" });
 
-store.capabilities(); // { search: "keyword" } — the SQLite reference backend is FTS5/bm25
+await store.capabilities(); // { search: "keyword" } — the SQLite reference backend is FTS5/bm25
 ```
 
 The protocol is six methods, all async:
@@ -78,7 +79,7 @@ interface MemoryStore {
   get(id: string): Promise<MemoryRecord | null>;
   invalidate(id: string, reason?: string): Promise<void>;
   delete(id: string): Promise<void>;   // true forgetting — never exposed to the agent
-  capabilities(): MemoryStoreCapabilities;
+  capabilities(): Promise<MemoryStoreCapabilities>;
 }
 ```
 

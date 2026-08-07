@@ -29,6 +29,7 @@ export {
   loadConversationStore,
   loadEvalStore,
   loadEventStore,
+  loadMemoryStore,
   loadRunStore,
 } from "./load.js";
 export type {
@@ -36,6 +37,8 @@ export type {
   LoadEvalStoreResult,
   LoadEventStoreOptions,
   LoadEventStoreResult,
+  LoadMemoryStoreOptions,
+  LoadMemoryStoreResult,
   LoadRunStoreResult,
 } from "./load.js";
 export { RunStore } from "./run-store.js";

@@ -20,6 +20,9 @@
  * back to an in-memory-only setup otherwise.
  */
 
+// Static import is safe: `memory/store.js` has no optional dep (better-sqlite3
+// types live behind the dynamic `../memory/sqlite-store.js` import below).
+import { InMemoryMemoryStore, type MemoryStore } from "../memory/store.js";
 import type { SQLiteConversationStore } from "./conversation-store.js";
 import type { EvalStore } from "./eval-store.js";
 import type { EventStore, EventStoreOptions } from "./event-store.js";
@@ -321,6 +324,59 @@ export async function loadConversationStore(
     return {
       unavailable: true,
       reason: `SQLiteConversationStore init failed: ${(err as Error).message ?? "unknown"}`,
+    };
+  }
+}
+
+/** Inputs for {@link loadMemoryStore}. The `Database` field is auto-resolved. */
+export interface LoadMemoryStoreOptions {
+  /** Memory DB file; defaults to `resolveMemoryDbPath()`. NEVER the events.db ladder file. */
+  readonly path?: string;
+}
+
+/** Result of {@link loadMemoryStore}: ALWAYS-usable store + diagnostic info. */
+export interface LoadMemoryStoreResult {
+  /** SqliteMemoryStore when a driver resolved; InMemoryMemoryStore fallback otherwise (soft-degrade, issue pin). */
+  store: MemoryStore;
+  /** True when the store is the in-memory fallback (no driver, or init failed). */
+  unavailable: boolean;
+  /** Human-readable reason; surfaced in CLI banners. */
+  reason: string;
+}
+
+/**
+ * Attempt to instantiate a `SqliteMemoryStore` backed by SQLite (bun:sqlite
+ * under Bun, better-sqlite3 under Node). Same driver resolution as
+ * {@link loadConversationStore}, with one delta: the `store` field is NEVER
+ * absent — on any failure path (driver unresolvable OR construction throws) it
+ * degrades to a live {@link InMemoryMemoryStore} with a reason.
+ */
+export async function loadMemoryStore(
+  opts: LoadMemoryStoreOptions = {},
+): Promise<LoadMemoryStoreResult> {
+  const resolved = await resolveDatabase();
+  if ("reason" in resolved) {
+    return { store: new InMemoryMemoryStore(), unavailable: true, reason: resolved.reason };
+  }
+
+  const { SqliteMemoryStore, resolveMemoryDbPath } = await import("../memory/sqlite-store.js");
+  const path = opts.path ?? resolveMemoryDbPath();
+  try {
+    const store = new SqliteMemoryStore({
+      path,
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
+      Database: resolved.Database as any,
+    });
+    return {
+      store,
+      unavailable: false,
+      reason: `connected to ${path} via ${resolved.driver}`,
+    };
+  } catch (err) {
+    return {
+      store: new InMemoryMemoryStore(),
+      unavailable: true,
+      reason: `SqliteMemoryStore init failed: ${(err as Error).message ?? "unknown"}`,
     };
   }
 }
