@@ -12,9 +12,12 @@
  * Driver contract (conversation-store precedent): `.exec` / `.prepare` only —
  * no `.pragma()`, no `.transaction()` — explicit `BEGIN`/`COMMIT`, and bare-`@`
  * named params so `load.ts`'s bun:sqlite adapter (`wrapBunDatabase`) works
- * unchanged. Consumers should not import this module unless a SQLite driver is
- * installed — see `loadMemoryStore()` in `../storage/load.js` for the
- * optional-dep entry that soft-degrades to `InMemoryMemoryStore`.
+ * unchanged. This module is safe to import unconditionally (it is re-exported
+ * from the runtime barrel): better-sqlite3 appears only as an `import type`, so
+ * no native dep is pulled in. A driver is needed only to CONSTRUCT the store —
+ * see `loadMemoryStore()` in `../storage/load.js` for the optional-dep entry
+ * that resolves one and soft-degrades to `InMemoryMemoryStore` when none is
+ * available.
  */
 
 import { mkdirSync } from "node:fs";
@@ -43,7 +46,9 @@ import { type MemoryStore, type MemoryWriteInput, MemoryWriteInputSchema } from 
  */
 export function resolveMemoryDbPath(): string {
   if (process.env.AP_MEMORY_DB_PATH) return process.env.AP_MEMORY_DB_PATH;
-  const base = process.env.XDG_STATE_HOME ?? path.join(homedir(), ".local", "state");
+  // `||` not `??`: per the XDG basedir spec an empty XDG_STATE_HOME means UNSET —
+  // `??` would keep "" and yield the relative path "ap/memory.db".
+  const base = process.env.XDG_STATE_HOME || path.join(homedir(), ".local", "state");
   return path.join(base, "ap", "memory.db");
 }
 

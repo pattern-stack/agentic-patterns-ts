@@ -492,7 +492,11 @@ Stated rather than hidden, mirroring the ADRs:
   Manual is the capture mechanism — write it accordingly.
 - **Keyword search only in the reference backends** (FTS5/bm25). No semantic/vector search until
   the Postgres/pgvector backend; the `capabilities()` flag exists so it can exceed the reference
-  without breaking the contract.
+  without breaking the contract. Match granularity differs between reference backends and is
+  deliberately NOT pinned by the conformance kit: `InMemoryMemoryStore` matches substrings (query
+  `prefer` hits content `prefers`), while the FTS5 backend matches whole tokens (it does not). Only
+  relevance ORDERING and the filter semantics are contractual — develop against the backend you
+  ship on.
 - **Recall injects at turn 1 only.** Long conversations rely on the toolbox; per-turn
   re-injection waits for AgencyHost.
 - **Multi-agent sharing is by overlapping scope only** — no attach-by-reference memory blocks.

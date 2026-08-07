@@ -336,8 +336,12 @@ export interface LoadMemoryStoreOptions {
 
 /** Result of {@link loadMemoryStore}: ALWAYS-usable store + diagnostic info. */
 export interface LoadMemoryStoreResult {
-  /** SqliteMemoryStore when a driver resolved; InMemoryMemoryStore fallback otherwise (soft-degrade, issue pin). */
-  store: MemoryStore;
+  /**
+   * SqliteMemoryStore when a driver resolved; InMemoryMemoryStore fallback
+   * otherwise (soft-degrade, issue pin). Call `store.close?.()` to release the
+   * SQLite file handle; the in-memory fallback has no handle and no-ops.
+   */
+  store: MemoryStore & { close?: () => void };
   /** True when the store is the in-memory fallback (no driver, or init failed). */
   unavailable: boolean;
   /** Human-readable reason; surfaced in CLI banners. */

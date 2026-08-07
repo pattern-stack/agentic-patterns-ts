@@ -88,7 +88,7 @@ try {
   const afterDelete = await store.search({ scope: {}, query: "corrected" });
   assert(afterDelete.length === 0, "FTS scrubbed after delete");
 
-  (store as { close(): void }).close();
+  store.close?.();
 
   // Durability: reopen the same file, surviving records still there.
   const reopened = await loadMemoryStore({ path: dbPath });
@@ -100,7 +100,7 @@ try {
     survivorHits.length === 1 && survivorHits[0]!.record.id === rich.id,
     "FTS index survives reopen",
   );
-  (reopened.store as { close(): void }).close();
+  reopened.store.close?.();
 
   console.log(
     "smoke-memory-sqlite PASS — bun:sqlite driver: FTS5 ordering, json_each filters, supersede/invalidate, durability across reopen",

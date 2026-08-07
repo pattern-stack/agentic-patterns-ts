@@ -275,6 +275,11 @@ describe("SqliteMemoryStore (impl-specific)", () => {
       process.env.XDG_STATE_HOME = "/tmp/xdg-state";
       expect(resolveMemoryDbPath()).toBe(path.join("/tmp/xdg-state", "ap", "memory.db"));
     });
+
+    it("treats an empty XDG_STATE_HOME as unset", () => {
+      process.env.XDG_STATE_HOME = "";
+      expect(path.isAbsolute(resolveMemoryDbPath())).toBe(true);
+    });
   });
 
   describe("loadMemoryStore", () => {
