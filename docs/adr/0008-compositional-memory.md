@@ -5,8 +5,8 @@
 - **Context owner:** Doug
 - **Scope:**
   - `packages/agent-core` — `MemoryTarget` schema (referenced by ADR-0007's `MemoryRecord.target`); `organisms/apply-memory-overlay.ts` (new pure function `applyMemoryOverlay(config, records)`); `organisms/agent.ts` (`AgentPromptSectionData.source` gains `"memory"` + `memoryIds`); no changes to any atom's schema or rendering.
-  - `packages/agent-runtime` — promotion/demotion Plays; gate-tier wiring (`SafetyGate`/`HumanApprovalGate` on promotion operations); evolution events (`agent.memory.promote`, `agent.memory.demote`, `agent.memory.overlay`); overlay application at the instantiate seam; composition lint (`lintComposition`).
-  - `packages/agent-dashboard` — evolution lens (later phase).
+  - `packages/agent-runtime` — MemoryStore protocol extension (`promote`/`demote`/`corroborate` + promotion rows, conformance-pinned); promotion/demotion Plays; gate-tier wiring (`SafetyGate`/`HumanApprovalGate` on promotion operations); evolution events (`agent.memory.promote`, `agent.memory.demote`, `agent.memory.overlay`); overlay application at the instantiate seam; recall pinning + `agent`-key post-filter in the recall assembler; composition lint (`lintComposition`).
+  - `packages/agent-dashboard` — evolution lens: conflicts panel + pending-review queue with composition-diff preview (later phase).
   - External (design alignment only): codegen-patterns `agents` subsystem persists overlays and carries its event-based change logging; the curation "gardening" job runs on the jobs tier.
 
 ## Context
@@ -44,18 +44,22 @@ The risk this ADR must own: we are **evolving agents over time**. Uncontrolled, 
    MemoryTarget =
      | { primitive: "background"; section: "teamContext" | "projectContext"
                                          | "conventions" | "currentState"; key: string }
-     | { primitive: "judgment";   domain: string; slot: "heuristics" }
+     | { primitive: "judgment";   domain: string;
+         slot: "heuristics" | "constraints" | "escalationTriggers" }
      | { primitive: "example";    judgmentDomain: string }   // compiles to Example on that Judgment
-     | { primitive: "awareness";  /* content parsed as domain entry */ }
+     | { primitive: "awareness" }                            // compiles to an AwarenessDomain
+     | { primitive: "recovery" }                             // guarded tier only
      | { primitive: "manual";     capability: string; section: "workflows" }   // later phase
    ```
 
    Untargeted records — everything in ADR-0007 v1 — behave exactly as before: recall blob + toolbox. `target` is a *proposal*, not a promotion; promotion is a separate, gated act (Decision 4).
 
+   Structured targets carry a structured **`payload`** alongside the prompt-ready `content` prose — an `example` target stores `{scenario, good, bad?, reasoning?}`, an `awareness` target `{name, description, accessMethod}` — so `applyMemoryOverlay` never parses prose. A targeted record missing its required payload cannot promote.
+
 2. **`applyMemoryOverlay(config, records) → config′` is a pure core function.** It folds *promoted, valid* targeted records into an `AgentConfig` deterministically:
    - **Authored config always wins.** A memory `background` entry whose key collides with an authored key is dropped from the overlay (and flagged by lint, Decision 6) — never overwrites.
    - Merge rules per primitive: `background` entries insert under their section keyed by `key`; `judgment` heuristics append to the *existing* judgment with matching `domain` (a memory may not create a new judgment domain in v1 — that is a structural change reserved for humans); `example`s append to the matching judgment's examples; `awareness` domains append.
-   - The function is total and order-independent for non-conflicting records; conflicts resolve by `createdAt` (older wins) and are reported, never silently dropped.
+   - The function is total and order-independent for non-conflicting records. Memory-vs-memory collisions are treated as a reconciliation failure that already happened upstream: `memory_save` on a targeted record searches its scope+target first, and on collision must either `supersedes` the existing record (the correction case — newer wins *via explicit invalidation*, audit chain intact) or choose a different key. For the residual (genuinely concurrent learnings), the overlay renders the **newest** deterministically, keeps *both* records valid, flags the conflict in the overlay report and ledger, and curation proposes the permanent supersede — surfaced side-by-side in the dashboard **conflicts panel**. Nothing renders silently wrong; nothing is silently deleted.
    - It runs at the **instantiate seam** (ADR-0004): the delivered per-conversation agent is built from `config′`. The stored authored `AgentConfig` is never mutated — the overlay is a derived view, recomputed each instantiate from the store's current valid records. This is what makes rollback trivial (Decision 5).
 
 3. **Attribution: learned lines are traceable.** `AgentPromptSectionData` gains `source: "role" | "instance" | "memory"` at the fragment level, with `memoryIds: string[]` on memory-derived fragments. "Why does the agent believe X?" resolves as: prompt line → memory record → `provenance.conversationId`/`runId` → the stored conversation. The dashboard's existing section-attribution surface (Playground lens) extends to render this. No surveyed memory system has line-level attribution; this is the sightline that makes evolution safe to allow.
@@ -69,9 +73,11 @@ The risk this ADR must own: we are **evolving agents over time**. Uncontrolled, 
    | **Guarded** | `judgment.constraints`, `escalationTriggers`, `recovery` | Human approval (`HumanApprovalGate`) — these change what the agent refuses or escalates |
    | **Locked (v1)** | `persona`, `tone`, `methodology`, new judgment domains, `mission` | Not promotable. Identity is authored. Revisit only with field experience. |
 
-   Demotion mirrors promotion: an invalidated record (ADR-0007 chain) leaves the overlay at the next instantiate, automatically.
+   **Recurrence mechanics:** a repeated lesson does not mint a duplicate record — `memory_save` detects the near-duplicate candidate and **corroborates** it, appending `{conversationId, runId, at}` to the record's `supports` list. N counts **distinct conversations**, so a single long session cannot self-promote a rule. And candidates earn exposure rather than relying on query luck: targeted candidates get a small reserved slice of the recall budget (up to K, recency-rotated) so the agent keeps meeting its own provisional lessons and can corroborate them against reality. Contradicting evidence never decrements a counter — it routes to the conflict flow (Decision 2). Counters that move both ways are how promotions flap.
 
-5. **Evolution is a ledger, and rollback is free.** Every promotion/demotion emits typed events — `agent.memory.promote`, `agent.memory.demote`, plus a per-instantiate `agent.memory.overlay` summary (record count, bytes per primitive, dropped-conflict count) — through the standard four-guard SSE path. Because overlays are derived views over invalidation-first records:
+   **Demotion: the bar to remove a learning equals the bar that added it.** Auto-tier records the agent may invalidate/supersede freely (audited via events). Earned-tier demotion needs the same class of evidence that earned promotion — accumulated contradiction, eval regression, or a human decision. Guarded-tier: an agent-initiated `memory_invalidate` or `supersedes` against a guarded-promoted record does **not** take effect — it becomes a *pending demotion proposal*, and the learning keeps rendering until a human confirms. An agent cannot unlearn what it was made to learn; it can only propose to. Proposals ride the existing human-input approval round-trip (pending-input registry, fail-closed timeout) and surface in the dashboard **pending-review queue** with a composition-diff preview ("this line would leave your agent"). An invalidated auto/earned record leaves the overlay at the next instantiate, automatically.
+
+5. **Evolution is a ledger — store-resident — and rollback is free.** Promotion state lives in the MemoryStore, not on the telemetry spine: ADR-0007's protocol is extended with `promote(id)` / `demote(id, reason?)` / `corroborate(id, provenance)` operations backed by promotion rows, so "valid + promoted for this scope" is one bounded query, pinned by the conformance kit — and the ledger survives event retention-pruning (the exact lifecycle mismatch that kept memory off the telemetry file in ADR-0007). The typed events — `agent.memory.promote`, `agent.memory.demote`, plus a per-instantiate `agent.memory.overlay` summary (record count, bytes per primitive, conflict count) — are the ledger's *mirror* on the standard four-guard SSE path, powering live observability. Because overlays are derived views over invalidation-first records:
    - **Rollback** = invalidate the record (or the promotion). Next instantiate compiles without it. No migration, no config surgery.
    - **Point-in-time reconstruction** = replay the ledger: which records were valid+promoted at time T fully determines the composition at time T.
    - **Communicating learnings** is a query, not a feature: "what did you learn this week" = promote events since T, each with human-readable content and provenance. Agents get a `memory_learnings` view via the toolbox so they can *tell the user* how they've changed; the app-side (codegen-patterns agents subsystem) aligns its event-based change logging with the same ledger so persisted definitions and framework overlays share one history.
@@ -81,7 +87,9 @@ The risk this ADR must own: we are **evolving agents over time**. Uncontrolled, 
    - **Contradiction checks:** promotion into a judgment slot requires a reconciliation search first (ADR-0007 `search` over the same domain); a candidate that contradicts an existing heuristic/constraint cannot auto-promote — it surfaces as a conflict for curation (agent-proposed `supersedes`, or human pick). Authored-vs-learned conflicts always resolve authored-wins and are reported.
    - **Curation ("gardening"):** a periodic pass — a Play on the jobs/scheduler tier in production, invocable manually in the framework tier — that dedupes near-identical records, merges fragmenting entries, proposes invalidation of stale `currentState` facts, re-runs evals on earned-tier promotions, and emits a **composition health report** (`lintComposition`: size per primitive, conflict list, unused-recall stats, staleness candidates). Curation *proposes*; the same gate tiers approve. No opaque auto-rewriting — the exact failure ChatGPT's Dreaming was criticized for.
 
-7. **Eval-gated promotion is the differentiating loop.** For earned-tier candidates, the promotion Play may run the agent's eval suite against `config` and `config′` and require non-regression (or improvement) to promote. Self-improvement becomes measured, reviewable, and reversible — versus the field's "edit MEMORY.md and hope."
+7. **Eval-gated promotion is the differentiating loop.** For earned-tier candidates, the promotion Play may run the agent's eval suite against `config` and `config′` and require non-regression (or improvement) to promote. The eval certifies the candidate applied to the base config plus already-promoted records **in the candidate's own scope** — a promotion bar, not a per-user guarantee, with the same epistemics as CI: green on the branch, not on every deploy target. Gardening may re-run evals per major scope as a later hardening step. Self-improvement becomes measured, reviewable, and reversible — versus the field's "edit MEMORY.md and hope."
+
+8. **Scope hygiene: the reserved `agent` key.** Records specific to one agent carry `agent: "<name>"` in their scope; records without it are deliberately shared across the user's agents (which is exactly what user-preference memories want). Because subset-match alone cannot express "shared + mine, not theirs" — a filter of `{user}` also matches `{user, agent: other}` records — the framework's recall assembler and overlay query post-filter to `agent ∈ {me, unset}`. This is a runtime helper, not a store change: the protocol stays pure subset-match, and the convention is documented and conformance-noted rather than encoded as a query operator.
 
 ## Consequences
 
@@ -101,7 +109,7 @@ The risk this ADR must own: we are **evolving agents over time**. Uncontrolled, 
 
 **Known limits, stated rather than hidden**
 
-- v1 promotable targets are `background`, `awareness`, `judgment.heuristics`, `example` only. Constraints/escalation are human-gated; persona/tone/methodology/mission and *new* judgment domains are not promotable at all.
+- v1 promotable targets are `background`, `awareness`, `judgment.heuristics`, `example` only. Constraints/escalation/recovery are guarded (human-gated, later phase); persona/tone/methodology/mission and *new* judgment domains are not promotable at all.
 - Play/skill synthesis from memory (the Hermes "autonomous skill creation" analog) is deferred — a learned procedure lands as prose (`manual.workflows`, later phase) before it ever lands as executable code.
 - Contradiction detection is lexical/search-grade, not semantic proof; it narrows the window, it does not close it. Gardening + human review are the backstop.
 - CC-runner path: attribution inside Claude Code sessions is limited to what the prompt carries; the ledger remains complete server-side.

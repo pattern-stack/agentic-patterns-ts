@@ -56,7 +56,7 @@ In-repo constraints that shaped the design (verified this session):
    }
    ```
 
-   All methods async (house rule). Anything beyond this (session auto-capture, batch import) arrives later as separate, optional interfaces — ADK's "two abstract methods, optional extensions throw" shape, minus the throwing: we use capability flags and separate interfaces instead of `NotImplementedError` surprises.
+   All methods async (house rule). Anything beyond this (session auto-capture, batch import) arrives later as separate, optional interfaces — ADK's "two abstract methods, optional extensions throw" shape, minus the throwing: we use capability flags and separate interfaces instead of `NotImplementedError` surprises. [ADR-0008](0008-compositional-memory.md) defines the first such extension: store-resident promotion (`promote`/`demote`/`corroborate` + promotion rows), declared via `capabilities()` and pinned by the same conformance kit — promotion state is system-of-record data, so it lives here, not on the retention-pruned telemetry spine.
 
 7. **The record is a fact with provenance and validity, not a scored embedding row.**
 
@@ -73,6 +73,9 @@ In-repo constraints that shaped the design (verified this session):
      expiresAt?: string;                            // optional TTL (host-enforced)
      target?: MemoryTarget;                         // optional typed pointer into the
                                                     // agent's composition — see ADR-0008
+     payload?: unknown;                             // structured form for structured
+                                                    // targets — see ADR-0008
+     supports?: Provenance[];                       // corroboration evidence — see ADR-0008
    }
    ```
 
