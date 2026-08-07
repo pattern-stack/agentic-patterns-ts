@@ -90,6 +90,12 @@ export const PROFILE_EVENT_TYPES: Readonly<Record<EventProfile, readonly string[
     // intent (allow or block). Belongs in observability so the otel/langfuse
     // exporters surface it as a span/generation; see exporter `_onGateDecision`.
     "agent.gate.decision",
+    // Memory events (ADR-0007 D10, #420) — write/search/recall observability.
+    // "What did it remember and why" is a query, not a mystery. Observability
+    // only for now; a dashboard memory lens (UX) is ADR-0007 future work.
+    "agent.memory.write",
+    "agent.memory.search",
+    "agent.memory.recall",
     "agent.error",
   ],
   [EventProfile.DEBUG]: [

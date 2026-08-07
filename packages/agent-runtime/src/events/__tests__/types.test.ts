@@ -61,6 +61,96 @@ describe("Core Event Types", () => {
     });
   });
 
+  describe("memory events (#420)", () => {
+    it("creates a MemoryWriteEvent with per-record previews", () => {
+      const event = createEvent("agent.memory.write", {
+        traceId: "trace-1",
+        runId: "run-1",
+        scope: { userId: "u1" },
+        count: 2,
+        records: [
+          { id: "m1", kind: "fact", preview: "the sky is blue" },
+          { id: "m2", kind: "preference", preview: "prefers dark mode", supersededId: "m0" },
+        ],
+        toolCallId: "tc-1",
+      });
+
+      expect(event.type).toBe("agent.memory.write");
+      expect(event.timestamp).toBeInstanceOf(Date);
+      expect(event.spanId.length).toBeGreaterThan(0);
+      expect(event.scope).toEqual({ userId: "u1" });
+      expect(event.count).toBe(2);
+      expect(event.records).toHaveLength(2);
+      expect(event.records[0]?.supersededId).toBeUndefined();
+      expect(event.records[1]?.supersededId).toBe("m0");
+      expect(event.toolCallId).toBe("tc-1");
+    });
+
+    it("creates a MemorySearchEvent with the full filter set", () => {
+      const event = createEvent("agent.memory.search", {
+        traceId: "trace-1",
+        runId: "run-1",
+        scope: { userId: "u1" },
+        query: "dark mode",
+        kinds: ["preference"],
+        tags: ["ui"],
+        limit: 5,
+        includeInvalidated: false,
+        resultCount: 1,
+        resultIds: ["m2"],
+        toolCallId: "tc-2",
+      });
+
+      expect(event.type).toBe("agent.memory.search");
+      expect(event.query).toBe("dark mode");
+      expect(event.kinds).toEqual(["preference"]);
+      expect(event.tags).toEqual(["ui"]);
+      expect(event.limit).toBe(5);
+      expect(event.includeInvalidated).toBe(false);
+      expect(event.resultCount).toBe(1);
+      expect(event.resultIds).toEqual(["m2"]);
+    });
+
+    it("creates a MemorySearchEvent without the optional filters (recency listing)", () => {
+      const event = createEvent("agent.memory.search", {
+        traceId: "trace-1",
+        runId: "run-1",
+        scope: { userId: "u1" },
+        limit: 10,
+        includeInvalidated: true,
+        resultCount: 0,
+        resultIds: [],
+      });
+
+      expect(event.type).toBe("agent.memory.search");
+      expect(event.query).toBeUndefined();
+      expect(event.kinds).toBeUndefined();
+      expect(event.tags).toBeUndefined();
+      expect(event.toolCallId).toBeUndefined();
+      expect(event.timestamp).toBeInstanceOf(Date);
+    });
+
+    it("creates a MemoryRecallEvent with the pinned {count, chars, truncated} trio", () => {
+      const event = createEvent("agent.memory.recall", {
+        traceId: "trace-1",
+        runId: "run-1",
+        scope: { userId: "u1" },
+        count: 3,
+        chars: 1800,
+        budgetChars: 2000,
+        truncated: true,
+        preview: "## Memory\n- the sky is blue… (preview only)",
+      });
+
+      expect(event.type).toBe("agent.memory.recall");
+      expect(event.count).toBe(3);
+      expect(event.chars).toBe(1800);
+      expect(event.truncated).toBe(true);
+      expect(event.budgetChars).toBe(2000);
+      expect(event.preview).toContain("(preview only)");
+    });
+  });
+
   describe("Discriminated union", () => {
     it("narrows correctly in switch statements", () => {
       const event: AgentEvent = createEvent("agent.message.complete", {

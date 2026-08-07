@@ -62,6 +62,21 @@ describe("Event Profiles", () => {
       expect(types).toContain("agent.message.complete");
     });
 
+    it("OBSERVABILITY profile includes memory events (#420) — and UX does not", () => {
+      const obs = PROFILE_EVENT_TYPES[EventProfile.OBSERVABILITY];
+      const ux = PROFILE_EVENT_TYPES[EventProfile.UX];
+      for (const memoryType of [
+        "agent.memory.write",
+        "agent.memory.search",
+        "agent.memory.recall",
+      ]) {
+        expect(obs).toContain(memoryType);
+        // Pins the OBSERVABILITY-only decision — a dashboard memory lens (UX)
+        // is ADR-0007 future work, not #420.
+        expect(ux).not.toContain(memoryType);
+      }
+    });
+
     it("TOOLS profile includes only tool events", () => {
       const types = PROFILE_EVENT_TYPES[EventProfile.TOOLS];
       expect(types).toHaveLength(5);
