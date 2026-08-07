@@ -66,9 +66,11 @@ export function matchesAgentConvention(scope: MemoryScope, me?: string): boolean
 
 /**
  * Upper bound on the candidate fetch for the targeted-collision check
- * (ADR-0008 D2). Targeted records are rare in v1, so a single page of 500 is
- * a comfortable ceiling; a partition holding more than 500 valid targeted
- * records would slip collisions past the gate — documented bound.
+ * (ADR-0008 D2). The store has no target filter, so this is an UNFILTERED
+ * recency page (createdAt desc) of the partition — the target match is a
+ * client-side post-filter. Documented bound: once the partition holds more
+ * than 500 valid records of ANY kind newer than an existing targeted record,
+ * that record falls off the page and its collision slips past the gate.
  */
 const COLLISION_SCAN_LIMIT = 500;
 
@@ -296,6 +298,12 @@ export class MemoryToolbox extends Toolbox {
     // 1. Targeted-collision check (ADR-0008 D2, the write-time nudge). Only
     //    targeted saves get the hard gate — untargeted duplicates are the
     //    Manual's "memory_search first" soft nudge.
+    //    The gate is EXACT-scope (scopesEqual against the bound scope, agent
+    //    key included) while D8 reads union shared + own. Intended v1
+    //    consequence: a shared (agent-unset) record and an agent-tagged one
+    //    may both validly target the same slot, so an agent-bound reader can
+    //    see two live records for one slot. Loosening the gate to a subset
+    //    match would instead let one agent block another agent's write.
     if (args.target !== undefined) {
       const candidates = await this._store.search({
         scope: this._scope,

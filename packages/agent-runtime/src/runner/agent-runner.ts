@@ -397,8 +397,9 @@ export class AgentRunner implements RunnerProtocol {
         try {
           // #421 memory-event passthrough: the #420 write/search vocabulary
           // reaches the bus TYPED instead of being coerced to progress.
-          // Correlation fields are spread LAST so `e.data` can never override
-          // them. The `as never` is the one localized cast this requires —
+          // Correlation fields are spread LAST, and spanId is forced undefined,
+          // so `e.data` can never override them.
+          // The `as never` is the one localized cast this requires —
           // `ToolEvent.data` is `Record<string, unknown>`, but the sole
           // producer is MemoryToolbox, whose payloads are constructed against
           // the typed event interfaces (and pinned by its tests). No runtime
@@ -414,6 +415,10 @@ export class AgentRunner implements RunnerProtocol {
                   runId: a.runId,
                   parentSpanId: a.parentSpanId,
                   toolCallId: a.parentToolCallId,
+                  // spanId is this event's own identity, never the tool's to
+                  // set — forcing it undefined makes createEvent generate a
+                  // fresh one (`data.spanId ?? generateId()`).
+                  spanId: undefined,
                 } as never),
               )
               .catch(() => {});
