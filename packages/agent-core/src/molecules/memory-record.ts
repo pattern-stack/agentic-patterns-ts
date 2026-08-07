@@ -156,6 +156,13 @@ export function targetPayloadSchema(
     case "recovery":
     case "manual":
       return undefined;
+    default: {
+      // Compile-time exhaustiveness: a new MemoryTarget arm must declare its
+      // payload schema here (or explicitly opt out as a prose arm).
+      const _exhaustive: never = target;
+      void _exhaustive;
+      return undefined;
+    }
   }
 }
 
@@ -221,12 +228,19 @@ export type MemoryRecord = z.infer<typeof MemoryRecordSchema>;
 
 export type MemoryRecordInput = z.input<typeof MemoryRecordSchema>;
 
-/** Recursively freeze plain objects and arrays; primitives and functions pass through. */
-function deepFreeze(value: unknown): void {
-  if (value === null || typeof value !== "object" || Object.isFrozen(value)) return;
+/**
+ * Recursively freeze plain objects and arrays; primitives and functions pass
+ * through. `seen` is the cycle guard — it replaces an `Object.isFrozen` early
+ * return, which also skipped the unfrozen descendants of an already-frozen
+ * container.
+ */
+function deepFreeze(value: unknown, seen: WeakSet<object> = new WeakSet()): void {
+  if (value === null || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
   Object.freeze(value);
   for (const inner of Object.values(value)) {
-    deepFreeze(inner);
+    deepFreeze(inner, seen);
   }
 }
 
@@ -236,6 +250,10 @@ function deepFreeze(value: unknown): void {
  * returned record and every nested container (scope, tags, provenance,
  * target, supports and each entry, and payload when it is an object/array)
  * are frozen.
+ *
+ * `payload` is the one field parse carries through **by reference**
+ * (`z.unknown()` does not copy), so freezing the record freezes the caller's
+ * own payload object in place. Pass a copy if you intend to keep mutating it.
  */
 export function memoryRecord(input: MemoryRecordInput): MemoryRecord {
   // Parse first, THEN freeze the parse result — never freeze before parsing.

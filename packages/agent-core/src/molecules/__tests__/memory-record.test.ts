@@ -137,8 +137,12 @@ describe("MemoryTargetSchema", () => {
   it("accepts bare awareness and recovery targets, stripping extra keys", () => {
     expect(MemoryTargetSchema.safeParse({ primitive: "awareness" }).success).toBe(true);
     expect(MemoryTargetSchema.safeParse({ primitive: "recovery" }).success).toBe(true);
-    expect(MemoryTargetSchema.safeParse({ primitive: "awareness", extra: 1 }).success).toBe(true);
-    expect(MemoryTargetSchema.safeParse({ primitive: "recovery", extra: 1 }).success).toBe(true);
+    const awareness = MemoryTargetSchema.safeParse({ primitive: "awareness", extra: 1 });
+    expect(awareness.success).toBe(true);
+    if (awareness.success) expect(awareness.data).toEqual({ primitive: "awareness" });
+    const recovery = MemoryTargetSchema.safeParse({ primitive: "recovery", extra: 1 });
+    expect(recovery.success).toBe(true);
+    if (recovery.success) expect(recovery.data).toEqual({ primitive: "recovery" });
   });
 
   it("accepts a manual target", () => {
@@ -291,6 +295,18 @@ describe("memoryRecord factory", () => {
     expect(Object.isFrozen(record.supports)).toBe(true);
     expect(Object.isFrozen(record.supports?.[0])).toBe(true);
     expect(Object.isFrozen(record.payload)).toBe(true);
+  });
+
+  it("freezes descendants of an already-frozen payload container", () => {
+    const payload = Object.freeze({ scenario: "s", good: "g", nested: { tags: ["a"] } });
+    const record = memoryRecord({
+      ...minimalRecord,
+      target: { primitive: "example", judgmentDomain: "code-review" },
+      payload,
+    });
+    const inner = (record.payload as { nested: { tags: string[] } }).nested;
+    expect(Object.isFrozen(inner)).toBe(true);
+    expect(Object.isFrozen(inner.tags)).toBe(true);
   });
 
   it("stores scope with sorted keys regardless of input order", () => {
