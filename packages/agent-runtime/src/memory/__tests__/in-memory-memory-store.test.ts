@@ -4,6 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { InMemoryMemoryStore, type MemoryWriteInput } from "../store.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
@@ -22,13 +23,13 @@ describe("InMemoryMemoryStore (impl-specific)", () => {
   });
 
   it("write rejects empty content with no mutation", async () => {
-    await expect(store.write([fact("")])).rejects.toThrow();
+    await expect(store.write([fact("")])).rejects.toThrow(z.ZodError);
     expect(await store.search({ scope: {}, includeInvalidated: true })).toEqual([]);
   });
 
   it("write rejects an invalid kind with no mutation", async () => {
     const bad = { scope: {}, kind: "vibe", content: "x" } as unknown as MemoryWriteInput;
-    await expect(store.write([bad])).rejects.toThrow();
+    await expect(store.write([bad])).rejects.toThrow(z.ZodError);
     expect(await store.search({ scope: {}, includeInvalidated: true })).toEqual([]);
   });
 
@@ -39,7 +40,7 @@ describe("InMemoryMemoryStore (impl-specific)", () => {
       target: { primitive: "example", judgmentDomain: "code-review" },
       payload: { scenario: "reviewer sees a large diff" },
     });
-    await expect(store.write([input])).rejects.toThrow();
+    await expect(store.write([input])).rejects.toThrow(z.ZodError);
   });
 
   it("returned records are deep-frozen", async () => {

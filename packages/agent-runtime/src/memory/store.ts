@@ -83,8 +83,10 @@ export interface MemoryStore {
    * Relevance-ordered search (ADR-0007 D5). Accepts the pre-parse query shape;
    * implementations MUST apply MemorySearchQuerySchema defaults
    * (limit 10, includeInvalidated false). `query` absent ⇒ filtered,
-   * recency-ordered listing (createdAt descending). Ordering is the contract;
-   * `score` is backend-advisory and never part of it.
+   * recency-ordered listing (createdAt descending). A present-but-blank `query`
+   * (e.g. `" "`) is a query, not an absence — it is not the recency listing, and
+   * a keyword backend that tokenizes it to nothing matches nothing. Ordering is
+   * the contract; `score` is backend-advisory and never part of it.
    *
    * Scope filtering is subset-match (ADR-0007 D3): a record matches when
    * `record.scope[k] === filter[k]` for EVERY key in the filter. The empty
