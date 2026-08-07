@@ -158,21 +158,21 @@ rendering and passes the finished block in. Self-hosting the runner, that looks 
 ```typescript
 import { assembleRecall } from "@agentic-patterns/runtime";
 
-const recall = await assembleRecall(store, {
-  scope: memoryScope(s),
+const recall = await assembleRecall(store, memoryScope(s), {
   query: firstUserText,     // optional — without it, profile + recency listing only
   budgetChars: 4_000,       // character budget, deterministic and model-agnostic
 });
 // Profile-kind records first, then search hits; capped; truncation marked, never silent.
-// Emits agent.memory.recall { count, bytes, truncated }.
+// Emits agent.memory.recall { count, chars, truncated } — only when the `emit` option is wired.
 
 const prompt = agent.renderInitialPrompt({ scope: s, recall: recall.block });
 ```
 
-Under the server, recall assembly is the host's job at conversation creation, driven by the same
-registration that carries `instantiate` — the exact registration seam is still open (see
-question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs go through the
-toolbox.
+Under the server, recall assembly is the host's job at **first-message time** — the first user
+text is the search query, so assembly waits for it rather than running at conversation creation.
+It is driven by the same registration that carries `instantiate` — the exact registration seam
+is still open (see question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs
+go through the toolbox.
 
 Everything above is observable from day one: `agent.memory.write`, `agent.memory.search`, and
 `agent.memory.recall` flow through the standard event spine to exporters and the dashboard.
@@ -339,7 +339,7 @@ slow growth beats bad growth.
 Recall is capped by a **character** budget — deterministic and model-agnostic, deliberately not
 tokens. Assembly order is fixed: profile records for the scope first, then search hits against
 the first user text, cut at the budget with truncation *marked* in the block and reported on the
-`agent.memory.recall` event (`{ count, bytes, truncated }`). Watch that event in the dashboard:
+`agent.memory.recall` event (`{ count, chars, truncated }`). Watch that event in the dashboard:
 a permanently-true `truncated` flag means your profile tier has bloated or your agents save too
 liberally — fix the write side before raising the budget.
 
@@ -532,13 +532,19 @@ item below is a place where the docs above had to guess, hedge, or gloss:
    targets, or are targets host/curation-assigned only? The quickstart and targets sections above
    assume host writes can set everything and stay silent on the model-facing arg surface.
 
-3. **`Awareness.fromRecall`'s signature and formatting ownership.** `fromScope` takes
+3. **Resolved (#422):** the runtime assembler owns formatting — `RenderContext.recall` is a
+   finished string, and `Awareness.fromRecall(fn?, base?)` defaults `fn` to identity so the
+   zero-arg form renders the block verbatim.
+   **`Awareness.fromRecall`'s signature and formatting ownership.** `fromScope` takes
    `(scopeLike, fn, base)`; the guide guessed `fromRecall()` takes nothing and renders a
    preformatted block. Who owns the ADK-style formatting discipline (delimited block, timestamped
    entries) — the runtime assembler or the render fn? If the assembler, `RenderContext.recall` is
    a finished string; if the renderer, recall must cross the seam structured, which touches core.
 
-4. **Recall budget configuration and default.** Neither ADR names the knob's home (registration
+4. **Resolved (#422):** the knob is `AssembleRecallOptions.budgetChars`, default
+   `DEFAULT_RECALL_BUDGET_CHARS = 4000`; the server-registration wiring remains open
+   (question 5).
+   **Recall budget configuration and default.** Neither ADR names the knob's home (registration
    field? runner option? assembler argument?) nor a default number. The guide invented
    `budgetChars: 4_000` on an invented `assembleRecall` options bag.
 
