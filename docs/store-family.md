@@ -37,7 +37,7 @@ axes.
 | **ConversationStore** | thread/session message + turn history (the dialogue you *replay*) | ✅ exists — protocol is **`ConversationStoreProtocol`**; in-mem impl **mis-named `MemoryStore`** (`conversation/store.ts:59,94`) | `SessionService` (`session.events`) |
 | **EventStore** | raw event-stream log — every bus event → a row (SQLite) | ✅ exists — `storage/event-store.ts:94` + `SQLiteExporter` | ADK events (partial) |
 | **RunStore** | aggregated **run records** — one row per run (tokens, step metrics, finish, status, trace) — the execution you *analyze* | ❌ **#117**. Extends `EventStore`; spec = canvas-workstation `EvalStore` **minus** its eval overlay | ADK eval/run logs (no clean 1:1) |
-| **MemoryStore** | **semantic cross-session recall** — search facts from past sessions into the current one | ❌ **#119**, not built; **name freed by #118** | `MemoryService` |
+| **MemoryStore** | **semantic cross-session recall** — search facts from past sessions into the current one | ✅ #418 — protocol **`MemoryStore`** + impl **`InMemoryMemoryStore`** (`memory/store.ts`); conformance kit `runMemoryStoreConformance` (`memory/conformance.ts`) is the portability contract (ADR-0007); SQLite impl + toolbox in later stack issues | `MemoryService` |
 | **ArtifactStore** | versioned **blob/file** storage tied to a run/session | ❌ **#120**, not built | `ArtifactService` |
 | **ScratchpadStore** | run-scoped **shared context** (ephemeral, forked per branch) | ✅ exists as `Scratchpad`/`Slot` (`workflows/slot.ts`) — **not a durable store; naming alias only** | ADK `session.state` (partial) |
 
@@ -80,7 +80,7 @@ Sequential/Parallel AND coordinator delegation; see `docs/node-context.md` #99.)
 | `SessionService` (+ InMemory/Database impls) | `ConversationStore` + impls | **#118** |
 | `Session` object (`.events` + `.state`) | *(future)* `Session` aggregate | deferred wrapper — see below |
 | `session.state` (ephemeral dict) | `Scratchpad` (`slot.ts`) | run-scoped, execution-coupled |
-| `MemoryService` (semantic recall) | `MemoryStore` (freed by #118) | **#119**, deferred |
+| `MemoryService` (semantic recall) | `MemoryStore` (freed by #118) | **#418** — protocol + in-memory impl + conformance kit; SQLite/toolbox later |
 | `ArtifactService` (blobs) | `ArtifactStore` | **#120**, deferred |
 | eval/run logs | `EventStore` *(have)* + `RunStore` *(#117)* | run aggregate; eval overlay later |
 | **— no equivalent —** | **`Role`** = Persona + Judgments + Capabilities + Responsibilities | our extra layer; the subagent-consistency mechanism |

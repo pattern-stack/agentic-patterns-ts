@@ -47,3 +47,6 @@ export type {
 
 export { createEvalResultRecorder } from "../storage/eval-recorder.js";
 export type { EvalRecorderMeta, EvalResultLike } from "../storage/eval-recorder.js";
+
+export { InMemoryMemoryStore } from "../memory/store.js";
+export type { MemoryStore, MemoryWriteInput } from "../memory/store.js";
