@@ -1,4 +1,6 @@
 export { runMemoryStoreConformance } from "./conformance.js";
+export { assembleRecall, DEFAULT_RECALL_BUDGET_CHARS } from "./recall.js";
+export type { AssembleRecallOptions, RecallEmitOptions, RecallResult } from "./recall.js";
 export {
   MEMORY_TARGET_SCHEMA_VERSION,
   resolveMemoryDbPath,

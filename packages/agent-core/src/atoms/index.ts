@@ -24,6 +24,7 @@ export {
   Awareness,
   AwarenessSchema,
   type AwarenessData,
+  type AwarenessRecallRenderFn,
   type AwarenessScopeRenderFn,
   AwarenessDomain,
   AwarenessDomainSchema,
