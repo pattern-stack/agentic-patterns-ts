@@ -395,6 +395,30 @@ export class AgentRunner implements RunnerProtocol {
       // ordering guarantee between Channel B and the tool's own lifecycle.
       emit: (e) => {
         try {
+          // #421 memory-event passthrough: the #420 write/search vocabulary
+          // reaches the bus TYPED instead of being coerced to progress.
+          // Correlation fields are spread LAST so `e.data` can never override
+          // them. The `as never` is the one localized cast this requires —
+          // `ToolEvent.data` is `Record<string, unknown>`, but the sole
+          // producer is MemoryToolbox, whose payloads are constructed against
+          // the typed event interfaces (and pinned by its tests). No runtime
+          // validation here — `emit` is the fire-and-forget sink (#99
+          // non-throw contract). `agent.memory.recall` is deliberately NOT
+          // bridged: it is host-side (#422), never tool-side.
+          if (e.type === "agent.memory.write" || e.type === "agent.memory.search") {
+            void this.eventBus
+              .publish(
+                createEvent(e.type, {
+                  ...(e.data ?? {}),
+                  traceId: a.traceId,
+                  runId: a.runId,
+                  parentSpanId: a.parentSpanId,
+                  toolCallId: a.parentToolCallId,
+                } as never),
+              )
+              .catch(() => {});
+            return;
+          }
           void this.eventBus
             .publish(
               createEvent("agent.tool.progress", {

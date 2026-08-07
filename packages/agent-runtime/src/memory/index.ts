@@ -7,3 +7,10 @@ export {
 export type { SqliteMemoryStoreOptions } from "./sqlite-store.js";
 export { InMemoryMemoryStore, MemoryWriteInputSchema } from "./store.js";
 export type { MemoryStore, MemoryWriteInput } from "./store.js";
+export {
+  matchesAgentConvention,
+  MemoryToolbox,
+  memoryCapability,
+  RESERVED_AGENT_SCOPE_KEY,
+} from "./toolbox.js";
+export type { MemoryCapabilityOptions, MemoryToolboxOptions } from "./toolbox.js";
