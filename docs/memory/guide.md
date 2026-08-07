@@ -455,13 +455,14 @@ that taught it.
 
 ```typescript
 await store.invalidate(recordId, "heuristic caused over-escalation of routine tickets");
-// Done. The next instantiate compiles without it — no migration, no config surgery.
+// Shipped: the record is excluded from every subsequent search and recall.
+// (Phase B) The next instantiate also recompiles without it — no migration, no config surgery.
 ```
 
-Demotion mirrors promotion automatically: an invalidated record leaves the overlay at the next
-instantiate and emits `agent.memory.demote`. If the record was superseded rather than plainly
-wrong, prefer the `supersedes` write — the correction and the retirement land in one atomic act
-and the chain records *why*.
+**(Phase B)** Demotion will mirror promotion automatically: an invalidated record leaves the overlay
+at the next instantiate and emits `agent.memory.demote`. If the record was superseded rather than
+plainly wrong, prefer the `supersedes` write — the correction and the retirement land in one atomic
+act and the chain records *why*.
 
 ### Answering "why does the agent believe X?"
 
