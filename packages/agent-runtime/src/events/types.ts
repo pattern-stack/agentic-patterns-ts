@@ -566,6 +566,11 @@ export interface ScratchpadJoinEvent extends StateEventBase {
 // `workflows/state-events.ts` `capPreview` precedent); the formatter and every
 // exporter pass them through verbatim. Budget/size figures are CHARS (issue
 // pin: budget units are chars end-to-end, model-agnostic + deterministic).
+//
+// Profile membership is OBSERVABILITY-only, deliberately: these types are NOT in
+// `workflows/as-agent.ts`'s RELAYED_STREAM_EVENTS (no live playground relay) and NOT
+// in `conversation.ts`'s STATE_DELTA_EVENT_TYPES (not replayed state parts) — the
+// dashboard memory lens is ADR-0007 future work, not this issue.
 // ---------------------------------------------------------------------------
 
 /** One written record's identity + byte-capped content preview in a {@link MemoryWriteEvent}. */
@@ -581,7 +586,7 @@ export interface MemoryRecordPreview {
 
 export interface MemoryWriteEvent extends BaseEvent {
   readonly type: "agent.memory.write";
-  /** The partition scope written into (bound at construction — ADR-0007 D8b). */
+  /** The partition scope written into (bound at instantiate time — ADR-0007 D9). */
   readonly scope: MemoryScope;
   /** Records written this batch (`=== records.length`; explicit for cheap aggregation). */
   readonly count: number;
