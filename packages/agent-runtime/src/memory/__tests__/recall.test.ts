@@ -29,6 +29,7 @@ const marker = (omitted: number): string =>
 /**
  * An entry is `- [${kind} · ${date}] ${content}`: 22 fixed chars + content
  * for kind "fact" (date is always 10 chars). +1 for the "\n" joiner.
+ * Pinned against the real block by the entry-format width test below.
  */
 const FACT_ENTRY_OVERHEAD = 22;
 
@@ -143,6 +144,17 @@ describe("assembleRecall", () => {
   // -- Budget / truncation --------------------------------------------------
 
   describe("budget / truncation", () => {
+    it("pins the entry-format width the budget math assumes", async () => {
+      const store = new InMemoryMemoryStore();
+      const content = "width probe fact";
+      await seed(store, content);
+      const result = await assembleRecall(store, SCOPE);
+      const entry = result.block.split("\n").find((line) => line.includes(content));
+      expect(entry).toBeDefined();
+      // A formatEntry change fails HERE rather than skewing the budget math below.
+      expect(entry?.length).toBe(FACT_ENTRY_OVERHEAD + content.length);
+    });
+
     it("reports untruncated when everything fits", async () => {
       const store = new InMemoryMemoryStore();
       await seed(store, "first small fact");
