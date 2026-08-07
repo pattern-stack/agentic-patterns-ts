@@ -1,0 +1,171 @@
+# Memory layer Phase 1 — MemoryStore protocol, SQLite backend, recall surface
+# Gate 0: approved in-session 2026-08-07 ("I'll merge now. Please sync the issues").
+# Spec of record: docs/adr/0007-memory-store.md + docs/adr/0008-compositional-memory.md
+#   (both merged to main via PR #416, decision-complete after the docs pressure-test).
+# Design-preview docs: docs/memory/guide.md + docs/memory/evolution-cookbook.md.
+# Program epic: #414 · memory epic: #415 (leaves nest under #415, NOT a new epic).
+# Execution: overnight ultracode run, stacked PRs via `st` (dugshub/stack), human PR review in the morning.
+
+plan:
+  slug: memory-store
+  summary: "ADR-0007 Phase 1: MemoryRecord core molecules, MemoryStore protocol + InMemory + SQLite/FTS5 backends with an exported conformance kit, memory events, MemoryToolbox, and the budget-capped turn-1 recall surface."
+  milestone: null
+  auto_approve: true             # gate1: auto — trust grant given in-session; Gate 2 (PR review) stays human
+  existing_epic: "415"           # leaves roll up under the existing memory epic — do not create a new epic
+  epic_title: "Memory layer · Epic M1 — MemoryStore protocol, SQLite backend, recall surface (graduates #119)"
+  epic_body: |
+    (existing epic #415 — see issue for scope; this plan syncs its Phase-1 leaves)
+
+issues:
+  - key: "417"
+    key_original: m1
+    title: "core: memory record molecules — MemoryRecord/MemoryScope/MemoryTarget/MemoryHit/MemorySearchQuery"
+    depends_on: []
+    labels: [core]
+    description: |
+      **Size S · branch `mem/m1-record-molecules` · packages: core · spec: ADR-0007 Decision 2+7, ADR-0008 Decision 1**
+
+      New `core/src/molecules/memory-record.ts` following the RenderArtifact precedent (Zod schema
+      + `z.infer` types + frozen factory). Ship: `MemoryScope` (flat string map), `Provenance`
+      ({conversationId?, runId?, author?, at?}), `MemoryTarget` (discriminated union per ADR-0008
+      Decision 1 incl. constraints/escalationTriggers/recovery arms), `MemoryRecord` (id, scope,
+      kind fact|preference|episode|profile, content, tags?, provenance?, createdAt/updatedAt,
+      invalidAt?/supersededBy?, expiresAt?, target?, payload?, supports?), `MemoryHit`
+      ({record, score?}), `MemorySearchQuery` (query?, scope, kinds?, tags?, limit default 10,
+      includeInvalidated default false), `MemoryStoreCapabilities` ({search: keyword|semantic|hybrid}).
+      Export via molecules barrel + core index.
+
+      **Pinned decisions:** structured targets (example/awareness) declare required payload shapes
+      as Zod schemas here; `content` stays prompt-ready prose. No confidence/salience/decay fields.
+
+      **Acceptance:** `bun run check` green; unit tests for schema validation, freeze semantics,
+      payload-shape validation per target arm; no runtime imports (core layering).
+
+  - key: "418"
+    key_original: m2
+    title: "runtime: MemoryStore protocol + InMemoryMemoryStore + exported conformance kit"
+    depends_on: ["417"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `mem/m2-protocol-conformance` · packages: runtime · spec: ADR-0007 Decisions 3-6, 11**
+
+      New `runtime/src/memory/` module: `store.ts` — structural `MemoryStore` protocol
+      (write/search/get/invalidate/delete/capabilities, all async) + `InMemoryMemoryStore` beside it
+      (ConversationStore pattern). `conformance.ts` — **exported** `runMemoryStoreConformance(makeStore)`
+      vitest describe-factory: write/read-back, subset-match scope semantics (filter ⊆ record;
+      empty-filter-matches-all documented + tested), invalidation chains (supersedes atomically sets
+      invalidAt+supersededBy), search excludes invalidated by default, relevance ordering (never
+      score values), limit semantics incl. limit=0, `updatedAt` touched ONLY by invalidate (pin it),
+      capabilities declaration. First conformance kit in the repo — this is the SQLite↔Postgres
+      portability contract.
+
+      **Pinned decisions:** `MemoryWriteInput` = {scope, kind, content, tags?, provenance?, target?,
+      payload?, supersedes?}; store assigns id + timestamps. Promotion ops (promote/demote/corroborate)
+      are ADR-0008 Phase B — NOT in this issue; reserve nothing beyond the record fields.
+
+      **Acceptance:** `bun run check` green; InMemoryMemoryStore passes the kit; kit exported from
+      runtime barrel; docs/store-family.md gains the MemoryStore row (protocol + impl naming per #118).
+
+  - key: "419"
+    key_original: m3
+    title: "runtime: SqliteMemoryStore — FTS5 reference backend + loadMemoryStore()"
+    depends_on: ["418"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `mem/m3-sqlite-fts5` · packages: runtime · spec: ADR-0007 Decisions 1, 5**
+
+      `runtime/src/memory/sqlite-store.ts`: `SqliteMemoryStore` on its OWN SQLite file (default
+      path config; NOT the EventStore ladder file) with its own `PRAGMA user_version` ladder starting
+      at 1. FTS5 external-content table over `content` (+tags), bm25 relevance for query searches,
+      recency ordering for query-less listings. Honor the driver contract: `.exec`/`.prepare` only,
+      explicit BEGIN/COMMIT, works under better-sqlite3 AND bun:sqlite (named-param adapter path).
+      `loadMemoryStore()` in storage/load.ts following the existing load* template (soft-degrade
+      to InMemoryMemoryStore with reason). Scope stored as canonical sorted-key JSON; subset-match
+      implemented portably (json_each or LIKE-safe strategy — implementer's call, conformance-proven).
+
+      **Acceptance:** `bun run check` green; SqliteMemoryStore passes the conformance kit under BOTH
+      drivers (vitest runs better-sqlite3; add a bun-driver smoke); migration-ladder test in the
+      house style (hand-build v-prior DB, reopen, assert survival).
+
+  - key: "420"
+    key_original: m4
+    title: "runtime: memory events — agent.memory.write/search/recall through the four guards"
+    depends_on: ["419"]
+    labels: [runtime]
+    description: |
+      **Size S · branch `mem/m4-events` · packages: runtime, dashboard · spec: ADR-0007 Decision 10**
+
+      Add `MemoryWriteEvent`/`MemorySearchEvent`/`MemoryRecallEvent` to events/types.ts (+ AgentEvent
+      union; byte-cap content previews per house rule, 512B). Four coordinated sse-formatter.ts edits
+      (SSEEventName union, SSE_WIRE_EVENT_NAMES, mapEventToSSE branches, SSE_EVENT_NAMES map);
+      regenerate sse-event-manifest.json; add to event-profiles (OBSERVABILITY); extend the dashboard
+      client event union so the drift test passes. Recall event carries {count, chars, truncated}.
+
+      **Pinned decision:** budget units are CHARS end-to-end; events report chars (plus the standard
+      byte-capped previews). No exporter changes needed (SQLiteExporter is generic).
+
+      **Acceptance:** `bun run check` green incl. dashboard drift test; exhaustiveness guards compile.
+
+  - key: "421"
+    key_original: m5
+    title: "runtime: MemoryToolbox — memory_save/search/list/invalidate, scope-bound at instantiate"
+    depends_on: ["420"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `mem/m5-toolbox` · packages: runtime · spec: ADR-0007 Decision 8b+9, ADR-0008 Decision 2 (write-time nudge)**
+
+      `runtime/src/memory/toolbox.ts`: `MemoryToolbox extends Toolbox` (MessagingToolbox shape,
+      defineTool factories, typed args + validated returns). Tools: `memory_save` (search-before-save:
+      near-duplicate targeted collision in same scope+target ⇒ must supersede or re-key — return a
+      structured conflict envelope, never silently duplicate), `memory_search`, `memory_list`,
+      `memory_invalidate`. Partition scope is BOUND AT CONSTRUCTION (ADR-0004 instantiate seam) —
+      tools cannot write/read outside it; never expose an unscoped search. Reserved `agent` scope key
+      convention honored (ADR-0008 Decision 8): reads post-filter to agent ∈ {me, unset}. Emits the
+      m4 events via ctx.emit. Ship a `memoryCapability(store, scope, opts)` helper wrapping toolbox +
+      built-in Manual (standing "you have memory" + save-policy guidance, adapted from
+      docs/memory/guide.md §deciding-what-to-remember). `delete` is NOT exposed to the agent.
+
+      **Acceptance:** `bun run check` green; unit tests for scope confinement, supersede nudge,
+      agent-key post-filter, event emission; tool names checked against play-collision guidance.
+
+  - key: "422"
+    key_original: m6
+    title: "core+runtime: recall surface — RenderContext.recall + Awareness.fromRecall + recall assembler"
+    depends_on: ["421"]
+    labels: [core, runtime]
+    description: |
+      **Size M · branch `mem/m6-recall` · packages: core, runtime · spec: ADR-0007 Decision 8a, ADR-0008 Decision 8**
+
+      Core: widen `RenderContext` with `recall?: string` (pre-formatted, pre-budgeted block);
+      `Awareness.fromRecall` instance render fn mirroring `fromScope` exactly (incl. the replace()
+      override so withDomain/withDomains/withCapabilities preserve it; byte-identical rendering when
+      absent). Render stays pure — no fetching in render fns (ADR-0005 hard gate).
+      Runtime: `runtime/src/memory/recall.ts` — `assembleRecall(store, scope, {budgetChars = 4000,
+      query?, pinCandidates?})`: profile-kind records first, then search hits (query = first user
+      text when available), agent-key post-filter, char-budget cap with MARKED truncation (house
+      rule: never silently clip), returns {block, count, chars, truncated} and emits
+      agent.memory.recall. Turn-1 ordering pinned: the HOST calls assembleRecall at first-message
+      time (when the user text exists) and passes the block via RenderContext — document this in
+      the module docblock + docs/memory/guide.md correction.
+
+      **Acceptance:** `bun run check` green; core renders byte-identical without ctx.recall;
+      assembler unit tests (budget, profile-first ordering, truncation marker, post-filter).
+
+  - key: "423"
+    key_original: m7
+    title: "docs: memory docs refreshed to settled design + store-family/CHANGELOG sync"
+    depends_on: ["422"]
+    labels: [documentation]
+    description: |
+      **Size S · branch `mem/m7-docs` · packages: none (docs) · spec: PR #416 decision round**
+
+      Refresh docs/memory/guide.md + evolution-cookbook.md: mark the resolved open-questions
+      (promotion state store-resident, target union widened incl. recovery, structured payloads,
+      supersede-first conflicts, removal-bar-equals-addition-bar demotion, pinning+corroboration,
+      reserved agent key, chars units, turn-1 ordering, updatedAt semantics, MemoryWriteInput shape)
+      as RESOLVED with what shipped in m1-m6; keep genuinely-open Phase-B/C questions flagged.
+      Downgrade banners from DESIGN PREVIEW to "Phase 1 shipped; compositional layer (ADR-0008)
+      pending" where accurate. Sync docs/store-family.md ladder table + CHANGELOG entries; this
+      plan file + stack artifacts land here too.
+
+      **Acceptance:** docs consistent with shipped m1-m6 API names; `bun run check` green.
