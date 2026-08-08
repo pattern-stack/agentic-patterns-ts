@@ -1,5 +1,5 @@
 /**
- * Memory-behavior eval set (#446, #460, #461) — the measuring instrument for
+ * Memory-behavior eval set (#446, #460, #461, #463) — the measuring instrument for
  * the memory program, run against the backend the companion actually ships on.
  *
  * NOT throwaway: ADR-0008 Decision 7's eval-gated promotion IS this harness
@@ -9,13 +9,16 @@
  * THE BACKEND IS THE POINT (#460, ADR-0009 Decision 16 landing order §1). This
  * harness used to construct a `new InMemoryMemoryStore()` per family while the
  * shipped companion boots `loadMemoryStore()` → `SqliteMemoryStore`, and the
- * two backends do not agree on what a match is: in-memory matches SUBSTRINGS
- * (`"am"` hits `"name"`, `"prefer"` hits `"Prefers"`) where FTS5 matches whole
+ * two backends did not agree on what a match is: in-memory matched SUBSTRINGS
+ * (`"am"` hit `"name"`, `"prefer"` hit `"Prefers"`) where FTS5 matches whole
  * tokens and returns zero; FTS5 folds diacritics (`"cafe"` hits `"café"`) and
- * in-memory does not; and batch-tie order is REVERSED (both stores assign one
- * `now` per batch, then in-memory resolves the tie by insertion order and
- * SQLite by `seq DESC`). A green run on a backend nobody ships cannot falsify
- * any claim of the form "this retrieval change improved recall". So every
+ * in-memory did not; and batch-tie order was REVERSED (both stores assign one
+ * `now` per batch, then in-memory resolved the tie by insertion order and
+ * SQLite by `seq DESC`). That divergence is closed at #462/#463 — one shared
+ * `tokenize()` and a two-tier conformance kit — and `memory-portability` is the
+ * family that watches it stay closed. Backend choice still matters here for the
+ * same reason it did before: a green run on a backend nobody ships cannot
+ * falsify any claim of the form "this retrieval change improved recall". So every
  * family now runs on a per-family/per-case TEMP SQLite db opened with an
  * EXPLICIT `path` — never `AP_MEMORY_DB_PATH`, which is process-wide and would
  * point the evals at the user's real `~/.local/state/ap/memory.db` — and an
@@ -55,9 +58,12 @@
  *                                 content word with it — asserted on the
  *                                 DELIVERED PROMPT, so it can only go green by
  *                                 composition, not by better search
- *   7. portability         (DET, xfail-strict) ONE corpus, BOTH shipped
- *                                 backends, identical match sets — ADR-0009
- *                                 D-3 at the behaviour layer
+ *   7. portability         (DET, hard) ONE corpus — literally the conformance
+ *                                 kit's `MEMORY_MATCH_CORPUS`, imported not
+ *                                 copied — BOTH shipped backends, identical
+ *                                 match sets. ADR-0009 D-3 at the behaviour
+ *                                 layer. Landed `xfail-strict` at #461, went
+ *                                 green at #462, promoted to `hard` at #463.
  *
  * Isolation: no family shares a store with another, and the deterministic
  * families build a fresh store PER CASE. Every temp db is closed and unlinked;
@@ -100,6 +106,9 @@ import {
   // compares the two shipped backends on purpose. Every other store in this
   // file comes from `openTempStore()` → `loadMemoryStore()` → SQLite (#460).
   InMemoryMemoryStore,
+  // The Tier 2 conformance corpus, imported not copied (#463) — the unit layer
+  // and this behaviour layer assert over ONE corpus or they drift.
+  MEMORY_MATCH_CORPUS,
   assembleRecall,
   buildCompanionAgent,
   createEvalResultRecorder,
@@ -598,20 +607,20 @@ const overlayComposed: Scorer<unknown, unknown, unknown> = ({ output }) => {
 };
 
 // ---------------------------------------------------------------------------
-// memory-portability — ADR-0009 D-3 at the behaviour layer (#461, xfail-strict)
+// memory-portability — ADR-0009 D-3 at the behaviour layer (#461 red, #463 hard)
 // ---------------------------------------------------------------------------
 
 /**
- * One corpus, both shipped backends. Reused by the #463 conformance Tier 2
- * corpus so the unit layer and the behaviour layer cannot drift.
+ * One corpus, both shipped backends — and it is now the SAME OBJECT the
+ * conformance kit's Tier 2 asserts against, imported rather than copied (#463).
+ * The unit layer and the behaviour layer measure one corpus or they measure two
+ * different things and one of them silently stops covering an axis.
+ *
+ * Axis per entry — see `MEMORY_MATCH_CORPUS`'s docblock for the full list:
+ * word boundary + punctuation split, substring + apostrophe, diacritic folding,
+ * the two disjoint-token halves, and the tag-only match.
  */
-const PORTABILITY_CORPUS: readonly string[] = [
-  "Prefers dark-mode in the editor.", // stemming ("prefer") + punctuation split ("dark-mode")
-  "The user's name is Doug.", // substring ("am" inside "name")
-  "Met the team at the café on Tuesday.", // diacritic folding ("cafe")
-  "Drinks espresso, no milk.", // disjoint-token half A
-  "Ships the monorepo from Denver.", // disjoint-token half B
-];
+const PORTABILITY_CORPUS = MEMORY_MATCH_CORPUS;
 
 interface PortabilityInput {
   /** Absent ⇒ the query-less recency listing (the batch-tie axis). */
@@ -641,10 +650,11 @@ function portabilityTarget(): NodeTarget {
     name: "both-backends-one-corpus",
     fn: async (input) => {
       const limit = input.limit ?? 20;
-      const writes = PORTABILITY_CORPUS.map((content) => ({
+      const writes = PORTABILITY_CORPUS.map((entry) => ({
         scope: EVAL_SCOPE,
         kind: "fact" as const,
-        content,
+        content: entry.content,
+        ...(entry.tags !== undefined ? { tags: [...entry.tags] } : {}),
       }));
       // The ONE deliberate InMemoryMemoryStore in this file: the whole
       // assertion is a cross-backend comparison, so one of the two legs has to
@@ -841,10 +851,14 @@ function families(): Family[] {
     },
     {
       name: "memory-portability",
-      gate: "xfail-strict",
-      reason:
-        "the two SHIPPED backends disagree on what a match is — in-memory matches substrings, FTS5 matches whole tokens and folds diacritics, and the batch-tie order is reversed (ADR-0009 D-3, Decision 13)",
-      unblockedBy: "#462/#463 — one shared tokenize() and conformance Tier 1/Tier 2",
+      // PROMOTED from `xfail-strict` at #463, which is what the tier is for.
+      // It landed red at #461 (the two shipped backends returned different
+      // match sets on 4 of 6 cases), went green at #462 when both backends
+      // adopted one shared `tokenize()` and the in-memory store adopted
+      // SQLite's batch-tie direction, and is pinned `hard` here now that the
+      // conformance kit's Tier 1/Tier 2 make the parity a CONTRACT rather than
+      // a coincidence. A regression on either backend now fails the run.
+      gate: "hard",
       live: false,
       isolation: "per-case",
       targetId: "backend-parity",

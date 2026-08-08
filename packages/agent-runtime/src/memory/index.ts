@@ -1,4 +1,8 @@
-export { runMemoryStoreConformance } from "./conformance.js";
+export { MEMORY_MATCH_CORPUS, runMemoryStoreConformance } from "./conformance.js";
+export type {
+  MemoryMatchCorpusEntry,
+  MemoryStoreConformanceOptions,
+} from "./conformance.js";
 export {
   assembleRecall,
   DEFAULT_PROFILE_BUDGET_RATIO,
@@ -13,6 +17,7 @@ export {
 export type { SqliteMemoryStoreOptions } from "./sqlite-store.js";
 export { InMemoryMemoryStore, MemoryWriteInputSchema } from "./store.js";
 export type { MemoryStore, MemoryWriteInput } from "./store.js";
+export { tokenize } from "./tokenize.js";
 export {
   matchesAgentConvention,
   MemoryToolbox,

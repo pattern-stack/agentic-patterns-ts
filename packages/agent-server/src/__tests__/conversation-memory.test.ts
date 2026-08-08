@@ -142,6 +142,21 @@ function makeConfig(agents: AgentRegistration[], eventBus: AgentEventBus): Serve
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const SCOPE = { user: "dug", agent: "companion" };
 
+/**
+ * The first user message on every turn-1-recall test — deliberately sharing a
+ * whole content token with each fixture's seed (`espresso`, `tea`).
+ *
+ * This used to be `"what do I drink?"`, which shares NO content word with
+ * `"Doug takes espresso, no milk."` and retrieved it only because
+ * `InMemoryMemoryStore` matched SUBSTRINGS: the query token `do` was a
+ * substring of `Doug`, and `i` a substring of `likes`. These tests are about
+ * turn-1 recall reaching the host bag, not about retrieval quality, so they
+ * were silently resting on a store bug — ADR-0009 D-3 removed it (one shared
+ * `tokenize()`, whole-token matching on both shipped backends) and the probe
+ * has to actually overlap now.
+ */
+const RECALL_PROBE = "what do I drink — espresso or tea?";
+
 /** Seed the partition with one preference + one unrelated-scope record. */
 async function seededStore(): Promise<InMemoryMemoryStore> {
   const store = new InMemoryMemoryStore();
@@ -227,7 +242,7 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
     // No search happens at creation — recall waits for the first user text.
     expect(searchCalls).toBe(0);
 
-    const firstBody = await postMessage(app, id, "what do I drink?");
+    const firstBody = await postMessage(app, id, RECALL_PROBE);
 
     const first = captured[0];
     expect(first).toBeDefined();
@@ -319,7 +334,7 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
     // (the default applied — the caller sent no scope at all).
     expect(derivationArgs).toEqual([{ user: "dug" }]);
 
-    await postMessage(app, id, "what do I drink?");
+    await postMessage(app, id, RECALL_PROBE);
     expect(captured[0]?.recallAtCall).toContain("espresso");
     expect(derivationArgs).toHaveLength(1);
   });
@@ -498,7 +513,7 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
     expect(derivationArgs).toEqual([{ user: "guest" }]);
 
     const { id } = (await res.json()) as { id: string };
-    await postMessage(app, id, "what do I drink?");
+    await postMessage(app, id, RECALL_PROBE);
     expect(captured[0]?.recallAtCall).toContain("Guest likes tea.");
   });
 
