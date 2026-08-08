@@ -1,4 +1,6 @@
-# Memory — developer guide
+---
+title: "Memory — developer guide"
+---
 
 > **Status: PHASE 1 SHIPPED** (#417–#422) — the store, its in-memory and SQLite/FTS5 backends, the
 > conformance kit, the memory events, the agent toolbox, and the turn-1 recall surface are

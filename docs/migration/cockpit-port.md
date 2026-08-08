@@ -1,4 +1,6 @@
-# Cockpit → Dashboard port playbook
+---
+title: "Cockpit → Dashboard port playbook"
+---
 
 **Status:** Ready to start · **Created:** 2026-06-25 · **Owner:** Doug
 **Companion ADR:** [`docs/adr/0001-constellation-dashboard.md`](../adr/0001-constellation-dashboard.md)

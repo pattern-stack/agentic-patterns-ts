@@ -1,4 +1,6 @@
-# Node context & runner threading — how a run's runner + scratchpad reach every subagent
+---
+title: "Node context & runner threading — how a run's runner + scratchpad reach every subagent"
+---
 
 > Status: **DESIGN / PLAN (LOCKED)** (2026-07-03). Companion to `docs/store-family.md`.
 > This doc owns the two tracks that are **not Stores** but are what let canvas-workstation's

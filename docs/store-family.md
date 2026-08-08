@@ -1,4 +1,6 @@
-# The Store family — the framework's persistence & context layer
+---
+title: "The Store family — the framework's persistence & context layer"
+---
 
 > Status: **DESIGN / PLAN (LOCKED)** (2026-07-03). Post-investigation: every claim below was
 > verified against the runtime source and the downstream consumer

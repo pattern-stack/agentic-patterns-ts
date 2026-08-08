@@ -1,4 +1,6 @@
-# Agent Packages — self-contained plugin units for an agent system
+---
+title: "Agent Packages — self-contained plugin units for an agent system"
+---
 
 > Status: **DESIGN / MOCKUP** (2026-07-03). Companion to `docs/closed-composition.md`
 > (whose primitives — `asAgent`, Node DI, retry, AccumulatingLoop, eval, bus threading —

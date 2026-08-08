@@ -1,4 +1,6 @@
-# Playground redesign — the object graph is the product
+---
+title: "Playground redesign — the object graph is the product"
+---
 
 > Status: **DRAFT for review** (2026-07-01, Doug + Claude). Supersedes the "observability
 > console" framing of `ap playground`. Companion doctrine:

@@ -1,4 +1,6 @@
-# Runner & Provider Strategy — ADR
+---
+title: "Runner & Provider Strategy — ADR"
+---
 
 Status: accepted — implementation follows in a separate PR
 Target package: `@agentic-patterns/runtime`

@@ -39,6 +39,7 @@
       "pnpm-lock.yaml",
       "bun.lock",
       "demo/",
+      "docs-site/.astro/",
       "packages/agent-cli/assets/dashboard/",
       "packages/agent-cli/assets/plugin-template/",
       "packages/agent-cli/assets/scalar/",

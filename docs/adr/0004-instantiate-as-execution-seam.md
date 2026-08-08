@@ -1,4 +1,6 @@
-# ADR 0004 — `instantiate(context)` becomes the execution seam: per-conversation delivered instances, redaction, run-metadata stamping
+---
+title: "ADR 0004 — `instantiate(context)` becomes the execution seam: per-conversation delivered instances, redaction, run-metadata stamping"
+---
 
 - **Status:** Accepted (2026-07-15) — PR-1 (runtime + server) of the
   [#268](https://github.com/pattern-stack/agentic-patterns-ts/issues/268) stack.

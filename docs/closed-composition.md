@@ -1,4 +1,6 @@
-# Closed Composition — the keystone that makes agents chainable
+---
+title: "Closed Composition — the keystone that makes agents chainable"
+---
 
 > Status: **DESIGN / NORTH STAR** (2026-07-02). This is the architectural diagnosis and
 > direction, not an implementation spec — `/sdlc develop` produces the spec from here.

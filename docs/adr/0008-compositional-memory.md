@@ -1,4 +1,6 @@
-# ADR 0008 — Compositional memory: matured memories compile into the agent's composition, not into a context appendix
+---
+title: "ADR 0008 — Compositional memory: matured memories compile into the agent's composition, not into a context appendix"
+---
 
 - **Status:** PROPOSED — design review. Companion to [ADR-0007](0007-memory-store.md) (the store substrate; this ADR changes nothing there). Program #414; the Phase-2/3 north star for epic #415.
 - **Date:** 2026-08-06

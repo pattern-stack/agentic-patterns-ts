@@ -60,6 +60,15 @@ jobs:
       - name: Bun-driver memory smoke (bun:sqlite)
         run: bun run smoke:memory
 
+      # Docs truth gate (#457): docs/reference/events.md is GENERATED from
+      # sse-event-manifest.json and committed — a wire-vocabulary change
+      # without a docs regeneration fails here, same discipline as the
+      # dashboard's sse-events drift test. (The docs SITE build itself rides
+      # the Build step above — docs-site is a workspace member, and its
+      # link validator runs inside `astro build`.)
+      - name: Docs event-reference drift check
+        run: bun run check:docs-events
+
   # Publish to npm on every merge to main, gated on a green `check`. Packs each
   # public package (core/runtime/server/cli) and publishes it IFF its version
   # isn't already on npm — so merges without a version bump are fast no-ops, and

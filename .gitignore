@@ -18,3 +18,7 @@ screenshots/
 
 # macOS noise
 .DS_Store
+
+# docs-site (astro/starlight) build artifacts
+docs-site/dist/
+docs-site/.astro/

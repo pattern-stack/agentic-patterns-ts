@@ -1,4 +1,6 @@
-# ADR 0007 — MemoryStore: cross-session memory is a scoped, invalidation-first store protocol; backends differ in engine, never in contract
+---
+title: "ADR 0007 — MemoryStore: cross-session memory is a scoped, invalidation-first store protocol; backends differ in engine, never in contract"
+---
 
 - **Status:** PROPOSED — design review. Graduates #119 (deferred-with-intent, build trigger fired). Epic M1 #415, ambient-platform program #414.
 - **Date:** 2026-08-06

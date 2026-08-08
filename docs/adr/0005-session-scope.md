@@ -1,4 +1,6 @@
-# ADR 0005 — `SessionScope`: a declarative, typed per-conversation scope, carried as `host.scope`, rendered on one shared agent instance
+---
+title: "ADR 0005 — `SessionScope`: a declarative, typed per-conversation scope, carried as `host.scope`, rendered on one shared agent instance"
+---
 
 - **Status:** Accepted (2026-07-18) — shipped as the
   [#308](https://github.com/pattern-stack/agentic-patterns-ts/issues/308)

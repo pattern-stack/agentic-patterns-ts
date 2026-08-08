@@ -1,4 +1,6 @@
-# ADR 0003 — `delegateTo` pad sharing is default-on through a fork
+---
+title: "ADR 0003 — `delegateTo` pad sharing is default-on through a fork"
+---
 
 - **Status:** Accepted (2026-07-15) — ratified for
   [#269](https://github.com/pattern-stack/agentic-patterns-ts/issues/269).

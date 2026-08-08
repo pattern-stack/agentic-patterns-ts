@@ -202,6 +202,8 @@ export function printMatrix(): void {
       lines.push(`| ${cls} | ${row.enforcement} | ${row.basis} | ${row.evidence} |`);
     }
   }
-  // biome-ignore lint/suspicious/noConsole: the matrix IS the test artifact.
+  // Deliberate console output: the matrix IS the test artifact. (noConsole is
+  // not enabled in this repo's biome config, so no suppression is needed —
+  // biome 1.9.5+ flags the unused suppression itself.)
   console.log(lines.join("\n"));
 }

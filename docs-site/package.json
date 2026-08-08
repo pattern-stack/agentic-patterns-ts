@@ -1,0 +1,15 @@
+{
+  "name": "@agentic-patterns/docs-site",
+  "private": true,
+  "type": "module",
+  "description": "Starlight documentation site — renders docs/ in place (#457/#458)",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build && bun run ../tools/check-docs-links.ts",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.7",
+    "astro": "^7.2.0"
+  }
+}

@@ -1,0 +1,95 @@
+// Starlight site over the repo's docs/ tree (#457/#458).
+//
+// docs/ stays the single source of truth at its current paths — code comments
+// and ADR cross-references point at docs/... — so the content collection reads
+// it IN PLACE via a glob loader (see src/content.config.ts) instead of moving
+// files under src/content/docs/.
+//
+// The build script chains tools/check-docs-links.ts after `astro build`, so a
+// broken internal link in the FINAL html fails the workspace build — which is
+// the CI `check` gate. That is the point: docs join the same required status
+// as code (#457 truth pipeline).
+import { dirname, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import starlight from "@astrojs/starlight";
+import { defineConfig, passthroughImageService } from "astro/config";
+
+const DOCS_ROOT = fileURLToPath(new URL("../docs", import.meta.url));
+
+/**
+ * Inter-doc links are authored as relative *.md paths so they keep working in
+ * GitHub's file view (docs/ is read in both places). This rewrites them to
+ * site routes at build time: resolve against the source file, re-root under
+ * the docs/ collection base, drop the extension, lowercase (the glob loader's
+ * slug rule for this tree — no spaces/unicode in these filenames). Links that
+ * escape docs/ or aren't *.md pass through untouched and the validator flags
+ * them — that's the desired failure mode.
+ */
+function remarkRelativeMdLinks() {
+  return (tree, file) => {
+    const walk = (node) => {
+      if (node.type === "link" && typeof node.url === "string") {
+        const m = /^([^#?]+\.mdx?)(#.*)?$/i.exec(node.url);
+        if (m && !/^([a-z]+:|\/)/i.test(node.url)) {
+          const target = resolve(dirname(file.path), m[1]);
+          const rel = relative(DOCS_ROOT, target);
+          if (!rel.startsWith("..")) {
+            const slug = rel
+              .replace(/\.mdx?$/i, "")
+              .split(sep)
+              .join("/")
+              .toLowerCase();
+            node.url = (slug === "index" ? "/" : `/${slug}/`) + (m[2] ?? "");
+          }
+        }
+      }
+      for (const child of node.children ?? []) walk(child);
+    };
+    walk(tree);
+  };
+}
+
+export default defineConfig({
+  site: "https://agentic-patterns.pattern-stack.com",
+  markdown: {
+    remarkPlugins: [remarkRelativeMdLinks],
+  },
+  // No sharp: the site is text-only today and the native dependency has bitten
+  // this repo before (better-sqlite3 ABI). Passthrough keeps installs boring.
+  image: { service: passthroughImageService() },
+  integrations: [
+    starlight({
+      title: "Agentic Patterns",
+      description:
+        "Composable primitives for building LLM agents — TypeScript. Atoms to organisms, executed by a runtime with events, gates, and exporters.",
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/pattern-stack/agentic-patterns-ts",
+        },
+      ],
+      sidebar: [
+        {
+          label: "Guides",
+          items: [
+            "agent-packages",
+            "authoring-a-toolbox",
+            "runners",
+            "store-family",
+            "node-context",
+            "event-persistence",
+            "closed-composition",
+            "eval-surface",
+            "playground-redesign",
+            "claude-code-plugin-activation",
+          ],
+        },
+        { label: "Memory", items: [{ autogenerate: { directory: "memory" } }] },
+        { label: "Reference", items: [{ autogenerate: { directory: "reference" } }] },
+        { label: "Architecture Decisions", items: [{ autogenerate: { directory: "adr" } }] },
+        { label: "Migration", items: [{ autogenerate: { directory: "migration" } }] },
+      ],
+    }),
+  ],
+});

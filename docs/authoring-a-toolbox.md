@@ -1,4 +1,6 @@
-# Authoring a toolbox
+---
+title: "Authoring a toolbox"
+---
 
 How to define tools, group them into a `Toolbox`, and expose them as a `Capability` — using the
 typed authoring factories (`defineTool`, `toolbox`, `capability`) added in core 0.11.0.

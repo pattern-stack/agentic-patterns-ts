@@ -1,4 +1,6 @@
-# ADR 0001 — The constellation cockpit becomes the dev-kit dashboard
+---
+title: "ADR 0001 — The constellation cockpit becomes the dev-kit dashboard"
+---
 
 - **Status:** Accepted (2026-06-25) — execution playbook in
   [`docs/migration/cockpit-port.md`](../migration/cockpit-port.md).
