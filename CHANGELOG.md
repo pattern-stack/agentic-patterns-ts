@@ -9,7 +9,7 @@
 - **agent-core**: hoisted the returns-violation tag (`Symbol.for`, guard, message constant, constructor) into a shared package-internal module (`molecules/returns-violation.ts`) used by both `defineTool` and `definePlay`, retiring the duplicated `"output violated its returns schema"` string literal across the tool and play sides.
 - **docs**: `docs/authoring-a-toolbox.md` — new "Authoring a play" section (envelope semantics, the D2 validate-before-serialize caveat, the tool-wins-on-collision rule); `packages/agent-core/README.md` — Playbook example updated to `definePlay`/`playbook()`.
 
-## Unreleased
+## 0.38.0 · core 0.17.0 (2026-08-07)
 
 ### Features
 
