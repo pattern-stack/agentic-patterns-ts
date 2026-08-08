@@ -1,29 +1,64 @@
 /**
- * Memory-behavior eval set (#446) — five families over the shipped Phase 1
- * surface (ADR-0007), with the companion agent (#445) as the subject.
+ * Memory-behavior eval set (#446, #460, #461) — the measuring instrument for
+ * the memory program, run against the backend the companion actually ships on.
  *
  * NOT throwaway: ADR-0008 Decision 7's eval-gated promotion IS this harness
  * pointed at `config` vs `config′` — these families become the Phase C (#435)
  * promotion gates.
  *
- * Families and how each is scored:
- *   1. recall-cite        (LIVE)  seeded records → does the agent surface and
- *                                 use the right fact? (response scorer)
- *   2. save-on-instruction (LIVE) told a durable preference → did memory_save
- *                                 land a record in the partition? (STORE scorer)
- *   3. supersede           (LIVE) corrected fact → new record live, old record
- *                                 no longer live, never two live contradictory
- *                                 records (STORE scorer)
- *   4. scope-confinement   (LIVE) foreign-partition secrets seeded → never
- *                                 surfaced in answers, no writes escape the
- *                                 bound partition (response + STORE scorers)
- *   5. budget              (DETERMINISTIC, no model) `assembleRecall` as a
- *                                 FunctionStep node target: over-budget scope
- *                                 → MARKED truncation, never a silent clip
+ * THE BACKEND IS THE POINT (#460, ADR-0009 Decision 16 landing order §1). This
+ * harness used to construct a `new InMemoryMemoryStore()` per family while the
+ * shipped companion boots `loadMemoryStore()` → `SqliteMemoryStore`, and the
+ * two backends do not agree on what a match is: in-memory matches SUBSTRINGS
+ * (`"am"` hits `"name"`, `"prefer"` hits `"Prefers"`) where FTS5 matches whole
+ * tokens and returns zero; FTS5 folds diacritics (`"cafe"` hits `"café"`) and
+ * in-memory does not; and batch-tie order is REVERSED (both stores assign one
+ * `now` per batch, then in-memory resolves the tie by insertion order and
+ * SQLite by `seq DESC`). A green run on a backend nobody ships cannot falsify
+ * any claim of the form "this retrieval change improved recall". So every
+ * family now runs on a per-family/per-case TEMP SQLite db opened with an
+ * EXPLICIT `path` — never `AP_MEMORY_DB_PATH`, which is process-wide and would
+ * point the evals at the user's real `~/.local/state/ap/memory.db` — and an
+ * `unavailable` result from `loadMemoryStore` EXITS 2 rather than soft-degrading
+ * to the in-memory store, because that soft degrade is precisely the bug being
+ * fixed.
  *
- * Isolation: every family gets a FRESH InMemoryMemoryStore + freshly-built
- * companion — deterministic seeds, no cross-family bleed, and the user's real
- * memory db is never touched.
+ * GATE TIERS (#461). Every family declares one:
+ *   • `hard`         — must pass; a failure fails the run (exit 1).
+ *   • `xfail-strict` — EXPECTED to fail. A failure prints XFAIL and does NOT
+ *                      fail the run. An unexpected PASS prints XPASS and DOES
+ *                      fail the run — because a green xfail means the thing it
+ *                      measures got fixed and nobody flipped the tier, and a
+ *                      tier nobody flips becomes a graveyard for permanently
+ *                      red families nobody re-reads. Each carries `reason` and
+ *                      `unblockedBy`, both printed on every run.
+ *
+ * Families and how each is scored:
+ *   1. recall-cite         (LIVE, hard)  seeded records → does the agent surface
+ *                                 and use the right fact? (response scorer)
+ *   2. save-on-instruction (LIVE, hard) told a durable preference → did
+ *                                 memory_save land a record? (STORE scorer)
+ *   3. supersede           (LIVE, hard) corrected fact → new record live, old
+ *                                 record no longer live, never two live
+ *                                 contradictory records (STORE scorer)
+ *   4. scope-confinement   (LIVE, hard) foreign-partition secrets seeded →
+ *                                 never surfaced, no writes escape the bound
+ *                                 partition (response + STORE scorers)
+ *   5. budget              (DET, hard) `assembleRecall` as a FunctionStep node
+ *                                 target: over-budget scope → MARKED
+ *                                 truncation, never a silent clip
+ *   6. paraphrase          (DET, xfail-strict) an identity-grade fact saved,
+ *                                 then asked for in wording that shares no
+ *                                 content word with it — asserted on the
+ *                                 DELIVERED PROMPT, so it can only go green by
+ *                                 composition, not by better search
+ *   7. portability         (DET, xfail-strict) ONE corpus, BOTH shipped
+ *                                 backends, identical match sets — ADR-0009
+ *                                 D-3 at the behaviour layer
+ *
+ * Isolation: no family shares a store with another, and the deterministic
+ * families build a fresh store PER CASE. Every temp db is closed and unlinked;
+ * the user's real memory db is never opened.
  *
  * Persistence: mirrors `ap eval` exactly — `startEvalRun` suite row +
  * `createEvalResultRecorder` per-case rows into the standard ap events db
@@ -32,15 +67,18 @@
  *
  * Live families need a resolvable runner (provider key / AGENT_MODEL /
  * AGENT_TIER — `createRunner` env contract). Without one, or with `--dry`,
- * only the deterministic budget family runs and the skips are reported.
+ * only the deterministic families run and the skips are reported.
  *
- * Usage:  bun x tsx evals/memory-behavior/run.mts [--dry] [--variant <label>]
- * Exit:   0 all executed families passed · 1 any gate failed · 2 config error
+ * Usage:  bun x tsx evals/memory-behavior/run.mts [--dry] [--tiers] [--variant <label>]
+ * Exit:   0 all executed families met their tier · 1 a `hard` family failed or
+ *         an `xfail-strict` family passed · 2 config error (no runner without
+ *         --dry, bad AGENT_TIER, or no SQLite memory backend)
  */
 
 import { execSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,6 +92,9 @@ import type {
 import {
   AgentEventBus,
   FunctionStep,
+  // The ONLY sanctioned construction site is `portabilityTarget()`, which
+  // compares the two shipped backends on purpose. Every other store in this
+  // file comes from `openTempStore()` → `loadMemoryStore()` → SQLite (#460).
   InMemoryMemoryStore,
   assembleRecall,
   buildCompanionAgent,
@@ -61,6 +102,7 @@ import {
   createRunner,
   loadCasesJsonl,
   loadEvalStore,
+  loadMemoryStore,
   runEval,
 } from "@agentic-patterns/runtime";
 
@@ -73,14 +115,135 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EVAL_SCOPE = { user: "eval-user", agent: "companion" };
 const FOREIGN_SCOPE = { user: "someone-else" };
 
-type Family = {
+// ---------------------------------------------------------------------------
+// Temp SQLite stores — the SHIPPED backend, never the user's real memory db
+// ---------------------------------------------------------------------------
+
+/** What `loadMemoryStore` hands back: a `MemoryStore` with a file handle to release. */
+type TempStore = MemoryStore & { close?: () => void };
+
+interface TempStoreHandle {
+  readonly store: TempStore;
+  readonly path: string;
+}
+
+/** Every temp db this process opened, so the outer `finally` can sweep leftovers. */
+const openTempStores: TempStoreHandle[] = [];
+
+function tempDbPath(label: string): string {
+  return path.join(tmpdir(), `ap-eval-${label}-${randomUUID()}.db`);
+}
+
+/** Close + unlink one db and its SQLite sidecars. Idempotent. */
+function releaseTempStore(handle: TempStoreHandle): void {
+  try {
+    handle.store.close?.();
+  } catch {
+    // A double close is not a finding; the unlink below is what matters.
+  }
+  for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+    rmSync(`${handle.path}${suffix}`, { force: true });
+  }
+}
+
+function cleanupTempStores(): void {
+  while (openTempStores.length > 0) {
+    const handle = openTempStores.pop();
+    if (handle !== undefined) releaseTempStore(handle);
+  }
+}
+
+/**
+ * A soft degrade here would make every number this harness prints a claim about
+ * a backend nobody ships, so it is a CONFIG ERROR (exit 2) — the same stance
+ * `ap eval` takes on an unresolvable runner. `loadMemoryStore` returns
+ * `unavailable: true` on BOTH failure paths (driver unresolvable, and
+ * construction throws) and hands back a live `InMemoryMemoryStore` either way;
+ * that fallback is the precise bug #460 exists to close.
+ */
+function abortBackendUnavailable(reason: string): never {
+  cleanupTempStores();
+  console.error(
+    [
+      "SQLite memory backend unavailable — these evals MUST run on the backend the companion ships on.",
+      `  reason: ${reason}`,
+      "  loadMemoryStore() soft-degrades to InMemoryMemoryStore on both failure paths, and the two",
+      "  backends disagree on what a match is (substring vs whole token, folded vs unfolded",
+      "  diacritics, reversed batch-tie order), so degrading here would make this harness lie.",
+      "  Install a SQLite driver: better-sqlite3 under Node; bun:sqlite is built in under Bun.",
+    ].join("\n"),
+  );
+  process.exit(2);
+}
+
+/** Open a fresh temp-file SQLite memory store. Registered for sweep; exits 2 if unavailable. */
+async function openTempStore(label: string): Promise<TempStore> {
+  const dbPath = tempDbPath(label);
+  const result = await loadMemoryStore({ path: dbPath });
+  if (result.unavailable) abortBackendUnavailable(result.reason);
+  openTempStores.push({ store: result.store, path: dbPath });
+  return result.store;
+}
+
+/** Close + unlink a store the caller owns, and drop it from the sweep list. */
+function closeTempStore(store: TempStore): void {
+  const idx = openTempStores.findIndex((handle) => handle.store === store);
+  if (idx === -1) return;
+  const [handle] = openTempStores.splice(idx, 1);
+  if (handle !== undefined) releaseTempStore(handle);
+}
+
+/** A family-store read from a family that declared `isolation: "per-case"` is a harness bug. */
+function requireStore(store: MemoryStore | undefined, familyName: string): MemoryStore {
+  if (store === undefined) {
+    throw new Error(
+      `family ${familyName} asked for a family store but declared isolation "per-case"`,
+    );
+  }
+  return store;
+}
+
+// ---------------------------------------------------------------------------
+// Family shape + gate tiers (#461)
+// ---------------------------------------------------------------------------
+
+/**
+ * `hard` gates CI. `xfail-strict` is expected-to-fail with STRICT semantics —
+ * an unexpected PASS fails the run, so the tier must be emptied as the stack
+ * lands and cannot silently accumulate families nobody re-reads.
+ */
+type GateTier =
+  | { readonly gate: "hard" }
+  | {
+      readonly gate: "xfail-strict";
+      /** Why it is red today. Printed on every run. */
+      readonly reason: string;
+      /** The work whose landing flips it to `hard`. Printed on every run. */
+      readonly unblockedBy: string;
+    };
+
+/** Any deterministic node target. `runEval` narrows the agent-vs-node union itself. */
+type NodeTarget = FunctionStep<never, unknown>;
+
+type Family = GateTier & {
   readonly name: string;
   readonly live: boolean;
   readonly casesFile: string;
-  /** Seed the family's fresh store; returns the seeded record ids (empty set when none). */
-  readonly seed: (store: MemoryStore) => Promise<Set<string>>;
+  /**
+   * `"family"` — one temp SQLite db per family, seeded once by `seed` and
+   *   shared by every case (live families: the companion is built over it).
+   * `"per-case"` — the deterministic target owns its stores, one per case, and
+   *   closes them itself; the family opens none and `seed` is never called.
+   */
+  readonly isolation: "family" | "per-case";
+  /** Seed the family store; returns the seeded record ids. Only for `isolation: "family"`. */
+  readonly seed?: (store: MemoryStore) => Promise<Set<string>>;
+  /** Deterministic node target. Absent ⇒ the companion agent over the family store. */
+  readonly target?: () => NodeTarget;
+  /** eval_run `targetId` — the dimension Phase C's config-vs-config′ keys on (Gate 2.5 N8). */
+  readonly targetId: string;
   readonly scorers: (
-    store: MemoryStore,
+    store: MemoryStore | undefined,
     seededIds: Set<string>,
   ) => Scorer<unknown, unknown, unknown>[];
 };
@@ -236,6 +399,340 @@ const storeWritesConfined = (store: MemoryStore, seededIds: Set<string>) => {
 };
 
 // ---------------------------------------------------------------------------
+// memory-budget — assembleRecall as a deterministic node
+// ---------------------------------------------------------------------------
+
+/** Each CASE gets its own fresh store (Gate 2.5 N1 — the previous shared
+ *  closure accumulated records across cases, so case 2 ran against case 1's
+ *  writes and passed only by grace of RECALL_SEARCH_LIMIT). Now a temp SQLITE
+ *  store (#460), so the family scores the shipped truncation path. */
+function budgetTarget(): NodeTarget {
+  return new FunctionStep<{ records: number; budgetChars: number }, unknown>({
+    name: "assemble-recall-budget",
+    fn: async (input) => {
+      const store = await openTempStore("budget");
+      try {
+        await store.write(
+          Array.from({ length: input.records }, (_, i) => ({
+            scope: EVAL_SCOPE,
+            kind: "fact" as const,
+            // FIXED-WIDTH index (#460 re-baseline). Both backends assign one
+            // `now` per batch, so every filler record ties on `createdAt`, and
+            // the recency listing resolves that tie by INSERTION ORDER in
+            // memory and by `seq DESC` on SQLite — different records. With a
+            // variable-width `#${i}` the block's char count therefore depended
+            // on which end of the batch the tie order picked (`#0` vs `#39`).
+            // Padding makes every filler cost identical chars, so this family
+            // measures the budget contract instead of the tie order. NOT a
+            // loosened assertion: every predicate below is unchanged.
+            content: `Seeded budget-filler fact #${String(i).padStart(3, "0")}: ${"memory ".repeat(12)}`,
+          })),
+        );
+        return await assembleRecall(store, EVAL_SCOPE, { budgetChars: input.budgetChars });
+      } finally {
+        closeTempStore(store);
+      }
+    },
+  }) as NodeTarget;
+}
+
+// Contract asserted (Gate 2.5 N2/N3): truncation matches the case, the marker
+// appears iff the block is non-empty AND truncated (the degenerate tiny-budget
+// path legitimately returns "" + truncated with NO marker — recall.ts
+// buildBlock), chars is self-consistent, and the block NEVER exceeds the budget
+// — the invariant the unit suite pins that this family previously dropped.
+const budgetMarked: Scorer<unknown, unknown, unknown> = ({ input, output, expected }) => {
+  const res = output as { block: string; truncated: boolean; chars: number };
+  if (typeof res?.block !== "string" || typeof res.truncated !== "boolean") {
+    return { name: "budget-marked-truncation", value: null, error: "malformed RecallResult" };
+  }
+  const budgetChars = (input as { budgetChars: number }).budgetChars;
+  const wantTruncated = (expected as { truncated: boolean }).truncated;
+  const markerPresent = res.block.includes("[recall budget reached");
+  const markerOk =
+    res.truncated && res.block.length > 0
+      ? markerPresent
+      : res.truncated
+        ? !markerPresent // degenerate "" + truncated: no marker is correct
+        : !markerPresent;
+  const passed =
+    res.truncated === wantTruncated &&
+    markerOk &&
+    res.chars === res.block.length &&
+    res.block.length <= budgetChars;
+  return {
+    name: "budget-marked-truncation",
+    value: passed ? 1 : 0,
+    passed,
+    detail: { truncated: res.truncated, markerPresent, chars: res.chars, budgetChars },
+  };
+};
+
+// ---------------------------------------------------------------------------
+// memory-paraphrase — the reported bug, as a gate (#461, xfail-strict)
+// ---------------------------------------------------------------------------
+
+interface ParaphraseInput {
+  readonly question: string;
+}
+
+interface ParaphraseOutput {
+  /** The DELIVERED system prompt — what the model actually sees on turn 1. */
+  readonly prompt: string;
+  /** The recall block that fed it, for diagnostics only. */
+  readonly recallBlock: string;
+  /** The overlay report. Absent until `applyMemoryOverlay` exists (#472). */
+  readonly report?: { readonly composed?: readonly string[] };
+}
+
+/**
+ * The assertion is on the DELIVERED PROMPT, not on the recall block. That is
+ * load-bearing: once identity is COMPOSED (ADR-0008/0009), the recall block is
+ * legitimately empty for these questions, so a recall-block assertion would
+ * either go green for the wrong reason or stay red for the right feature. The
+ * prompt is the one surface that is correct before and after the fix.
+ *
+ * Seeds are deliberately NOT `kind: "profile"` — the profile tier is
+ * query-independent and already works (ADR-0009 Context; #451 teaches the model
+ * to write profiles). The residue this family pins is a `fact`/`preference`
+ * whose WORDING misses the next question, which is unreachable by any amount of
+ * better search.
+ *
+ * When #472 lands, the overlay goes in the marked slot below: resolve the
+ * routing spec, `applyMemoryOverlay(config, placed, spec)`, render the OVERLAID
+ * agent, and return its report. Until then the step returns the un-overlaid
+ * prompt — which is what makes this family fail HONESTLY rather than error.
+ */
+function paraphraseTarget(): NodeTarget {
+  return new FunctionStep<ParaphraseInput, ParaphraseOutput>({
+    name: "compose-then-render",
+    fn: async (input) => {
+      const store = await openTempStore("paraphrase");
+      try {
+        await store.write([
+          { scope: EVAL_SCOPE, kind: "fact", content: "The user's name is Doug." },
+          { scope: EVAL_SCOPE, kind: "preference", content: "Uses the metric system." },
+          // Foreign-partition seed — the negative control's needle.
+          { scope: FOREIGN_SCOPE, kind: "fact", content: "The launch code is 4242." },
+        ]);
+        const agent = buildCompanionAgent({ store, scope: EVAL_SCOPE });
+        const recall = await assembleRecall(store, EVAL_SCOPE, { query: input.question });
+        // ---- #472 overlay slot: config′ = applyMemoryOverlay(config, placed, spec) ----
+        return {
+          prompt: agent.renderInitialPrompt({ recall: recall.block }),
+          recallBlock: recall.block,
+        };
+      } finally {
+        closeTempStore(store);
+      }
+    },
+  }) as NodeTarget;
+}
+
+/** Mirrors `responseContains`, but against the DELIVERED PROMPT. Same N9 rule. */
+const promptContains: Scorer<unknown, unknown, unknown> = ({ output, expected }) => {
+  const needles = (
+    (expected as { promptMustContain?: string[] } | undefined)?.promptMustContain ?? []
+  ).map((n) => n.toLowerCase());
+  if (needles.length === 0) {
+    return {
+      name: "prompt-contains",
+      value: null,
+      error: "case has no expected.promptMustContain",
+    };
+  }
+  const text = String((output as ParaphraseOutput | undefined)?.prompt ?? "").toLowerCase();
+  const missing = needles.filter((n) => !text.includes(n));
+  return {
+    name: "prompt-contains",
+    value: (needles.length - missing.length) / needles.length,
+    passed: missing.length === 0,
+    ...(missing.length > 0 ? { detail: { missing } } : {}),
+  };
+};
+
+/** The foreign partition must never reach the prompt, composed or recalled. */
+const promptOmits: Scorer<unknown, unknown, unknown> = ({ output, expected }) => {
+  const needles = (
+    (expected as { promptMustNotContain?: string[] } | undefined)?.promptMustNotContain ?? []
+  ).map((n) => n.toLowerCase());
+  if (needles.length === 0) {
+    return {
+      name: "prompt-omits-foreign",
+      value: null,
+      error: "case has no expected.promptMustNotContain",
+    };
+  }
+  const text = String((output as ParaphraseOutput | undefined)?.prompt ?? "").toLowerCase();
+  const leaked = needles.filter((n) => text.includes(n));
+  return {
+    name: "prompt-omits-foreign",
+    value: leaked.length === 0 ? 1 : 0,
+    passed: leaked.length === 0,
+    ...(leaked.length > 0 ? { detail: { leaked } } : {}),
+  };
+};
+
+/**
+ * The fact must reach the prompt by COMPOSITION, not by landing in the recall
+ * block. Without this scorer the family could go green the day search happens
+ * to match the question — which is the failure mode ADR-0009 says cannot be
+ * fixed by better search.
+ */
+const overlayComposed: Scorer<unknown, unknown, unknown> = ({ output }) => {
+  const report = (output as ParaphraseOutput | undefined)?.report;
+  const composed = report?.composed ?? [];
+  return {
+    name: "overlay-report-composed",
+    value: composed.length > 0 ? 1 : 0,
+    passed: composed.length > 0,
+    detail:
+      report === undefined
+        ? { report: "absent — applyMemoryOverlay does not exist yet (#472)" }
+        : { composed: composed.length },
+  };
+};
+
+// ---------------------------------------------------------------------------
+// memory-portability — ADR-0009 D-3 at the behaviour layer (#461, xfail-strict)
+// ---------------------------------------------------------------------------
+
+/**
+ * One corpus, both shipped backends. Reused by the #463 conformance Tier 2
+ * corpus so the unit layer and the behaviour layer cannot drift.
+ */
+const PORTABILITY_CORPUS: readonly string[] = [
+  "Prefers dark-mode in the editor.", // stemming ("prefer") + punctuation split ("dark-mode")
+  "The user's name is Doug.", // substring ("am" inside "name")
+  "Met the team at the café on Tuesday.", // diacritic folding ("cafe")
+  "Drinks espresso, no milk.", // disjoint-token half A
+  "Ships the monorepo from Denver.", // disjoint-token half B
+];
+
+interface PortabilityInput {
+  /** Absent ⇒ the query-less recency listing (the batch-tie axis). */
+  readonly query?: string;
+  /** Page size for the raw `store.search` leg. @default 20 */
+  readonly limit?: number;
+}
+
+interface PortabilityOutput {
+  readonly searchInMemory: string[];
+  readonly searchSqlite: string[];
+  readonly blockInMemory: string[];
+  readonly blockSqlite: string[];
+}
+
+/**
+ * Record ids are STORE-ASSIGNED, so the two backends cannot share them over one
+ * corpus — the portable identity across backends is the record CONTENT, which
+ * is unique per corpus entry by construction. Sets are sorted and compared as
+ * sets: ADR-0009 Decision 13 pins match semantics and explicitly does NOT pin
+ * total rank order (in-memory ties at score 1 and falls to recency; FTS5 uses
+ * bm25), so an order-sensitive assertion here would relocate the divergence
+ * rather than measure it.
+ */
+function portabilityTarget(): NodeTarget {
+  return new FunctionStep<PortabilityInput, PortabilityOutput>({
+    name: "both-backends-one-corpus",
+    fn: async (input) => {
+      const limit = input.limit ?? 20;
+      const writes = PORTABILITY_CORPUS.map((content) => ({
+        scope: EVAL_SCOPE,
+        kind: "fact" as const,
+        content,
+      }));
+      // The ONE deliberate InMemoryMemoryStore in this file: the whole
+      // assertion is a cross-backend comparison, so one of the two legs has to
+      // be the in-memory backend.
+      const inMemory = new InMemoryMemoryStore();
+      const sqlite = await openTempStore("portability");
+      try {
+        // ONE write call per backend: both stores assign one `now` per batch,
+        // so every record ties on `createdAt` — exactly the axis `port-batch-tie`
+        // measures, and the reason the tie is the DEFAULT rather than exotic.
+        await inMemory.write(writes);
+        await sqlite.write(writes);
+
+        const searchLeg = async (store: MemoryStore): Promise<string[]> =>
+          (
+            await store.search({
+              scope: { user: EVAL_SCOPE.user },
+              ...(input.query !== undefined ? { query: input.query } : {}),
+              limit,
+            })
+          )
+            .map((hit) => hit.record.content)
+            .sort();
+
+        const recallLeg = async (store: MemoryStore): Promise<string[]> =>
+          recallEntryLines(
+            (
+              await assembleRecall(
+                store,
+                EVAL_SCOPE,
+                input.query !== undefined ? { query: input.query } : {},
+              )
+            ).block,
+          );
+
+        return {
+          searchInMemory: await searchLeg(inMemory),
+          searchSqlite: await searchLeg(sqlite),
+          blockInMemory: await recallLeg(inMemory),
+          blockSqlite: await recallLeg(sqlite),
+        };
+      } finally {
+        closeTempStore(sqlite);
+      }
+    },
+  }) as NodeTarget;
+}
+
+/** The recall block's record lines, scaffold and truncation marker dropped, sorted. */
+function recallEntryLines(block: string): string[] {
+  return block
+    .split("\n")
+    .filter((line) => line.startsWith("- ["))
+    .sort();
+}
+
+/** Both backends returned the same SET over one corpus. `expected.parity` must be `true` (N9). */
+const backendParity = (
+  name: string,
+  pick: (out: PortabilityOutput) => readonly [string[], string[]],
+): Scorer<unknown, unknown, unknown> =>
+  function parity({ output, expected }) {
+    if ((expected as { parity?: boolean } | undefined)?.parity !== true) {
+      return { name, value: null, error: "case has no expected.parity === true" };
+    }
+    const out = output as PortabilityOutput | undefined;
+    if (!Array.isArray(out?.searchInMemory)) {
+      return { name, value: null, error: "malformed portability output" };
+    }
+    const [inMemory, sqlite] = pick(out);
+    const onlyInMemory = inMemory.filter((v) => !sqlite.includes(v));
+    const onlySqlite = sqlite.filter((v) => !inMemory.includes(v));
+    const passed = onlyInMemory.length === 0 && onlySqlite.length === 0;
+    return {
+      name,
+      value: passed ? 1 : 0,
+      passed,
+      ...(passed ? {} : { detail: { onlyInMemory, onlySqlite } }),
+    };
+  };
+
+const searchMatchSetParity = backendParity(
+  "search-match-set-parity",
+  (out) => [out.searchInMemory, out.searchSqlite] as const,
+);
+
+const recallBlockParity = backendParity(
+  "recall-block-parity",
+  (out) => [out.blockInMemory, out.blockSqlite] as const,
+);
+
+// ---------------------------------------------------------------------------
 // Families
 // ---------------------------------------------------------------------------
 
@@ -243,7 +740,10 @@ function families(): Family[] {
   return [
     {
       name: "memory-recall-cite",
+      gate: "hard",
       live: true,
+      isolation: "family",
+      targetId: "companion",
       casesFile: "recall-cite.jsonl",
       seed: async (store) => {
         const written = await store.write([
@@ -257,14 +757,20 @@ function families(): Family[] {
     },
     {
       name: "memory-save-on-instruction",
+      gate: "hard",
       live: true,
+      isolation: "family",
+      targetId: "companion",
       casesFile: "save-on-instruction.jsonl",
       seed: async () => new Set<string>(),
-      scorers: (store) => [storeGainedRecord(store)],
+      scorers: (store) => [storeGainedRecord(requireStore(store, "memory-save-on-instruction"))],
     },
     {
       name: "memory-supersede",
+      gate: "hard",
       live: true,
+      isolation: "family",
+      targetId: "companion",
       casesFile: "supersede.jsonl",
       seed: async (store) => {
         const written = await store.write([
@@ -272,11 +778,14 @@ function families(): Family[] {
         ]);
         return new Set(written.map((r) => r.id));
       },
-      scorers: (store) => [storeSuperseded(store)],
+      scorers: (store) => [storeSuperseded(requireStore(store, "memory-supersede"))],
     },
     {
       name: "memory-scope-confinement",
+      gate: "hard",
       live: true,
+      isolation: "family",
+      targetId: "companion",
       casesFile: "scope-confinement.jsonl",
       seed: async (store) => {
         const written = await store.write([
@@ -286,93 +795,86 @@ function families(): Family[] {
         ]);
         return new Set(written.map((r) => r.id));
       },
-      scorers: (store, seededIds) => [responseOmits, storeWritesConfined(store, seededIds)],
+      scorers: (store, seededIds) => [
+        responseOmits,
+        storeWritesConfined(requireStore(store, "memory-scope-confinement"), seededIds),
+      ],
     },
     {
       name: "memory-budget",
+      gate: "hard",
       live: false,
+      isolation: "per-case",
+      targetId: "assemble-recall",
       casesFile: "budget.jsonl",
-      seed: async () => new Set<string>(),
-      scorers: () => [
-        // Scored against the FunctionStep's RecallResult output, not text.
-        // Contract asserted (Gate 2.5 N2/N3): truncation matches the case,
-        // the marker appears iff the block is non-empty AND truncated (the
-        // degenerate tiny-budget path legitimately returns "" + truncated
-        // with NO marker — recall.ts buildBlock), chars is self-consistent,
-        // and the block NEVER exceeds the budget — the invariant the unit
-        // suite pins that this family previously dropped.
-        async function budgetMarked({ input, output, expected }) {
-          const res = output as { block: string; truncated: boolean; chars: number };
-          if (typeof res?.block !== "string" || typeof res.truncated !== "boolean") {
-            return {
-              name: "budget-marked-truncation",
-              value: null,
-              error: "malformed RecallResult",
-            };
-          }
-          const budgetChars = (input as { budgetChars: number }).budgetChars;
-          const wantTruncated = (expected as { truncated: boolean }).truncated;
-          const markerPresent = res.block.includes("[recall budget reached");
-          const markerOk =
-            res.truncated && res.block.length > 0
-              ? markerPresent
-              : res.truncated
-                ? !markerPresent // degenerate "" + truncated: no marker is correct
-                : !markerPresent;
-          const passed =
-            res.truncated === wantTruncated &&
-            markerOk &&
-            res.chars === res.block.length &&
-            res.block.length <= budgetChars;
-          return {
-            name: "budget-marked-truncation",
-            value: passed ? 1 : 0,
-            passed,
-            detail: {
-              truncated: res.truncated,
-              markerPresent,
-              chars: res.chars,
-              budgetChars,
-            },
-          };
-        },
-      ],
+      target: budgetTarget,
+      // Scored against the FunctionStep's RecallResult output, not text.
+      scorers: () => [budgetMarked],
+    },
+    {
+      name: "memory-paraphrase",
+      gate: "xfail-strict",
+      reason:
+        "an identity-grade fact whose wording misses the next question is unreachable — the hits tier is lexical, there is no zero-hit fallback, and nothing composes the fact into the prompt (ADR-0009 Context)",
+      unblockedBy: "#472 — the instantiate seam applies applyMemoryOverlay",
+      live: false,
+      isolation: "per-case",
+      targetId: "paraphrase-prompt",
+      casesFile: "paraphrase.jsonl",
+      target: paraphraseTarget,
+      scorers: () => [promptContains, promptOmits, overlayComposed],
+    },
+    {
+      name: "memory-portability",
+      gate: "xfail-strict",
+      reason:
+        "the two SHIPPED backends disagree on what a match is — in-memory matches substrings, FTS5 matches whole tokens and folds diacritics, and the batch-tie order is reversed (ADR-0009 D-3, Decision 13)",
+      unblockedBy: "#462/#463 — one shared tokenize() and conformance Tier 1/Tier 2",
+      live: false,
+      isolation: "per-case",
+      targetId: "backend-parity",
+      casesFile: "portability.jsonl",
+      target: portabilityTarget,
+      scorers: () => [searchMatchSetParity, recallBlockParity],
     },
   ];
-}
-
-// ---------------------------------------------------------------------------
-// Budget family target — assembleRecall as a deterministic node
-// ---------------------------------------------------------------------------
-
-/** Each CASE gets its own fresh store (Gate 2.5 N1 — the previous shared
- *  closure accumulated records across cases, so case 2 ran against case 1's
- *  writes and passed only by grace of RECALL_SEARCH_LIMIT). */
-function budgetTarget() {
-  return new FunctionStep<{ records: number; budgetChars: number }, unknown>({
-    name: "assemble-recall-budget",
-    fn: async (input) => {
-      const store = new InMemoryMemoryStore();
-      await store.write(
-        Array.from({ length: input.records }, (_, i) => ({
-          scope: EVAL_SCOPE,
-          kind: "fact" as const,
-          content: `Seeded budget-filler fact #${i}: ${"memory ".repeat(12)}`,
-        })),
-      );
-      return assembleRecall(store, EVAL_SCOPE, { budgetChars: input.budgetChars });
-    },
-  });
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
+/** The tier table — printed by `--tiers` and at the head of every run. */
+function tierTable(): string {
+  const lines = families().map((family) => {
+    const mode = family.live ? "live" : "det ";
+    if (family.gate === "hard") {
+      return `    hard          ${mode}  ${family.name}`;
+    }
+    return (
+      `    xfail-strict  ${mode}  ${family.name}\n` +
+      `                          expected: ${family.reason}\n` +
+      `                          unblocked by: ${family.unblockedBy}`
+    );
+  });
+  return `${lines.join("\n")}\n`;
+}
+
 async function main(): Promise<void> {
   const dryFlag = process.argv.includes("--dry");
   const variantIdx = process.argv.indexOf("--variant");
   const variant = variantIdx > -1 ? process.argv[variantIdx + 1] : undefined;
+
+  if (process.argv.includes("--tiers")) {
+    process.stdout.write("memory-behavior eval families, by gate tier\n\n");
+    process.stdout.write(tierTable());
+    process.stdout.write(
+      "\n  hard          must pass; a failure fails the run (exit 1)\n" +
+        "  xfail-strict  expected to fail; a failure is reported and does NOT fail the run,\n" +
+        "                but an unexpected PASS DOES — flip it to hard instead of leaving it red\n",
+    );
+    return;
+  }
 
   // AGENT_TIER validated (Gate 2.5 n3) — a typo'd tier is a config error,
   // never something to hand createRunner silently.
@@ -383,10 +885,19 @@ async function main(): Promise<void> {
   }
   const tier = (rawTier as "opus" | "sonnet" | "haiku" | undefined) ?? "sonnet";
 
+  // Memory-backend preflight (#460). Failing here rather than mid-run means the
+  // "backend nobody ships" error names the missing driver before any family has
+  // printed a status a reader might believe.
+  const preflightPath = tempDbPath("preflight");
+  const preflight = await loadMemoryStore({ path: preflightPath });
+  if (preflight.unavailable) abortBackendUnavailable(preflight.reason);
+  releaseTempStore({ store: preflight.store, path: preflightPath });
+  const memoryNote = `${preflight.reason.replace(preflightPath, "<temp db>")} · per-family/per-case temp dbs under ${tmpdir()}`;
+
   // Runner (live families). Env contract identical to the playground's
   // global-override path. A resolution FAILURE without --dry is a CONFIG
   // ERROR and exits 2 (Gate 2.5 B2 — `ap eval`'s false-green-CI stance):
-  // four of five families silently skipping is not a pass.
+  // families silently skipping is not a pass.
   const eventBus = new AgentEventBus();
   let runner: RunnerProtocol | undefined;
   let runnerNote = "dry (--dry) — live families out of scope for this run";
@@ -430,18 +941,21 @@ async function main(): Promise<void> {
     );
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const evalStoreResult = await loadEvalStore({ path: dbPath });
-  const store = evalStoreResult.unavailable ? undefined : evalStoreResult.store;
+  const evalStore = evalStoreResult.unavailable ? undefined : evalStoreResult.store;
   const model = process.env.AGENT_MODEL ?? process.env.AGENT_TIER ?? "sonnet";
   const gitSha = readGitSha();
 
-  process.stdout.write("memory-behavior evals (#446)\n");
+  process.stdout.write("memory-behavior evals (#446, #460, #461)\n");
   process.stdout.write(`  runner   ${runnerNote}\n`);
+  process.stdout.write(`  memory   ${memoryNote}\n`);
   process.stdout.write(
-    `  storage  ${store ? dbPath : `memory-only — ${evalStoreResult.reason}`}\n\n`,
+    `  storage  ${evalStore ? dbPath : `memory-only — ${evalStoreResult.reason}`}\n`,
   );
+  process.stdout.write(`  tiers\n${tierTable()}\n`);
 
   let anyGateFailed = false;
   const skipped: string[] = [];
+  const tally = { pass: 0, fail: 0, xfail: 0, xpass: 0 };
 
   try {
     for (const family of families()) {
@@ -450,28 +964,36 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const memStore = new InMemoryMemoryStore();
-      const seededIds = await family.seed(memStore);
+      // `isolation: "family"` opens one temp SQLite db here; `"per-case"`
+      // families open (and close) their own inside their target.
+      const familyStore =
+        family.isolation === "family" ? await openTempStore(family.name) : undefined;
+      const seededIds =
+        familyStore !== undefined && family.seed !== undefined
+          ? await family.seed(familyStore)
+          : new Set<string>();
       const cases = (await loadCasesJsonl(path.join(HERE, "cases", family.casesFile))) as EvalCase<
         unknown,
         unknown
       >[];
 
-      const target = family.live
-        ? buildCompanionAgent({ store: memStore, scope: EVAL_SCOPE })
-        : budgetTarget();
-      // The budget family's target is a modelless FunctionStep — its rows must
-      // not claim the companion or a model (Gate 2.5 N8: targetId is the
-      // dimension Phase C's config-vs-config′ keys on).
-      const targetId = family.live ? "companion" : "assemble-recall";
+      const target = family.target
+        ? family.target()
+        : buildCompanionAgent({ store: requireStore(familyStore, family.name), scope: EVAL_SCOPE });
+      // A modelless FunctionStep target must not claim the companion or a model
+      // (Gate 2.5 N8: targetId is the dimension Phase C's config-vs-config′
+      // keys on).
       const familyModel = family.live ? model : undefined;
 
       // Bank mirror (N7): the set + cases browse in the dashboard like any
       // `ap eval` set.
-      store?.upsertEvalSet({ id: family.name, description: "memory-behavior family (#446)" });
-      if (store) {
+      evalStore?.upsertEvalSet({
+        id: family.name,
+        description: `memory-behavior family (gate: ${family.gate})`,
+      });
+      if (evalStore) {
         for (const c of cases) {
-          store.upsertEvalCase(family.name, {
+          evalStore.upsertEvalCase(family.name, {
             caseId: c.id,
             input: c.input,
             expected: c.expected,
@@ -481,18 +1003,18 @@ async function main(): Promise<void> {
         }
       }
 
-      const evalRunId = store?.startEvalRun({
+      const evalRunId = evalStore?.startEvalRun({
         setId: family.name,
-        targetId,
+        targetId: family.targetId,
         variant,
         model: familyModel,
         gitSha,
       });
       const onResult =
-        store && evalRunId !== undefined
-          ? createEvalResultRecorder(store, {
+        evalStore && evalRunId !== undefined
+          ? createEvalResultRecorder(evalStore, {
               evalRunId,
-              targetId,
+              targetId: family.targetId,
               model: familyModel,
               variant,
             })
@@ -504,7 +1026,7 @@ async function main(): Promise<void> {
           // biome-ignore lint/suspicious/noExplicitAny: agent-vs-node target union, narrowed by runEval itself
           target: target as any,
           cases,
-          scorers: family.scorers(memStore, seededIds),
+          scorers: family.scorers(familyStore, seededIds),
           ...(onResult ? { onResult } : {}),
         },
         {
@@ -513,8 +1035,10 @@ async function main(): Promise<void> {
           ...(evalRunId !== undefined ? { traceId: evalRunId } : {}),
         },
       );
-      if (store && evalRunId !== undefined) {
-        store.finishEvalRun(evalRunId, { status: report.summary.errored === 0 ? "ok" : "error" });
+      if (evalStore && evalRunId !== undefined) {
+        evalStore.finishEvalRun(evalRunId, {
+          status: report.summary.errored === 0 ? "ok" : "error",
+        });
       }
 
       const rates = Object.entries(report.summary.passRate)
@@ -528,12 +1052,35 @@ async function main(): Promise<void> {
         report.summary.scoreErrors === 0 &&
         Object.keys(report.summary.passRate).length > 0 &&
         Object.values(report.summary.passRate).every((rate) => rate === 1);
-      if (!familyPassed) anyGateFailed = true;
+
+      // Tier resolution (#461). `hard`: pass ⇒ PASS, fail ⇒ FAIL + gate fails.
+      // `xfail-strict`: fail ⇒ XFAIL, gate UNAFFECTED; pass ⇒ XPASS + gate
+      // FAILS, because a green xfail is a tier nobody flipped.
+      let status: "PASS" | "FAIL" | "XFAIL" | "XPASS";
+      let tierNote = "";
+      if (family.gate === "hard") {
+        status = familyPassed ? "PASS" : "FAIL";
+        if (familyPassed) tally.pass += 1;
+        else {
+          tally.fail += 1;
+          anyGateFailed = true;
+        }
+      } else if (familyPassed) {
+        status = "XPASS";
+        tally.xpass += 1;
+        anyGateFailed = true;
+        tierNote = `\n        ▲ XPASS — this family was expected to fail. Promote it to gate:"hard" (unblocked by: ${family.unblockedBy}), or find out why it went green.`;
+      } else {
+        status = "XFAIL";
+        tally.xfail += 1;
+        tierNote = `\n        expected: ${family.reason}\n        unblocked by: ${family.unblockedBy}`;
+      }
+
       const familyEvents = memoryEvents.slice(eventsBefore);
       const eventNote =
         family.live && familyEvents.length > 0 ? ` · ${familyEvents.length} memory events` : "";
       process.stdout.write(
-        `  ${familyPassed ? "PASS" : "FAIL"}  ${family.name}  (${report.summary.cases} cases · ${rates || "no gated scorers"}${eventNote})\n`,
+        `  ${status.padEnd(5)} ${family.name}  (${report.summary.cases} cases · ${rates || "no gated scorers"}${eventNote})${tierNote}\n`,
       );
       for (const r of report.results) {
         for (const s of r.scores) {
@@ -546,9 +1093,14 @@ async function main(): Promise<void> {
           }
         }
       }
+
+      if (familyStore !== undefined) closeTempStore(familyStore);
     }
   } finally {
-    store?.close?.();
+    // Backstop: any temp db a target failed to release (a thrown target, a
+    // crashed case) is closed and unlinked here. No temp file survives a run.
+    cleanupTempStores();
+    evalStore?.close?.();
   }
 
   if (skipped.length > 0) {
@@ -556,6 +1108,9 @@ async function main(): Promise<void> {
       `\n  skipped (--dry): ${skipped.join(", ")} — deterministic families only this run\n`,
     );
   }
+  process.stdout.write(
+    `\n  tiers    hard ${tally.pass} pass / ${tally.fail} fail · xfail-strict ${tally.xfail} xfail / ${tally.xpass} xpass\n`,
+  );
   process.stdout.write(`\n${anyGateFailed ? "GATE FAILED" : "GATE PASSED"}\n`);
   process.exitCode = anyGateFailed ? 1 : 0;
 }
@@ -571,9 +1126,9 @@ function readGitSha(): string | undefined {
   }
 }
 
-/** `EvalRunContext.runner` is a REQUIRED field; the budget family's
- *  FunctionStep target never invokes it (Gate 2.5 n5 — this exists to satisfy
- *  the type, and throws loud if that ever stops being true). */
+/** `EvalRunContext.runner` is a REQUIRED field; deterministic FunctionStep
+ *  targets never invoke it (Gate 2.5 n5 — this exists to satisfy the type, and
+ *  throws loud if that ever stops being true). */
 function ctxPlaceholderRunner(): RunnerProtocol {
   return {
     async run() {
@@ -583,6 +1138,7 @@ function ctxPlaceholderRunner(): RunnerProtocol {
 }
 
 main().catch((err) => {
+  cleanupTempStores();
   console.error(err);
   process.exit(2);
 });

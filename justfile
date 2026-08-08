@@ -31,8 +31,14 @@ companion:
     bun run build
     bun packages/agent-cli/dist/cli.js playground
 
-# Memory-behavior eval set (#446): five families over the shipped memory
-# surface, companion as subject. `just eval-memory --dry` = deterministic only.
+# Memory-behavior eval set (#446/#460/#461): seven families over the shipped
+# memory surface, companion as subject, run against per-family TEMP SQLite dbs
+# (the backend the companion ships on — never your real memory.db).
+#   --dry    deterministic families only (no runner needed)
+#   --tiers  list the families and their gate tiers (hard | xfail-strict), run nothing
+# Exit: 0 every executed family met its tier · 1 a `hard` family FAILED or an
+# `xfail-strict` family PASSED · 2 config error (no runner, bad AGENT_TIER, no
+# SQLite driver — the harness refuses to soft-degrade to the in-memory store).
 eval-memory *ARGS:
     bun x tsx evals/memory-behavior/run.mts {{ARGS}}
 
