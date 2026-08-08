@@ -291,6 +291,7 @@ export function toAgentRegistration(
     instantiateDefaults: reg.instantiateDefaults,
     contextRedactKeys: reg.contextRedactKeys,
     evals: reg.evals,
+    memory: reg.memory,
     runner,
   };
 }

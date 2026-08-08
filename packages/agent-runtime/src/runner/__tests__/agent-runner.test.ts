@@ -1138,6 +1138,80 @@ describe("AgentRunner", () => {
     });
   });
 
+  // #444 — the recall half of the render seam: `host.recall` (the turn-1
+  // block the host assembled via `assembleRecall`) narrows into
+  // `RenderContext.recall` alongside `host.scope`. Empty string is ABSENT:
+  // assembleRecall returns "" for "nothing recalled", and rendering must stay
+  // byte-identical to the no-recall case then.
+  describe("renderInitialPrompt recall relay (#444)", () => {
+    const captureAgent = (
+      captured: Array<{ scope?: Record<string, unknown>; recall?: string } | undefined>,
+    ) =>
+      makeAgent({
+        renderInitialPrompt: (ctx) => {
+          captured.push(ctx);
+          return "system prompt";
+        },
+      });
+
+    it("run(): delivers {scope, recall} when the host bag carries both", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => textResult("hi", 5, 5),
+      });
+      const parsedScope = { user: "dug" };
+      const captured: Array<{ scope?: Record<string, unknown>; recall?: string } | undefined> = [];
+      const runner = new AgentRunner(model);
+
+      await runner.run(captureAgent(captured), "hello", {
+        host: { ...buildScopeHost(parsedScope), recall: "## Recalled Memories\n- [fact] espresso" },
+      });
+
+      expect(captured).toEqual([
+        { scope: parsedScope, recall: "## Recalled Memories\n- [fact] espresso" },
+      ]);
+    });
+
+    it("run(): delivers {recall} alone when the host bag has recall but no scope", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => textResult("hi", 5, 5),
+      });
+      const captured: Array<{ scope?: Record<string, unknown>; recall?: string } | undefined> = [];
+      const runner = new AgentRunner(model);
+
+      await runner.run(captureAgent(captured), "hello", { host: { recall: "- remembered" } });
+
+      expect(captured).toEqual([{ recall: "- remembered" }]);
+    });
+
+    it("run(): treats empty-string host.recall as absent (assembleRecall's nothing-recalled)", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => textResult("hi", 5, 5),
+      });
+      const captured: Array<{ scope?: Record<string, unknown>; recall?: string } | undefined> = [];
+      const runner = new AgentRunner(model);
+
+      await runner.run(captureAgent(captured), "hello", { host: { recall: "" } });
+
+      expect(captured).toEqual([undefined]);
+    });
+
+    it("runStructured(): delivers {scope, recall} when the host bag carries both", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => textResult(JSON.stringify({ ok: true }), 10, 5),
+      });
+      const parsedScope = { user: "dug" };
+      const captured: Array<{ scope?: Record<string, unknown>; recall?: string } | undefined> = [];
+      const runner = new AgentRunner(model);
+      const schema = z.object({ ok: z.boolean() });
+
+      await runner.runStructured(captureAgent(captured), "hello", schema, {
+        host: { ...buildScopeHost(parsedScope), recall: "- remembered" },
+      });
+
+      expect(captured).toEqual([{ scope: parsedScope, recall: "- remembered" }]);
+    });
+  });
+
   // #117: message.start now carries systemPrompt (mirroring run()), and
   // message.complete carries the authoritative finishReason.
   describe("runStructured() event stamping (#117)", () => {

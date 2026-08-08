@@ -212,13 +212,18 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
   // -------------------------------------------------------------------------
 
   /**
-   * Narrow `RunOptions.host` down to `host.scope` (#308) — same inline
-   * structural narrow as `AgentRunner._renderCtx`; cannot import
-   * `workflows/scope-host.ts` here (reverse layering).
+   * Narrow `RunOptions.host` down to `host.scope` (#308) + `host.recall`
+   * (#444) — same inline structural narrow as `AgentRunner._renderCtx`;
+   * cannot import `workflows/scope-host.ts` here (reverse layering). Empty
+   * `recall` is absent (assembleRecall's "" = nothing recalled).
    */
   private _renderCtx(options?: RunOptions): RenderContext | undefined {
-    const scope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
-    return scope ? { scope } : undefined;
+    const host = options?.host as { scope?: Record<string, unknown>; recall?: string } | undefined;
+    const scope = host?.scope;
+    const recall =
+      typeof host?.recall === "string" && host.recall.length > 0 ? host.recall : undefined;
+    if (!scope && recall === undefined) return undefined;
+    return { ...(scope ? { scope } : {}), ...(recall !== undefined ? { recall } : {}) };
   }
 
   // TODO(#308): `options.host` (and therefore `host.scope`) is NOT relayed to

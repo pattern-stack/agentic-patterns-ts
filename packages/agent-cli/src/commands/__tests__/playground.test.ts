@@ -49,6 +49,22 @@ describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map
     toJsonSchema: () => ({}),
   };
 
+  // A duck-typed fake memory declaration (#444) — like `fakeScope`, its
+  // IDENTITY surviving the map is what the test proves (the same store
+  // instance must reach the server: turn-1 recall and the toolbox must share
+  // one store).
+  const fakeMemory: NonNullable<DiscoveredAgent["memory"]> = {
+    store: {
+      write: async () => [],
+      search: async () => [],
+      get: async () => null,
+      invalidate: async () => {},
+      delete: async () => {},
+      capabilities: () => ({ search: "keyword" }),
+    },
+    scope: { user: "dug", agent: "full" },
+  };
+
   // Every optional `DiscoveredAgent` field populated — this is the fixture a
   // future field silently failing to reach `AgentRegistration` must show up
   // against.
@@ -65,6 +81,7 @@ describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map
     instantiateDefaults: { tenant: "default-tenant" },
     contextRedactKeys: ["secret"],
     evals: [{ setId: "xd-interpret" }],
+    memory: fakeMemory,
   };
 
   it("threads every DiscoveredAgent field into AgentRegistration, scope by identity", () => {
@@ -81,11 +98,15 @@ describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map
       instantiateDefaults: { tenant: "default-tenant" },
       contextRedactKeys: ["secret"],
       evals: [{ setId: "xd-interpret" }],
+      memory: fakeMemory,
       runner: fakeRunner,
     });
     // Not a copy — the exact scope instance must survive (the point of
     // duck-typed pass-through: no `.parse` re-implementation en route).
     expect(result.scope).toBe(fakeScope);
+    // Same identity rule for memory (#444): the STORE instance the agent file
+    // booted is the one the server's turn-1 recall must read.
+    expect(result.memory).toBe(fakeMemory);
   });
 
   it("a registration declaring none of the optional fields maps to all-undefined, not dropped keys", () => {
@@ -103,6 +124,7 @@ describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map
     expect(result.contextRedactKeys).toBeUndefined();
     expect(result.evals).toBeUndefined();
     expect(result.provenance).toBeUndefined();
+    expect(result.memory).toBeUndefined();
     expect(result.runner).toBe(fakeRunner);
   });
 });

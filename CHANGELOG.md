@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- **agent-runtime, agent-server, agent-cli**: Playground memory wiring (#444, ADR-0007 D8a) — turn-1 recall now has a route from a registration to the rendered prompt. A registration may declare `memory: { store, scope, budgetChars? }` (agent-file-owned store — typically `loadMemoryStore()`, the SAME instance its `instantiate` hook binds into `memoryCapability`, so toolbox writes and recall share one store; author-declared partition scope as a static string map or a function of the PARSED effective context, resolved once at creation, 502 on empty/non-string-map/throwing derivations). At FIRST-message time — when the user text exists to serve as the query, per the pinned ordering — `POST /conversations/:id/messages` calls `assembleRecall(store, scope, { query })` and sets the finished block on the conversation's mutable host bag (`host.recall`); both runners' `_renderCtx` now narrow `host.recall` alongside `host.scope` into the `RenderContext` handed to `renderInitialPrompt`, with empty-string recall treated as absent (rendering stays byte-identical when nothing was recalled). Assembly is a one-shot, best-effort latch: a failed assembly logs and the turn streams without recall; later turns re-render the same block (the bag persists, never re-fetches). The `agent.memory.recall` emission publishes on the shared bus with freshly-minted trace/run ids (host-side, pre-stream — exporters already tolerate row-less runIds). CLI discovery threads a duck-typed `memory` wrapper declaration (all-or-nothing structural check, same rule as `scope`) through `toAgentRegistration` by identity. Memory-less registrations keep their hostless behavior byte-identically.
+
 ## core 0.16.0 (2026-07-26)
 
 ### Features
