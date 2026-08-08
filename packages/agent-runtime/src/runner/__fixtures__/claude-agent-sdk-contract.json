@@ -1,7 +1,7 @@
 {
   "_comment": "Executable + packaging contract for @anthropic-ai/claude-agent-sdk, asserted by sdk-contract.test.ts. The lockfile pins the concrete SDK version; the SDK's platform executable packages pin the bundled Claude Code executable; this fixture records the tested SDK<->CC pair so an upstream drift (a lockfile refresh that moves either version, or a repackaging that drops the bundled executables / changes the peer-dep ranges we absorb) surfaces as a failing test rather than silent behavior change. Regenerate deliberately when intentionally bumping the SDK: copy the installed package's version / claudeCodeVersion / peerDependencies / optionalDependencies keys here.",
-  "sdkVersion": "0.3.215",
-  "claudeCodeVersion": "2.1.215",
+  "sdkVersion": "0.3.225",
+  "claudeCodeVersion": "2.1.225",
   "peerDependencies": {
     "@anthropic-ai/sdk": ">=0.93.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
