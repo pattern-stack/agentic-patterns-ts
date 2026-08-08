@@ -421,6 +421,15 @@ always-injected tier. Maintain at most a handful per scope, and prefer *replacin
 record (`supersedes`) over accumulating several — they all spend budget before relevance ranking
 applies to anything else.
 
+Because the tier is unconditional it is also unconditional *cost*, so it carries its own slice:
+`AssembleRecallOptions.profileBudgetChars`, defaulting to `DEFAULT_PROFILE_BUDGET_RATIO` (0.4) of
+`budgetChars`. Profile records are admitted newest-first until the slice is spent; the rest are
+**deferred, not dropped** — they still count toward the block's truncation marker, and one may
+still enter through the hits tier if the query earns it. Without this slice a bloated profile
+partition silently starves the tier that answers the user's actual question, and starves it worst
+in exactly the sessions where the store has learned the most. Raising the slice is the wrong
+first move: a persistently-truncated block means the write side is over-saving profiles.
+
 ### Scoping patterns
 
 Search filters use **subset-match**: a filter matches every record whose scope contains all of
@@ -580,6 +589,15 @@ Stated rather than hidden, mirroring the ADRs:
   `prefer` hits content `prefers`), while the FTS5 backend matches whole tokens (it does not). Only
   relevance ORDERING and the filter semantics are contractual — develop against the backend you
   ship on.
+- **The hits tier misses when wording does not overlap.** Recall's search tier passes the first
+  user message verbatim as `query`, and the reference backends match it lexically — so a stored
+  `fact` reading "The user's name is Doug" is returned for *"what's my name?"* and **not** for
+  *"who am I?"*. There is no zero-hit fallback to the recency listing, which makes passing a query
+  strictly worse than passing none when the phrasings diverge. The block's own framing line
+  ("most relevant first") promises more than lexical matching delivers. `kind: "profile"` is the
+  v1 answer for anything that must survive rephrasing — it is injected before search runs and is
+  therefore phrasing-proof; `fact`/`preference`/`episode` are not. Retrieval quality on the
+  shipped path is unowned work, not a resolved design.
 - **Recall injects at turn 1 only.** Long conversations rely on the toolbox; per-turn
   re-injection waits for AgencyHost.
 - **Multi-agent sharing is by overlapping scope only** — no attach-by-reference memory blocks.

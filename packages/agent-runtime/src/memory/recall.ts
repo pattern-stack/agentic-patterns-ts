@@ -34,6 +34,19 @@ import { RESERVED_AGENT_SCOPE_KEY, matchesAgentConvention } from "./toolbox.js";
 /** Default recall character budget (guide.md §Recall tuning; issue pin: chars, not tokens). */
 export const DEFAULT_RECALL_BUDGET_CHARS = 4000;
 
+/**
+ * Fraction of the total budget the always-on profile tier may consume before
+ * it starts crowding out the query-driven hits tier.
+ *
+ * The profile tier is unconditional (`kinds: ["profile"]`, no query) and fills
+ * FIRST, so without a sub-budget a bloated profile partition silently starves
+ * the tier that answers the user's actual question — and starves it worst in
+ * exactly the sessions where the store has learned the most. `PROFILE_FETCH_LIMIT`
+ * bounds the page, not the cost. Records the sub-budget defers are COUNTED into
+ * the block's truncation marker, never silently dropped (house rule).
+ */
+export const DEFAULT_PROFILE_BUDGET_RATIO = 0.4;
+
 /** Correlation + bus for the agent.memory.recall emission — host-supplied (host-side, no ToolExecutionContext exists here). */
 export interface RecallEmitOptions {
   bus: EventBus;
@@ -45,6 +58,12 @@ export interface RecallEmitOptions {
 export interface AssembleRecallOptions {
   /** Character budget for the WHOLE block, header + marker included. Positive integer. @default 4000 */
   budgetChars?: number;
+  /**
+   * Character sub-budget for the always-on profile tier, so it cannot starve
+   * the query-driven hits tier. Positive integer.
+   * @default `floor(budgetChars * DEFAULT_PROFILE_BUDGET_RATIO)`
+   */
+  profileBudgetChars?: number;
   /** The first user text. Absent ⇒ the hits tier is a filtered, recency-ordered listing. */
   query?: string;
   /**
@@ -134,6 +153,13 @@ export async function assembleRecall(
       `assembleRecall pinCandidates must be a non-negative integer, got ${pinCandidates}`,
     );
   }
+  const profileBudgetChars =
+    options?.profileBudgetChars ?? Math.floor(budgetChars * DEFAULT_PROFILE_BUDGET_RATIO);
+  if (!Number.isInteger(profileBudgetChars) || profileBudgetChars <= 0) {
+    throw new Error(
+      `assembleRecall profileBudgetChars must be a positive integer, got ${profileBudgetChars}`,
+    );
+  }
 
   // 3. Derive the read filter exactly as MemoryToolbox does: the bound scope
   //    minus the reserved `agent` key. Subset-matching with `agent` IN the
@@ -153,10 +179,23 @@ export async function assembleRecall(
   const included = new Map<string, MemoryRecord>();
 
   // Profile tier — no `query`, so recency-ordered per the D5 listing contract.
+  // Admitted greedily under `profileBudgetChars` (newest first): the tier is
+  // always-on, therefore always-cost, and an unbounded profile partition would
+  // consume the budget before the hits tier ever renders. Deferred records are
+  // held, not discarded — they still count toward the truncation marker below,
+  // and one may still enter via the hits tier if the query earns it.
   const profiles = visible(
     await store.search({ scope: readFilter, kinds: ["profile"], limit: PROFILE_FETCH_LIMIT }),
   );
+  const deferredProfiles: MemoryRecord[] = [];
+  let profileChars = 0;
   for (const record of profiles) {
+    const cost = formatEntry(record).length + 1; // +1 for the joining newline
+    if (profileChars + cost > profileBudgetChars) {
+      deferredProfiles.push(record);
+      continue;
+    }
+    profileChars += cost;
     if (!included.has(record.id)) included.set(record.id, record);
   }
 
@@ -186,8 +225,11 @@ export async function assembleRecall(
   }
 
   // 5+6. Format under the budget — whole-record granularity, marker counts
-  // against the budget (capPreview precedent: never exceed the cap).
-  const result = buildBlock([...included.values()], budgetChars);
+  // against the budget (capPreview precedent: never exceed the cap). Profile
+  // records the sub-budget deferred are reported as omitted UNLESS a later tier
+  // admitted them anyway, so the marker never double-counts.
+  const preOmitted = deferredProfiles.filter((record) => !included.has(record.id)).length;
+  const result = buildBlock([...included.values()], budgetChars, preOmitted);
 
   // 7. Emit when wired — best-effort, awaited (deterministic tests), never
   //    throws (fire-and-forget sink — mirror toolbox._emit). "Nothing
@@ -223,10 +265,13 @@ export async function assembleRecall(
  * omitted the marker line is appended — and counts against the budget, so
  * already-included entries are dropped (last first) until it fits. A
  * non-empty block always satisfies `block.length <= budgetChars`.
+ *
+ * `preOmitted` carries records a caller already excluded before assembly (the
+ * profile sub-budget) so they are reported in the marker rather than vanishing.
  */
-function buildBlock(records: MemoryRecord[], budgetChars: number): RecallResult {
+function buildBlock(records: MemoryRecord[], budgetChars: number, preOmitted = 0): RecallResult {
   if (records.length === 0) {
-    return { block: "", count: 0, chars: 0, truncated: false };
+    return { block: "", count: 0, chars: 0, truncated: preOmitted > 0 };
   }
 
   const scaffold = SCAFFOLD_LINES.join("\n");
@@ -239,7 +284,7 @@ function buildBlock(records: MemoryRecord[], budgetChars: number): RecallResult 
     kept.push(entry);
     running += 1 + entry.length;
   }
-  let omitted = entries.length - kept.length;
+  let omitted = entries.length - kept.length + preOmitted;
 
   if (omitted === 0) {
     const block = [...SCAFFOLD_LINES, ...kept].join("\n");
