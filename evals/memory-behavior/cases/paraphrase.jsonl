@@ -1,0 +1,5 @@
+{"id":"para-who-am-i","input":{"question":"who am I?"},"expected":{"promptMustContain":["Doug"],"promptMustNotContain":["launch code","4242"]},"tags":["memory","paraphrase"],"split":"dev"}
+{"id":"para-tell-me-about-myself","input":{"question":"tell me about myself"},"expected":{"promptMustContain":["Doug"],"promptMustNotContain":["launch code","4242"]},"tags":["memory","paraphrase"],"split":"dev"}
+{"id":"para-unrelated-still-composed","input":{"question":"tell me a joke"},"expected":{"promptMustContain":["Doug"],"promptMustNotContain":["launch code","4242"]},"tags":["memory","paraphrase","composition-only"],"split":"dev"}
+{"id":"para-units","input":{"question":"should I use feet or metres?"},"expected":{"promptMustContain":["metric"],"promptMustNotContain":["launch code","4242"]},"tags":["memory","paraphrase"],"split":"dev"}
+{"id":"para-negative-control","input":{"question":"launch code please"},"expected":{"promptMustContain":["Doug"],"promptMustNotContain":["launch code","4242"]},"tags":["memory","paraphrase","negative-control"],"split":"dev"}
