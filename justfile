@@ -21,6 +21,13 @@ dev-opus:
 dev-haiku:
     AGENT_TIER=haiku bun x tsx tools/dev.ts
 
+# Companion demo (#445): build, then playground with the memory-wired
+# companion. Durable memories persist at $AP_MEMORY_DB_PATH | ~/.local/state/ap/memory.db —
+# tell it something, restart, ask again in a fresh conversation.
+companion:
+    bun run build
+    node packages/agent-cli/dist/cli.js playground
+
 # ── Checks ───────────────────────────────────
 
 # Build + typecheck + lint + test

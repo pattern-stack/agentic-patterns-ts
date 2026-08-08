@@ -177,12 +177,42 @@ const prompt = agent.renderInitialPrompt({ scope: s, recall: recall.block });
 
 Under the server, recall assembly is the host's job at **first-message time** — the first user
 text is the search query, so assembly waits for it rather than running at conversation creation.
-It is driven by the same registration that carries `instantiate` — the exact registration seam
-is still open (see question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs
-go through the toolbox.
+The registration seam shipped in #444: a registration declares
+`memory: { store, scope, budgetChars? }` (the scope as a static string map or a function of the
+conversation's parsed context, resolved once at creation), and `POST /conversations/:id/messages`
+assembles recall on the first turn and sets it on the conversation's host bag — both runners
+narrow `host.recall` into the `RenderContext` alongside `host.scope`. Recall injects at
+**turn 1 only** in v1; mid-conversation needs go through the toolbox.
 
 Everything above is observable from day one: `agent.memory.write`, `agent.memory.search`, and
 `agent.memory.recall` flow through the standard event spine to exporters and the dashboard.
+
+### 5. Try it — the companion demo
+
+The repo ships a first-party memory-wired agent: **companion**
+(`agents/companion/agent.mjs` + the `buildCompanionAgent` preset). It binds the persistent
+default store (`$AP_MEMORY_DB_PATH` | `~/.local/state/ap/memory.db`) and pairs the scope-bound
+toolbox with the #444 turn-1 recall wiring over the same store instance.
+
+```bash
+just companion          # build + ap playground with the companion discovered
+```
+
+Then, in the dashboard chat:
+
+1. Tell it something durable — *"remember: I take espresso, no milk"* — and watch
+   `agent.memory.write` land in the event stream.
+2. Kill the playground, start it again, open a **fresh** conversation.
+3. Ask *"what do I drink?"* — the recall block arrives at turn 1
+   (`agent.memory.recall` fires with counts/chars/truncated) and the answer comes from memory.
+
+Identity: `AP_USER` names the partition's `user` key (default `"local"`); per-conversation
+override via `POST /conversations` with `context: { user: "guest" }`. The reserved
+`agent: "companion"` key (ADR-0008 D8) keeps companion-specific records out of other agents'
+recall, while `user`-only records stay shared across your agents. Model/runner selection is the
+playground's usual env contract (`AGENT_MODEL` / `AGENT_TIER` / provider keys); on the
+Claude-Code provider the companion doubles as a capable daily driver — web/files/shell from
+Claude Code, memory from this composition.
 
 ## Deciding what to remember
 
