@@ -34,6 +34,7 @@ import {
 import type DatabaseConstructor from "better-sqlite3";
 import type { Database, Statement } from "better-sqlite3";
 import { type MemoryStore, type MemoryWriteInput, MemoryWriteInputSchema } from "./store.js";
+import { tokenize } from "./tokenize.js";
 
 // ---------------------------------------------------------------------------
 // Path resolution
@@ -81,8 +82,10 @@ export const MEMORY_TARGET_SCHEMA_VERSION = 1;
  * bookkeeping. The update trigger is belt-and-braces — v1 updates never touch
  * `content`/`tags`, only invalidation columns. `tags` is indexed as its JSON
  * text; the default unicode61 tokenizer treats `[`,`"`,`,` as separators, so
- * `["ui","prefs"]` tokenizes to `ui`, `prefs` — the same tokens as the
- * in-memory store's haystack join.
+ * `["ui","prefs"]` tokenizes to `ui`, `prefs` — the same tokens the in-memory
+ * store gets from `tokenize()` over its `content + tags.join(" ")` haystack.
+ * Conformance Tier 2 carries a tag-only match case that pins this claim
+ * (ADR-0009 D-3); it was asserted here and tested nowhere until then.
  */
 const MEMORY_SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS memory_records (
@@ -242,10 +245,22 @@ export class SqliteMemoryStore implements MemoryStore {
 
     // bm25 is smaller-is-better; ASC puts the best hit first, and a record
     // matching more of the OR'd terms always outranks a subset match (per-term
-    // scores sum). Ordering-tie note (unpinned by the conformance kit): ties in
-    // `created_at` resolve by `seq DESC` here vs. insertion order in the
-    // in-memory store — the kit tick()s around every ordering assertion, so
-    // this divergence is outside the contract.
+    // scores sum).
+    //
+    // `m.seq DESC` is now CONTRACTUAL, not an implementation detail. Both
+    // stores assign one `now` per batch, so `write([a,b,c])` ties all three on
+    // `created_at`; this store resolved the tie by `seq DESC` (last written
+    // first) while the in-memory store resolved it by insertion order, and a
+    // `limit: 2` listing therefore returned DIFFERENT RECORDS from the two
+    // shipped backends. That is a match-set divergence, not a ranking nicety,
+    // and the comment that used to sit here called it "outside the contract"
+    // because the kit tick()ed around every ordering assertion. ADR-0009 D-3
+    // overrules that: conformance Tier 1 now pins the batch tie, `seq DESC` is
+    // the pinned direction, and the in-memory store adopted it.
+    //
+    // Total RANK order for a *query* search remains deliberately unpinned
+    // (bm25 here vs. matched-token count in-memory vs. `ts_rank` on Postgres) —
+    // ADR-0009 Decision 13 states that narrowing explicitly.
     this._ftsStmt = this._db.prepare(`
       SELECT m.*, bm25(memory_fts) AS bm25_rank
       FROM memory_fts JOIN memory_records m ON m.seq = memory_fts.rowid
@@ -373,15 +388,29 @@ export class SqliteMemoryStore implements MemoryStore {
       return rows.map((row) => ({ record: this._rowToRecord(row) }));
     }
 
-    // Tokenize exactly like the in-memory store. Zero tokens (whitespace-only
-    // query) ⇒ zero score ⇒ no hits — without touching the db.
-    const tokens = q.query.toLowerCase().split(/\s+/).filter(Boolean);
+    // The SHARED tokenizer (ADR-0009 D-3 / Decision 13) — the same call the
+    // in-memory store makes, not a lookalike. Zero tokens (whitespace-only
+    // query) ⇒ no hits, without touching the db.
+    const tokens = tokenize(q.query);
     if (tokens.length === 0) return [];
-    // OR-joined quoted tokens, internal double quotes doubled. OR (not FTS5's
-    // implicit AND) is required for kit parity: "alpha beta" must return the
-    // record containing only `alpha`, ranked below the record containing both.
-    // Quoting makes FTS5 operators/punctuation in user text (NEAR, -, (,
-    // unbalanced ") inert — a query string must never raise an FTS syntax error.
+    // OR-joined, one FTS5 string per SUB-TOKEN. This used to split the query on
+    // WHITESPACE and quote each whitespace-token, which turned a punctuated
+    // token into an FTS5 adjacency PHRASE: `"dark-mode"` required `dark`
+    // immediately followed by `mode`, while a punctuation-splitting in-memory
+    // store would have OR'd them — so fixing only the in-memory side would have
+    // CREATED a divergence rather than removed one (ADR-0009 Decision 13, the
+    // adopted critic finding). `tokenize` has already stripped every
+    // non-alphanumeric, so each token is exactly one `unicode61` token.
+    //
+    // OR, not FTS5's implicit AND: "alpha beta" must return the record
+    // containing only `alpha`, ranked below the record containing both. This is
+    // the axis a Postgres backend would silently break (`plainto_tsquery`
+    // defaults to AND), and Tier 2's disjoint-token case is what catches it.
+    //
+    // Quoting is retained even though tokens can no longer contain FTS5
+    // punctuation: it keeps a token that HAPPENS to be a bareword operator
+    // (`or`, `and`, `not`, `near`) inert as a string literal. The doubling of
+    // internal `"` is unreachable now and kept as belt-and-braces.
     const match = tokens.map((t) => `"${t.replaceAll('"', '""')}"`).join(" OR ");
     const rows = this._ftsStmt.all({ ...filterBinds, match }) as Array<
       RawRow & { bm25_rank: number }

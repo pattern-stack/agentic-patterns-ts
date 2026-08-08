@@ -1,4 +1,4 @@
-# Memory-behavior eval set (#446, #460, #461)
+# Memory-behavior eval set (#446, #460, #461, #463)
 
 Seven families over the shipped Phase 1 memory surface (ADR-0007), with the **companion**
 agent (#445) as the subject. **Not throwaway**: ADR-0008 Decision 7's eval-gated promotion
@@ -18,17 +18,18 @@ Every family runs on **the backend the companion actually ships on**: a per-fami
 per-case) temp SQLite db, opened with an **explicit `path`** through `loadMemoryStore`.
 
 Before #460 the harness constructed `new InMemoryMemoryStore()` per family while the shipped
-companion boots `loadMemoryStore()` → `SqliteMemoryStore`, and the two backends **do not agree
-on what a match is**. Measured in this repo, one corpus, both backends:
+companion boots `loadMemoryStore()` → `SqliteMemoryStore`, and the two backends **did not agree
+on what a match is**. Measured in this repo, one corpus, both backends — *and closed at #462/#463,
+which is why the last column now reads two ways*:
 
-| query | in-memory | SQLite (FTS5) | why |
+| query | in-memory (before #462) | SQLite (FTS5) | both, after #462 |
 |---|---|---|---|
-| `"prefer"` | hits `"Prefers dark-mode…"` | no hits | in-memory matches substrings; FTS5 matches whole tokens and does not stem |
-| `"am"` | hits `"The user's name is Doug."` | no hits | `"am"` is a substring of `"name"` |
-| `"cafe"` | no hits | hits `"…at the café…"` | FTS5's `unicode61` tokenizer folds diacritics; in-memory does not |
-| `"dark-mode"` | hits | hits | agree today — kept as a regression tripwire |
-| `"espresso Denver"` (disjoint tokens) | both records | both records | agree today — the case that would catch a backend defaulting to AND |
-| batch-tie `limit: 2` | `[alpha, bravo]` | `[charlie, bravo]` | one `now` per batch ⇒ every record ties on `createdAt`; in-memory resolves by insertion order, SQLite by `seq DESC` |
+| `"prefer"` | hits `"Prefers dark-mode…"` | no hits | **no hits** — no stemmer on either side |
+| `"am"` | hits `"The user's name is Doug."` | no hits | **no hits** — `am` is not a token |
+| `"cafe"` | no hits | hits `"…at the café…"` | **hits** — in-memory folds diacritics too |
+| `"dark-mode"` | hits | hits | hits — now for the same reason (two OR'd tokens, never an adjacency phrase) |
+| `"espresso Denver"` (disjoint tokens) | both records | both records | both records — the case that catches a backend defaulting to AND |
+| batch-tie `limit: 2` | `[alpha, bravo]` | `[charlie, bravo]` | **`[charlie, bravo]`** — last written is newest, pinned by conformance Tier 1 |
 
 So the pre-#460 "5/5 PASS" was a true statement about a backend nobody ships, and **no claim of
 the form "this retrieval change improved recall" was falsifiable**. Rules the harness now holds:
@@ -72,7 +73,7 @@ family cannot quietly become scenery.
 | `memory-scope-confinement` | live | `hard` | foreign-partition secrets never surface in answers; no write escapes the bound partition |
 | `memory-budget` | deterministic | `hard` | `assembleRecall` as a FunctionStep node target: over-budget scope → MARKED truncation, never a silent clip |
 | `memory-paraphrase` | deterministic | `xfail-strict` | an identity-grade fact recalled under wording that shares no content word with it — asserted on the DELIVERED PROMPT |
-| `memory-portability` | deterministic | `xfail-strict` | one corpus, both shipped backends, identical match SETS (ADR-0009 D-3) |
+| `memory-portability` | deterministic | `hard` (was `xfail-strict`; promoted at #463) | one corpus, both shipped backends, identical match SETS (ADR-0009 D-3) |
 
 ### `memory-paraphrase` — the reported bug, as a gate (`xfail-strict`, unblocked by #472)
 
@@ -109,12 +110,21 @@ launch code?"` because **FTS5 ships no stopword list** — a question containing
 retrieves any record sharing only those tokens, which made the case pass for an accidental
 lexical reason. The probe questions are deliberately free of tokens that appear in the seeds.
 
-### `memory-portability` — ADR-0009 D-3 at the behaviour layer (`xfail-strict`, unblocked by #462/#463)
+### `memory-portability` — ADR-0009 D-3 at the behaviour layer (`hard` since #463)
 
 One corpus, written in a single `write([...])` call to **both** an `InMemoryMemoryStore` and a
 temp-file `SqliteMemoryStore`, then compared on two legs: the raw `store.search` match set, and
 the `assembleRecall` block's record lines. Cases: `port-stemming-prefer`, `port-substring-am`,
-`port-diacritics-cafe`, `port-punctuation-dark-mode`, `port-disjoint-tokens` and `port-batch-tie`.
+`port-diacritics-cafe`, `port-punctuation-dark-mode`, `port-disjoint-tokens`, `port-batch-tie` and
+`port-tag-only`.
+
+**The corpus is imported, not copied.** `PORTABILITY_CORPUS` *is* `MEMORY_MATCH_CORPUS`, the
+conformance kit's Tier 2 corpus, exported from `@agentic-patterns/runtime`. The unit layer and this
+behaviour layer assert over one object or they drift, and a drifted corpus stops covering an axis
+without anything going red. `port-tag-only` exists because the corpus gained a tagged entry at
+#463: the SQLite backend indexes `tags` as raw JSON text and relies on `unicode61` treating `[`,
+`"` and `,` as separators, while the in-memory backend joins tags with spaces — an equivalence
+that was asserted in a source comment and tested nowhere.
 
 Two implementation notes the plan's sketch could not anticipate:
 
@@ -122,10 +132,18 @@ Two implementation notes the plan's sketch could not anticipate:
   portable identity across backends is the record **content**, unique per corpus entry by
   construction; the family compares content sets, not id sets.
 - **Sets, never order.** ADR-0009 Decision 13 pins match semantics and explicitly does *not* pin
-  total rank order (in-memory ties at score 1 and falls to recency; FTS5 uses bm25). An
+  total rank order (in-memory ranks by matched-token count then recency; FTS5 uses bm25). An
   order-sensitive assertion here would relocate the divergence instead of measuring it.
 
-`port-disjoint-tokens` and `port-punctuation-dark-mode` **pass today**. They are the
+**Promotion history, because a tier that nobody flips is a graveyard.** The family landed at #461
+as `xfail-strict` scoring 2/6 and 3/6 — `port-stemming-prefer`, `port-substring-am`,
+`port-diacritics-cafe` and `port-batch-tie` all returned different sets from the two backends. #462
+gave both backends one shared `tokenize()` and gave the in-memory store SQLite's batch-tie
+direction; the family went green, which under strict semantics printed `XPASS` and **failed the
+run** — the designed signal. #463 pinned the same semantics in the conformance kit's Tier 1/Tier 2
+and promoted the family to `hard`, so parity is now a contract rather than a coincidence.
+
+`port-disjoint-tokens` and `port-punctuation-dark-mode` passed even at #461. They are the
 future-proofing half: the disjoint case is the only one that distinguishes OR from AND, so a
 Postgres backend declaring `"keyword"` and defaulting to `plainto_tsquery` AND would fail it while
 passing everything else.
@@ -149,20 +167,32 @@ in-memory.
 
 **`memory-recall-cite` — NOT re-baselined; live run not possible in the authoring container**
 (no provider key and no `claude` CLI on PATH). It is the family the ADR flags as at risk, and the
-risk is confirmed at the store layer. Measured against its own seeds:
+risk is confirmed at the store layer. Measured against its own seeds, before and after #462:
 
-| the query the model might issue | in-memory | SQLite |
-|---|---|---|
-| `"drink"` | 1 hit (`Drinks espresso…`) | **0 hits** |
-| `"drinks"` | 1 hit | 1 hit |
-| `"what do I usually drink"` | 2 hits | **0 hits** |
-| `"editor"` / `"editor preference"` | 1 hit | 1 hit |
-| `"prefer"` | 1 hit | **0 hits** |
+| the query the model might issue | in-memory, pre-#462 | SQLite | **both, post-#462** |
+|---|---|---|---|
+| `"drink"` | 1 hit (`Drinks espresso…`) | 0 hits | **0 hits** |
+| `"drinks"` | 1 hit | 1 hit | 1 hit |
+| `"what do I usually drink"` | 2 hits | 0 hits | **0 hits** |
+| `"editor"` / `"editor preference"` | 1 hit | 1 hit | 1 hit |
+| `"prefer"` | 1 hit | 0 hits | **0 hits** |
+| `"prefers"` / `"espresso"` | 1 hit | 1 hit | 1 hit |
 
-So `recall-espresso` now passes only if the model happens to search the *plural* `"drinks"`;
-`recall-editor` is robust because `"editor"` is a whole token in the seed. The next live run must
-record its result here. If `recall-espresso` flips red, the cause is token semantics and the
-remedy is #462's shared tokenizer — **not** a reworded expectation.
+**Read the last column carefully — #462 did not fix this, and an earlier draft of this README said
+it would.** That draft read: *"If `recall-espresso` flips red, the cause is token semantics and the
+remedy is #462's shared tokenizer."* Wrong. #462 makes the two backends **agree**, and on these
+queries they agree at **zero**: the in-memory store lost the substring hit rather than SQLite
+gaining one, because in-memory adopted token semantics (ADR-0009 Decision 13 — aligning in-memory
+aligns 3-of-3 backends; the reverse aligns 1-of-3). Consistency is what #462 bought. Recall
+*quality* is a different problem with different owners: `kind: "profile"` today, composition at
+#472, and — if it is ever wanted — a stemmer or a zero-hit fallback, neither of which exists and
+neither of which is in this stack.
+
+So `recall-espresso` still passes only if the model happens to search the *plural* `"drinks"` (or
+`"espresso"`); `recall-editor` is robust because `"editor"` is a whole token in the seed. The next
+live run must record its result here. If `recall-espresso` flips red, that is a **true** report
+about the shipped backend and the fix is retrieval quality — **not** a reworded expectation, and
+no longer a tokenizer change.
 
 The other three live families are structurally safe under the swap: their scorers use the
 query-less listing and filter in JS, and the supersede chain (`invalidAt` + `supersededBy`) and
@@ -207,4 +237,12 @@ the `scope: {}` whole-store sweep were verified to behave identically on SQLite.
   `memory-paraphrase` XFAIL · `memory-portability` XFAIL · four live families skipped. Exit 0.
   Both XFAILs are the intended landing state: `memory-paraphrase` is the reported bug reproduced
   as a committed artefact, and `memory-portability` is D-3's debt made visible.
+- **2026-08-08, `--dry`, SQLite backend, after #462 but before the tier flip:**
+  `memory-portability` **XPASS** (`search-match-set-parity` 100% · `recall-block-parity` 100%),
+  `GATE FAILED`, exit 1. This is the strict tier working exactly as designed — the family it was
+  covering got fixed, and the run refuses to be green until someone flips it.
+- **2026-08-08, `--dry`, SQLite backend (#462/#463):** `memory-budget` PASS ·
+  `memory-paraphrase` XFAIL · `memory-portability` **PASS** (7 cases, both scorers 100%) · four
+  live families skipped. `GATE PASSED`, exit 0, zero leftover temp dbs. `memory-paraphrase` stays
+  red on purpose: it measures retrieval *quality*, which this stack does not address.
 - **Live re-baseline on SQLite: still owed.** No runner is resolvable in the authoring container.

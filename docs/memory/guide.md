@@ -86,9 +86,12 @@ interface MemoryStore {
 }
 ```
 
-Any backend that passes `runMemoryStoreConformance(makeStore)` — an exported vitest
+Any backend that passes `runMemoryStoreConformance(makeStore, options?)` — an exported vitest
 `describe`-factory — honors the same contract. That's the whole portability story: the
-SQLite→Postgres path is a conformance run, not a rewrite.
+SQLite→Postgres path is a conformance run, not a rewrite. The kit has two tiers: **Tier 1** is
+universal, **Tier 2** is keyed on what `capabilities()` declares and pins *match semantics* for
+every `search: "keyword"` backend. See [Limits](#limits-v1) for exactly what each tier pins, and
+for the one thing deliberately left unpinned.
 
 ### 2. Scope it from SessionScope
 
@@ -584,11 +587,39 @@ Stated rather than hidden, mirroring the ADRs:
   Manual is the capture mechanism — write it accordingly.
 - **Keyword search only in the reference backends** (FTS5/bm25). No semantic/vector search until
   the Postgres/pgvector backend; the `capabilities()` flag exists so it can exceed the reference
-  without breaking the contract. Match granularity differs between reference backends and is
-  deliberately NOT pinned by the conformance kit: `InMemoryMemoryStore` matches substrings (query
-  `prefer` hits content `prefers`), while the FTS5 backend matches whole tokens (it does not). Only
-  relevance ORDERING and the filter semantics are contractual — develop against the backend you
-  ship on.
+  without breaking the contract.
+
+  **Match semantics are now pinned across backends — this bullet used to say the opposite.** It
+  read: *"Match granularity differs between reference backends and is deliberately NOT pinned by
+  the conformance kit … Only relevance ORDERING and the filter semantics are contractual — develop
+  against the backend you ship on."* That was true and it was a bug, not a feature: the shipped
+  companion runs on SQLite/FTS5 while every test and eval ran on `InMemoryMemoryStore`, and the two
+  disagreed in **opposite** directions — in-memory matched SUBSTRINGS (`am` hit `name`, `prefer`
+  hit `Prefers`) and split the query on whitespace only (so `name?` matched nothing), while FTS5
+  matched whole tokens, split on punctuation and folded diacritics (`cafe` hit `café`). "Develop
+  against the backend you ship on" is not advice a library can give about its own reference
+  implementations. [ADR-0009](../adr/0009-memory-routing-and-background-composition.md) settled it
+  (constraint D-3, Decision 13) and both backends changed.
+
+  What **is** pinned, by `runMemoryStoreConformance`:
+
+  | Tier | Applies to | Pins |
+  |---|---|---|
+  | 1 — universal | every backend | filtering (scope subset-match, `kinds`, `tags`), invalidation chains, `limit` semantics including `limit: 0`, the `updatedAt`-only-on-invalidate rule, the recency listing, more-matching-tokens-first, and the **batch tie** |
+  | 2 — per `capabilities().search` | every backend declaring `keyword` | **identical match SETS** over one shared corpus: word boundaries, punctuation, case, diacritics, one-character tokens, tags-as-haystack, and multi-token OR |
+
+  Both reference backends call one exported `tokenize()` — lowercase → NFD → drop combining marks
+  → split on every non-letter/non-number. No stemming and **no stopword list**, mirroring FTS5's
+  `unicode61`: `prefer` does *not* match `prefers` on either backend, and `the` matches everything
+  containing it. The batch tie matters more than it sounds: every backend assigns one `now` per
+  batch, so `write([a,b,c])` ties all three on `createdAt`, and a `limit: 2` listing used to return
+  *different records* per backend. Last written now wins, everywhere.
+
+  What is **not** pinned, deliberately: **total rank order** for a query search. In-memory ranks by
+  matched-token count then recency, FTS5 by bm25, a Postgres backend would use `ts_rank`. Pinning
+  total order would force a bm25 reimplementation into the in-memory store and would then fail the
+  `ts_rank` backend — relocating the divergence instead of removing it. Assert on match sets and on
+  the Tier 1 ordering invariants; do not assert on positions 3-vs-4 of a relevance list.
 - **The hits tier misses when wording does not overlap.** Recall's search tier passes the first
   user message verbatim as `query`, and the reference backends match it lexically — so a stored
   `fact` reading "The user's name is Doug" is returned for *"what's my name?"* and **not** for
