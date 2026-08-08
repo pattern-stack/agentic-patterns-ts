@@ -21,12 +21,30 @@ bun x tsx evals/memory-behavior/run.mts --dry    # deterministic families only
 
 Design notes:
 
-- **Isolation**: every family gets a fresh `InMemoryMemoryStore` + freshly built companion —
-  deterministic seeds, no cross-family bleed, the user's real memory db untouched.
+- **Isolation**: every family gets a fresh `InMemoryMemoryStore` + freshly built companion, and
+  the budget family's `FunctionStep` builds a fresh store PER CASE — no cross-family or
+  cross-case bleed, the user's real memory db untouched.
 - **Store-state scorers** are the point: memory behavior is a side effect, so scorers close
-  over the family's store and assert what was *written*, not just what was *said*.
-- **Persistence** mirrors `ap eval` exactly (`startEvalRun` + `createEvalResultRecorder` into
-  `$AP_DB_PATH` | `~/.local/state/ap/events.db`) so runs appear in the dashboard's eval surface.
+  over the family's store and assert what was *written*, not just what was *said*. The
+  supersede family checks the `supersededBy` chain and forbids duplicates (exactly one live
+  new-fact record); scope-confinement sweeps the WHOLE store for any non-seeded record outside
+  the bound partition. The contradiction check is substring-grade (lexical window — a record
+  asserting the old fact while merely *mentioning* the new one can slip it); Phase C hardening
+  can tighten this.
+- **The gate cannot pass vacuously**: node errors, scorer errors, and an empty pass-rate map
+  all FAIL the family (`ap eval`'s three-term gate); malformed expectations ERROR instead of
+  passing; a runner-resolution failure without `--dry` exits 2 (config error) rather than
+  silently skipping four families.
+- **Events are diagnostics, not gates**: `agent.memory.*` counts print per family, but
+  tool-event emission is runner-dependent (the claude-CLI fallback executes tools without a
+  `ToolExecutionContext`), so gating on them would flake by runner.
+- **Persistence** uses `ap eval`'s calls — set/case bank (`upsertEvalSet`/`upsertEvalCase`, so
+  the dashboard's eval surface can browse these sets), suite row with `gitSha` provenance,
+  per-case rows via `createEvalResultRecorder`, `store.close()` on exit — into
+  `$AP_DB_PATH` | `~/.local/state/ap/events.db`. Not mirrored (follow-up): the
+  `SQLiteExporter` event-trace attachment.
+- The budget family persists under `targetId: "assemble-recall"` with no model — it never runs
+  the companion, and Phase C keys promotion decisions on `targetId`.
 - Case banks are `loadCasesJsonl`-shaped (`cases/*.jsonl`) and stay CLI-compatible.
 - Exit codes: 0 gate pass · 1 gate failure · 2 config error (CI-friendly).
 

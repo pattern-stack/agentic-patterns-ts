@@ -32,9 +32,9 @@ companion:
     bun packages/agent-cli/dist/cli.js playground
 
 # Memory-behavior eval set (#446): five families over the shipped memory
-# surface, companion as subject. Add --dry for deterministic families only.
-eval-memory:
-    bun x tsx evals/memory-behavior/run.mts
+# surface, companion as subject. `just eval-memory --dry` = deterministic only.
+eval-memory *ARGS:
+    bun x tsx evals/memory-behavior/run.mts {{ARGS}}
 
 # ── Checks ───────────────────────────────────
 
