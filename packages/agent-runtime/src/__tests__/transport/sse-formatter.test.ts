@@ -69,10 +69,10 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.tool.approval.response"]).toBe("tool.approval.response");
   });
 
-  it("has exactly 33 mappings", () => {
+  it("has exactly 36 mappings", () => {
     // 31 since #323 added the `harness.native` envelope mapping, +2 for #389's
-    // tool-approval request/response pair.
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(33);
+    // tool-approval request/response pair, +3 for #420's memory events.
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(36);
   });
 });
 

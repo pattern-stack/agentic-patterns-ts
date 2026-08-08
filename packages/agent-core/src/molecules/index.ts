@@ -44,6 +44,42 @@ export type {
 } from "./model-facing-schema-lint.js";
 
 export {
+  AwarenessTargetPayloadSchema,
+  AwarenessTargetSchema,
+  BackgroundTargetSchema,
+  ExampleTargetPayloadSchema,
+  ExampleTargetSchema,
+  JudgmentTargetSchema,
+  ManualTargetSchema,
+  MemoryHitSchema,
+  MemoryKindSchema,
+  MemoryRecordSchema,
+  MemoryScopeSchema,
+  MemorySearchQuerySchema,
+  MemoryStoreCapabilitiesSchema,
+  MemoryTargetSchema,
+  ProvenanceSchema,
+  RecoveryTargetSchema,
+  canonicalMemoryScope,
+  memoryRecord,
+  targetPayloadSchema,
+} from "./memory-record.js";
+export type {
+  AwarenessTargetPayload,
+  ExampleTargetPayload,
+  MemoryHit,
+  MemoryKind,
+  MemoryRecord,
+  MemoryRecordInput,
+  MemoryScope,
+  MemorySearchQuery,
+  MemorySearchQueryInput,
+  MemoryStoreCapabilities,
+  MemoryTarget,
+  Provenance,
+} from "./memory-record.js";
+
+export {
   WorkflowStepDefinitionSchema,
   RuleDefinitionSchema,
   TemplateDefinitionSchema,

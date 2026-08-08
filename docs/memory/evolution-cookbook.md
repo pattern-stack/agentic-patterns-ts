@@ -1,6 +1,13 @@
 # How agents evolve: worked examples
 
-> **Status: DESIGN PREVIEW** — behavior specified in ADR-0007/ADR-0008; not yet implemented. These scenarios exist to pressure-test the design.
+> **Status: DESIGN PREVIEW (Phase B)** — every scenario below turns on **promotion**, and the
+> compositional layer (ADR-0008) is not built. The ADR-0007 substrate underneath them *has*
+> shipped (#417–#422): the record shape incl. `target`/`payload`/`supports`, the store and its
+> SQLite backend, the events, the toolbox, and turn-1 recall. So the writes, scopes, invalidation
+> chains, and recall blocks shown here are real APIs; the **tier paths, composition diffs, and
+> promote/demote events are not**. These scenarios exist to pressure-test the design — see the
+> [design questions](#design-questions-surfaced-while-writing-this) for which of their assumptions
+> the Phase 1 build settled.
 
 This cookbook follows five agents over days and weeks and shows the full causal chain of
 each learning, concretely: the interaction that triggered it, the `MemoryRecord` written
@@ -14,9 +21,12 @@ Conventions used throughout:
 - Record ids (`mem_9f2e71`), conversation/run ids, and event payload fields beyond what the
   ADRs pin down are **illustrative**. The record shape, scope semantics, invalidation
   chain, tier table, and event *names* are normative per the ADRs.
-- Recall blocks are rendered by `Awareness.fromRecall` (ADR-0007 §8); the exact block
-  format is not yet specified, so the delimited/timestamped shape shown here (ADK
-  `preload_memory` discipline) is a plausible rendering, not a contract.
+- Recall blocks reach the prompt through `Awareness.fromRecall` (ADR-0007 §8), but the block is
+  **assembled and formatted by the runtime** (`assembleRecall`, #422) and placed verbatim by core.
+  The shipped format is a `## Recalled Memories` header, a framing line, then one
+  `- [<kind> · <YYYY-MM-DD>] <content>` entry per record, with a marked truncation line when the
+  character budget clips. The delimited/timestamped shape shown in these scenarios predates that
+  and is illustrative, not the contract.
 - Prompt fragments are shown exactly as the atoms render them today
   (`Background.toPrompt()`, `Judgment.toPrompt()`, `Example.toPrompt()`,
   `AwarenessDomain.toPrompt()`), because ADR-0008 adds **zero** schema or rendering
@@ -752,115 +762,107 @@ the self.
 
 ---
 
-## Open design questions surfaced while writing this
+## Design questions surfaced while writing this
 
 Ambiguities and awkward corners hit while making the scenarios concrete. Each was worked
-around above with an explicitly-marked assumption; all need answers before Phase B/C.
+around above with an explicitly-marked assumption. Phase 1 (#417–#422) settled several of
+them — those are marked **RESOLVED** with what shipped; the rest still need answers before
+Phase B/C.
 
-1. **`MemoryTarget` cannot express the guarded tier.** The tier table (ADR-0008
-   Decision 4) gates `judgment.constraints`, `escalationTriggers`, and `recovery` behind
-   human approval — but the `MemoryTarget` union (Decision 1) only admits
-   `{ primitive: "judgment"; slot: "heuristics" }`. Scenario 4 had to assume a widened
-   union (`slot: "escalationTriggers"`). Also, `recovery` is a Role-level primitive, not
-   a judgment slot — its target shape is entirely unspecified. Either the union widens in
-   the same phase that activates the guarded tier, or the tier table's guarded row is
-   aspirational; the ADRs should say which.
+1. **RESOLVED (#417) — the target union ships whole, guarded arms included.**
+   `MemoryTargetSchema` admits `slot: "heuristics" | "constraints" | "escalationTriggers"`
+   on the judgment arm and carries `{ primitive: "recovery" }` as its own Role-level arm
+   (plus a later-phase `manual` arm). Scenario 4's assumed widening is now the shipped
+   shape. The union widened *ahead* of the tier that activates it, deliberately: widening a
+   stored record's schema later is breaking, so storability and promotability are decoupled.
 
-2. **Where does promotion state live?** `MemoryRecord` has no `tier`/`promoted` field, yet
-   `applyMemoryOverlay` consumes "*promoted*, valid targeted records" and the instantiate
-   path needs "a bounded query (valid+promoted records for scope)". Ledger replay defines
-   point-in-time truth, but nobody wants to replay events per instantiate. Options: a
-   field on the record (breaks ADR-0007's frozen shape — the exact "breaking to add
-   later" trap `target` was reserved to avoid), a promotions side-table in the store, or
-   a store-protocol extension (`listPromoted(scope)`). Needs a decision; it changes the
-   ADR-0007 contract surface.
+2. **RESOLVED in principle (decision round); implementation Phase B — promotion state is
+   store-resident.** Ledger replay per instantiate was rejected on cost. Phase 1 shipped the
+   record fields that decision depends on (`target`, `payload`, `supports`) for exactly the
+   "breaking to add later" reason raised here. Whether the store holds it as a record column
+   or a promotions side-table is still open — but it is the store's problem, not the event
+   spine's.
 
-3. **Recurrence linkage is unspecified.** "≥ N supporting episodes" — supported *how*?
-   Scenario 2 invented a `tags: ["supports:mem_e41c92"]` convention. Is support a tag
-   convention, a provenance link, or a first-class edge? And what counts: N distinct
-   *conversations*? runs? Can the same session mint two supporting episodes and
-   self-promote a rule in one sitting?
+3. **RESOLVED (#417) — support is a first-class field, not a tag convention.**
+   `MemoryRecord.supports?: Provenance[]` holds corroboration entries
+   (`{ conversationId?, runId?, author?, at? }`), so "N supporting episodes" counts entries
+   with real provenance rather than parsing `tags: ["supports:…"]`. It is lifecycle-owned —
+   not settable through `write`; a Phase B `corroborate` operation appends. **Still open:**
+   what *counts* as distinct (conversations vs runs), and whether one session may
+   self-promote.
 
-4. **String `content` vs structured targets.** `Example` needs
-   `scenario/good/bad/reasoning`; an `awareness` target is "content parsed as domain
-   entry" (`name/description/accessMethod`). But `content` is "natural-language,
-   prompt-ready" — a single string. Scenario 3 used labeled `Scenario:/Good:/Bad:/Why:`
-   lines. Who parses (at write? at promotion? inside `applyMemoryOverlay`?), what is the
-   grammar, and what happens on parse failure — reject at write, hold at candidate, or
-   fall back to recall? A pure `applyMemoryOverlay` that can *fail to parse* mid-fold
-   needs defined behavior.
+4. **RESOLVED (#417) — structured targets carry a validated payload; nothing parses prose.**
+   `example` and `awareness` declare Zod payload shapes
+   (`{ scenario, good, bad?, reasoning? }` / `{ name, description, accessMethod }`) enforced
+   by `MemoryRecordSchema` at **write** time. Scenario 3's labeled `Scenario:/Good:/Bad:/Why:`
+   prose is superseded by the payload. Parse failure therefore cannot happen mid-fold: a bad
+   payload is rejected at write, and a *missing* payload is legal but simply un-promotable.
+   The pure `applyMemoryOverlay` never faces a parse decision.
 
-5. **The `kind` vocabulary has no procedural kind.** A learned heuristic is neither
-   `fact`, `preference`, `episode`, nor `profile` — Scenarios 2 and 5 shoehorned rules
-   into `kind: "fact"`, Scenario 4 into `"preference"`. Once `target` exists, `kind` and
-   `target` partially encode the same thing. Either `kind` grows a `rule`-like value, or
-   the docs should state that `kind` is a recall/two-tier concern and `target` alone
-   governs composition semantics.
+5. **OPEN — the `kind` vocabulary still has no procedural kind.** The shipped enum is
+   `fact | preference | episode | profile`, so a learned rule still lands as `fact` or
+   `preference` while `target` carries the compositional intent. The doc position (not yet
+   an ADR decision) is that `kind` is a *recall/two-tier* concern — it governs whether a
+   record is always-injected (`profile`) or search-ranked — and `target` alone governs
+   composition semantics.
 
-6. **What does "written + reconciled" mean, exactly, for auto tier?** Scenario 1 assumed
-   a synchronous reconciliation search at write time and immediate promotion. Is
-   reconciliation mandatory-at-write (making `memory_save` slower), or deferred to the
-   next gardening pass (facts don't appear in composition for hours/days)? The
-   perceived responsiveness of the "easy path" hangs on this.
+6. **OPEN (Phase B) — "written + reconciled" for the auto tier is still undefined.** Whether
+   reconciliation is synchronous at write or deferred to gardening is undecided. Phase 1
+   does establish the synchronous half is affordable: `memory_save` already performs a
+   targeted-collision search on every targeted write (#421) without a perceptible cost.
 
-7. **Budget-spill ordering is unspecified.** Conflict resolution is "older wins", but
-   when the bloat scenario spills 6 of 23 records to recall, *which* 6? Newest first?
-   `kind: "profile"` protected? A pinned flag? Deterministic spill order is required for
-   the pure-function claim, and "oldest wins" (mirroring conflicts) would mean an agent's
-   most *recent* learnings are the first casualties of bloat — probably backwards.
+7. **PARTIALLY RESOLVED (#422) — recall-side spill is pinned; overlay-side spill is not.**
+   The recall assembler's order is fixed and deterministic — profile records, then pinned
+   candidates, then search hits — clipped at the character budget with the omitted count
+   reported in a marked truncation line (never silent). So `kind: "profile"` *is* protected,
+   and newest-first governs the candidate tier. The `applyMemoryOverlay` per-primitive
+   budget spill this question actually asked about remains **open**, along with its
+   determinism requirement.
 
-8. **Invalidate vs supersede vs "demote-but-keep" is convention, not contract.**
-   Scenario 4's rollback invalidated the record — which also removes it from *recall*
-   search (by default). Doug wanted the rule out of the composition; did he want the
-   memory gone from recall too? There is no operation for "revoke the promotion, keep
-   the candidate" (demote without invalidate). The guarded tier likely needs one —
-   rollback of a promotion and retraction of a memory are different acts.
+8. **PARTIALLY RESOLVED (decision round) — the removal bar equals the addition bar; the
+   demote-without-invalidate operation is still missing.** It is now settled that
+   invalidating a *promoted* guarded-tier record requires the same gate that promoted it,
+   so an agent cannot strip a human-approved trigger via `memory_invalidate`. Enforcement is
+   Phase B. The distinct act this question identified — "revoke the promotion, keep the
+   candidate" — is **still unspecified**, and remains the cleanest argument for a `demote`
+   operation separate from invalidation.
 
-9. **"Older wins" for memory-vs-memory key collisions fights the common case.** Two valid
-   promoted records with the same `background` key resolve `createdAt`-older-wins. But
-   for facts, the newer record is *usually* the truer one (Scenario 1's deploy-window
-   change) — the design only produces the right answer if writers reliably use
-   `supersedes`. A write-time nudge (reconciliation detecting a same-key valid record and
-   *requiring* an explicit supersede-or-new-key choice) would close the trap; nothing
-   specifies it.
+9. **RESOLVED (#421) — the write-time nudge shipped, exactly as proposed here.**
+   `memory_save` detects a near-duplicate targeted collision in the same scope + same target
+   and returns a **structured conflict envelope** requiring the agent to either supersede the
+   existing record or re-key; it never silently writes the duplicate. The trap this question
+   describes is closed at the write path rather than refereed by the overlay, which demotes
+   "older wins" to a last-resort determinism tiebreak.
 
-10. **The ledger lives on the retention-pruned event spine.** "What did you learn this
-    week" and point-in-time replay are defined as queries over promote/demote *events* —
-    but ADR-0007 deliberately kept memory off the telemetry store precisely because it is
-    retention-pruned and downgrade-hostile. If promote events age out with telemetry
-    retention, the evolution ledger is not durable. Either promotion facts must also live
-    in the memory store (see Q2 — same table solves both), or `memory_learnings` cannot
-    be an event query.
+10. **PARTIALLY RESOLVED (#419) — memory is off the telemetry spine; the ledger's home is
+    still unnamed.** `SqliteMemoryStore` uses its **own SQLite file** with its own
+    `PRAGMA user_version` ladder starting at 1 — never `events.db` — so memory records cannot
+    age out with telemetry retention. But promote/demote events do not exist yet and
+    `memory_learnings` is not shipped, so where the *evolution ledger* durably lives is
+    unanswered. Q2's store-resident promotion state remains the likely joint solution.
 
-11. **Scope subset-matching makes overlays per-slice — is that intended, and how do evals
-    cope?** A heuristic promoted at scope `{ tenant, user: "u_42" }` overlays only
-    conversations matching that scope: the "same" agent behaves differently per user.
-    Probably desirable — but the eval-gated promotion runs *one* suite against *one*
-    `config′`; per-scope overlays mean the evaluated composition is not the composition
-    every user gets. Related: nothing but author convention (an `agent:` scope field)
-    prevents records learned by one agent from overlaying a *different* agent whose
-    judgment domains happen to match. The framework "does not invent identity" — but the
-    overlay query needs a stated identity convention or cross-agent leakage is one
-    missing scope field away.
+11. **PARTIALLY RESOLVED (#421/#422) — cross-agent leakage has a blessed convention; the
+    per-slice eval question does not.** The reserved `agent` scope key (ADR-0008 D8) is now
+    shipped as `RESERVED_AGENT_SCOPE_KEY` with a shared `matchesAgentConvention` post-filter
+    used by both the toolbox and the recall assembler: a record is visible to agent `me` when
+    its `agent` key is unset (shared) or equals `me`. So leakage is no longer one missing
+    scope field away. **Still open:** that per-scope overlays mean an eval suite validates a
+    composition no individual user necessarily receives.
 
-12. **Learned lines in safety-relevant slots are prompt-indistinguishable by design —
-    should they be?** For `background` this is the feature. For a guarded
-    `escalationTriggers` line (Scenario 4), the model cannot tell an authored safety rule
-    from a learned one, and neither can a human reading the raw prompt outside the
-    dashboard. Attribution lives only in `renderSections()`. Worth an explicit decision
-    that this is acceptable for guarded slots (the approval gate being deemed
-    sufficient), rather than an accident.
+12. **OPEN (Phase B decision) — learned lines in safety-relevant slots remain
+    prompt-indistinguishable.** Nothing in Phase 1 changes this; attribution still lives only
+    in `renderSections()`. It deserves an explicit "acceptable for guarded slots because the
+    approval gate is sufficient" ruling rather than remaining an accident of the design.
 
-13. **Candidates depend on lucky recall.** Scenario 2's story only works because the
-    Aug 14 PR's first user text happened to match the candidate record. Recall is
-    query-driven (turn-1 text) and budget-capped; a highly relevant candidate heuristic
-    can simply miss. If candidacy is the probation mechanism, targeted candidates may
-    need recall *priority* (e.g., ranked ahead of untargeted hits for the matching
-    domain, or profile-style pinning) — otherwise probation is a coin flip and
-    recurrence counts are suppressed by the very mechanism meant to gather them.
+13. **RESOLVED (#422) — candidates no longer depend on lucky recall.**
+    `assembleRecall`'s `pinCandidates` option pins up to N valid targeted records, newest
+    first, in their own tier between profile records and query-ranked hits — profile-style
+    pinning, exactly as this question proposed. It defaults to `0` (off): the exposure hook
+    exists, and the promotion machinery that should switch it on is Phase B.
 
-14. **`updatedAt` has no defined mutator.** With invalidation-first curation, records are
-    never edited — corrections are new records via `supersedes`. So what ever changes
-    `updatedAt`? If the answer is "invalidation touches it", say so; if records are
-    truly immutable post-write, `updatedAt` is dead weight in the shape and the
-    conformance kit should pin whichever answer is chosen.
+14. **RESOLVED (#418) — `invalidate` is the only mutator of `updatedAt`.**
+    Records are born with `createdAt === updatedAt` and are otherwise immutable; `invalidate`
+    sets `invalidAt` and bumps `updatedAt`, and a `supersedes` write does the same to the
+    superseded record atomically with the new record's creation. Idempotent re-invalidation
+    leaves `updatedAt` untouched. The conformance kit pins all of this, so every backend
+    inherits it.

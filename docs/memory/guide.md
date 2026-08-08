@@ -1,15 +1,18 @@
 # Memory — developer guide
 
-> **Status: DESIGN PREVIEW** — this documents the behavior specified in ADR-0007/ADR-0008.
-> Nothing on this page is implemented yet; it exists so the design can be read, used on paper,
-> and criticized before we build.
+> **Status: PHASE 1 SHIPPED** (#417–#422) — the store, its in-memory and SQLite/FTS5 backends, the
+> conformance kit, the memory events, the agent toolbox, and the turn-1 recall surface are
+> implemented and exported. The **compositional layer (ADR-0008)** — promotion, `applyMemoryOverlay`,
+> demotion, the gardening pass, `lintComposition`, `memory_learnings` — is **Phase B, not built**.
+> Sections describing it are marked **(Phase B)** and state intended behavior, not shipped code.
 
 How to give an agent cross-session memory: wire a store, scope it, let the agent read and write
 it, and — when a memory has earned it — compile it into the agent's composition. Sources:
 [ADR-0007](../adr/0007-memory-store.md) (the store) and
-[ADR-0008](../adr/0008-compositional-memory.md) (the compositional layer). Where this guide had
-to guess at a surface the ADRs leave open, the guess is marked and the gap is listed in
-[open design questions](#open-design-questions-surfaced-while-writing-this) at the bottom.
+[ADR-0008](../adr/0008-compositional-memory.md) (the compositional layer). The questions this guide
+originally had to guess at are settled below in
+[design questions](#design-questions-surfaced-while-writing-this) — each marked RESOLVED with what
+shipped, or still flagged open for Phase B/C.
 
 ## The mental model
 
@@ -61,12 +64,13 @@ the in-memory store yourself. Memory gets **its own SQLite file** — it is a sy
 telemetry, and must never inherit the event store's retention pruning.
 
 ```typescript
-import { InMemoryMemoryStore, loadMemoryStore } from "@agentic-patterns/runtime";
+import { loadMemoryStore } from "@agentic-patterns/runtime";
 
-const store =
-  (await loadMemoryStore({ path: "./data/memory.sqlite" })) ?? new InMemoryMemoryStore();
+// `store` is ALWAYS usable — when `unavailable` it is already the
+// InMemoryMemoryStore fallback; `reason` says why (CLI-banner material).
+const { store, unavailable, reason } = await loadMemoryStore({ path: "./data/memory.sqlite" });
 
-store.capabilities(); // { search: "keyword" } — the SQLite reference backend is FTS5/bm25
+await store.capabilities(); // { search: "keyword" } — the SQLite reference backend is FTS5/bm25
 ```
 
 The protocol is six methods, all async:
@@ -78,7 +82,7 @@ interface MemoryStore {
   get(id: string): Promise<MemoryRecord | null>;
   invalidate(id: string, reason?: string): Promise<void>;
   delete(id: string): Promise<void>;   // true forgetting — never exposed to the agent
-  capabilities(): MemoryStoreCapabilities;
+  capabilities(): Promise<MemoryStoreCapabilities>;
 }
 ```
 
@@ -116,10 +120,14 @@ function memoryScope(s: SupportScope): Record<string, string> {
 
 `MemoryToolbox` captures its partition scope **at construction**, which is why it belongs inside
 your `instantiate` hook (ADR-0004): a memory tool physically cannot write outside its
-conversation's partition, even if the model asks it to. The toolbox ships with a Manual carrying
-the standing "you have memory" instruction and the curation protocol (save with `supersedes` when
-correcting) — extend it with your own guidance (see
-[deciding what to remember](#deciding-what-to-remember)).
+conversation's partition, even if the model asks it to. No tool takes a `scope` parameter, and no
+unscoped search is reachable.
+
+The packaging is deliberately two-piece: `MemoryToolbox` is a plain `Toolbox` (tools only), and
+`memoryCapability(store, scope, opts)` is the ready-made bundle — that toolbox plus a built-in
+`TextManual` carrying the standing "you have memory" instruction and the curation protocol (save
+with `supersedes` when correcting). Use the capability helper unless you want to compose the
+Manual yourself (see [deciding what to remember](#deciding-what-to-remember)).
 
 ```typescript
 import { AgentBuilder, Awareness } from "@agentic-patterns/core";
@@ -157,21 +165,21 @@ rendering and passes the finished block in. Self-hosting the runner, that looks 
 ```typescript
 import { assembleRecall } from "@agentic-patterns/runtime";
 
-const recall = await assembleRecall(store, {
-  scope: memoryScope(s),
+const recall = await assembleRecall(store, memoryScope(s), {
   query: firstUserText,     // optional — without it, profile + recency listing only
   budgetChars: 4_000,       // character budget, deterministic and model-agnostic
 });
 // Profile-kind records first, then search hits; capped; truncation marked, never silent.
-// Emits agent.memory.recall { count, bytes, truncated }.
+// Emits agent.memory.recall { count, chars, truncated } — only when the `emit` option is wired.
 
 const prompt = agent.renderInitialPrompt({ scope: s, recall: recall.block });
 ```
 
-Under the server, recall assembly is the host's job at conversation creation, driven by the same
-registration that carries `instantiate` — the exact registration seam is still open (see
-question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs go through the
-toolbox.
+Under the server, recall assembly is the host's job at **first-message time** — the first user
+text is the search query, so assembly waits for it rather than running at conversation creation.
+It is driven by the same registration that carries `instantiate` — the exact registration seam
+is still open (see question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs
+go through the toolbox.
 
 Everything above is observable from day one: `agent.memory.write`, `agent.memory.search`, and
 `agent.memory.recall` flow through the standard event spine to exporters and the dashboard.
@@ -267,11 +275,27 @@ matured memory should compile into:
 type MemoryTarget =
   | { primitive: "background"; section: "teamContext" | "projectContext"
                                       | "conventions" | "currentState"; key: string }
-  | { primitive: "judgment";   domain: string; slot: "heuristics" }
+  | { primitive: "judgment";   domain: string;
+      slot: "heuristics" | "constraints" | "escalationTriggers" }  // latter two guarded-tier
   | { primitive: "example";    judgmentDomain: string }  // compiles to an Example on that Judgment
-  | { primitive: "awareness" }                            // content parsed as a domain entry
+  | { primitive: "awareness" }                           // compiles to an AwarenessDomain
+  | { primitive: "recovery" }                            // guarded-tier
   | { primitive: "manual";     capability: string; section: "workflows" };  // later phase
 ```
+
+The union ships **whole** (`molecules/memory-record.ts`, #417) even though only some arms are
+promotable — widening a stored record's schema later is breaking, so the guarded and later-phase
+arms are storable from day one. In Phase 1 the target is stored and returned untouched; nothing
+acts on it.
+
+**Structured targets carry a structured `payload`, not prose to be parsed.** `example` and
+`awareness` declare their required shapes as Zod schemas beside the record
+(`ExampleTargetPayloadSchema` = `{ scenario, good, bad?, reasoning? }`,
+`AwarenessTargetPayloadSchema` = `{ name, description, accessMethod }`), validated on write by
+`MemoryRecordSchema`'s refinement. `content` stays prompt-ready prose alongside. A structured-arm
+record with **no** payload is still valid — it is a candidate that simply cannot promote. Prose
+arms (`background`, `judgment`, `recovery`, `manual`) carry their learning in `content` and their
+payload is never validated.
 
 ```typescript
 await store.write([
@@ -293,8 +317,14 @@ await store.write([
 ```
 
 A targeted record is a **candidate**: it reaches the agent through the recall surfaces like any
-other record — visible *as memory* — until promotion moves it into the overlay. Promotion is
-tiered by blast radius:
+other record — visible *as memory* — until promotion moves it into the overlay.
+
+> **(Phase B)** Everything from here to the end of this section — promotion tiers, the gate chain,
+> `applyMemoryOverlay` — is ADR-0008 and **not implemented**. Phase 1 ships the *data contract*
+> (`target`, structured `payload`, `supports`) and the write-time nudge; no promotion machinery
+> exists. `MemoryStore` deliberately has no `promote`/`demote`/`corroborate` methods yet.
+
+Promotion is tiered by blast radius:
 
 | Tier | Targets | Bar to promote |
 |---|---|---|
@@ -338,7 +368,7 @@ slow growth beats bad growth.
 Recall is capped by a **character** budget — deterministic and model-agnostic, deliberately not
 tokens. Assembly order is fixed: profile records for the scope first, then search hits against
 the first user text, cut at the budget with truncation *marked* in the block and reported on the
-`agent.memory.recall` event (`{ count, bytes, truncated }`). Watch that event in the dashboard:
+`agent.memory.recall` event (`{ count, chars, truncated }`). Watch that event in the dashboard:
 a permanently-true `truncated` flag means your profile tier has bloated or your agents save too
 liberally — fix the write side before raising the budget.
 
@@ -392,7 +422,13 @@ it used to believe" queries. Never enable it on the recall path; recall is for c
 Omitting `query` entirely turns `search` into a filtered, recency-ordered listing — that's what
 backs `memory_list` and your admin surfaces.
 
-## Evolution operations
+## Evolution operations (Phase B)
+
+> Not implemented. `agent.memory.promote` / `.demote` / `.overlay` events and the
+> `memory_learnings` tool do not exist in Phase 1 — the shipped events are
+> `agent.memory.write` / `.search` / `.recall` (#420) and the shipped toolbox has four tools
+> (#421). `store.invalidate(id, reason)` *is* shipped and behaves as described below; what is
+> missing is the overlay that would recompile as a result.
 
 ### Reading the ledger
 
@@ -419,13 +455,14 @@ that taught it.
 
 ```typescript
 await store.invalidate(recordId, "heuristic caused over-escalation of routine tickets");
-// Done. The next instantiate compiles without it — no migration, no config surgery.
+// Shipped: the record is excluded from every subsequent search and recall.
+// (Phase B) The next instantiate also recompiles without it — no migration, no config surgery.
 ```
 
-Demotion mirrors promotion automatically: an invalidated record leaves the overlay at the next
-instantiate and emits `agent.memory.demote`. If the record was superseded rather than plainly
-wrong, prefer the `supersedes` write — the correction and the retirement land in one atomic act
-and the chain records *why*.
+**(Phase B)** Demotion will mirror promotion automatically: an invalidated record leaves the overlay
+at the next instantiate and emits `agent.memory.demote`. If the record was superseded rather than
+plainly wrong, prefer the `supersedes` write — the correction and the retirement land in one atomic
+act and the chain records *why*.
 
 ### Answering "why does the agent believe X?"
 
@@ -435,7 +472,12 @@ on memory-derived fragments. The chain is mechanical: prompt line → `memoryIds
 attribution surface (Playground lens) renders it. No surveyed memory system has line-level
 attribution; use it — it is what makes letting agents evolve tolerable.
 
-## Governance
+## Governance (Phase B)
+
+> Not implemented. `applyMemoryOverlay`, `lintComposition`, and the gardening pass are ADR-0008.
+> The one governance mechanism that *is* live in Phase 1 is the toolbox's write-time nudge:
+> a second `memory_save` with the same scope + same target returns a structured conflict envelope
+> instead of silently duplicating (#421).
 
 Agents must grow naturally, not malignantly. Three mechanisms, all mandatory in the design:
 
@@ -491,13 +533,24 @@ Stated rather than hidden, mirroring the ADRs:
   Manual is the capture mechanism — write it accordingly.
 - **Keyword search only in the reference backends** (FTS5/bm25). No semantic/vector search until
   the Postgres/pgvector backend; the `capabilities()` flag exists so it can exceed the reference
-  without breaking the contract.
+  without breaking the contract. Match granularity differs between reference backends and is
+  deliberately NOT pinned by the conformance kit: `InMemoryMemoryStore` matches substrings (query
+  `prefer` hits content `prefers`), while the FTS5 backend matches whole tokens (it does not). Only
+  relevance ORDERING and the filter semantics are contractual — develop against the backend you
+  ship on.
 - **Recall injects at turn 1 only.** Long conversations rely on the toolbox; per-turn
   re-injection waits for AgencyHost.
 - **Multi-agent sharing is by overlapping scope only** — no attach-by-reference memory blocks.
+  Per-agent partitioning uses the reserved `agent` scope key, applied as a client-side post-filter;
+  its documented cost is that **a page may return fewer than `limit` hits** when foreign-agent
+  records occupied slots (no over-fetch compensation in v1).
 - **`expiresAt` is filtered at read; nothing sweeps expired rows** (no scheduler in the framework
-  tier).
-- **Promotable targets are `background`, `awareness`, `judgment.heuristics`, `example` only.**
+  tier). Expired records are excluded from `search` unconditionally but still returned by `get`.
+- **The whole compositional layer is Phase B** — no `applyMemoryOverlay`, no promotion or
+  demotion, no gardening pass, no `lintComposition`, no `memory_learnings`. A `target` is stored
+  and returned untouched; nothing acts on it yet.
+- **Promotable targets (Phase B) will be `background`, `awareness`, `judgment.heuristics`,
+  `example` only.**
   Constraints/escalation/recovery are human-gated; persona, tone, methodology, mission, and *new*
   judgment domains are not promotable at all.
 - **No skill synthesis.** A learned procedure lands as prose (`manual.workflows`, later phase)
@@ -508,124 +561,136 @@ Stated rather than hidden, mirroring the ADRs:
 - **CC-runner attribution is limited** to what the prompt carries; the ledger stays complete
   server-side.
 
-## Open design questions surfaced while writing this
+## Design questions surfaced while writing this
 
-Writing this guide as if the system existed forced concrete answers the ADRs don't give. Each
-item below is a place where the docs above had to guess, hedge, or gloss:
+Writing this guide as if the system existed forced concrete answers the ADRs don't give. Every
+item below is one of those gaps, marked **RESOLVED** with what shipped in #417–#422 (or in the
+PR #416 decision round) — or still **OPEN**, deferred to Phase B/C.
 
-1. **Where does "promoted" live?** `MemoryRecord` (ADR-0007) has no promotion-state field, yet
-   `applyMemoryOverlay` needs a *bounded store query* for "valid + promoted records for scope"
-   at every instantiate (ADR-0008 cost note). Is promotion a record field (breaking to add later
-   — the exact reason `target` was reserved early), a separate store table, or derived by ledger
-   replay (too expensive per instantiate)? The ADRs imply both "the events are the source of
-   truth" and "the store knows"; those need reconciling.
+1. **RESOLVED (decision round) — where "promoted" lives: in the store, not the ledger.**
+   Promotion state is store-resident, so `applyMemoryOverlay` gets the bounded per-instantiate
+   query it needs; ledger replay was rejected as too expensive per instantiate. Phase 1 ships the
+   record fields this rests on (`target`, structured `payload`, `supports`) precisely because
+   widening a stored record later is breaking. The promotion *columns and operations*
+   (`promote`/`demote`/`corroborate`) are Phase B and deliberately absent from the `MemoryStore`
+   protocol today. **Still open (Phase B):** whether promotion is a record field or a side table.
 
-2. **`MemoryWriteInput` is named but never specified.** Which fields are author-writable? Can a
-   write set `id`, `createdAt`, `expiresAt`? Is `scope` on the input at all when writing through
-   `MemoryToolbox` (which binds scope at construction), or forced? And critically: does
-   `memory_save` expose `target` to the *model*, letting the agent propose its own promotion
-   targets, or are targets host/curation-assigned only? The quickstart and targets sections above
-   assume host writes can set everything and stay silent on the model-facing arg surface.
+2. **RESOLVED (#418, #421) — `MemoryWriteInput` is pinned, and the model *may* propose targets.**
+   `MemoryWriteInputSchema` = `{ scope, kind, content, tags?, provenance?, target?, payload?,
+   supersedes? }`. The store assigns `id`, `createdAt`, `updatedAt` (equal at birth); everything
+   lifecycle-owned — `invalidAt`, `supersededBy`, `expiresAt`, `supports` — is **not** writable on
+   a write. Writes are all-or-nothing per batch: an invalid input or an unknown `supersedes` id
+   rejects the whole batch with no mutation. Through `MemoryToolbox` there is no `scope` parameter
+   at all (bound at construction), but `memory_save` **does** expose `target` to the model — an
+   agent can propose its own promotion target, which is safe precisely because a target is a
+   proposal that Phase 1 stores and ignores.
 
-3. **`Awareness.fromRecall`'s signature and formatting ownership.** `fromScope` takes
-   `(scopeLike, fn, base)`; the guide guessed `fromRecall()` takes nothing and renders a
-   preformatted block. Who owns the ADK-style formatting discipline (delimited block, timestamped
-   entries) — the runtime assembler or the render fn? If the assembler, `RenderContext.recall` is
-   a finished string; if the renderer, recall must cross the seam structured, which touches core.
+3. **RESOLVED (#422) — the runtime assembler owns formatting.** `RenderContext.recall` is a
+   finished string; core only *places* it. `Awareness.fromRecall(fn?, base?)` mirrors `fromScope`
+   and defaults `fn` to identity, so the zero-arg form renders the assembled block verbatim. The
+   hook is instance-carried with a `replace()` override, so `withDomain`/`withDomains`/
+   `withCapabilities` preserve it; absent `ctx.recall`, rendering is byte-identical to pre-recall.
+   This is what keeps render purity (ADR-0005) intact — the renderer never fetches.
 
-4. **Recall budget configuration and default.** Neither ADR names the knob's home (registration
-   field? runner option? assembler argument?) nor a default number. The guide invented
-   `budgetChars: 4_000` on an invented `assembleRecall` options bag.
+4. **RESOLVED (#422) — the knob is `AssembleRecallOptions.budgetChars`**, default
+   `DEFAULT_RECALL_BUDGET_CHARS = 4000`, applied to the *whole* block (header and truncation
+   marker included). Server-registration wiring remains open — question 5.
 
-5. **The server-path memory seam.** ADR-0007 says "the runtime host assembles recall before
-   rendering," but nothing tells the server a registration *has* memory. Is there a registration
-   field (`memory: { store, scope: mapFn, budget }`)? Does conversation creation fail (like
-   `instantiate` 502) when the store errors, or degrade to no recall? The quickstart shows only
-   the self-hosted path because the server wiring is unspecifiable.
+5. **OPEN (Phase C) — the server-path memory seam.** Nothing tells the server a registration
+   *has* memory: no `memory: { store, scope, budget }` registration field exists, and whether a
+   store error should fail conversation creation (like `instantiate`'s 502) or degrade to no
+   recall is undecided. Phase 1 ships the assembler and pins **who calls it and when** (question
+   19); the self-hosted path in the quickstart is the only wired path.
 
-6. **SessionScope → memory scope stringification.** Memory scope is `Record<string, string>`;
-   SessionScope fields can be any Zod type (numbers, enums, emails). Who stringifies, is the
-   mapping declared anywhere machine-readable (dashboard, conformance, gardening all want to know
-   the partition key shape), or is it forever an ad hoc function per registration as the guide
-   shows?
+6. **OPEN (Phase C) — SessionScope → memory scope stringification.** Memory scope is
+   `Record<string, string>`; SessionScope fields can be any Zod type. It remains an ad hoc
+   per-registration mapping function, declared nowhere machine-readable. Phase 1 only pins the
+   *storage* side: scope is canonicalized to sorted-key form (`canonicalMemoryScope`), so pick
+   stable ids.
 
-7. **"Shared + mine, not theirs" is not expressible in one query.** Subset-match makes
-   `{ tenant }` match every user's personal records too; there is no "scope is exactly X" or
-   "key absent" operator. The guide had to invent an `audience: "team"` sentinel-key convention
-   plus a two-search union. Either bless a convention in the docs/toolbox, or add an exact-scope
-   / key-absence query capability — ADR-0007 currently presents broad-filter over-matching as
-   purely a feature.
+7. **PARTIALLY RESOLVED (#421/#422) — the reserved `agent` key is blessed; exact-scope querying
+   is not.** ADR-0008 D8's reserved `agent` scope key now has a shipped convention: a record is
+   visible to agent `me` when its scope's `agent` key is unset (shared) or equals `me`, applied as
+   a client-side post-filter (`matchesAgentConvention`) by both the toolbox and the recall
+   assembler — a runtime helper, not a store change. **Documented v1 consequence:** a page may
+   return fewer than `limit` hits when foreign-agent records occupied slots; there is no
+   over-fetch compensation. The general problem — no "scope is exactly X" or "key absent"
+   operator, so `{ tenant }` still over-matches every user's personal records — is **still open**;
+   the `audience: "team"` sentinel plus two-search union remains the workaround.
 
-8. **How do candidates accrue recurrence evidence?** Earned-tier promotion needs "≥N supporting
-   episodes," but nothing defines a *supporting episode* or where the count lives. Candidates
-   reach the agent only via relevance-ranked, budget-capped recall — a candidate heuristic that
-   never surfaces can never be corroborated. Is recurrence "N near-duplicate records written"
-   (in tension with dedupe-on-write curation), an explicit link between records, or a gardening
-   judgment call?
+8. **RESOLVED (decision round, data contract in #417/#422) — recurrence evidence is an explicit
+   corroboration array.** `MemoryRecord.supports?: Provenance[]` (ADR-0008 D4) records supporting
+   occurrences on the record itself, rather than counting near-duplicate writes (which would fight
+   dedupe-on-write). It is lifecycle-owned — not settable on `write`; a Phase B `corroborate`
+   operation appends to it. The "a candidate that never surfaces can never be corroborated"
+   chicken-and-egg is answered by `assembleRecall`'s `pinCandidates` option: up to N valid targeted
+   records, newest first, are pinned between the profile tier and the hits tier. It defaults to
+   `0` (off) — the hook exists; the promotion machinery that would use it is Phase B.
 
-9. **Threshold and eval-suite wiring for promotion Plays.** Where does `N` live (per agent? per
-   Play invocation? per target tier?), and how does the promotion Play locate "the agent's eval
-   suite"? Is eval-gating an alternative to recurrence (the ADR says "or") or configurable as
-   an additional requirement?
+9. **OPEN (Phase B) — threshold and eval-suite wiring for promotion Plays.** Where `N` lives, how
+   a promotion Play locates the agent's eval suite, and whether eval-gating is an alternative to
+   recurrence or an additional requirement, all remain unspecified. Nothing in Phase 1 depends on
+   the answer.
 
-10. **Older-wins conflict resolution cuts against invalidation-first.** ADR-0008 resolves
-    learned-vs-learned overlay conflicts by `createdAt`, *older* wins. But ADR-0007's whole
-    curation stance is that newer corrections supersede older facts. If two valid promoted
-    records conflict, the newer one is more likely right — older-wins is only obviously correct
-    as a determinism tiebreak. Should conflict resolution instead force the pair into the
-    contradiction-conflict flow (neither wins until curated)?
+10. **RESOLVED (decision round, enforced at write in #421) — conflicts are supersede-first, so
+    older-wins rarely arbitrates.** The fix moved *upstream* of the overlay: `memory_save`
+    detects a near-duplicate targeted collision in the same scope + same target and returns a
+    structured conflict envelope demanding the agent either supersede the existing record or
+    re-key — it never silently writes the duplicate. Two live contradictory targeted records is
+    now a state the write path resists, rather than one the overlay has to referee. Older-wins
+    survives only as a determinism tiebreak of last resort (Phase B).
 
-11. **How does prose become a structured `Example`?** `Example` has `scenario` / good / bad /
-    `reasoning` fields; a `MemoryRecord` has one `content` string. The `example` target promises
-    episodic memory "compiled, not retold" — but who parses the string into the structure inside
-    a *pure, deterministic* fold? Same problem for `awareness` ("content parsed as domain entry"
-    — `AwarenessDomain` needs `name`/`description`/`accessMethod`). Structured targets likely
-    need a structured payload on the record, not parsing.
+11. **RESOLVED (#417) — structured targets carry a structured payload; nothing parses prose.**
+    `ExampleTargetPayloadSchema` (`{ scenario, good, bad?, reasoning? }`) and
+    `AwarenessTargetPayloadSchema` (`{ name, description, accessMethod }`) are declared beside the
+    record and enforced by `MemoryRecordSchema`'s refinement on write. The shapes mirror the atoms
+    they compile into as *input* shapes, declared rather than imported, so the data contract stays
+    free of atom coupling. A structured-arm record with no payload stays valid — it just cannot
+    promote. This is what lets the Phase B fold be pure and deterministic.
 
-12. **`applyMemoryOverlay`'s return shape.** The ADR writes `→ config′` yet requires conflicts
-    to be "reported, never silently dropped" and budget spill to be marked — and a pure core
-    function can't emit events. The result must carry a report
-    (`{ config, conflicts, spilled, … }`); the exact shape, and how the runtime turns it into
-    the `agent.memory.overlay` event, is unspecified.
+12. **OPEN (Phase B) — `applyMemoryOverlay`'s return shape.** It must carry a report
+    (`{ config, conflicts, spilled, … }`) since a pure core function cannot emit events, but the
+    exact shape and its translation into `agent.memory.overlay` are unspecified. Not built.
 
-13. **Where does `memory_learnings` read from?** It's described as a toolbox view over promote
-    events, but the `MemoryStore` protocol has no event-history API, and the telemetry
-    `EventStore` is retention-pruned, optional, and deliberately decoupled from memory. If the
-    ledger's durable home is the telemetry store, point-in-time replay and `memory_learnings`
-    both inherit telemetry retention — contradicting the "system of record" stance. The ledger
-    needs a named durable home.
+13. **OPEN (Phase B) — the ledger needs a named durable home.** `memory_learnings` is not shipped
+    (the toolbox has four tools), and the `MemoryStore` protocol still has no event-history API.
+    Phase 1 sharpens the constraint rather than solving it: memory deliberately got **its own
+    SQLite file** with its own `user_version` ladder, never the retention-pruned `events.db` — so
+    whatever the ledger's home turns out to be, it will not inherit telemetry retention.
 
-14. **Is demotion gated?** Promotion into guarded slots requires human approval, but
-    `memory_invalidate` is on the agent toolbox, and demotion is automatic at next instantiate.
-    An agent can therefore unilaterally remove a human-approved constraint from its own overlay
-    by invalidating the backing record. Symmetric gating (invalidation of a guarded-tier
-    *promoted* record requires the same gate) seems necessary.
+14. **RESOLVED (decision round) — the removal bar equals the addition bar.** Invalidating a
+    *promoted* guarded-tier record requires the same gate that promoted it; an agent cannot
+    unilaterally strip a human-approved constraint from its own overlay via `memory_invalidate`.
+    Enforcement is Phase B (there is no promoted tier yet to protect). Phase 1's contribution is
+    that `delete` is host-only and absent from the toolbox — the agent can never destroy the
+    evidence, only invalidate it.
 
-15. **Expiry breaks ledger completeness.** An `expiresAt` on a promoted record silently drops it
-    from the overlay at the next instantiate (filtered at read) with no `agent.memory.demote`
-    event — so "replay the ledger to reconstruct time T" is wrong for expiring records unless
-    expiry either emits events or is banned on promoted/targeted records.
+15. **PARTIALLY RESOLVED (#418/#419) — expiry semantics are pinned; the ledger interaction is not.**
+    Expired records (`expiresAt <= now`) are excluded from `search` unconditionally — even with
+    `includeInvalidated: true` — while `get(id)` still returns them for host management. Nothing
+    sweeps expired rows. Whether expiry on a *promoted* record must emit a demote event (or be
+    banned outright) is **still open** for Phase B.
 
-16. **`lintComposition` invocation and failure semantics.** "A composition-wide ceiling triggers
-    a hard lint failure" — where? At instantiate (conversation creation 502s because the agent
-    learned too much?), in CI, or only inside the gardening report? Its input (config + records?
-    a store handle?) and output schema are unspecified; the guide's table is inferred from the
-    prose list.
+16. **OPEN (Phase B) — `lintComposition` invocation and failure semantics.** Where a ceiling
+    breach fails (instantiate? CI? the gardening report only?), and the function's input and
+    output schemas, are all unspecified. Not built.
 
-17. **Units drift: chars vs bytes.** Budgets are characters (recall cap, per-primitive overlay
-    budgets); events report bytes (`agent.memory.recall`, overlay's "bytes per primitive").
-    Multi-byte content makes these visibly diverge on the dashboard. Pick one unit or report
-    both.
+17. **RESOLVED (#420/#422) — chars for budgets, bytes only for previews.** Budget units are
+    **characters end-to-end**; `agent.memory.recall` reports `{ count, chars, truncated }`. The
+    only bytes anywhere are the standard house-rule preview caps (512 B, marked when clipped) on
+    event payloads, which are a log-hygiene concern rather than a budget. The dashboard therefore
+    never shows two competing budget units.
 
-18. **Toolbox packaging.** Is `MemoryToolbox` a `Toolbox` (author wraps it in a `Capability` and
-    supplies/merges the Manual) or a ready-made `Capability` with its Manual attached? The ADR
-    says the *Manual* carries the standing instruction, implying a capability-shaped bundle; the
-    name says toolbox. This decides how an author's own save-policy manual (section above)
-    composes with the built-in one, and matters for the global tool-name collision rules
-    (`memory_*` names must not collide with plays on the SDK-bridge path).
+18. **RESOLVED (#421) — `MemoryToolbox` is a `Toolbox`; `memoryCapability()` is the bundle.**
+    The toolbox ships tools only; `memoryCapability(store, scope, opts)` wraps it with a built-in
+    `TextManual` carrying the standing instruction and save policy. Authors who want to compose
+    their own Manual use the toolbox directly. Tool names (`memory_save` / `memory_search` /
+    `memory_list` / `memory_invalidate`) were checked against the play-collision guidance for the
+    SDK-bridge path.
 
-19. **Turn-1 recall query source.** "Search the first user text" assumes the first user message
-    exists before instantiate/render. Conversation creation (where instantiate runs and the
-    agent binds) can happen before any user message is sent — so recall assembly must happen at
-    first-run time, not conversation-creation time, or the query is empty. The seam ordering
-    (instantiate → bind → first message → assemble → render) deserves explicit specification.
+19. **RESOLVED (#422) — recall assembles at first-message time, not conversation creation.**
+    The pinned ordering is **instantiate → bind → first user message → `assembleRecall` → render**.
+    The host calls the assembler when the first user text exists to serve as `query`, then passes
+    `result.block` via `RenderContext.recall` into `renderInitialPrompt({ scope, recall })`. This
+    is documented in the module docblock as well as here, because getting it wrong yields an empty
+    query and a silently degraded recall block rather than an error.

@@ -71,6 +71,13 @@ describe("SSE event-union drift check", () => {
     }
   });
 
+  it("covers the memory kinds (#420) explicitly", () => {
+    const client = new Set<string>(CLIENT_EVENT_NAMES);
+    for (const name of ["memory.write", "memory.search", "memory.recall"]) {
+      expect(client.has(name)).toBe(true);
+    }
+  });
+
   it("PROOF: the check FAILS when the unions diverge", () => {
     // Simulate the runtime adding a name the dashboard hasn't caught up to.
     const driftedManifest = [...CLIENT_EVENT_NAMES, "some.future.event"];

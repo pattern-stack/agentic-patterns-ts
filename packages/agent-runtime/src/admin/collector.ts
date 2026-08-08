@@ -382,6 +382,12 @@ export class InMemoryEventCollector extends BaseExporter {
       case "agent.scratchpad.read":
       case "agent.scratchpad.fork":
       case "agent.scratchpad.join":
+      // Memory events (ADR-0007 D10, #420): observed, ring-buffered only.
+      // OBSERVABILITY-profile vocabulary — nothing emits them yet (#421/#422);
+      // a dashboard memory lens is ADR-0007 future work.
+      case "agent.memory.write":
+      case "agent.memory.search":
+      case "agent.memory.recall":
         this._recordEvent(typed);
         return;
       default: {

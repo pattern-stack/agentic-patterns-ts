@@ -384,6 +384,76 @@ describe("Awareness.fromScope", () => {
   });
 });
 
+describe("Awareness.fromRecall", () => {
+  const FALLBACK = "You have no external information sources available.";
+
+  it("appends the host-assembled block verbatim (identity default) after the base content", () => {
+    const awareness = Awareness.fromRecall();
+    expect(awareness.toPrompt({ recall: "block" })).toBe(`${FALLBACK}\n\nblock`);
+  });
+
+  it("renders through a custom fn when one is supplied", () => {
+    const awareness = Awareness.fromRecall((r) => `wrapped: ${r}`);
+    expect(awareness.toPrompt({ recall: "block" })).toBe(`${FALLBACK}\n\nwrapped: block`);
+  });
+
+  it("renders base domains first, recall appended last", () => {
+    const awareness = Awareness.fromRecall(undefined, {
+      domains: [{ name: "GitHub", description: "Repos", accessMethod: "API" }],
+    });
+    const nullary = awareness.toPrompt();
+    expect(nullary).toContain("GitHub");
+    expect(awareness.toPrompt({ recall: "block" })).toBe(`${nullary}\n\nblock`);
+  });
+
+  it("is byte-identical to a plain Awareness when ctx is omitted", () => {
+    expect(Awareness.fromRecall().toPrompt()).toBe(new Awareness({}).toPrompt());
+  });
+
+  it("is byte-identical to nullary rendering when ctx.recall is undefined", () => {
+    const awareness = Awareness.fromRecall();
+    expect(awareness.toPrompt({ scope: { workspace: "acme" } })).toBe(awareness.toPrompt());
+  });
+
+  it("a hook-less instance ignores ctx.recall entirely", () => {
+    const awareness = new Awareness({});
+    expect(awareness.toPrompt({ recall: "block" })).toBe(awareness.toPrompt());
+  });
+
+  it("skips the append for an empty-string ctx.recall (hosts may pass block unconditionally)", () => {
+    const awareness = Awareness.fromRecall();
+    expect(awareness.toPrompt({ recall: "" })).toBe(awareness.toPrompt());
+  });
+
+  it("recallRender AND scopeRender survive withDomain/withDomains/withCapabilities", () => {
+    const awareness = new Awareness(
+      {},
+      (s) => `Workspace: ${String(s.workspace)}`,
+      (r) => r,
+    );
+    const chained = awareness
+      .withDomain({ name: "GitHub", description: "Repos", accessMethod: "API" })
+      .withDomains([{ name: "Docs", description: "d", accessMethod: "m" }])
+      .withCapabilities(["search"]);
+    expect(chained.recallRender).toBe(awareness.recallRender);
+    expect(chained.scopeRender).toBe(awareness.scopeRender);
+    const prompt = chained.toPrompt({ scope: { workspace: "acme" }, recall: "remembered" });
+    expect(prompt).toContain("Workspace: acme");
+    expect(prompt).toContain("remembered");
+  });
+
+  it("renders base, scope text, recall text in that order when both hooks fire", () => {
+    const awareness = new Awareness(
+      {},
+      (s) => `Workspace: ${String(s.workspace)}`,
+      (r) => r,
+    );
+    expect(awareness.toPrompt({ scope: { workspace: "acme" }, recall: "remembered" })).toBe(
+      `${FALLBACK}\n\nWorkspace: acme\n\nremembered`,
+    );
+  });
+});
+
 describe("Awareness.toPrompt(ctx) append semantics", () => {
   it("is byte-identical to a scopeRender-less Awareness when ctx is omitted", () => {
     const withHook = Awareness.fromScope(workspaceScope, (s) => `Workspace: ${s.workspace}`);

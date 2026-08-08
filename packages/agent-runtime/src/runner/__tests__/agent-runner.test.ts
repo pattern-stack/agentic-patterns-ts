@@ -760,6 +760,106 @@ describe("AgentRunner", () => {
       expect(progress.traceId).toBe("trace-abc");
     });
 
+    it("ctx.emit passes memory events through TYPED with correlation stamped last (#421)", async () => {
+      let callCount = 0;
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => {
+          callCount++;
+          if (callCount === 1) {
+            return toolCallResult(
+              { toolCallId: "tc-memory-1", toolName: "get_weather", input: { city: "NYC" } },
+              10,
+              5,
+            );
+          }
+          return textResult("Done.", 5, 5);
+        },
+      });
+      const tools = [
+        ToolSchema.fromZod("get_weather", "Get weather", z.object({ city: z.string() })),
+      ];
+      const agent = makeAgent({ getTools: () => tools });
+
+      const capturedCtx: ToolExecutionContext[] = [];
+      const executor: ToolExecutor = {
+        execute: async (_name, _args, ctx) => {
+          if (ctx) capturedCtx.push(ctx);
+          return { ok: true };
+        },
+      };
+
+      const bus = new AgentEventBus();
+      const memoryEvents: AgentEvent[] = [];
+      const progressEvents: AgentEvent[] = [];
+      bus.subscribe("agent.memory.write", (e) => memoryEvents.push(e as AgentEvent));
+      bus.subscribe("agent.memory.search", (e) => memoryEvents.push(e as AgentEvent));
+      bus.subscribe("agent.tool.progress", (e) => progressEvents.push(e as AgentEvent));
+
+      const runner = new AgentRunner(model, bus);
+      await runner.run(agent, "weather?", {
+        toolExecutor: executor,
+        traceId: "trace-mem",
+      });
+
+      const ctx = capturedCtx[0];
+      expect(ctx).toBeDefined();
+
+      // agent.memory.write reaches the bus typed, with data passed through and
+      // correlation stamped from the dispatch context — an `e.data.runId`
+      // cannot override the stamped runId (correlation is spread LAST).
+      ctx?.emit?.({
+        type: "agent.memory.write",
+        data: {
+          scope: { tenant: "acme" },
+          count: 1,
+          records: [{ id: "m1", kind: "fact", preview: "p" }],
+          runId: "EVIL-OVERRIDE",
+        },
+      });
+      // agent.memory.search bridges the same way.
+      ctx?.emit?.({
+        type: "agent.memory.search",
+        data: {
+          scope: { tenant: "acme" },
+          limit: 10,
+          includeInvalidated: false,
+          resultCount: 0,
+          resultIds: [],
+        },
+      });
+      await Promise.resolve(); // let the fire-and-forget publishes settle
+
+      expect(memoryEvents).toHaveLength(2);
+      const write = memoryEvents[0] as unknown as {
+        type: string;
+        traceId: string;
+        runId: string;
+        parentSpanId?: string;
+        toolCallId?: string;
+        scope: Record<string, string>;
+        count: number;
+        records: Array<{ id: string }>;
+      };
+      expect(write.type).toBe("agent.memory.write");
+      expect(write.traceId).toBe("trace-mem");
+      expect(write.runId).toBe(ctx?.runId); // stamped from the dispatch context
+      expect(write.runId).not.toBe("EVIL-OVERRIDE"); // e.data cannot override
+      expect(write.parentSpanId).toBeTruthy();
+      expect(write.toolCallId).toBe("tc-memory-1");
+      expect(write.scope).toEqual({ tenant: "acme" });
+      expect(write.count).toBe(1);
+      expect(write.records[0]?.id).toBe("m1");
+      expect(memoryEvents[1]?.type).toBe("agent.memory.search");
+
+      // Regression pin: non-memory emits still fall through to progress.
+      ctx?.emit?.({ type: "progress", data: { statusText: "still-progress" } });
+      await Promise.resolve();
+      expect(progressEvents).toHaveLength(1);
+      expect((progressEvents[0] as unknown as { statusText: string }).statusText).toBe(
+        "still-progress",
+      );
+    });
+
     it("execute(name, args) with no toolExecutor ctx support still works (backward compat)", async () => {
       let callCount = 0;
       const model = new MockLanguageModelV3({

@@ -42,6 +42,14 @@ export type AwarenessData = z.infer<typeof AwarenessSchema>;
 export type AwarenessScopeRenderFn = (scope: Record<string, unknown>) => string;
 
 /**
+ * A recall-derived render hook attached to an Awareness INSTANCE (not schema
+ * data — Zod-validated frozen data can't carry functions). Receives the
+ * host-assembled `ctx.recall` block; returns the text to append (empty string
+ * ⇒ skipped). See {@link Awareness.fromRecall}.
+ */
+export type AwarenessRecallRenderFn = (recall: string) => string;
+
+/**
  * Defines what the agent CAN know - available information sources.
  */
 export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
@@ -55,9 +63,22 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
    */
   readonly scopeRender?: AwarenessScopeRenderFn;
 
-  constructor(data: z.input<typeof AwarenessSchema>, scopeRender?: AwarenessScopeRenderFn) {
+  /**
+   * Optional render-time hook: when set AND a render `ctx.recall` is
+   * supplied, `toPrompt(ctx)` appends this fn's output after the existing
+   * content and after any scope-derived text. Instance-carried rather than
+   * schema data — same rationale and `replace()` survival as `scopeRender`.
+   */
+  readonly recallRender?: AwarenessRecallRenderFn;
+
+  constructor(
+    data: z.input<typeof AwarenessSchema>,
+    scopeRender?: AwarenessScopeRenderFn,
+    recallRender?: AwarenessRecallRenderFn,
+  ) {
     super(AwarenessSchema, data);
     this.scopeRender = scopeRender;
+    this.recallRender = recallRender;
   }
 
   /**
@@ -78,6 +99,21 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
     base?: z.input<typeof AwarenessSchema>,
   ): Awareness {
     return new Awareness(base ?? {}, fn as unknown as AwarenessScopeRenderFn);
+  }
+
+  /**
+   * Build an Awareness whose `toPrompt(ctx)` appends the host-assembled
+   * `ctx.recall` block when one is supplied. The `fromScope` sibling — no new
+   * Section subclass, no render impurity. `fn` defaults to identity: the
+   * block arrives pre-formatted and pre-budgeted from the runtime assembler
+   * (ADR-0007 D8a), so the default renders it verbatim. Supply `fn` only to
+   * re-wrap the finished block (never to fetch or reformat records).
+   */
+  static fromRecall(
+    fn?: AwarenessRecallRenderFn,
+    base?: z.input<typeof AwarenessSchema>,
+  ): Awareness {
+    return new Awareness(base ?? {}, undefined, fn ?? ((recall) => recall));
   }
 
   /** Get list of domain names. */
@@ -101,8 +137,12 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
    *   APPENDED after the existing content — including the no-sources
    *   fallback line below — separated by a blank line, never reordering or
    *   replacing anything. An empty-string result from `scopeRender` is
-   *   skipped. Omitting `ctx` (or a `scopeRender`-less instance) renders
-   *   byte-identically to the pre-scope behavior.
+   *   skipped. Likewise, when both `recallRender` (this instance) and
+   *   `ctx.recall` (this call) exist, the recall-derived text is appended
+   *   after the existing content *and after any scope-derived text*,
+   *   blank-line separated; an empty-string result is skipped. Omitting
+   *   `ctx` (or a hook-less instance) renders byte-identically to the
+   *   pre-scope/pre-recall behavior.
    */
   toPrompt(ctx?: RenderContext): string {
     let base: string;
@@ -120,20 +160,27 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
       base = lines.join("\n");
     }
 
+    let out = base;
     if (this.scopeRender && ctx?.scope !== undefined) {
       const extra = this.scopeRender(ctx.scope as Record<string, unknown>);
       if (extra !== "") {
-        return `${base}\n\n${extra}`;
+        out = `${out}\n\n${extra}`;
       }
     }
-    return base;
+    if (this.recallRender && ctx?.recall !== undefined) {
+      const extra = this.recallRender(ctx.recall);
+      if (extra !== "") {
+        out = `${out}\n\n${extra}`;
+      }
+    }
+    return out;
   }
 
   /**
    * Overridden because {@link AgenticModel.replace} reconstructs via the
-   * 1-arg schema-data constructor and would silently drop `scopeRender` (an
-   * instance field, not schema data) on every `withDomain`/`withDomains`/
-   * `withCapabilities` call, which all build on `replace()`.
+   * 1-arg schema-data constructor and would silently drop `scopeRender`/
+   * `recallRender` (instance fields, not schema data) on every `withDomain`/
+   * `withDomains`/`withCapabilities` call, which all build on `replace()`.
    */
   override replace(updates: Partial<AwarenessData>): this {
     // `this.constructor` (not a hardcoded `new Awareness`) so a downstream
@@ -142,8 +189,9 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
     const Ctor = this.constructor as new (
       data: z.input<typeof AwarenessSchema>,
       scopeRender?: AwarenessScopeRenderFn,
+      recallRender?: AwarenessRecallRenderFn,
     ) => this;
-    return new Ctor({ ...this.data, ...updates }, this.scopeRender);
+    return new Ctor({ ...this.data, ...updates }, this.scopeRender, this.recallRender);
   }
 
   /** Add a single domain to this awareness. */

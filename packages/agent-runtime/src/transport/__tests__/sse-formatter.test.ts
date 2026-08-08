@@ -355,6 +355,128 @@ describe("SSEFormatter", () => {
     });
   });
 
+  describe("memory lifecycle", () => {
+    it("formats memory.write with snake_case record previews", () => {
+      const event = createEvent("agent.memory.write", {
+        ...makeBase(),
+        scope: { userId: "u1" },
+        count: 2,
+        records: [
+          { id: "m1", kind: "fact", preview: "the sky is blue" },
+          { id: "m2", kind: "preference", preview: "prefers dark mode", supersededId: "m0" },
+        ],
+        toolCallId: "tc-1",
+      });
+      const frame = formatter.format(event);
+      expect(frame).not.toBeNull();
+      const parsed = parseSSE(frame!);
+      expect(parsed.event).toBe("memory.write");
+      expect(parsed.data.scope).toEqual({ userId: "u1" });
+      expect(parsed.data.count).toBe(2);
+      expect(parsed.data.tool_call_id).toBe("tc-1");
+      const records = parsed.data.records as Record<string, unknown>[];
+      expect(records).toHaveLength(2);
+      expect(records[0]).toEqual({ id: "m1", kind: "fact", preview: "the sky is blue" });
+      // snake_case remap: supersededId → superseded_id, present ONLY on the superseding record.
+      expect(records[1]).toEqual({
+        id: "m2",
+        kind: "preference",
+        preview: "prefers dark mode",
+        superseded_id: "m0",
+      });
+      expect("superseded_id" in records[0]!).toBe(false);
+    });
+
+    it("omits tool_call_id and superseded_id when absent on memory.write", () => {
+      const event = createEvent("agent.memory.write", {
+        ...makeBase(),
+        scope: { userId: "u1" },
+        count: 1,
+        records: [{ id: "m1", kind: "episode", preview: "went well" }],
+      });
+      const parsed = parseSSE(formatter.format(event)!);
+      expect(parsed.event).toBe("memory.write");
+      expect("tool_call_id" in parsed.data).toBe(false);
+      const records = parsed.data.records as Record<string, unknown>[];
+      expect("superseded_id" in records[0]!).toBe(false);
+    });
+
+    it("formats memory.search with the full payload", () => {
+      const event = createEvent("agent.memory.search", {
+        ...makeBase(),
+        scope: { userId: "u1" },
+        query: "dark mode",
+        kinds: ["preference", "fact"],
+        tags: ["ui"],
+        limit: 5,
+        includeInvalidated: false,
+        resultCount: 2,
+        resultIds: ["m2", "m1"],
+        toolCallId: "tc-2",
+      });
+      const parsed = parseSSE(formatter.format(event)!);
+      expect(parsed.event).toBe("memory.search");
+      expect(parsed.data.scope).toEqual({ userId: "u1" });
+      expect(parsed.data.limit).toBe(5);
+      expect(parsed.data.include_invalidated).toBe(false);
+      expect(parsed.data.result_count).toBe(2);
+      expect(parsed.data.result_ids).toEqual(["m2", "m1"]);
+      expect(parsed.data.query).toBe("dark mode");
+      expect(parsed.data.kinds).toEqual(["preference", "fact"]);
+      expect(parsed.data.tags).toEqual(["ui"]);
+      expect(parsed.data.tool_call_id).toBe("tc-2");
+    });
+
+    it("omits the optional filter keys on memory.search when absent", () => {
+      const event = createEvent("agent.memory.search", {
+        ...makeBase(),
+        scope: { userId: "u1" },
+        limit: 10,
+        includeInvalidated: true,
+        resultCount: 0,
+        resultIds: [],
+      });
+      const parsed = parseSSE(formatter.format(event)!);
+      expect(parsed.event).toBe("memory.search");
+      expect("query" in parsed.data).toBe(false);
+      expect("kinds" in parsed.data).toBe(false);
+      expect("tags" in parsed.data).toBe(false);
+      expect("tool_call_id" in parsed.data).toBe(false);
+    });
+
+    it("formats memory.recall with the pinned chars-based payload", () => {
+      const event = createEvent("agent.memory.recall", {
+        ...makeBase(),
+        scope: { userId: "u1" },
+        count: 3,
+        chars: 1800,
+        budgetChars: 2000,
+        truncated: true,
+        preview: "## Memory\n- the sky is blue… (preview only)",
+      });
+      const parsed = parseSSE(formatter.format(event)!);
+      expect(parsed.event).toBe("memory.recall");
+      // Exactly {scope, count, chars, budget_chars, truncated, preview}
+      // plus the formatter's trace enrichment (traceId + timestamp).
+      expect(parsed.data).toEqual({
+        scope: { userId: "u1" },
+        count: 3,
+        chars: 1800,
+        budget_chars: 2000,
+        truncated: true,
+        preview: "## Memory\n- the sky is blue… (preview only)",
+        traceId: "t1",
+        timestamp: event.timestamp.toISOString(),
+      });
+    });
+
+    it("maps the three agent.memory.* types in SSE_EVENT_NAMES", () => {
+      expect(SSE_EVENT_NAMES["agent.memory.write"]).toBe("memory.write");
+      expect(SSE_EVENT_NAMES["agent.memory.search"]).toBe("memory.search");
+      expect(SSE_EVENT_NAMES["agent.memory.recall"]).toBe("memory.recall");
+    });
+  });
+
   describe("error", () => {
     it("formats error events", () => {
       const event = createEvent("agent.error", {
