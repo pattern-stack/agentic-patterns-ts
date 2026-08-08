@@ -184,6 +184,12 @@ assembles recall on the first turn and sets it on the conversation's host bag �
 narrow `host.recall` into the `RenderContext` alongside `host.scope`. Recall injects at
 **turn 1 only** in v1; mid-conversation needs go through the toolbox.
 
+**The one invariant the seam cannot check for you:** `memory.store` must be the SAME instance
+your `instantiate` hook binds into `memoryCapability`, and `memory.scope` must derive the SAME
+partition that hook binds. They are two independent author-supplied declarations — if they
+diverge, every toolbox write succeeds and every recall comes back empty, with no error anywhere.
+Keep both in one named function (the `memoryScope(s)` pattern above) and pass it to both seams.
+
 Everything above is observable from day one: `agent.memory.write`, `agent.memory.search`, and
 `agent.memory.recall` flow through the standard event spine to exporters and the dashboard.
 
@@ -204,15 +210,21 @@ Then, in the dashboard chat:
    `agent.memory.write` land in the event stream.
 2. Kill the playground, start it again, open a **fresh** conversation.
 3. Ask *"what do I drink?"* — the recall block arrives at turn 1
-   (`agent.memory.recall` fires with counts/chars/truncated) and the answer comes from memory.
+   (`agent.memory.recall` appears in the chat stream with counts/chars/truncated) and the
+   answer comes from memory.
 
 Identity: `AP_USER` names the partition's `user` key (default `"local"`); per-conversation
 override via `POST /conversations` with `context: { user: "guest" }`. The reserved
 `agent: "companion"` key (ADR-0008 D8) keeps companion-specific records out of other agents'
-recall, while `user`-only records stay shared across your agents. Model/runner selection is the
-playground's usual env contract (`AGENT_MODEL` / `AGENT_TIER` / provider keys); on the
-Claude-Code provider the companion doubles as a capable daily driver — web/files/shell from
-Claude Code, memory from this composition.
+recall, while `user`-only records stay shared across your agents.
+
+**Which runner you resolve matters for step 1** (playground env contract: `AGENT_MODEL` /
+`AGENT_TIER` / provider keys): with a provider key — e.g. `ANTHROPIC_API_KEY` — you get
+`AgentRunner` and the full event vocabulary, `memory_save` included. The bare **claude-CLI
+fallback** (no keys) still SAVES and RECALLS correctly, but executes tools without a
+`ToolExecutionContext`, so `agent.memory.write`/`.search` don't emit — and it runs with native
+CC tools disabled, so it is not the "capable daily driver" profile. The `agent.memory.recall`
+event in step 3 is route-emitted and appears on every runner.
 
 ## Deciding what to remember
 

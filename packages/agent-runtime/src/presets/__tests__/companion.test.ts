@@ -33,16 +33,23 @@ describe("buildCompanionAgent", () => {
     expect(withRecall).toContain("Doug takes espresso, no milk.");
   });
 
-  it("renders byte-identically with no recall in context (empty ctx == no ctx)", () => {
+  it("renders byte-identically with no recall in context (empty ctx == no ctx == empty-string recall)", () => {
     const agent = companion();
     expect(agent.renderInitialPrompt({})).toBe(agent.renderInitialPrompt());
+    // assembleRecall's "" (nothing recalled) must also be byte-identical (#444).
+    expect(agent.renderInitialPrompt({ recall: "" })).toBe(agent.renderInitialPrompt());
     expect(agent.renderInitialPrompt()).not.toContain("Recalled Memories");
   });
 
   it("names memory as an awareness domain and carries the memory-discipline judgment", () => {
-    const prompt = companion().renderInitialPrompt();
+    const agent = companion();
+    const prompt = agent.renderInitialPrompt();
     expect(prompt).toContain("cross-session memory");
-    expect(prompt).toContain("supersedes");
+    // Judgment-UNIQUE text (Gate 2.5 N4): "supersedes" alone appears in the
+    // Manual and tool descriptions too — deleting the Judgment would not
+    // change it. This line exists only in the Judgment's heuristics.
+    expect(prompt).toContain("never leave two live contradictory records");
+    expect(agent.role.judgments.map((j) => j.data.domain)).toContain("memory discipline");
   });
 
   it("writes through the bound partition only — the toolbox carries the build-time scope", async () => {

@@ -9,10 +9,12 @@
  * with `buildCompanionAgent(opts).withModel(id)` if you need a specific model.
  *
  * NO CAPABILITIES beyond memory (2026-08-08 decision, #445): general
- * capability arrives entity-first later; on the ClaudeCodeRunner profile the
- * runner itself contributes web/files/shell. The composition here is the
- * memory discipline — recall awareness, the save/supersede judgment, and the
- * scope-bound `memoryCapability`.
+ * capability arrives entity-first later. The composition here is the memory
+ * discipline — recall awareness, the save/supersede judgment, and the
+ * scope-bound `memoryCapability`. (A Claude-Code-hosted profile that would
+ * contribute web/files/shell natively is future work — the playground's
+ * reachable CC path today is the claude-CLI fallback, which runs with
+ * native tools disabled; see #445's Gate 2.5 notes.)
  *
  * The MEMORY SCOPE is author-declared (ADR-0007 D3) and bound at build time
  * (ADR-0004 instantiate seam): callers wanting per-conversation scopes
@@ -79,7 +81,7 @@ export function buildCompanionAgent(opts: CompanionOptions) {
         heuristics: [
           "When told a durable fact or preference — or when one clearly emerges — save it with memory_save",
           "When a saved fact is corrected, write the correction with supersedes; never leave two live contradictory records",
-          "Prefer memory_search over guessing when asked about the user's preferences or history",
+          "Prefer memory_search over guessing when asked about the user's preferences or history that the recall block doesn't already answer",
           "When an answer comes from a recalled memory, say so briefly",
         ],
         constraints: [

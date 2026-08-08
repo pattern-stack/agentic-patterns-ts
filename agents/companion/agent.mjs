@@ -13,9 +13,14 @@
 // `context: { user: "guest" }` — the instantiate hook rebinds the toolbox
 // and the #444 wiring re-derives the recall partition from the same context.
 //
-// Demo profile: run the playground on the ClaudeCodeRunner for a capable
-// daily driver (web/files/shell come from Claude Code itself; memory tools
-// from this composition). Any runner works — memory behavior is identical.
+// Runner reality (Gate 2.5 B1/B3): the playground resolves the runner from
+// env. With a provider key (e.g. ANTHROPIC_API_KEY) you get AgentRunner —
+// full event vocabulary, memory_save emits agent.memory.write. The bare
+// claude-CLI fallback (no keys) runs with NATIVE CC TOOLS DISABLED and
+// executes tools without a ToolExecutionContext, so memory WRITES still
+// land but their events don't emit. A capable "CC daily driver" profile
+// (web/files/shell + memory) needs a runner-selection seam the CLI doesn't
+// expose yet — tracked as follow-up work, not claimed here.
 import { buildCompanionAgent, loadMemoryStore } from "../../packages/agent-runtime/dist/index.js";
 
 const memory = await loadMemoryStore();
@@ -25,7 +30,9 @@ process.stderr.write(
     : `[companion] memory: ${memory.reason}\n`,
 );
 
-const defaultUser = process.env.AP_USER ?? "local";
+// `||` not `??` (Gate 2.5 N2, the sqlite-store.ts precedent): an empty
+// AP_USER= line in .env means UNSET, never a silent "" partition.
+const defaultUser = process.env.AP_USER || "local";
 
 /** Memory partition for a conversation context (reserved agent key, ADR-0008 D8). */
 const memoryScopeOf = (ctx) => ({
@@ -38,7 +45,7 @@ export default () => ({
   name: "Companion",
   description:
     "Generalist personal assistant with cross-session memory — the memory-layer dogfood instrument",
-  agent: buildCompanionAgent({ store: memory.store, scope: memoryScopeOf(undefined) }),
+  agent: buildCompanionAgent({ store: memory.store, scope: memoryScopeOf() }),
   // Per-conversation delivery (ADR-0004): rebind the memory partition to the
   // conversation's context, so `context: { user: "guest" }` reads/writes
   // guest's partition — never the default user's.

@@ -24,9 +24,12 @@ dev-haiku:
 # Companion demo (#445): build, then playground with the memory-wired
 # companion. Durable memories persist at $AP_MEMORY_DB_PATH | ~/.local/state/ap/memory.db —
 # tell it something, restart, ask again in a fresh conversation.
+# BUN, not node (Gate 2.5 B2): under node, better-sqlite3's bun-installed
+# native binding can be ABI-mismatched and memory SILENTLY degrades to
+# in-memory — the demo's whole point is persistence. bun:sqlite always works.
 companion:
     bun run build
-    node packages/agent-cli/dist/cli.js playground
+    bun packages/agent-cli/dist/cli.js playground
 
 # ── Checks ───────────────────────────────────
 
