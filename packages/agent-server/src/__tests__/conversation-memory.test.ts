@@ -31,7 +31,7 @@ import type {
   RunOptions,
   RunResult,
 } from "@agentic-patterns/runtime";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createServer } from "../app.js";
 import type { AgentRegistration, ServerConfig } from "../config.js";
@@ -227,7 +227,7 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
     // No search happens at creation — recall waits for the first user text.
     expect(searchCalls).toBe(0);
 
-    await postMessage(app, id, "what do I drink?");
+    const firstBody = await postMessage(app, id, "what do I drink?");
 
     const first = captured[0];
     expect(first).toBeDefined();
@@ -236,9 +236,15 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
     // The other partition's record never crosses the scope boundary.
     expect(first?.recallAtCall).not.toContain("Unrelated partition record.");
 
-    // The recall emission reached the shared bus (dashboard/exporter path).
+    // Route-owned emission, both sinks: `publish()` on the shared bus
+    // (asserted via direct subscription — NOTE: no built-in exporter
+    // implements a memory.recall handler yet, so this pins the bus contract
+    // only), AND the SSE frame written onto THIS turn's stream so the chat
+    // surface sees recall arrive. traceId groups by conversation (m4).
     expect(recallEvents).toHaveLength(1);
     expect((recallEvents[0] as { count?: number }).count).toBe(1);
+    expect(recallEvents[0]?.traceId).toBe(id);
+    expect(firstBody).toContain("memory.recall");
 
     const searchesAfterFirstTurn = searchCalls;
     expect(searchesAfterFirstTurn).toBeGreaterThan(0);
@@ -373,6 +379,129 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
     expect(((await res.json()) as { error: string }).error).toContain("boom");
   });
 
+  it("502s at creation when the derivation returns a non-string value (Gate 2.5 M5)", async () => {
+    const app = createServer(
+      makeConfig(
+        [
+          {
+            id: "companion",
+            name: "Companion",
+            agent: plainAgent(),
+            memory: {
+              store: new InMemoryMemoryStore(),
+              scope: () => ({ user: 123 }) as unknown as Record<string, string>,
+            },
+            ...hostCapturingRunner([]),
+          },
+        ],
+        new AgentEventBus(),
+      ),
+    );
+
+    const res = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "companion" }),
+    });
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toContain("memory scope");
+  });
+
+  it("502s at creation for a STATIC empty scope map (same check, non-fn path)", async () => {
+    const app = createServer(
+      makeConfig(
+        [
+          {
+            id: "companion",
+            name: "Companion",
+            agent: plainAgent(),
+            memory: { store: new InMemoryMemoryStore(), scope: {} },
+            ...hostCapturingRunner([]),
+          },
+        ],
+        new AgentEventBus(),
+      ),
+    );
+
+    const res = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "companion" }),
+    });
+    expect(res.status).toBe(502);
+  });
+
+  it("502s at creation for a non-positive-integer budgetChars (Gate 2.5 m3/M1 — fail loud, not a dead latch)", async () => {
+    const app = createServer(
+      makeConfig(
+        [
+          {
+            id: "companion",
+            name: "Companion",
+            agent: plainAgent(),
+            memory: { store: new InMemoryMemoryStore(), scope: SCOPE, budgetChars: 0 },
+            ...hostCapturingRunner([]),
+          },
+        ],
+        new AgentEventBus(),
+      ),
+    );
+
+    const res = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "companion" }),
+    });
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toContain("budgetChars");
+  });
+
+  it("a memory-only registration ACCEPTS a caller scope and feeds it to the derivation (Gate 2.5 m5)", async () => {
+    const store = new InMemoryMemoryStore();
+    await store.write([
+      {
+        scope: { user: "guest", agent: "companion" },
+        kind: "preference",
+        content: "Guest likes tea.",
+      },
+    ]);
+    const derivationArgs: Array<Record<string, unknown> | undefined> = [];
+    const captured: Array<{ host: unknown; recallAtCall: unknown }> = [];
+    const app = createServer(
+      makeConfig(
+        [
+          {
+            id: "companion",
+            name: "Companion",
+            agent: plainAgent(),
+            // NO instantiate hook, NO SessionScope — memory alone must accept context.
+            memory: {
+              store,
+              scope: (ctx) => {
+                derivationArgs.push(ctx);
+                return { user: String(ctx?.user ?? "local"), agent: "companion" };
+              },
+            },
+            ...hostCapturingRunner(captured),
+          },
+        ],
+        new AgentEventBus(),
+      ),
+    );
+
+    const res = await app.request("/conversations", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ agent_id: "companion", scope: { user: "guest" } }),
+    });
+    expect(res.status).toBe(201);
+    expect(derivationArgs).toEqual([{ user: "guest" }]);
+
+    const { id } = (await res.json()) as { id: string };
+    await postMessage(app, id, "what do I drink?");
+    expect(captured[0]?.recallAtCall).toContain("Guest likes tea.");
+  });
+
   it("a recall-assembly failure is best-effort: the turn still streams, without recall", async () => {
     const broken: MemoryStore = {
       write: async () => {
@@ -402,11 +531,21 @@ describe("memory-declaring registration — turn-1 recall (#444)", () => {
       ),
     );
 
-    const { id } = await createConversation(app, "companion");
-    const body = await postMessage(app, id, "hello");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { id } = await createConversation(app, "companion");
+      const body = await postMessage(app, id, "hello");
 
-    expect(body).toContain("message.complete");
-    expect(captured[0]?.recallAtCall).toBeUndefined();
+      expect(body).toContain("message.complete");
+      expect(captured[0]?.recallAtCall).toBeUndefined();
+      // Best-effort means LOGGED, never silent (Gate 2.5 N4).
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("recall assembly failed"),
+        expect.anything(),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

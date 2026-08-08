@@ -27,6 +27,7 @@ import type {
 } from "@agentic-patterns/runtime";
 import {
   Conversation,
+  DEFAULT_RECALL_BUDGET_CHARS,
   assembleRecall,
   buildScopeHost,
   createEvent,
@@ -125,7 +126,12 @@ export function conversationRoutes(
 
     const hasHook = typeof reg.instantiate === "function";
     const hasScope = reg.scope !== undefined;
-    if (rawScope !== undefined && !hasHook && !hasScope) {
+    // Memory-declaring registrations accept a caller context too (#444 Gate
+    // 2.5 m5): `memory.scope` is documented as a function of the PARSED
+    // effective context, so a memory-only registration must be able to
+    // receive one — same unparsed-context posture as hook-only registrations.
+    const hasMemory = reg.memory !== undefined;
+    if (rawScope !== undefined && !hasHook && !hasScope && !hasMemory) {
       return c.json(
         { error: `Agent has no instantiate hook — ${suppliedKey} is not accepted` },
         400,
@@ -203,12 +209,24 @@ export function conversationRoutes(
     // (same grammar as `instantiate failed` above).
     let memoryBinding: ConversationEntry["memory"];
     if (reg.memory) {
+      // Same fail-loud contract as the scope checks below (Gate 2.5 m3/M1):
+      // a bad budget would otherwise throw inside the first-message
+      // try/catch, get swallowed into one console.error, and leave recall
+      // silently dead for the conversation (latch consumed, never retried).
+      if (
+        reg.memory.budgetChars !== undefined &&
+        (!Number.isInteger(reg.memory.budgetChars) || reg.memory.budgetChars <= 0)
+      ) {
+        return c.json({ error: "memory budgetChars must be a positive integer" }, 502);
+      }
       let derived: unknown;
       try {
+        // A static scope map is COPIED (Gate 2.5 n7): the registration object
+        // is shared across every conversation it ever creates.
         derived =
           typeof reg.memory.scope === "function"
             ? reg.memory.scope(effectiveContext)
-            : reg.memory.scope;
+            : { ...reg.memory.scope };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return c.json({ error: `memory scope derivation failed: ${message}` }, 502);
@@ -281,13 +299,13 @@ export function conversationRoutes(
     conversations.set(conversation.id, {
       conversation,
       agentId,
-      ...(hasHook || hasScope ? { context: redactedContext } : {}),
+      ...(hasHook || hasScope || hasMemory ? { context: redactedContext } : {}),
       ...(redactedKeys ? { contextRedacted: redactedKeys } : {}),
       ...(host ? { host } : {}),
       ...(memoryBinding ? { memory: memoryBinding } : {}),
     });
 
-    if (!hasHook && !hasScope) {
+    if (!hasHook && !hasScope && !hasMemory) {
       return c.json({ id: conversation.id, agent_id: agentId }, 201);
     }
     return c.json(
@@ -509,35 +527,6 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
-    // Turn-1 recall (#444, ADR-0007 D8a — pinned ordering: instantiate →
-    // bind → FIRST user message → assemble → render). Assembled exactly once
-    // per conversation, HERE, because this is where the first user text
-    // exists to serve as the search query. The latch is set synchronously
-    // before the await so recall is one-shot even across racing requests.
-    // Best-effort by design: a failed assembly logs and the turn proceeds
-    // without recall (the toolbox surface still works); an EMPTY block sets
-    // nothing, keeping rendering byte-identical to the no-memory case. The
-    // emission's trace/run ids are freshly minted — the runner generates its
-    // own ids only after streaming starts, so a pre-stream host-side event
-    // cannot share them; exporters already tolerate row-less runIds.
-    if (entry.memory && !entry.recallAssembled) {
-      entry.recallAssembled = true;
-      try {
-        const recall = await assembleRecall(entry.memory.store, entry.memory.scope, {
-          query: content,
-          ...(entry.memory.budgetChars !== undefined
-            ? { budgetChars: entry.memory.budgetChars }
-            : {}),
-          emit: { bus: eventBus, traceId: crypto.randomUUID(), runId: crypto.randomUUID() },
-        });
-        if (recall.block.length > 0 && entry.host) {
-          entry.host.recall = recall.block;
-        }
-      } catch (err) {
-        console.error(`conversations: recall assembly failed for ${convId}:`, err);
-      }
-    }
-
     // 409 concurrency guard (#341): one turn at a time per conversation —
     // `entry.activeTurn` is set for the duration of the streamSSE callback
     // below and cleared in its `finally`. This also keeps `activeTurn`
@@ -557,6 +546,57 @@ export function conversationRoutes(
       // routes converge on the same teardown.
       const controller = new AbortController();
       entry.activeTurn = { controller, startedAt: Date.now() };
+
+      // Turn-1 recall (#444, ADR-0007 D8a — pinned ordering: instantiate →
+      // bind → FIRST user message → assemble → render). Assembled exactly
+      // once per conversation, HERE — inside the turn that WON the 409 guard
+      // and in the same synchronous slice that set `activeTurn` (Gate 2.5
+      // B1): a concurrent first message can neither double-assemble nor
+      // stream ahead with a recall-less bag while the winner is mid-await.
+      // This is where the first user text exists to serve as the search
+      // query. Best-effort by design: a failed assembly logs and the turn
+      // streams without recall (the toolbox surface still works); an EMPTY
+      // block sets nothing, keeping rendering byte-identical to the
+      // no-memory case.
+      if (entry.memory && !entry.recallAssembled) {
+        entry.recallAssembled = true;
+        try {
+          const recall = await assembleRecall(entry.memory.store, entry.memory.scope, {
+            query: content,
+            ...(entry.memory.budgetChars !== undefined
+              ? { budgetChars: entry.memory.budgetChars }
+              : {}),
+          });
+          if (recall.block.length > 0 && entry.host) {
+            entry.host.recall = recall.block;
+          }
+          // Emission is ROUTE-owned (assembleRecall's `emit` deliberately
+          // unused): ONE event, published on the shared bus AND written onto
+          // this turn's SSE stream so the chat surface watches recall arrive.
+          // traceId = the conversation id — the runner mints its run ids only
+          // after streaming starts, so a pre-stream host event cannot share
+          // them; grouping by conversation beats an unjoinable fresh uuid.
+          const recallEvent = createEvent("agent.memory.recall", {
+            traceId: convId,
+            runId: crypto.randomUUID(),
+            scope: entry.memory.scope,
+            count: recall.count,
+            chars: recall.chars,
+            budgetChars: entry.memory.budgetChars ?? DEFAULT_RECALL_BUDGET_CHARS,
+            truncated: recall.truncated,
+            preview: recall.block.slice(0, 512),
+          });
+          try {
+            await eventBus.publish(recallEvent);
+          } catch (err) {
+            console.error("conversations: agent.memory.recall publish failed:", err);
+          }
+          const frame = agentEventToSSE(recallEvent);
+          if (frame) await stream.writeSSE(frame);
+        } catch (err) {
+          console.error(`conversations: recall assembly failed for ${convId}:`, err);
+        }
+      }
 
       // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
       // `bus.publish`, so the runner generator (which this loop drains) is

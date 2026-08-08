@@ -60,7 +60,7 @@ describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map
       get: async () => null,
       invalidate: async () => {},
       delete: async () => {},
-      capabilities: () => ({ search: "keyword" }),
+      capabilities: async () => ({ search: "keyword" as const }),
     },
     scope: { user: "dug", agent: "full" },
   };

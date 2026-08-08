@@ -28,6 +28,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { MemoryStore } from "@agentic-patterns/runtime";
 import type { SessionScopeLike } from "@agentic-patterns/server";
 import { glob } from "tinyglobby";
 import { register } from "tsx/esm/api";
@@ -115,8 +116,13 @@ export interface DiscoveredAgent {
    * entirely.
    */
   readonly memory?: {
-    // biome-ignore lint/suspicious/noExplicitAny: store shape comes from the agent file's runtime copy, kept loose at the discovery boundary
-    readonly store: any;
+    /**
+     * Typed structurally as the runtime's `MemoryStore` interface — a store
+     * constructed by the agent file's OWN runtime copy satisfies it with
+     * zero runtime coupling (TS is structural; only `instanceof` would
+     * break across the built-dist boundary, and none is used).
+     */
+    readonly store: MemoryStore;
     readonly scope:
       | Record<string, string>
       | ((context?: Record<string, unknown>) => Record<string, string>);

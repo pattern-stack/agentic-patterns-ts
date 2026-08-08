@@ -167,8 +167,14 @@ export interface AgentRegistration {
    * (`host.recall`), which the runner narrows into `RenderContext.recall`.
    *
    * The registration OWNS the store (typically `loadMemoryStore()` in the
-   * agent definition — the same instance its `instantiate` hook binds into
-   * `memoryCapability`, so toolbox writes and turn-1 recall share one store).
+   * agent definition — the framework never boots one; a deliberate inversion
+   * of #444's original strategy, recorded on that issue). It MUST be the same
+   * instance the `instantiate` hook binds into `memoryCapability`, so toolbox
+   * writes and turn-1 recall share one store — AND the scope this field
+   * derives MUST equal the partition that hook binds into `memoryCapability`:
+   * they are two independent author-supplied derivations, and nothing
+   * compares them. Diverging silently splits the partitions — every write
+   * succeeds, every recall comes back empty (Gate 2.5 M2).
    * `scope` is the author-declared partition (ADR-0007 D3 — the framework
    * does not invent identity): a static string map, or a function of the
    * conversation's PARSED effective context, resolved ONCE at creation and

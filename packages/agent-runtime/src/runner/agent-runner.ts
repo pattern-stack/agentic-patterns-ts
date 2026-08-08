@@ -67,6 +67,7 @@ import {
 } from "../providers/model-resolver.js";
 import type { ResolvedLanguageModel } from "../providers/types.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
+import { narrowRenderCtx } from "./render-ctx.js";
 import { guardOpenObjectSchemas } from "./schema-guard.js";
 import { type ToolArgsOverlay, createGateToolApproval } from "./tool-approval-bridge.js";
 import type {
@@ -446,24 +447,9 @@ export class AgentRunner implements RunnerProtocol {
     };
   }
 
-  /**
-   * Narrow `RunOptions.host` down to the two keys the renderer cares about:
-   * `host.scope` (#308) and `host.recall` (#444 — the turn-1 recall block the
-   * HOST assembled via `assembleRecall`, rendered by `Awareness.fromRecall`).
-   * Inline structural narrow — cannot import `workflows/scope-host.ts`'s
-   * `hostOf`/`buildScopeHost` here, since `workflows` depends on `runner` and
-   * importing it back would be a reverse layering violation. Mirrors
-   * `hostOf`'s shape without the import. An empty-string `recall` is treated
-   * as absent — `assembleRecall` returns `""` for "nothing recalled", and
-   * rendering must stay byte-identical to the no-recall case then.
-   */
+  /** Shared host-bag narrowing — see `runner/render-ctx.ts` (#308/#444). */
   private _renderCtx(options?: RunOptions): RenderContext | undefined {
-    const host = options?.host as { scope?: Record<string, unknown>; recall?: string } | undefined;
-    const scope = host?.scope;
-    const recall =
-      typeof host?.recall === "string" && host.recall.length > 0 ? host.recall : undefined;
-    if (!scope && recall === undefined) return undefined;
-    return { ...(scope ? { scope } : {}), ...(recall !== undefined ? { recall } : {}) };
+    return narrowRenderCtx(options);
   }
 
   /**

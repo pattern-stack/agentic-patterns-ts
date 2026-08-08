@@ -45,6 +45,7 @@ import {
 } from "./harness/claude-code/claude-code-adapter.js";
 import { CodingAgentRunner } from "./harness/coding-agent-runner.js";
 import type { HarnessAdapter, ProbeContext } from "./harness/types.js";
+import { narrowRenderCtx } from "./render-ctx.js";
 import { type AgentLikeForBridge, buildAgentServers } from "./sdk-bridge.js";
 import type { RunOptions } from "./types.js";
 
@@ -211,19 +212,9 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
   // Internal helpers
   // -------------------------------------------------------------------------
 
-  /**
-   * Narrow `RunOptions.host` down to `host.scope` (#308) + `host.recall`
-   * (#444) — same inline structural narrow as `AgentRunner._renderCtx`;
-   * cannot import `workflows/scope-host.ts` here (reverse layering). Empty
-   * `recall` is absent (assembleRecall's "" = nothing recalled).
-   */
+  /** Shared host-bag narrowing — see `runner/render-ctx.ts` (#308/#444). */
   private _renderCtx(options?: RunOptions): RenderContext | undefined {
-    const host = options?.host as { scope?: Record<string, unknown>; recall?: string } | undefined;
-    const scope = host?.scope;
-    const recall =
-      typeof host?.recall === "string" && host.recall.length > 0 ? host.recall : undefined;
-    if (!scope && recall === undefined) return undefined;
-    return { ...(scope ? { scope } : {}), ...(recall !== undefined ? { recall } : {}) };
+    return narrowRenderCtx(options);
   }
 
   // TODO(#308): `options.host` (and therefore `host.scope`) is NOT relayed to
