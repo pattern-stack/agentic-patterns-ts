@@ -375,6 +375,8 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
         tools: agent.getTools().map((t) => (t as { name?: string }).name ?? ""),
         runnerCorrelationId: correlationId,
       },
+      // #437: trigger provenance rides the root event — parity with AgentRunner.
+      trigger: options?.trigger,
     }) as AgentEvent & { type: "agent.message.start" };
     await this.emit(startEvent);
 

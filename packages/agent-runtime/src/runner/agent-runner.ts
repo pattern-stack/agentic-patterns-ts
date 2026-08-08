@@ -489,7 +489,9 @@ export class AgentRunner implements RunnerProtocol {
       this._eventBus = options.eventBus;
     }
 
-    const runId = generateId();
+    // #437: honor a caller-provided correlation id (AP-29 F1) — parity with
+    // NodeBackedRunner and CodingAgentRunner. Minted only when absent.
+    const runId = options?.runId ?? generateId();
     const effectiveTraceId = options?.traceId ?? runId;
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
@@ -536,6 +538,7 @@ export class AgentRunner implements RunnerProtocol {
         tools: agentTools.map((t) => t.name),
       },
       systemPrompt: instructions,
+      trigger: options?.trigger,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -1238,7 +1241,8 @@ export class AgentRunner implements RunnerProtocol {
       this._eventBus = options.eventBus;
     }
 
-    const runId = generateId();
+    // #437: honor a caller-provided correlation id (AP-29 F1) — parity with run().
+    const runId = options?.runId ?? generateId();
     const effectiveTraceId = options?.traceId ?? runId;
     const toolExecutor = options?.toolExecutor;
 
@@ -1270,6 +1274,7 @@ export class AgentRunner implements RunnerProtocol {
         tools: agentTools.map((t) => t.name),
       },
       systemPrompt: instructions,
+      trigger: options?.trigger,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -1520,7 +1525,8 @@ export class AgentRunner implements RunnerProtocol {
       this._eventBus = options.eventBus;
     }
 
-    const runId = generateId();
+    // #437: honor a caller-provided correlation id (AP-29 F1) — parity with run().
+    const runId = options?.runId ?? generateId();
     const effectiveTraceId = options?.traceId ?? runId;
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
@@ -1587,6 +1593,7 @@ export class AgentRunner implements RunnerProtocol {
         tools: agentTools.map((t) => t.name),
       },
       systemPrompt: instructions,
+      trigger: options?.trigger,
     });
     const rootSpanId = msgStart.spanId;
     await this.emit(msgStart);
