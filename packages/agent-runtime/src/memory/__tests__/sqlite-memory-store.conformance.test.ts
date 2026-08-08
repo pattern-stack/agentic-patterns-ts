@@ -8,6 +8,7 @@
  */
 
 import Database from "better-sqlite3";
+import type { MemoryStoreConformanceOptions } from "../conformance.js";
 import { runMemoryStoreConformance } from "../conformance.js";
 import { SqliteMemoryStore } from "../sqlite-store.js";
 
@@ -32,15 +33,60 @@ function shimOnlyDatabase(): typeof Database {
   } as never;
 }
 
+/**
+ * A store factory paired with the `setStoredTarget` seed hook Tier 1's
+ * unknown-target tolerance axis needs (ADR-0009 Decision 14).
+ *
+ * The hook needs raw SQL against the store's OWN database, and the store keeps
+ * its handle private — correctly, since nothing in the protocol should be able
+ * to reach past it. So the driver is wrapped in a constructor function that
+ * hands the instance back through a holder before returning it (a constructor
+ * returning an object replaces `this`, so the store still gets the real
+ * driver). The holder is created per `runMemoryStoreConformance` call, and the
+ * kit re-invokes `makeStore` in `beforeEach`, so the handle is always the one
+ * belonging to the store the current test is exercising.
+ *
+ * Only `.prepare` is used, so this works through the shim-only surface too —
+ * which is worth having: it proves the seed itself needs no better-sqlite3
+ * extension.
+ */
+function sqliteBackend(driver: typeof Database): {
+  makeStore: () => SqliteMemoryStore;
+  setStoredTarget: NonNullable<MemoryStoreConformanceOptions["setStoredTarget"]>;
+} {
+  const holder: { db?: InstanceType<typeof Database> } = {};
+  const Tracking = function TrackingDatabase(path: string) {
+    const db = new driver(path);
+    holder.db = db;
+    return db;
+  } as unknown as typeof Database;
+
+  return {
+    makeStore: () => new SqliteMemoryStore({ path: ":memory:", Database: Tracking }),
+    setStoredTarget: (_store, recordId, rawTarget) => {
+      const db = holder.db;
+      if (db === undefined) throw new Error("no SQLite handle captured for this store");
+      // Bare-`@` named params, matching the store's own driver contract.
+      db.prepare("UPDATE memory_records SET target = @target WHERE id = @id").run({
+        target: JSON.stringify(rawTarget),
+        id: recordId,
+      });
+    },
+  };
+}
+
 // Top-level await — vitest ESM test files support it; the suites register
 // during collection. The `label` option keeps the two runs (and the in-memory
 // backend's run in the sibling file) distinguishable now that Tier 2 asserts
 // the SAME corpus against every backend — an unlabelled "Tier 2 › diacritics
 // fold" failure would not say which backend diverged.
-await runMemoryStoreConformance(() => new SqliteMemoryStore({ path: ":memory:", Database }), {
+const plain = sqliteBackend(Database);
+await runMemoryStoreConformance(plain.makeStore, {
   label: "SqliteMemoryStore (better-sqlite3)",
+  setStoredTarget: plain.setStoredTarget,
 });
-await runMemoryStoreConformance(
-  () => new SqliteMemoryStore({ path: ":memory:", Database: shimOnlyDatabase() }),
-  { label: "SqliteMemoryStore (bun-adapter surface)" },
-);
+const shimmed = sqliteBackend(shimOnlyDatabase());
+await runMemoryStoreConformance(shimmed.makeStore, {
+  label: "SqliteMemoryStore (bun-adapter surface)",
+  setStoredTarget: shimmed.setStoredTarget,
+});

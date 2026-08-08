@@ -7,8 +7,16 @@
  * read-back, subset-match scope semantics, tags and kinds filtering,
  * invalidation chains, default exclusion of invalidated records, the two
  * relevance ORDERING invariants (never score values), the batch tie, limit
- * semantics including `limit: 0`, the updatedAt-only-on-invalidate rule, and
- * capabilities declaration.
+ * semantics including `limit: 0`, the updatedAt-only-on-invalidate rule,
+ * capabilities declaration, and unknown-target tolerance (ADR-0009 Decision 14
+ * — one unreadable stored `target` degrades ONE record, never the partition).
+ *
+ * **Known Tier 1 gaps, both for the same reason.** Two axes need a row the
+ * six-method protocol cannot legally create. Unknown-target tolerance is
+ * covered through the OPTIONAL `setStoredTarget` seed hook, and registers a
+ * visible `todo` when a backend does not supply one. Expiry seeding
+ * (`expiresAt <= now` is filtered on read, but `MemoryWriteInput` cannot set
+ * it) has no hook yet and is untested here.
  *
  * **Tier 2 — per declared capability class.** Keyed on `caps.search`. Two
  * backends that both declare `search: "keyword"` MUST produce IDENTICAL match
@@ -92,6 +100,35 @@ export interface MemoryStoreConformanceOptions {
    * Purely cosmetic; defaults to no suffix.
    */
   readonly label?: string;
+
+  /**
+   * Seed hook for the unknown-target tolerance axis (ADR-0009 Decision 14):
+   * overwrite an existing record's PERSISTED `target` with a value the write
+   * protocol could never produce, then let the kit read it back.
+   *
+   * It exists because the axis is unreachable through the six-method protocol
+   * by construction — `MemoryWriteInputSchema.target` is strict precisely so
+   * tolerance stays a read-path property, which leaves the kit no legal way to
+   * CREATE the row it needs to test. The `#463` precedent for that shape of
+   * problem is expiry seeding, recorded as a Tier-1 gap for exactly the same
+   * reason.
+   *
+   * Supply it from any backend that reconstructs records out of serialized
+   * storage — which is every durable backend, and is where the defect lives.
+   * Omit it for a backend that hands back the same parsed objects it was given
+   * (`InMemoryMemoryStore`): there is no reconstruction, so there is nothing to
+   * tolerate, and a fabricated pass would be worse than an honest gap. When it
+   * is omitted the suite registers a `todo` naming the gap, so the hole is
+   * visible in the reporter rather than invisible in a green run.
+   *
+   * `rawTarget` is a VALUE, not a serialized string — the backend applies its
+   * own encoding, so the hook stays portable to a Postgres `jsonb` column.
+   */
+  readonly setStoredTarget?: (
+    store: MemoryStore,
+    recordId: string,
+    rawTarget: unknown,
+  ) => void | Promise<void>;
 }
 
 /**
@@ -118,7 +155,7 @@ export async function runMemoryStoreConformance(
   // Dynamic import — do NOT convert to a static import: this module is
   // bundled into the runtime barrel, and a top-level `import "vitest"` would
   // break every production consumer that doesn't install vitest.
-  const { beforeEach, describe, expect, it } = await import("vitest");
+  const { afterEach, beforeEach, describe, expect, it, vi } = await import("vitest");
   // Capabilities are declared, not probed (ADR-0007 D5) — read once up front
   // to key capability-gated sub-suites. This is the capability-keyed sub-suite
   // seam (ADR-0007 D11) that the ADR-0008 promotion extension will later hook.
@@ -437,23 +474,126 @@ export async function runMemoryStoreConformance(
       });
 
       /**
-       * Unknown-target tolerance — the Tier 1 slot ADR-0009 Decision 14 fills at
-       * plan issue #464, deliberately left as a `todo` rather than a passing
-       * test.
+       * Unknown-target tolerance (ADR-0009 Decision 14) — the Tier 1 slot #463
+       * reserved and #464 fills.
        *
        * The reproduction: rewrite one stored row's `target.section` to an
        * unrecognised value and EVERY query-less listing on that partition
-       * throws, because the SQLite backend runs `MemoryRecordSchema.parse`
-       * inside `rows.map` (`sqlite-store.ts` `_rowToRecord`). One bad row kills
-       * the partition's recall — it does not skip a record. That listing is
-       * exactly recall's profile tier.
+       * threw, because a durable backend rebuilds records through
+       * `MemoryRecordSchema.parse` inside `rows.map`. One bad row killed the
+       * partition's recall — it did not skip a record. That listing is exactly
+       * recall's always-injected profile tier, so the agent did not degrade, it
+       * went blind.
        *
-       * It cannot be written here yet: `MemoryWriteInputSchema` is strict, so
-       * this kit has no protocol-level way to CREATE such a row (the
-       * reproduction needs host SQL). #464 widens `MemoryRecordSchema.target`
-       * with a tolerant passthrough arm and lands the assertion.
+       * It is Tier 1 rather than backend-local because the defect is a property
+       * of the DATA CONTRACT, not of SQLite: any backend that serializes
+       * `target` and reparses it on read has it, a Postgres backend included,
+       * and the ADR's whole reason for landing this ahead of the routing work
+       * is that a reader at version N-1 must survive a row written at version
+       * N. Pinning it in one backend's own test file would prove the wrong
+       * thing.
+       *
+       * Two axes, and the difference between them is the design:
+       *   - unrecognised but READABLE (`{ primitive: string }`) ⇒ preserved
+       *     verbatim. Not degradation — a newer vocabulary is the expected
+       *     steady state, and dropping it would lose data on every read.
+       *   - UNREADABLE (not an object with a string `primitive`) ⇒ that ONE
+       *     record comes back target-less, every sibling is untouched, and the
+       *     backend reports it (this kit cannot assert the backend's log
+       *     channel portably; `sqlite-memory-store.test.ts` does).
        */
-      it.todo("tolerates an unrecognised stored target.section on get and on search — #464");
+      const setStoredTarget = options.setStoredTarget;
+      if (setStoredTarget === undefined) {
+        it.todo(
+          "unknown-target tolerance (ADR-0009 D14) — GAP: no setStoredTarget hook supplied by this backend",
+        );
+      } else {
+        describe("unknown-target tolerance (ADR-0009 D14)", () => {
+          // A backend is REQUIRED to make a degraded read observable, and the
+          // shipped one does it with a `console.warn` — but the CHANNEL is a
+          // backend choice (an event, a counter, a warn), so this kit cannot
+          // portably assert it and must not print it either. Silenced here;
+          // `sqlite-memory-store.test.ts` asserts the shipped channel.
+          beforeEach(() => {
+            vi.spyOn(console, "warn").mockImplementation(() => {});
+          });
+          afterEach(() => {
+            vi.restoreAllMocks();
+          });
+
+          /**
+           * A targeted record plus two untargeted siblings sharing the
+           * partition. An arrow, not a `function` declaration: a hoisted
+           * declaration loses the `setStoredTarget !== undefined` narrowing.
+           */
+          const seed = async (rawTarget: unknown): Promise<{ bad: string; siblings: string[] }> => {
+            const before = await writeOne(fact("written before the bad row"));
+            const bad = await writeOne(
+              fact("the row with the unreadable target", {
+                target: { primitive: "background", section: "conventions", key: "theme" },
+              }),
+            );
+            const after = await writeOne(fact("written after the bad row"));
+            await setStoredTarget(store, bad.id, rawTarget);
+            return { bad: bad.id, siblings: [before.id, after.id] };
+          };
+
+          it("preserves an unrecognised-but-readable target verbatim", async () => {
+            // The forward-compatibility case: a section vocabulary this build
+            // has never heard of, written by a newer version.
+            const future = { primitive: "background", section: "userProfile", key: "name" };
+            const { bad } = await seed(future);
+
+            const read = await store.get(bad);
+            expect(read).not.toBeNull();
+            expect(read!.target).toEqual(future);
+            expect(MemoryRecordSchema.safeParse(read).success).toBe(true);
+          });
+
+          it("preserves an unrecognised PRIMITIVE, not just an unrecognised section", async () => {
+            const { bad } = await seed({ primitive: "somethingNewEntirely", extra: [1, 2] });
+            expect((await store.get(bad))!.target).toEqual({
+              primitive: "somethingNewEntirely",
+              extra: [1, 2],
+            });
+          });
+
+          // Every shape here fails even the tolerant `{ primitive: string }`
+          // arm, which is what makes it a degradation rather than a pass-through.
+          for (const [name, rawTarget] of [
+            ["a number", 42],
+            ["a bare string", "background"],
+            ["null", null],
+            ["an array", ["background"]],
+            ["an object with no primitive", { section: "conventions" }],
+            ["an object whose primitive is not a string", { primitive: 7 }],
+          ] as const) {
+            it(`degrades ONE record to target-less when the stored target is ${name}`, async () => {
+              const { bad, siblings } = await seed(rawTarget);
+
+              // (1) the bad record itself: readable, target dropped, nothing
+              //     else about it changed.
+              const read = await store.get(bad);
+              expect(read).not.toBeNull();
+              expect(read!.target).toBeUndefined();
+              expect(read!.content).toBe("the row with the unreadable target");
+              expect(MemoryRecordSchema.safeParse(read).success).toBe(true);
+
+              // (2) the partition survives. This is the actual defect: the
+              //     query-less listing is recall's profile tier, and before
+              //     D14 it threw rather than returning two of three records.
+              const listed = await store.search({ scope: {} });
+              expect(listed.map((hit) => hit.record.id).sort()).toEqual([bad, ...siblings].sort());
+
+              // (3) and so does a keyword query that matches the bad row.
+              if (caps.search !== "semantic") {
+                const queried = await store.search({ scope: {}, query: "unreadable" });
+                expect(queried.map((hit) => hit.record.id)).toEqual([bad]);
+              }
+            });
+          }
+        });
+      }
     });
 
     // =======================================================================

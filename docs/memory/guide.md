@@ -333,6 +333,27 @@ promotable — widening a stored record's schema later is breaking, so the guard
 arms are storable from day one. In Phase 1 the target is stored and returned untouched; nothing
 acts on it.
 
+**Reading a stored `target` is tolerant; writing one is not.** That asymmetry is
+[ADR-0009](../adr/0009-memory-routing-and-background-composition.md) Decision 14, and it closes a
+real defect: `target` is persisted, every read reconstructs the record through
+`MemoryRecordSchema.parse`, and a store's search maps over *all* matching rows — so one row whose
+target no longer parsed made the entire partition's search throw. One bad row, and the always-
+injected profile tier returned nothing. The agent did not degrade, it went blind.
+
+| Stored value | What a read does |
+|---|---|
+| a known arm | parsed, exact type |
+| any `{ primitive: string }` object — an unrecognised section, a primitive from a newer version | **preserved verbatim**, `isKnownTarget()` returns `false`. Not an error: a reader meeting a row a newer version wrote is the expected steady state |
+| anything else (`42`, `null`, a bare string, an object with no `primitive`, non-JSON text) | that **one** record comes back target-less; every sibling is untouched; the backend reports it |
+| any other field corrupt (`content`, `scope`, `kind` …) | still throws — tolerance is scoped to `target`, deliberately |
+
+`memory_save` still accepts only the known union, so nothing you write can land in the tolerated
+tier. Degradation is never silent: `readStoredMemoryRecord()` returns the report as data, and
+`SqliteMemoryStore` also emits a once-per-reason `console.warn` (the same soft-degradation idiom as
+`schema-guard.ts` and `providers/capabilities.ts`). If you switch on `record.target`, narrow with
+`isKnownTarget()` first — it keeps your `switch` exhaustive instead of forcing a `default:` that
+absorbs future arms in silence.
+
 **Structured targets carry a structured `payload`, not prose to be parsed.** `example` and
 `awareness` declare their required shapes as Zod schemas beside the record
 (`ExampleTargetPayloadSchema` = `{ scenario, good, bad?, reasoning? }`,

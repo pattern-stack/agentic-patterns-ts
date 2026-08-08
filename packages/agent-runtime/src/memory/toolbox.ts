@@ -31,6 +31,7 @@ import {
   MemoryScopeSchema,
   type MemoryTarget,
   MemoryTargetSchema,
+  StoredMemoryTargetSchema,
   TextManual,
   type ToolDefinition,
   type ToolEvent,
@@ -38,6 +39,7 @@ import {
   Toolbox,
   canonicalMemoryScope,
   defineTool,
+  isKnownTarget,
 } from "@agentic-patterns/core";
 import { z } from "zod";
 import { capPreview } from "../workflows/state-events.js";
@@ -86,8 +88,16 @@ function scopesEqual(a: MemoryScope, b: MemoryScope): boolean {
 }
 
 /**
- * Structural equality of two targets: discriminant switch comparing every
+ * Structural equality of two KNOWN targets: discriminant switch comparing every
  * field of the matching arm — no `JSON.stringify` key-ordering gamble.
+ *
+ * Both parameters stay `MemoryTarget`, deliberately, now that a stored
+ * `record.target` may be an unrecognised arm (ADR-0009 D14). Callers narrow
+ * with `isKnownTarget` first; widening the signature instead would have cost
+ * the switch its exhaustiveness for nothing, since an unrecognised target
+ * cannot collide with a model-supplied one — `memory_save`'s parameters are
+ * still strictly `MemoryTargetSchema`, so the model can only ever name a known
+ * arm, and an unknown stored target is by construction not equal to it.
  */
 function sameTarget(a: MemoryTarget, b: MemoryTarget): boolean {
   if (a.primitive !== b.primitive) return false;
@@ -125,7 +135,13 @@ const MemoryRecordViewSchema = z.object({
   createdAt: z.string(),
   invalidAt: z.string().optional(),
   supersededBy: z.string().optional(),
-  target: MemoryTargetSchema.optional(),
+  // Tolerant, matching `MemoryRecordSchema` (ADR-0009 D14): this schema
+  // VALIDATES the tool's return value, so leaving it strict would relocate the
+  // detonation from the store to the tool — a single tolerated record in a hit
+  // list would fail the return validation and blind the model anyway.
+  // `SaveParamsSchema.target` below stays strict: the model still authors only
+  // known arms.
+  target: StoredMemoryTargetSchema.optional(),
 });
 
 type MemoryRecordView = z.infer<typeof MemoryRecordViewSchema>;
@@ -323,7 +339,11 @@ export class MemoryToolbox extends Toolbox {
         .filter(
           (record) =>
             scopesEqual(record.scope, this._scope) &&
-            record.target !== undefined &&
+            // Narrow, never loosen (ADR-0009 D14): a stored target this build
+            // cannot read is not a collision — it is a record whose slot is
+            // unknowable here, and blocking a write on it would brick saves
+            // against a partition written by a newer version.
+            isKnownTarget(record.target) &&
             sameTarget(record.target, target),
         );
       // Multiple collisions (pre-existing dirty data): pick the newest.

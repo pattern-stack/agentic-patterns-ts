@@ -10,8 +10,12 @@ import {
   MemoryStoreCapabilitiesSchema,
   MemoryTargetSchema,
   ProvenanceSchema,
+  StoredMemoryTargetSchema,
+  UnknownMemoryTargetSchema,
   canonicalMemoryScope,
+  isKnownTarget,
   memoryRecord,
+  readStoredMemoryRecord,
   targetPayloadSchema,
 } from "../memory-record.js";
 
@@ -388,5 +392,189 @@ describe("targetPayloadSchema", () => {
     expect(
       targetPayloadSchema({ primitive: "manual", capability: "crm", section: "workflows" }),
     ).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tolerant stored-`target` read — ADR-0009 Decision 14
+// ---------------------------------------------------------------------------
+// The defect: `target` is persisted and every read path reconstructs through
+// `MemoryRecordSchema.parse`, so ONE row whose target no longer parses made the
+// whole partition's search throw. These pin the two halves of the fix — the
+// tolerant arm (data preserved) and the degrade-not-detonate reader (data
+// dropped, loudly) — and, just as importantly, pin that the WRITE side did not
+// move.
+
+describe("UnknownMemoryTargetSchema", () => {
+  it("accepts any object with a non-empty string primitive, preserving extra keys", () => {
+    const parsed = UnknownMemoryTargetSchema.safeParse({
+      primitive: "background",
+      section: "userProfile",
+      key: "name",
+      nested: { a: [1, 2] },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data).toEqual({
+      primitive: "background",
+      section: "userProfile",
+      key: "name",
+      nested: { a: [1, 2] },
+    });
+  });
+
+  it.each([[42], ["background"], [null], [[]], [{}], [{ primitive: 7 }], [{ primitive: "" }]])(
+    "rejects %j — not an object with a string primitive",
+    (value) => {
+      expect(UnknownMemoryTargetSchema.safeParse(value).success).toBe(false);
+    },
+  );
+});
+
+describe("StoredMemoryTargetSchema", () => {
+  it("parses a known arm through MemoryTargetSchema first (exact shape, no extra keys invented)", () => {
+    const known = { primitive: "judgment", domain: "code-review", slot: "heuristics" };
+    const parsed = StoredMemoryTargetSchema.safeParse(known);
+    expect(parsed.success && parsed.data).toEqual(known);
+  });
+
+  it("falls through to the tolerant arm for an unrecognised SECTION on a known primitive", () => {
+    const future = { primitive: "background", section: "userProfile", key: "name" };
+    expect(MemoryTargetSchema.safeParse(future).success).toBe(false);
+    expect(StoredMemoryTargetSchema.safeParse(future).success).toBe(true);
+  });
+
+  it("falls through to the tolerant arm for an unrecognised PRIMITIVE", () => {
+    expect(StoredMemoryTargetSchema.safeParse({ primitive: "persona" }).success).toBe(true);
+  });
+});
+
+describe("isKnownTarget", () => {
+  it("is true for every known arm", () => {
+    expect(isKnownTarget({ primitive: "background", section: "conventions", key: "k" })).toBe(true);
+    expect(isKnownTarget({ primitive: "awareness" })).toBe(true);
+  });
+
+  it("is false for an unrecognised arm and for undefined", () => {
+    expect(isKnownTarget({ primitive: "background", section: "userProfile", key: "k" })).toBe(
+      false,
+    );
+    expect(isKnownTarget({ primitive: "persona" })).toBe(false);
+    expect(isKnownTarget(undefined)).toBe(false);
+  });
+});
+
+describe("MemoryRecordSchema — tolerant target (ADR-0009 D14)", () => {
+  it("accepts a record whose stored target uses an unrecognised vocabulary", () => {
+    const parsed = MemoryRecordSchema.safeParse({
+      ...minimalRecord,
+      target: { primitive: "background", section: "userProfile", key: "name" },
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.target).toEqual({
+      primitive: "background",
+      section: "userProfile",
+      key: "name",
+    });
+  });
+
+  it("still REJECTS a target that is not a readable object — that is the reader's job, not the schema's", () => {
+    expect(MemoryRecordSchema.safeParse({ ...minimalRecord, target: 42 }).success).toBe(false);
+  });
+
+  it("never validates payload against an unrecognised arm", () => {
+    // `example` requires a payload shape; `exampleV2` is unknown, so nothing is
+    // required — this reader cannot know what a vocabulary it has never seen wants.
+    expect(
+      MemoryRecordSchema.safeParse({
+        ...minimalRecord,
+        target: { primitive: "exampleV2", judgmentDomain: "d" },
+        payload: { totally: "unrelated" },
+      }).success,
+    ).toBe(true);
+    expect(
+      MemoryRecordSchema.safeParse({
+        ...minimalRecord,
+        target: { primitive: "example", judgmentDomain: "d" },
+        payload: { totally: "unrelated" },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("targetPayloadSchema — unrecognised arms", () => {
+  it("returns undefined rather than throwing on an unrecognised arm", () => {
+    expect(targetPayloadSchema({ primitive: "somethingNew" })).toBeUndefined();
+    expect(
+      targetPayloadSchema({ primitive: "background", section: "userProfile", key: "k" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("readStoredMemoryRecord", () => {
+  it("returns a known-target record unchanged, with no degradation report", () => {
+    const target = { primitive: "background", section: "conventions", key: "k" } as const;
+    const read = readStoredMemoryRecord({ ...minimalRecord, target });
+    expect(read.degraded).toBeUndefined();
+    expect(read.record.target).toEqual(target);
+    expect(Object.isFrozen(read.record)).toBe(true);
+  });
+
+  it("PRESERVES an unrecognised-but-readable target and reports nothing", () => {
+    // A reader at version N-1 meeting a row written at version N is the
+    // expected steady state, not an incident — warning on it would be noise.
+    const future = { primitive: "background", section: "userProfile", key: "name" };
+    const read = readStoredMemoryRecord({ ...minimalRecord, target: future });
+    expect(read.degraded).toBeUndefined();
+    expect(read.record.target).toEqual(future);
+  });
+
+  it.each([
+    ["a number", 42],
+    ["a bare string", "background"],
+    ["null", null],
+    ["an array", ["background"]],
+    ["an object with no primitive", { section: "conventions" }],
+    ["a non-string primitive", { primitive: 7 }],
+    ["an empty-string primitive", { primitive: "" }],
+  ])("degrades to target-less and REPORTS when the target is %s", (_name, target) => {
+    // The strict factory is what a store used to call here.
+    expect(() => memoryRecord({ ...minimalRecord, target } as MemoryRecordInput)).toThrow();
+
+    const read = readStoredMemoryRecord({ ...minimalRecord, target });
+    expect(read.record.target).toBeUndefined();
+    expect(read.record.content).toBe(minimalRecord.content);
+    expect(read.degraded).toEqual({
+      id: "mem_1",
+      field: "target",
+      reason: expect.stringContaining("stored target is not readable"),
+    });
+  });
+
+  it("carries the record id in the report, so a caller can act on the right row", () => {
+    const read = readStoredMemoryRecord({ ...minimalRecord, id: "mem_bad", target: 42 });
+    expect(read.degraded?.id).toBe("mem_bad");
+  });
+
+  it("THROWS on corruption in any other field — degradation is scoped to target, deliberately", () => {
+    expect(() => readStoredMemoryRecord({ ...minimalRecord, content: "" })).toThrow();
+    expect(() => readStoredMemoryRecord({ ...minimalRecord, kind: "vibes" as never })).toThrow();
+  });
+
+  it("THROWS when the target is readable but the PAYLOAD is invalid — the target is not at fault", () => {
+    expect(() =>
+      readStoredMemoryRecord({
+        ...minimalRecord,
+        target: { primitive: "example", judgmentDomain: "d" },
+        payload: { scenario: "" },
+      }),
+    ).toThrow();
+  });
+
+  it("deep-freezes the tolerated target, exactly as the strict factory would", () => {
+    const read = readStoredMemoryRecord({
+      ...minimalRecord,
+      target: { primitive: "persona", nested: { a: 1 } },
+    });
+    expect(Object.isFrozen(read.record.target)).toBe(true);
   });
 });

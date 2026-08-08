@@ -26,10 +26,12 @@ import path from "node:path";
 import {
   type MemoryHit,
   type MemoryRecord,
+  type MemoryRecordDegradation,
   type MemorySearchQueryInput,
   MemorySearchQuerySchema,
   type MemoryStoreCapabilities,
   memoryRecord,
+  readStoredMemoryRecord,
 } from "@agentic-patterns/core";
 import type DatabaseConstructor from "better-sqlite3";
 import type { Database, Statement } from "better-sqlite3";
@@ -157,6 +159,69 @@ function generateId(): string {
     return (globalThis as unknown as { crypto: { randomUUID(): string } }).crypto.randomUUID();
   }
   return `${Date.now().toString(36)}-${(++_counter).toString(36)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Degraded-read observability (ADR-0009 Decision 14)
+// ---------------------------------------------------------------------------
+// A dropped `target` must never be SILENT. Three channels were on the table:
+//
+//   (a) a counter on the search RESULT — rejected: `MemoryStore.search` returns
+//       `MemoryHit[]`, and wrapping it in an envelope is a breaking change to a
+//       protocol ADR-0007 D6 deliberately froze at six plain-return methods.
+//   (b) an `agent.memory.*` EVENT — rejected FOR NOW, not on principle: the
+//       vocabulary exists (`events/types.ts`), but it is emitted by the
+//       MemoryToolbox and the recall assembler through `ctx.emit`. A store has
+//       no bus, and giving one a bus is a constructor/API change plus a
+//       dependency edge from `memory/` into `events/` that nothing else in this
+//       directory has. Worth revisiting when a store-level bus exists; it would
+//       consume exactly the `MemoryRecordDegradation` this store already has.
+//   (c) a once-per-key `console.warn` — CHOSEN. It is this codebase's settled
+//       idiom for soft degradation, with two live precedents: `schema-guard.ts`
+//       (`allowOpenObjectSchemas` downgrades a throw to a once-per-schema warn)
+//       and `providers/capabilities.ts` (`advisedKeys`, once per model x
+//       capability, plus `resetAdvisoryWarningsForTests`). Zero API surface,
+//       zero layering cost, visible in any host's logs.
+//
+// (c) is the log channel; the DATA channel is `readStoredMemoryRecord`'s
+// `degraded` report, which is what tests and the conformance kit assert on. A
+// caller is never reduced to scraping stderr to know a row was degraded — it
+// can re-read the row and see `target` absent while the raw column still holds
+// the unreadable value, since this store never writes the degradation back.
+
+/**
+ * Reason classes already warned about. Keyed on the degraded FIELD plus the
+ * JavaScript type of the unreadable value — not on record id, which would be
+ * unbounded in the row count and would turn a corrupted partition into a log
+ * flood. `MAX_WARNED_KEYS` bounds it against a pathological db in which the
+ * key itself varies.
+ */
+const warnedDegradations = new Set<string>();
+const MAX_WARNED_KEYS = 32;
+
+/**
+ * Warn once per reason class. NEVER throws and NEVER changes control flow — the
+ * record has already been degraded and returned by the time this runs.
+ */
+function warnDegradedRead(degradation: MemoryRecordDegradation, rawTarget: unknown): void {
+  const key = `${degradation.field}:${rawTarget === null ? "null" : typeof rawTarget}`;
+  if (warnedDegradations.has(key) || warnedDegradations.size >= MAX_WARNED_KEYS) return;
+  warnedDegradations.add(key);
+  console.warn(
+    `[agentic-patterns] memory record ${degradation.id}: ${degradation.reason} — the record was returned WITHOUT its ${degradation.field} rather than failing the read (ADR-0009 D14). The stored value is untouched; further reads with an unreadable ${degradation.field} of this shape are silent.`,
+  );
+}
+
+/**
+ * Test-only: clear the once-per-reason warn memory. Mirrors
+ * `resetAdvisoryWarningsForTests` in `providers/capabilities.ts` — the `Set` is
+ * module-level and persists across every `it()` in a file, so without this the
+ * first test to degrade a row "claims" the warning and every later test in the
+ * same file silently gets none. Call it in a `beforeEach` in any suite that
+ * asserts on `console.warn`.
+ */
+export function resetMemoryDegradedReadWarningsForTests(): void {
+  warnedDegradations.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -499,12 +564,54 @@ export class SqliteMemoryStore implements MemoryStore {
   /**
    * Rebuild a frozen {@link MemoryRecord} from a raw row. Conditional spreads
    * for every optional field (`exactOptionalPropertyTypes` discipline — NULL
-   * column ⇒ key absent, never `undefined`-valued); `memoryRecord()` on the
-   * way out so every read path re-validates + deep-freezes (round-trip
-   * equality with the frozen write-side records).
+   * column ⇒ key absent, never `undefined`-valued); the record is re-validated
+   * + deep-frozen on the way out, so a read round-trips to the same frozen
+   * shape the write side produced.
+   *
+   * TOLERANT on `target` (ADR-0009 Decision 14). This method is called from
+   * inside `rows.map` on the search paths, so a throw here does not skip a
+   * record — it takes the ENTIRE result set with it. One hand-edited row, one
+   * row written by a newer version, and the partition's recall goes to zero.
+   * {@link readStoredMemoryRecord} degrades that single record to target-less
+   * instead, and the degradation is reported (data) and warned once per reason
+   * class (log). Corruption in any OTHER column still throws — see that
+   * function's docblock for why that asymmetry is deliberate.
    */
   private _rowToRecord(row: RawRow): MemoryRecord {
-    return memoryRecord({
+    // `target` is the one column read tolerantly, so its `JSON.parse` is
+    // guarded as well: a column hand-edited to non-JSON text is the same defect
+    // class as one holding an unrecognised vocabulary, arrives on the same
+    // `rows.map`, and would otherwise detonate one line above the tolerance.
+    let rawTarget: unknown;
+    let targetJsonError: string | undefined;
+    if (row.target !== null) {
+      try {
+        rawTarget = JSON.parse(row.target);
+      } catch (err) {
+        targetJsonError = (err as Error).message || "invalid JSON";
+      }
+    }
+    if (targetJsonError !== undefined) {
+      const degradation: MemoryRecordDegradation = {
+        id: row.id,
+        field: "target",
+        reason: `stored target is not valid JSON: ${targetJsonError}`,
+      };
+      const { record } = readStoredMemoryRecord(this._rowFields(row));
+      warnDegradedRead(degradation, row.target);
+      return record;
+    }
+    const { record, degraded } = readStoredMemoryRecord({
+      ...this._rowFields(row),
+      ...(row.target !== null ? { target: rawTarget } : {}),
+    });
+    if (degraded !== undefined) warnDegradedRead(degraded, rawTarget);
+    return record;
+  }
+
+  /** Every column except `target`, which has its own tolerant read path above. */
+  private _rowFields(row: RawRow): Omit<Parameters<typeof readStoredMemoryRecord>[0], "target"> {
+    return {
       id: row.id,
       scope: JSON.parse(row.scope),
       kind: row.kind as MemoryRecord["kind"],
@@ -516,9 +623,8 @@ export class SqliteMemoryStore implements MemoryStore {
       ...(row.invalid_at !== null ? { invalidAt: row.invalid_at } : {}),
       ...(row.superseded_by !== null ? { supersededBy: row.superseded_by } : {}),
       ...(row.expires_at !== null ? { expiresAt: row.expires_at } : {}),
-      ...(row.target !== null ? { target: JSON.parse(row.target) } : {}),
       ...(row.payload !== null ? { payload: JSON.parse(row.payload) } : {}),
       ...(row.supports !== null ? { supports: JSON.parse(row.supports) } : {}),
-    });
+    };
   }
 }

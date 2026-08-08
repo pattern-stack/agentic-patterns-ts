@@ -4,12 +4,17 @@
  * memoryCapability wrapper.
  */
 
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { Capability, type MemoryScope, type MemoryTarget } from "@agentic-patterns/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SandboxEventBus } from "../../events/sandbox-event-bus.js";
 import { createAgentAddress } from "../../events/sandbox-types.js";
 import { MessagingToolbox } from "../../transport/messaging-toolbox.js";
 import { PREVIEW_MARKER, byteLength } from "../../workflows/state-events.js";
+import { SqliteMemoryStore, resetMemoryDegradedReadWarningsForTests } from "../sqlite-store.js";
 import { InMemoryMemoryStore, type MemoryWriteInput } from "../store.js";
 import {
   MemoryToolbox,
@@ -375,5 +380,90 @@ describe("MemoryToolbox", () => {
       expect(prompt).toContain("Always save renewal dates."); // appended after
       expect(prompt.indexOf("Do NOT save")).toBeLessThan(prompt.indexOf("Always save"));
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tolerated stored targets (ADR-0009 Decision 14)
+// ---------------------------------------------------------------------------
+// The toolbox is the layer the MODEL sees, so it is where a tolerated record
+// either survives or detonates a second time. Two call sites widened for D14 —
+// the D2 collision gate and `MemoryRecordViewSchema` — and both are exercised
+// here through the real SQLite backend with a hand-edited row, because that is
+// the only way to produce a record `MemoryWriteInputSchema` refuses to make.
+
+describe("MemoryToolbox — tolerated stored targets (ADR-0009 D14)", () => {
+  let dir: string;
+  let dbPath: string;
+  let store: SqliteMemoryStore;
+  let raw: InstanceType<typeof Database>;
+  let toolbox: MemoryToolbox;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), "ap-memory-toolbox-"));
+    dbPath = path.join(dir, "memory.db");
+    store = new SqliteMemoryStore({ path: dbPath, Database });
+    raw = new Database(dbPath);
+    toolbox = new MemoryToolbox({ store, scope: BOUND });
+    resetMemoryDegradedReadWarningsForTests();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    raw.close();
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const saveHere = async (args: Record<string, unknown>): Promise<SavedResult> =>
+    (await toolbox.execute("memory_save", { kind: "fact", ...args })) as SavedResult;
+
+  const setStoredTarget = (id: string, column: string): void => {
+    raw.prepare("UPDATE memory_records SET target = ? WHERE id = ?").run(column, id);
+  };
+
+  it("returns a tolerated record in a hit list — the view schema widened with the record", async () => {
+    const saved = await saveHere({ content: "deploys freeze monthly", target: TARGET });
+    const future = { primitive: "background", section: "userProfile", key: "name" };
+    setStoredTarget(saved.id as string, JSON.stringify(future));
+
+    const listed = (await toolbox.execute("memory_list", {})) as HitsResult;
+    expect(listed.hits.map((hit) => hit.id)).toEqual([saved.id]);
+    expect(listed.hits[0]?.target).toEqual(future);
+  });
+
+  it("returns a DEGRADED record in a hit list, target-less rather than not at all", async () => {
+    const saved = await saveHere({ content: "deploys freeze monthly", target: TARGET });
+    setStoredTarget(saved.id as string, "42");
+
+    const listed = (await toolbox.execute("memory_list", {})) as HitsResult;
+    expect(listed.hits.map((hit) => hit.id)).toEqual([saved.id]);
+    expect(listed.hits[0]?.target).toBeUndefined();
+  });
+
+  it("does NOT treat an unreadable-vocabulary stored target as a D2 collision", async () => {
+    // Narrow, never loosen: the gate compares KNOWN arms. A stored target this
+    // build cannot read names a slot it cannot reason about, and blocking the
+    // write on it would brick saves against a partition a newer version wrote.
+    const first = await saveHere({ content: "deploys freeze monthly", target: TARGET });
+    setStoredTarget(
+      first.id as string,
+      JSON.stringify({ primitive: "background", section: "userProfile", key: "deploy" }),
+    );
+
+    const second = await saveHere({ content: "deploys freeze weekly", target: TARGET });
+    expect(second.status).toBe("saved");
+  });
+
+  it("still gates a KNOWN target that survived a sibling row's corruption", async () => {
+    // The tolerance must not become a way to lose the gate: one bad row in the
+    // partition, and the collision on a good row still fires.
+    const bad = await saveHere({ content: "unrelated", target: { ...TARGET, key: "release" } });
+    const good = await saveHere({ content: "deploys freeze monthly", target: TARGET });
+    setStoredTarget(bad.id as string, "42");
+
+    const second = await saveHere({ content: "deploys freeze weekly", target: TARGET });
+    expect(second.status).toBe("conflict");
+    expect(second.existing?.id).toBe(good.id);
   });
 });

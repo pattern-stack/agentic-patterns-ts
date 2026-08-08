@@ -60,8 +60,12 @@ export {
   MemoryTargetSchema,
   ProvenanceSchema,
   RecoveryTargetSchema,
+  StoredMemoryTargetSchema,
+  UnknownMemoryTargetSchema,
   canonicalMemoryScope,
+  isKnownTarget,
   memoryRecord,
+  readStoredMemoryRecord,
   targetPayloadSchema,
 } from "./memory-record.js";
 export type {
@@ -70,6 +74,7 @@ export type {
   MemoryHit,
   MemoryKind,
   MemoryRecord,
+  MemoryRecordDegradation,
   MemoryRecordInput,
   MemoryScope,
   MemorySearchQuery,
@@ -77,6 +82,9 @@ export type {
   MemoryStoreCapabilities,
   MemoryTarget,
   Provenance,
+  StoredMemoryRecordRead,
+  StoredMemoryTarget,
+  UnknownMemoryTarget,
 } from "./memory-record.js";
 
 export {

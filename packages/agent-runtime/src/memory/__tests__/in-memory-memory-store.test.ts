@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { InMemoryMemoryStore, type MemoryWriteInput } from "../store.js";
+import { InMemoryMemoryStore, type MemoryWriteInput, MemoryWriteInputSchema } from "../store.js";
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -131,5 +131,46 @@ describe("InMemoryMemoryStore (impl-specific)", () => {
 
   it("capabilities resolves { search: 'keyword' }", async () => {
     expect(await store.capabilities()).toEqual({ search: "keyword" });
+  });
+
+  /**
+   * The other half of ADR-0009 Decision 14, and the half that is easy to lose:
+   * tolerance is a READ-path property. If the write side ever widened to match,
+   * the model and every host could mint unknown vocabularies at will and the
+   * conformance kit's `setStoredTarget` hook — which exists only because no
+   * legal write can produce such a row — would quietly become unnecessary and
+   * then wrong.
+   */
+  describe("the WRITE path stays strict (ADR-0009 D14)", () => {
+    it("MemoryWriteInputSchema rejects an unrecognised target vocabulary", () => {
+      expect(
+        MemoryWriteInputSchema.safeParse({
+          scope: { tenant: "acme" },
+          kind: "fact",
+          content: "x",
+          target: { primitive: "background", section: "userProfile", key: "name" },
+        }).success,
+      ).toBe(false);
+      expect(
+        MemoryWriteInputSchema.safeParse({
+          scope: { tenant: "acme" },
+          kind: "fact",
+          content: "x",
+          target: { primitive: "persona" },
+        }).success,
+      ).toBe(false);
+    });
+
+    it("write() rejects the whole batch rather than storing an unknown target", async () => {
+      await expect(
+        store.write([
+          fact("valid sibling"),
+          fact("bad", {
+            target: { primitive: "persona" } as never,
+          }),
+        ]),
+      ).rejects.toThrow();
+      expect(await store.search({ scope: {}, includeInvalidated: true })).toEqual([]);
+    });
   });
 });

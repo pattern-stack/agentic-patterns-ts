@@ -10,12 +10,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventStore } from "../../storage/event-store.js";
 import { loadMemoryStore } from "../../storage/load.js";
 import {
   MEMORY_TARGET_SCHEMA_VERSION,
   SqliteMemoryStore,
+  resetMemoryDegradedReadWarningsForTests,
   resolveMemoryDbPath,
 } from "../sqlite-store.js";
 import { InMemoryMemoryStore, type MemoryWriteInput } from "../store.js";
@@ -252,6 +253,124 @@ describe("SqliteMemoryStore (impl-specific)", () => {
       expect(partial.map((h) => h.record.id)).toEqual([written!.id]);
       // A near-miss value (LIKE would wildcard-match `%`/`_`) matches nothing.
       expect(await store.search({ scope: { "pct%": "underXscore" } })).toEqual([]);
+      store.close();
+    });
+  });
+
+  /**
+   * The OBSERVABILITY half of ADR-0009 Decision 14. The tolerance itself is
+   * contractual and lives in the conformance kit (Tier 1, via the
+   * `setStoredTarget` hook); what channel a backend uses to make the
+   * degradation visible is a backend choice, so it is pinned here.
+   *
+   * This store follows the codebase's settled soft-degradation idiom — the
+   * once-per-key `console.warn` from `runner/schema-guard.ts` and
+   * `providers/capabilities.ts`, complete with the test-only reset those need
+   * for the same reason: the `Set` is module-level, so without a reset the
+   * first test in the file to degrade a row claims the warning and every later
+   * one silently gets none.
+   */
+  describe("degraded-read observability (ADR-0009 D14)", () => {
+    /** Write one targeted record, then overwrite its stored `target` column. */
+    async function withStoredTarget(rawTargetColumn: string): Promise<{
+      store: SqliteMemoryStore;
+      id: string;
+      raw: InstanceType<typeof Database>;
+    }> {
+      const dbPath = path.join(dir, "memory.db");
+      const store = new SqliteMemoryStore({ path: dbPath, Database });
+      const [record] = await store.write([
+        fact("targeted", {
+          target: { primitive: "background", section: "conventions", key: "theme" },
+        }),
+      ]);
+      const raw = new Database(dbPath);
+      raw
+        .prepare("UPDATE memory_records SET target = ? WHERE id = ?")
+        .run(rawTargetColumn, record!.id);
+      return { store, id: record!.id, raw };
+    }
+
+    beforeEach(() => {
+      resetMemoryDegradedReadWarningsForTests();
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("warns once per reason class, naming the record and the ADR", async () => {
+      const { store, id, raw } = await withStoredTarget("42");
+      const warn = vi.mocked(console.warn);
+
+      await store.get(id);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const message = String(warn.mock.calls[0]?.[0]);
+      expect(message).toContain("[agentic-patterns]");
+      expect(message).toContain(id);
+      expect(message).toContain("ADR-0009 D14");
+
+      // Same reason class on every subsequent read — log once, not per row.
+      await store.get(id);
+      await store.search({ scope: {} });
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      raw.close();
+      store.close();
+    });
+
+    it("does NOT warn for an unrecognised-but-readable target — that is forward compatibility, not corruption", async () => {
+      const { store, id, raw } = await withStoredTarget(
+        JSON.stringify({ primitive: "background", section: "userProfile", key: "name" }),
+      );
+      const read = await store.get(id);
+      expect(read!.target).toEqual({
+        primitive: "background",
+        section: "userProfile",
+        key: "name",
+      });
+      expect(console.warn).not.toHaveBeenCalled();
+      raw.close();
+      store.close();
+    });
+
+    it("tolerates a target column that is not even valid JSON", async () => {
+      // A hand-edited column is the reproduction ADR-0009 D14 names, and
+      // `JSON.parse` sits one line ABOVE the schema — so tolerance that started
+      // at the schema would still have detonated here.
+      const { store, id, raw } = await withStoredTarget("{not json");
+      const read = await store.get(id);
+      expect(read!.target).toBeUndefined();
+      expect(read!.content).toBe("targeted");
+      expect(String(vi.mocked(console.warn).mock.calls[0]?.[0])).toContain("not valid JSON");
+      raw.close();
+      store.close();
+    });
+
+    it("one unreadable row does not take the partition's recall with it", async () => {
+      // The actual defect: `_rowToRecord` runs inside `rows.map`, so a throw
+      // does not skip a record — it empties the whole result set, and the
+      // query-less listing is recall's always-injected profile tier.
+      const dbPath = path.join(dir, "memory.db");
+      const store = new SqliteMemoryStore({ path: dbPath, Database });
+      const written = await store.write([
+        fact("Doug ships from Denver", { kind: "profile" }),
+        fact("Doug drinks espresso", {
+          kind: "profile",
+          target: { primitive: "background", section: "conventions", key: "theme" },
+        }),
+        fact("Doug runs deploys on Fridays", { kind: "profile" }),
+      ]);
+      const raw = new Database(dbPath);
+      raw.prepare("UPDATE memory_records SET target = ? WHERE id = ?").run("42", written[1]!.id);
+
+      const listed = await store.search({ scope: {}, kinds: ["profile"] });
+      expect(listed.map((h) => h.record.id).sort()).toEqual(written.map((r) => r.id).sort());
+      const queried = await store.search({ scope: {}, query: "espresso" });
+      expect(queried.map((h) => h.record.id)).toEqual([written[1]!.id]);
+      expect(queried[0]!.record.target).toBeUndefined();
+
+      raw.close();
       store.close();
     });
   });
