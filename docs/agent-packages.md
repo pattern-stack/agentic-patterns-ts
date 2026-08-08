@@ -1,5 +1,8 @@
 ---
 title: "Agent Packages — self-contained plugin units for an agent system"
+description: "Design for agent directories as plugins: private subagents, a four-tier export contract, system-level DI, and package-shipped evals. Status: design/mockup."
+sidebar:
+  label: "Agent Packages"
 ---
 
 > Status: **DESIGN / MOCKUP** (2026-07-03). Companion to `docs/closed-composition.md`

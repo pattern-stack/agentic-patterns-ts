@@ -69,26 +69,34 @@ export default defineConfig({
           href: "https://github.com/pattern-stack/agentic-patterns-ts",
         },
       ],
+      // Grouping follows the cold-reader audit (#458): a short, honest Guides
+      // path first; dated design/plan documents live under "Design notes" so a
+      // visitor can tell shipped API from aspiration at a glance.
       sidebar: [
         {
           label: "Guides",
+          items: ["getting-started", "authoring-a-toolbox", "runners"],
+        },
+        { label: "Memory", items: [{ autogenerate: { directory: "memory" } }] },
+        {
+          label: "Reference",
+          items: ["reference/events", "event-persistence"],
+        },
+        { label: "Architecture Decisions", items: [{ autogenerate: { directory: "adr" } }] },
+        {
+          label: "Design notes",
+          collapsed: true,
           items: [
             "agent-packages",
-            "authoring-a-toolbox",
-            "runners",
             "store-family",
             "node-context",
-            "event-persistence",
             "closed-composition",
             "eval-surface",
             "playground-redesign",
             "claude-code-plugin-activation",
+            "migration/cockpit-port",
           ],
         },
-        { label: "Memory", items: [{ autogenerate: { directory: "memory" } }] },
-        { label: "Reference", items: [{ autogenerate: { directory: "reference" } }] },
-        { label: "Architecture Decisions", items: [{ autogenerate: { directory: "adr" } }] },
-        { label: "Migration", items: [{ autogenerate: { directory: "migration" } }] },
       ],
     }),
   ],

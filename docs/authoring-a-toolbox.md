@@ -1,5 +1,6 @@
 ---
 title: "Authoring a toolbox"
+description: "How to define tools and plays with defineTool/definePlay, read SessionScope in tools, and lint model-facing Zod schemas with lintModelFacingSchema."
 ---
 
 How to define tools, group them into a `Toolbox`, and expose them as a `Capability` — using the

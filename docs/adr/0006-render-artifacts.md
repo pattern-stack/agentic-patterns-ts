@@ -1,5 +1,8 @@
 ---
 title: "ADR 0006 — Render artifacts: a second data channel on the response envelope"
+description: "Adds a RenderArtifact channel on tool.end/message.complete for client-render data the model never saw, plus preserving structured terminal-tool output."
+sidebar:
+  label: "ADR 0006 — Render Artifacts"
 ---
 
 - **Status:** Accepted (2026-07-26) — open questions resolved in review:

@@ -1,5 +1,8 @@
 ---
 title: "ADR 0005 — `SessionScope`: a declarative, typed per-conversation scope, carried as `host.scope`, rendered on one shared agent instance"
+description: "Typed per-conversation identity via sessionScope/scopeItem: validated server-side, carried as host.scope, rendered by Awareness.fromScope on one shared agent."
+sidebar:
+  label: "ADR 0005 — SessionScope"
 ---
 
 - **Status:** Accepted (2026-07-18) — shipped as the

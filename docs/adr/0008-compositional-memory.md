@@ -1,5 +1,8 @@
 ---
 title: "ADR 0008 — Compositional memory: matured memories compile into the agent's composition, not into a context appendix"
+description: "Matured memories compile into the agent's composition via typed targets and applyMemoryOverlay, with tiered gated promotion, attribution, and a ledger."
+sidebar:
+  label: "ADR 0008 — Compositional Memory"
 ---
 
 - **Status:** PROPOSED — design review. Companion to [ADR-0007](0007-memory-store.md) (the store substrate; this ADR changes nothing there). Program #414; the Phase-2/3 north star for epic #415.

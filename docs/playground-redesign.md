@@ -1,5 +1,8 @@
 ---
 title: "Playground redesign — the object graph is the product"
+description: "Design shifting the playground from run observability to composition inspection: three doors (Roles/Agents/Capabilities), provenance chips, slice order."
+sidebar:
+  label: "Playground redesign"
 ---
 
 > Status: **DRAFT for review** (2026-07-01, Doug + Claude). Supersedes the "observability

@@ -1,5 +1,8 @@
 ---
 title: "ADR 0004 — `instantiate(context)` becomes the execution seam: per-conversation delivered instances, redaction, run-metadata stamping"
+description: "Promotes instantiate(context) from preview-only to the per-conversation delivered-instance factory, with redaction rules and run-metadata stamping."
+sidebar:
+  label: "ADR 0004 — instantiate() Execution Seam"
 ---
 
 - **Status:** Accepted (2026-07-15) — PR-1 (runtime + server) of the

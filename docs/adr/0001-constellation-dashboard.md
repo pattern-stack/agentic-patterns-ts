@@ -1,5 +1,8 @@
 ---
 title: "ADR 0001 — The constellation cockpit becomes the dev-kit dashboard"
+description: "Rebuilds the dashboard around the constellation cockpit: transport-agnostic graph engine, ChatWorkspace chat view, and uniform model-provider routing."
+sidebar:
+  label: "ADR 0001 — Constellation Dashboard"
 ---
 
 - **Status:** Accepted (2026-06-25) — execution playbook in

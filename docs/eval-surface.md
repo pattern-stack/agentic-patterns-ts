@@ -1,5 +1,8 @@
 ---
 title: "Eval surface — first-class eval management in the playground"
+description: "Locked design for the eval stack E1–E6: EvalStore on RunStore, trace capture, case banks with train/dev/test splits, ap eval CLI, review UI, LLM judge."
+sidebar:
+  label: "Eval surface"
 ---
 
 > **Status:** design (proposed stack). Companion to
