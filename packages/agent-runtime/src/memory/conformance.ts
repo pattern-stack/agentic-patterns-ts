@@ -454,6 +454,22 @@ export async function runMemoryStoreConformance(
        * with a tolerant passthrough arm and lands the assertion.
        */
       it.todo("tolerates an unrecognised stored target.section on get and on search — #464");
+
+      /**
+       * Non-Latin diacritic/combining-mark parity — a KNOWN Tier 2 hole,
+       * measured in PR #454's review: `tokenize()` (NFD + strip \p{M}) and
+       * FTS5 `unicode61` (`remove_diacritics 1`) agree for Latin-1-class
+       * content but diverge outside it. `"Tiếng Việt"` matches query
+       * `"tieng"` in-memory and returns zero rows on SQLite; same class of
+       * divergence for Greek tonos, Cyrillic breve, and Hebrew/Arabic
+       * combining marks (separators to `unicode61`, stripped by
+       * `tokenize()`). Landing this as a passing pin means either widening
+       * tokenize() to match unicode61 exactly or configuring FTS5 to match
+       * tokenize() — a semantics decision, not a test-only change.
+       */
+      it.todo(
+        "Tier 2 pins non-Latin diacritic parity (Vietnamese / Greek tonos / Cyrillic breve / Hebrew / Arabic) — tokenize() vs FTS5 unicode61 divergence, PR #454 review",
+      );
     });
 
     // =======================================================================

@@ -123,9 +123,11 @@ describe("InMemoryMemoryStore (impl-specific)", () => {
       await store.write([fact("Prefers dark-mode in the editor.")]);
       const hits = await store.search({ scope: {}, query: "dark-mode" });
       expect(hits).toHaveLength(1);
-      // Both sub-tokens matched, so the score is 2 — an adjacency phrase would
-      // have been one match, and SQLite must not treat it as one either.
-      expect(hits[0]!.score).toBe(2);
+      // Both sub-tokens matched — an adjacency phrase would have been one
+      // match, and SQLite must not treat it as one either. Score NUMBERS are
+      // backend-advisory and never pinned (conformance.ts, ADR-0007 D5), so
+      // assert only that both tokens contributed.
+      expect(hits[0]!.score).toBeGreaterThan(1);
     });
   });
 

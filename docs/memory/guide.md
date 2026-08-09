@@ -605,7 +605,7 @@ Stated rather than hidden, mirroring the ADRs:
 
   | Tier | Applies to | Pins |
   |---|---|---|
-  | 1 — universal | every backend | filtering (scope subset-match, `kinds`, `tags`), invalidation chains, `limit` semantics including `limit: 0`, the `updatedAt`-only-on-invalidate rule, the recency listing, more-matching-tokens-first, and the **batch tie** |
+  | 1 — universal | every backend | filtering (scope subset-match, `kinds`, `tags`), invalidation chains, `limit` semantics including `limit: 0`, the `updatedAt`-only-on-invalidate rule, the recency listing, more-matching-tokens-first (for non-semantic backends — a `semantic` backend may rank a conceptually closer record above one with more literal token overlap), and the **batch tie** |
   | 2 — per `capabilities().search` | every backend declaring `keyword` | **identical match SETS** over one shared corpus: word boundaries, punctuation, case, diacritics, one-character tokens, tags-as-haystack, and multi-token OR |
 
   Both reference backends call one exported `tokenize()` — lowercase → NFD → drop combining marks
@@ -620,6 +620,13 @@ Stated rather than hidden, mirroring the ADRs:
   total order would force a bm25 reimplementation into the in-memory store and would then fail the
   `ts_rank` backend — relocating the divergence instead of removing it. Assert on match sets and on
   the Tier 1 ordering invariants; do not assert on positions 3-vs-4 of a relevance list.
+
+  Also not pinned: **non-Latin diacritic and combining-mark parity**. The match-set pin holds for
+  Latin-1-class content (ASCII, Latin-1, Latin Extended-A, NFD-normalized Latin); outside it the
+  shared `tokenize()` (NFD + strip combining marks) and FTS5's `unicode61` are known to diverge —
+  Vietnamese diacritics (`tieng` matches `Tiếng` in-memory, zero rows on SQLite), Greek tonos,
+  Cyrillic breve, and Hebrew/Arabic combining marks (separators to `unicode61`, stripped by
+  `tokenize()`). Non-Latin corpora should be developed against the backend you ship on.
 - **The hits tier misses when wording does not overlap.** Recall's search tier passes the first
   user message verbatim as `query`, and the reference backends match it lexically — so a stored
   `fact` reading "The user's name is Doug" is returned for *"what's my name?"* and **not** for

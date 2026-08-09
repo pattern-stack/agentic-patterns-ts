@@ -27,10 +27,17 @@
  * containing it. A stemmer here would be a third semantic that neither FTS5 nor
  * `plainto_tsquery` shares.
  *
- * Both backends call this on the QUERY. In-memory additionally calls it on the
- * haystack; SQLite's haystack is tokenized by `unicode61` itself, and the two
- * are pinned to agree by the conformance kit's Tier 2 (`conformance.ts`), which
- * is the only thing that can keep them honest — this module cannot.
+ * Both backends call this on the QUERY — that side is genuinely shared. The
+ * HAYSTACKS are not: in-memory tokenizes its haystack with this function, while
+ * SQLite's haystack is tokenized by FTS5's `unicode61` itself. The two agree
+ * for Latin-1-class content — ASCII, Latin-1, Latin Extended-A, NFD-normalized
+ * Latin — and the conformance kit's Tier 2 (`conformance.ts`) pins exactly that
+ * class, which is the only thing that can keep them honest; this module cannot.
+ * Outside it they are KNOWN to diverge: `unicode61` (`remove_diacritics 1`)
+ * does not fold Vietnamese diacritics (`"tieng"` matches `"Tiếng"` in-memory,
+ * zero rows on FTS5), Greek tonos, or Cyrillic breve, and treats Hebrew/Arabic
+ * combining marks as SEPARATORS where this function strips them. Non-Latin
+ * corpora should be developed against the backend they ship on.
  */
 
 /**
