@@ -133,7 +133,8 @@ type MemoryRecordView = z.infer<typeof MemoryRecordViewSchema>;
 const SaveParamsSchema = z.object({
   kind: MemoryKindSchema.describe(
     "profile = durable identity fact about the user (name, role, who they are) — always " +
-      "injected next session, never search-ranked, so keep these to a handful; " +
+      "injected before search runs next session (and also returned by search like any " +
+      "record), so keep these to a handful; " +
       "fact = atomic statement still true next week; " +
       "preference = how the user wants things done; " +
       "episode = what happened and what it taught you. " +

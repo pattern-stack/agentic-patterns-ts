@@ -259,7 +259,10 @@ describe("assembleRecall", () => {
 
     it("keeps a query hit reachable when the profile tier would otherwise fill the budget", async () => {
       const store = new InMemoryMemoryStore();
-      await seedFatProfiles(store, 12); // ~2500 chars of profile against a 4000 budget
+      // ~4,900 chars of profile — overruns the 4,000 TOTAL budget, so without
+      // the slice the greedy assembly exhausts it on profiles alone and the
+      // hit never renders (12 seeded only ~3,083 chars and passed either way).
+      await seedFatProfiles(store, 20);
       await sleep(10);
       await seed(store, "deploys run through the alpha pipeline");
 
@@ -279,6 +282,41 @@ describe("assembleRecall", () => {
       expect(result.truncated).toBe(true);
       expect(result.count).toBe(1);
       expect(result.block.endsWith(marker(5))).toBe(true);
+    });
+
+    it("admits at least the newest profile when every entry overruns the slice", async () => {
+      const store = new InMemoryMemoryStore();
+      // One profile whose entry (~1,700 chars) alone exceeds the default slice
+      // (0.4 × 4000 = 1600). Pre-floor code deferred it entirely and, with no
+      // lexical hits, handed the model an EMPTY recall block.
+      await seed(store, `sole profile ${"P".repeat(1680)}`, { kind: "profile" });
+
+      const result = await assembleRecall(store, SCOPE, { query: NO_MATCH });
+      expect(result.block).not.toBe("");
+      expect(result.block).toContain("sole profile");
+      expect(result.count).toBe(1);
+      // Floor-admitted, so it is NOT reported omitted (no double-count).
+      expect(result.truncated).toBe(false);
+      expect(result.chars).toBeLessThanOrEqual(DEFAULT_RECALL_BUDGET_CHARS);
+    });
+
+    it("floor-admits only the newest; remaining oversized profiles still count as omitted", async () => {
+      const store = new InMemoryMemoryStore();
+      await seed(store, `older oversized ${"O".repeat(200)}`, { kind: "profile" }); // entry 241
+      await sleep(10);
+      await seed(store, `newer oversized ${"N".repeat(200)}`, { kind: "profile" }); // entry 241
+
+      // Slice of 100 fits neither: the floor admits the newest, the older one
+      // stays deferred and is reported in the marker exactly once.
+      const result = await assembleRecall(store, SCOPE, {
+        profileBudgetChars: 100,
+        query: NO_MATCH,
+      });
+      expect(result.count).toBe(1);
+      expect(result.block).toContain("newer oversized");
+      expect(result.block).not.toContain("older oversized");
+      expect(result.truncated).toBe(true);
+      expect(result.block.endsWith(marker(1))).toBe(true);
     });
 
     it("defers rather than bans — a later tier may readmit, without double-counting", async () => {

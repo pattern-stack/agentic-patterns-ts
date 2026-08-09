@@ -43,7 +43,10 @@ export const DEFAULT_RECALL_BUDGET_CHARS = 4000;
  * the tier that answers the user's actual question — and starves it worst in
  * exactly the sessions where the store has learned the most. `PROFILE_FETCH_LIMIT`
  * bounds the page, not the cost. Records the sub-budget defers are COUNTED into
- * the block's truncation marker, never silently dropped (house rule).
+ * the block's truncation marker, never silently dropped (house rule). The slice
+ * has an admit-at-least-one floor: a non-empty profile tier always contributes
+ * its newest record, even when that single entry overruns the slice — only the
+ * overall budget may exclude it.
  */
 export const DEFAULT_PROFILE_BUDGET_RATIO = 0.4;
 
@@ -60,7 +63,9 @@ export interface AssembleRecallOptions {
   budgetChars?: number;
   /**
    * Character sub-budget for the always-on profile tier, so it cannot starve
-   * the query-driven hits tier. Positive integer.
+   * the query-driven hits tier. Positive integer. Admit-at-least-one floor: a
+   * non-empty tier always contributes its newest record even when that entry
+   * alone overruns this slice (only `budgetChars` may exclude it).
    * @default `floor(budgetChars * DEFAULT_PROFILE_BUDGET_RATIO)`
    */
   profileBudgetChars?: number;
@@ -189,6 +194,7 @@ export async function assembleRecall(
   );
   const deferredProfiles: MemoryRecord[] = [];
   let profileChars = 0;
+  let admittedProfiles = 0;
   for (const record of profiles) {
     const cost = formatEntry(record).length + 1; // +1 for the joining newline
     if (profileChars + cost > profileBudgetChars) {
@@ -197,6 +203,18 @@ export async function assembleRecall(
     }
     profileChars += cost;
     if (!included.has(record.id)) included.set(record.id, record);
+    admittedProfiles += 1;
+  }
+  // Admit-at-least-one floor: the slice is a soft budget, not a ban. When the
+  // tier is non-empty but every entry overruns the slice, admit the single
+  // newest profile anyway — otherwise a lone oversized profile renders an
+  // EMPTY recall block where pre-slice code rendered the profile. The overall
+  // `budgetChars` enforcement in buildBlock still governs, unchanged. The
+  // floor-admitted record sits in `deferredProfiles` too, but the preOmitted
+  // dedupe below (`!included.has`) keeps the marker from double-counting it.
+  if (admittedProfiles === 0 && profiles.length > 0) {
+    const newest = profiles[0];
+    if (newest !== undefined) included.set(newest.id, newest);
   }
 
   // Pinned-candidate tier (ADR-0008 D4 exposure — recency-ordered; the ADR's
