@@ -25,13 +25,16 @@
  *
  * GATE TIERS (#461). Every family declares one:
  *   • `hard`         — must pass; a failure fails the run (exit 1).
- *   • `xfail-strict` — EXPECTED to fail. A failure prints XFAIL and does NOT
- *                      fail the run. An unexpected PASS prints XPASS and DOES
- *                      fail the run — because a green xfail means the thing it
- *                      measures got fixed and nobody flipped the tier, and a
- *                      tier nobody flips becomes a graveyard for permanently
- *                      red families nobody re-reads. Each carries `reason` and
- *                      `unblockedBy`, both printed on every run.
+ *   • `xfail-strict` — EXPECTED to fail BY ASSERTION. An assertion-borne
+ *                      failure prints XFAIL and does NOT fail the run. An
+ *                      unexpected PASS prints XPASS and DOES fail the run —
+ *                      because a green xfail means the thing it measures got
+ *                      fixed and nobody flipped the tier, and a tier nobody
+ *                      flips becomes a graveyard for permanently red families
+ *                      nobody re-reads. A failure carrying node/scorer ERRORS
+ *                      prints XFAIL-INVALID and ALSO fails the run — a crashed
+ *                      target is not an expected failure. Each carries `reason`
+ *                      and `unblockedBy`, both printed on every run.
  *
  * Families and how each is scored:
  *   1. recall-cite         (LIVE, hard)  seeded records → does the agent surface
@@ -70,9 +73,10 @@
  * only the deterministic families run and the skips are reported.
  *
  * Usage:  bun x tsx evals/memory-behavior/run.mts [--dry] [--tiers] [--variant <label>]
- * Exit:   0 all executed families met their tier · 1 a `hard` family failed or
- *         an `xfail-strict` family passed · 2 config error (no runner without
- *         --dry, bad AGENT_TIER, or no SQLite memory backend)
+ * Exit:   0 all executed families met their tier · 1 a `hard` family failed,
+ *         an `xfail-strict` family passed, or an `xfail-strict` family errored
+ *         (XFAIL-INVALID) · 2 config error (no runner without --dry, bad
+ *         AGENT_TIER, or no SQLite memory backend)
  */
 
 import { execSync } from "node:child_process";
@@ -711,6 +715,17 @@ const backendParity = (
       return { name, value: null, error: "malformed portability output" };
     }
     const [inMemory, sqlite] = pick(out);
+    // Empty-vs-empty is VACUOUS parity, not evidence of portability — it would
+    // certify queries on which neither backend retrieves anything the moment
+    // this family flips to `hard`. Same convention as the other vacuous shapes
+    // in this file: ERROR, never pass.
+    if (inMemory.length === 0 && sqlite.length === 0) {
+      return {
+        name,
+        value: null,
+        error: "both legs empty — parity requires at least one non-empty leg",
+      };
+    }
     const onlyInMemory = inMemory.filter((v) => !sqlite.includes(v));
     const onlySqlite = sqlite.filter((v) => !inMemory.includes(v));
     const passed = onlyInMemory.length === 0 && onlySqlite.length === 0;
@@ -870,8 +885,10 @@ async function main(): Promise<void> {
     process.stdout.write(tierTable());
     process.stdout.write(
       "\n  hard          must pass; a failure fails the run (exit 1)\n" +
-        "  xfail-strict  expected to fail; a failure is reported and does NOT fail the run,\n" +
-        "                but an unexpected PASS DOES — flip it to hard instead of leaving it red\n",
+        "  xfail-strict  expected to fail BY ASSERTION; such a failure is reported and does NOT\n" +
+        "                fail the run, but an unexpected PASS DOES — flip it to hard instead of\n" +
+        "                leaving it red — and so does a failure carrying node/scorer ERRORS\n" +
+        "                (XFAIL-INVALID): a crashed target is not an expected failure\n",
     );
     return;
   }
@@ -955,7 +972,7 @@ async function main(): Promise<void> {
 
   let anyGateFailed = false;
   const skipped: string[] = [];
-  const tally = { pass: 0, fail: 0, xfail: 0, xpass: 0 };
+  const tally = { pass: 0, fail: 0, xfail: 0, xpass: 0, xfailInvalid: 0 };
 
   try {
     for (const family of families()) {
@@ -1054,9 +1071,13 @@ async function main(): Promise<void> {
         Object.values(report.summary.passRate).every((rate) => rate === 1);
 
       // Tier resolution (#461). `hard`: pass ⇒ PASS, fail ⇒ FAIL + gate fails.
-      // `xfail-strict`: fail ⇒ XFAIL, gate UNAFFECTED; pass ⇒ XPASS + gate
-      // FAILS, because a green xfail is a tier nobody flipped.
-      let status: "PASS" | "FAIL" | "XFAIL" | "XPASS";
+      // `xfail-strict`: an ASSERTION-BORNE fail ⇒ XFAIL, gate UNAFFECTED;
+      // pass ⇒ XPASS + gate FAILS, because a green xfail is a tier nobody
+      // flipped; a fail carrying node or scorer ERRORS ⇒ XFAIL-INVALID + gate
+      // FAILS (#453 Gate 2.5 B1) — a crashed target proves nothing about the
+      // behaviour the family pins, so without this rule a reshape that makes
+      // every case THROW keeps printing the family's expected red and exits 0.
+      let status: "PASS" | "FAIL" | "XFAIL" | "XPASS" | "XFAIL-INVALID";
       let tierNote = "";
       if (family.gate === "hard") {
         status = familyPassed ? "PASS" : "FAIL";
@@ -1070,6 +1091,11 @@ async function main(): Promise<void> {
         tally.xpass += 1;
         anyGateFailed = true;
         tierNote = `\n        ▲ XPASS — this family was expected to fail. Promote it to gate:"hard" (unblocked by: ${family.unblockedBy}), or find out why it went green.`;
+      } else if (report.summary.errored > 0 || report.summary.scoreErrors > 0) {
+        status = "XFAIL-INVALID";
+        tally.xfailInvalid += 1;
+        anyGateFailed = true;
+        tierNote = `\n        ▲ XFAIL-INVALID (target errored — an expected failure must fail by assertion, not by exception): ${report.summary.errored} node error(s), ${report.summary.scoreErrors} scorer error(s)`;
       } else {
         status = "XFAIL";
         tally.xfail += 1;
@@ -1083,6 +1109,15 @@ async function main(): Promise<void> {
         `  ${status.padEnd(5)} ${family.name}  (${report.summary.cases} cases · ${rates || "no gated scorers"}${eventNote})${tierNote}\n`,
       );
       for (const r of report.results) {
+        // A thrown target lands as `{succeeded: false, scores: []}` — without
+        // this line its cause is DISCARDED and the family tally reads
+        // identically to an assertion failure (#453 Gate 2.5 B1). Printed for
+        // every family, hard and xfail alike.
+        if (!r.succeeded) {
+          process.stdout.write(
+            `        ✗ ${r.case.id} — TARGET ERRORED: ${r.error ?? "unknown error"}\n`,
+          );
+        }
         for (const s of r.scores) {
           if (s.passed === false || s.value === null) {
             process.stdout.write(
@@ -1109,7 +1144,7 @@ async function main(): Promise<void> {
     );
   }
   process.stdout.write(
-    `\n  tiers    hard ${tally.pass} pass / ${tally.fail} fail · xfail-strict ${tally.xfail} xfail / ${tally.xpass} xpass\n`,
+    `\n  tiers    hard ${tally.pass} pass / ${tally.fail} fail · xfail-strict ${tally.xfail} xfail / ${tally.xpass} xpass / ${tally.xfailInvalid} invalid\n`,
   );
   process.stdout.write(`\n${anyGateFailed ? "GATE FAILED" : "GATE PASSED"}\n`);
   process.exitCode = anyGateFailed ? 1 : 0;

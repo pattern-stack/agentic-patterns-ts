@@ -51,16 +51,23 @@ the form "this retrieval change improved recall" was falsifiable**. Rules the ha
 
 Every family declares a tier, printed on every run and listable with `--tiers`:
 
-| tier | family fails | family passes |
-|---|---|---|
-| `hard` | `FAIL` — fails the run (exit 1) | `PASS` |
-| `xfail-strict` | `XFAIL` — reported with `reason` + `unblockedBy`; run **unaffected** | `XPASS` — **fails the run** (exit 1) |
+| tier | family fails by assertion | family errors | family passes |
+|---|---|---|---|
+| `hard` | `FAIL` — fails the run (exit 1) | `FAIL` — fails the run (exit 1) | `PASS` |
+| `xfail-strict` | `XFAIL` — reported with `reason` + `unblockedBy`; run **unaffected** | `XFAIL-INVALID` — **fails the run** (exit 1) | `XPASS` — **fails the run** (exit 1) |
 
 The `xfail` → *pass* direction failing the run is the whole point. A green xfail means the thing
 it measures got fixed and nobody flipped the tier; making that fail forces the tier to be emptied
 as the stack lands, and catches a family that goes green for an accidental reason. Every
 `xfail-strict` family carries a `reason` and an `unblockedBy`, both printed on every run, so a red
 family cannot quietly become scenery.
+
+An expected failure must fail **by assertion, not by exception**: an `xfail-strict` family whose
+target throws or whose scorers error prints `XFAIL-INVALID` and fails the run, because a crashed
+target proves nothing about the behaviour the family pins — without this rule a reshape that made
+every case throw would keep printing the family's expected red and exit 0. Every failed case
+additionally prints its node-level error (`TARGET ERRORED: …`), hard and xfail families alike, so
+a thrown target is never indistinguishable from an honest assertion failure.
 
 ## Families
 
@@ -103,6 +110,10 @@ reach.
 satisfy, only composition. Scorers: `prompt-contains`, `prompt-omits-foreign` (applied to *every*
 case, since the foreign seed is present in all of them), and `overlay-report-composed`, which
 requires the fact to arrive by composition rather than by happening to land in the recall block.
+Note that `overlay-report-composed` is a **constant-false placeholder** until #472 lands — the
+target returns no overlay `report` because `applyMemoryOverlay` does not exist yet, so today the
+scorer discriminates nothing; it becomes the live composition check when the #472 overlay slot in
+the target is filled.
 
 Note on case wording: the negative control asks `"launch code please"` rather than `"what is the
 launch code?"` because **FTS5 ships no stopword list** — a question containing `the` or `is`
@@ -124,6 +135,9 @@ Two implementation notes the plan's sketch could not anticipate:
 - **Sets, never order.** ADR-0009 Decision 13 pins match semantics and explicitly does *not* pin
   total rank order (in-memory ties at score 1 and falls to recency; FTS5 uses bm25). An
   order-sensitive assertion here would relocate the divergence instead of measuring it.
+- **Parity requires a non-empty leg.** Empty-vs-empty is vacuous agreement, not evidence of
+  portability — the scorer ERRORs when both backends return nothing, so the family can never
+  certify a query on which neither backend retrieves anything.
 
 `port-disjoint-tokens` and `port-punctuation-dark-mode` **pass today**. They are the
 future-proofing half: the disjoint case is the only one that distinguishes OR from AND, so a
@@ -195,9 +209,9 @@ the `scope: {}` whole-store sweep were verified to behave identically on SQLite.
   `paraphrase-prompt`, `backend-parity`) with no model — they never run the companion, and Phase C
   keys promotion decisions on `targetId`.
 - Case banks are `loadCasesJsonl`-shaped (`cases/*.jsonl`) and stay CLI-compatible.
-- Exit codes: `0` every executed family met its tier · `1` a `hard` family failed **or** an
-  `xfail-strict` family passed · `2` config error (no runner without `--dry`, bad `AGENT_TIER`, or
-  no SQLite memory backend).
+- Exit codes: `0` every executed family met its tier · `1` a `hard` family failed, an
+  `xfail-strict` family passed, **or** an `xfail-strict` family errored (`XFAIL-INVALID`) · `2`
+  config error (no runner without `--dry`, bad `AGENT_TIER`, or no SQLite memory backend).
 
 ## Run log
 
