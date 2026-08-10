@@ -13,6 +13,7 @@
  */
 
 export type { ProviderProtocol, ProviderTier, SupportedProvider } from "./types.js";
+export { ProviderPackageError } from "./types.js";
 
 // Model capability map (#390) — Zod-schema'd, provenance-carrying knowledge
 // of which V4 SDK-level knobs each model family honors. See capabilities.ts
@@ -87,6 +88,13 @@ export const PROVIDERS: Readonly<Record<SupportedProvider, ProviderProtocol>> = 
  * Env-detection priority. First entry whose `envVars` include a set env
  * variable wins. Order reflects repo defaults — Anthropic first, OSS local
  * (Ollama) last so remote providers are preferred when both exist.
+ *
+ * This order is BEHAVIOUR, not documentation: it decides which model a bare
+ * `createRunner()` picks when several keys are present. Since #472 shipped
+ * anthropic/openai/google as real dependencies, every one of those three is
+ * reachable on a stock install, so the order is now observable by ordinary
+ * consumers rather than only by those who installed the matching provider
+ * package. Locked down by `runner/__tests__/create-runner.test.ts`.
  */
 export const PROVIDER_PRIORITY: readonly SupportedProvider[] = [
   "anthropic",
@@ -99,6 +107,28 @@ export const PROVIDER_PRIORITY: readonly SupportedProvider[] = [
   "openrouter",
   "ollama",
 ];
+
+/**
+ * Providers whose package ships as a real dependency of
+ * `@agentic-patterns/runtime` (#472) — reachable with nothing installed beyond
+ * the runtime itself. Derived from the registry so it cannot drift from the
+ * adapters; the package.json side is asserted by
+ * `providers/__tests__/bundled-providers.test.ts`.
+ */
+export const BUNDLED_PROVIDERS: readonly SupportedProvider[] = Object.freeze(
+  PROVIDER_PRIORITY.filter((name) => PROVIDERS[name].bundled),
+);
+
+/**
+ * The primary env var of each bundled provider, in priority order — the
+ * shortest list of "set one of these and you reach AgentRunner on a stock
+ * install". Aliases (e.g. `GOOGLE_API_KEY`) are omitted deliberately: this is
+ * advice copy, not the detection set. Used to build `createRunner`'s fallback
+ * message so it can never recommend a provider the runtime does not ship.
+ */
+export const BUNDLED_PROVIDER_ENV_VARS: readonly string[] = Object.freeze(
+  BUNDLED_PROVIDERS.map((name) => PROVIDERS[name].envVars[0] ?? "").filter((v) => v.length > 0),
+);
 
 /** Resolve a model id for a (provider, tier?, explicitModelId?) triple. */
 export function resolveModelId(

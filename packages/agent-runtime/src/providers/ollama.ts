@@ -27,11 +27,14 @@ export const ollamaProvider: ProviderProtocol = {
     haiku: "qwen3.5:4b",
   },
   envVars: ["OLLAMA_HOST"],
+  // AI SDK v5: the V1-only `ollama-ai-provider` is rejected by the v5 runtime;
+  // we use the V2 fork `ollama-ai-provider-v2`. Its `createOllama` / default
+  // `ollama` factory signature is unchanged at the `load()` call site.
+  packageName: "ollama-ai-provider-v2",
+  // Already a real dependency of @agentic-patterns/runtime (predates #472).
+  bundled: true,
   async load(modelId) {
-    // AI SDK v5: the V1-only `ollama-ai-provider` is rejected by the v5
-    // runtime; we use the V2 fork `ollama-ai-provider-v2`. Its `createOllama`
-    // / default `ollama` factory signature is unchanged at this call site.
-    const mod = await importProvider("ollama-ai-provider-v2", "ollama");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     // The fork doesn't read OLLAMA_HOST from env — pass it explicitly so
     // remote GPU boxes (e.g. behind a VPN) work out of the box when the
     // user sets the env var.

@@ -13,7 +13,21 @@
  *   6. options.fallbackToMock === true → new MockRunner()
  *   7. throw
  *
- * See docs/runners.md (§4) for the design doc.
+ * PACKAGING (#472): `@ai-sdk/anthropic`, `@ai-sdk/openai` and `@ai-sdk/google`
+ * ship as real dependencies of `@agentic-patterns/runtime`, so setting any of
+ * ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY reaches rung
+ * 4 (`AgentRunner`) with nothing else installed. The remaining adapters stay
+ * dynamic-import-only and name their package when they can't be loaded.
+ *
+ * NO SILENT DEGRADATION (#472): rung 5 is reachable ONLY when no provider
+ * credential was found at all. A credential that IS present but whose provider
+ * package cannot be loaded throws from `loadProviderModel` — it never continues
+ * down the ladder — because `ClaudeCodeAPIRunner` has no read site for
+ * `options.messageHistory`, so degrading into it silently turns every multi-turn
+ * conversation into a series of first turns.
+ *
+ * See docs/runners.md (§4) for the design doc and docs/adr/0010-* for the
+ * packaging decision.
  */
 
 import { spawn } from "node:child_process";
@@ -21,6 +35,7 @@ import { spawn } from "node:child_process";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import { bifrostCorrelationHeaders } from "../providers/bifrost.js";
 import {
+  BUNDLED_PROVIDER_ENV_VARS,
   PROVIDERS,
   PROVIDER_PRIORITY,
   type ProviderProtocol,
@@ -261,7 +276,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
   if (opts.provider) {
     const provider = PROVIDERS[opts.provider];
     const resolved = resolveModelId(provider, modelId, tier);
-    const model = await provider.load(resolved);
+    const model = await loadProviderModel(provider, resolved, "options.provider");
     return log(verbose, {
       runner: new AgentRunner(model, opts.eventBus),
       reason: `using ${opts.provider} (explicit, model=${resolved})`,
@@ -289,7 +304,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
       if (!matchedEnv) {
         throw new Error(modelProviderMismatchError(modelId, inferred, provider));
       }
-      const model = await provider.load(modelId);
+      const model = await loadProviderModel(provider, modelId, `env ${matchedEnv}`);
       return log(verbose, {
         runner: new AgentRunner(model, opts.eventBus),
         reason: `using ${inferred} (model ${modelId} → ${inferred}, env ${matchedEnv})`,
@@ -305,7 +320,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     const matchedEnv = provider.envVars.find((v) => process.env[v]);
     if (matchedEnv) {
       const resolved = resolveModelId(provider, modelId, tier);
-      const model = await provider.load(resolved);
+      const model = await loadProviderModel(provider, resolved, `env ${matchedEnv}`);
       return log(verbose, {
         runner: new AgentRunner(model, opts.eventBus),
         reason: `using ${name} (env ${matchedEnv}, model=${resolved})`,
@@ -322,8 +337,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
     });
     return log(verbose, {
       runner,
-      reason:
-        "using ClaudeCodeAPIRunner (claude CLI on PATH) — limited event vocabulary; set ANTHROPIC_API_KEY for AgentRunner with full events",
+      reason: claudeCliFallbackReason(),
       source: "claude-cli",
     });
   }
@@ -344,12 +358,15 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
       "Provide one of:",
       "  • options.runner (a RunnerProtocol instance)",
       "  • options.model (a language model, V2/V3/V4 spec)",
-      "  • options.provider + the matching @ai-sdk/* package installed",
-      "  • an env var: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY,",
-      "    GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY, DEEPSEEK_API_KEY,",
-      "    OPENROUTER_API_KEY, or OLLAMA_HOST",
-      "  • `claude` CLI on PATH (Claude Max login or ANTHROPIC_API_KEY)",
+      `  • an env var — ${BUNDLED_PROVIDER_ENV_VARS.join(", ")} — whose provider package`,
+      "    ships with @agentic-patterns/runtime (nothing else to install)",
+      "  • an env var for a provider whose package you install yourself:",
+      "    GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY",
+      "  • options.provider + (for a non-bundled provider) its package installed",
+      "  • `claude` CLI on PATH (Claude Max login) — note: that runner does NOT carry",
+      "    options.messageHistory, so multi-turn conversations lose prior context",
       "  • options.fallbackToMock = true",
+      ...emptyEnvVarNotes(),
     ].join("\n"),
   );
 }
@@ -366,6 +383,114 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
 function envTier(): ProviderTier | undefined {
   const v = process.env.AGENT_TIER;
   return v === "opus" || v === "sonnet" || v === "haiku" ? v : undefined;
+}
+
+/**
+ * The consequence sentence (#472). `ClaudeCodeAPIRunner` has NO read site for
+ * `options.messageHistory` — only `AgentRunner`'s message assembly does — so a
+ * silent landing on that rung turns every multi-turn conversation into a series
+ * of first turns while still answering plausibly. Every message that could lead
+ * a caller onto (or explain) that rung says this out loud.
+ */
+const HISTORY_LOSS_WARNING =
+  "ClaudeCodeAPIRunner does NOT carry options.messageHistory — multi-turn conversations lose all prior context";
+
+/**
+ * Load a model through a provider adapter, converting any package-load failure
+ * into a loud, fix-naming error (#472).
+ *
+ * The defect this closes: a consumer sets a provider key, the provider's package
+ * cannot be imported, and the run degrades into `ClaudeCodeAPIRunner` — the one
+ * runner that drops `messageHistory`. A credential was present, so the caller's
+ * INTENT was `AgentRunner`; silently serving a lesser runner (or a bare
+ * ERR_MODULE_NOT_FOUND with no context) is the wrong answer. We refuse to
+ * continue down the ladder and say exactly what to fix.
+ *
+ * @param credentialSource human-readable origin of the choice that got us here,
+ *   e.g. `"env OPENAI_API_KEY"` or `"options.provider"`.
+ */
+async function loadProviderModel(
+  provider: ProviderProtocol,
+  resolvedModelId: string,
+  credentialSource: string,
+): Promise<ResolvedLanguageModel> {
+  try {
+    return await provider.load(resolvedModelId);
+  } catch (cause) {
+    throw new Error(providerLoadFailureError(provider, resolvedModelId, credentialSource, cause), {
+      cause,
+    });
+  }
+}
+
+/**
+ * Build the fail-loud message for "credential present, provider package
+ * unloadable". Names the credential, the package, the fix, and — crucially —
+ * why we are NOT quietly continuing to the CLI fallback.
+ */
+function providerLoadFailureError(
+  provider: ProviderProtocol,
+  resolvedModelId: string,
+  credentialSource: string,
+  cause: unknown,
+): string {
+  const fix = provider.bundled
+    ? [
+        `  Fix: "${provider.packageName}" ships as a dependency of @agentic-patterns/runtime, so it`,
+        "       should already be present. This usually means a broken, partial, or deduped-away",
+        "       install — reinstall dependencies (bun install / npm install / pnpm install).",
+      ]
+    : [
+        `  Fix: install it — bun add ${provider.packageName}  (or npm i ${provider.packageName})`,
+        `       Only ${BUNDLED_PROVIDER_ENV_VARS.join(", ")} work with no extra install.`,
+      ];
+  return [
+    `createRunner: ${credentialSource} selected the "${provider.name}" provider, but its package`,
+    `"${provider.packageName}" could not be loaded — no model could be constructed for "${resolvedModelId}".`,
+    ...fix,
+    "",
+    "  Not falling back to another runner: a credential was present, so AgentRunner was the",
+    `  intended path. ${HISTORY_LOSS_WARNING}, which would make this failure invisible.`,
+    "",
+    `  Underlying error: ${cause instanceof Error ? cause.message : String(cause)}`,
+  ].join("\n");
+}
+
+/**
+ * The `reason` for the `claude` CLI rung. Reaching it means NO provider env var
+ * was set (a set-but-unloadable provider throws in {@link loadProviderModel}),
+ * so the old copy — "set ANTHROPIC_API_KEY for AgentRunner with full events" —
+ * was both incomplete and, in the #472 report, actively misleading: the key WAS
+ * set and the package was missing. This version names every env var that works
+ * on a stock install, states the history-loss consequence, and calls out env
+ * vars that are present but empty (an empty value reads as unset, which is its
+ * own silent skip).
+ */
+function claudeCliFallbackReason(): string {
+  const notes = emptyEnvVarNotes();
+  return [
+    "using ClaudeCodeAPIRunner (claude CLI on PATH) — no provider API key found.",
+    `WARNING: ${HISTORY_LOSS_WARNING}; event vocabulary is also limited.`,
+    `For AgentRunner set one of: ${BUNDLED_PROVIDER_ENV_VARS.join(", ")} — those provider packages ship with @agentic-patterns/runtime, nothing else to install.`,
+    ...notes,
+  ].join(" ");
+}
+
+/**
+ * Notes about provider env vars that are DEFINED BUT EMPTY. `OPENAI_API_KEY=`
+ * in a `.env` is falsy, so detection skips it exactly as if it were unset —
+ * a silent skip that looks identical to "I configured nothing".
+ */
+function emptyEnvVarNotes(): string[] {
+  const blank = new Set<string>();
+  for (const name of PROVIDER_PRIORITY) {
+    for (const v of PROVIDERS[name].envVars) {
+      if (process.env[v] !== undefined && process.env[v] === "") blank.add(v);
+    }
+  }
+  return blank.size === 0
+    ? []
+    : [`(note: ${[...blank].join(", ")} is set but EMPTY — an empty value is treated as unset.)`];
 }
 
 /**
@@ -427,6 +552,16 @@ async function hasClaudeCli(): Promise<boolean> {
 /** @internal — tests use this to reset the CLI-probe cache between runs. */
 export function _resetClaudeCliCache(): void {
   _claudeCliCache = undefined;
+}
+
+/**
+ * Force the CLI-probe result so the fallback rung can be exercised
+ * deterministically on machines with (or without) `claude` on PATH.
+ *
+ * @internal — tests only.
+ */
+export function _setClaudeCliCache(value: boolean): void {
+  _claudeCliCache = value;
 }
 
 /**

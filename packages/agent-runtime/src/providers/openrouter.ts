@@ -13,8 +13,10 @@ export const openrouterProvider: ProviderProtocol = {
     haiku: "anthropic/claude-haiku-4-5",
   },
   envVars: ["OPENROUTER_API_KEY"],
+  packageName: "@openrouter/ai-sdk-provider",
+  bundled: false,
   async load(modelId) {
-    const mod = await importProvider("@openrouter/ai-sdk-provider", "openrouter");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     return mod.openrouter(modelId);
   },
 };

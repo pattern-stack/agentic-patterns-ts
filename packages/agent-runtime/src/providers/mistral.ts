@@ -8,8 +8,10 @@ export const mistralProvider: ProviderProtocol = {
     haiku: "mistral-small-latest",
   },
   envVars: ["MISTRAL_API_KEY"],
+  packageName: "@ai-sdk/mistral",
+  bundled: false,
   async load(modelId) {
-    const mod = await importProvider("@ai-sdk/mistral", "mistral");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     return mod.mistral(modelId);
   },
 };

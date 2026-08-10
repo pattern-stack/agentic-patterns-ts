@@ -8,8 +8,12 @@ export const googleProvider: ProviderProtocol = {
     haiku: "gemini-2.5-flash-lite",
   },
   envVars: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],
+  packageName: "@ai-sdk/google",
+  // Bundled (#472): setting GOOGLE_GENERATIVE_AI_API_KEY is enough to reach
+  // AgentRunner.
+  bundled: true,
   async load(modelId) {
-    const mod = await importProvider("@ai-sdk/google", "google");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     return mod.google(modelId);
   },
 };
