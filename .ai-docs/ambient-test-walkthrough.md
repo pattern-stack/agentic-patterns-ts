@@ -101,17 +101,39 @@ cd ~/Projects/dug/swe-brain && just dev     # adds the frontend on :8338
 cd apps/backend && bun scripts/set-seed-password.ts   # login: owner@swe-brain.test / swebrain-dev
 ```
 
-Open `http://localhost:8338` and walk: **/schedules** (see `demo-minutely` and its
-`next_fire_at` advancing each minute) → **/directives** (`scheduled-agent-brief`, its
-`agent.run` step) → **/agents** → the workspace-analyst **console / trace** view, where the
-triggered run should appear alongside console-started ones.
+Open `http://localhost:8338` and walk: **/schedules** (`demo-minutely`) → **/directives**
+(`scheduled-agent-brief`, its `agent.run` step) → **/agents** → workspace-analyst.
 
-⚠️ **Verify rather than assume:** `process-compose.yml` carries a comment that the frontend
-runs on mock data (`VITE_DATA_SOURCE=mock`), but the generated store binds entities to
-`api`/`electric` backings — the two disagree and I did not resolve which wins at runtime.
-If the browser shows agents you don't recognize, that's mock data; the psql/API results
-above are ground truth. If needed, set `VITE_API_URL=http://localhost:3100` (and
-`VITE_DATA_SOURCE=rest`) in `apps/frontend/.env.local` and restart the frontend.
+This walk is scripted — run it instead of clicking, and watch it drive your own browser:
+
+```bash
+# narrate (watchable) — needs a Chromium browser on CDP :9222
+node ~/.claude/plugins/cache/claudecode-patterns/sdlc/*/scripts/guided-tour.mjs \
+  .claude/tours/ambient-loop.mjs                      # in ~/Projects/dug/swe-brain
+# verify (assertions + report.json, ~10s)
+… same command with --verify
+```
+
+✅ **Data source: resolved (2026-08-09).** The earlier warning here was wrong. There is no
+mock path — `SyncMode` is `'api' | 'electric'` only, every entity resolves to `mode: 'api'`,
+and `VITE_DATA_SOURCE` is declared in `vite-env.d.ts` but **read nowhere in the app**. The
+API base derives `:3100` from the page origin, so **no `.env.local` and no `VITE_API_URL`
+is needed**. The `process-compose.yml` comment claiming mock data is stale. What you see in
+the browser is the real database.
+
+⚠️ **The triggered run is NOT visible in the UI.** The earlier claim that it "appears
+alongside console-started ones" is false as built. The agent surface renders activity from
+`agent_conversations`, and schedule-triggered runs create none — as of 2026-08-09 all 292
+ambient runs have `conversation_id IS NULL` while all 4 console-started runs have one. So
+workspace-analyst reports `conversations 0 · No conversations yet` despite 296 runs. This is
+the gap [#456](https://github.com/pattern-stack/agentic-patterns-ts/issues/456) chunks 2–3
+exist to close; evidence is posted on that issue. The tour's last step asserts on it and is
+**deliberately red** until then. **psql remains the ground truth for A3** — the browser
+cannot confirm the loop ran.
+
+Also expect 4 console 404s on every page load (`auth_sessions`, `email_verifications`,
+`password_resets`, `user_credentials`) — the generated frontend binds collections to
+auth-internal entities the API withholds. Cosmetic, but noisy.
 
 ### A5 · Stand down
 
