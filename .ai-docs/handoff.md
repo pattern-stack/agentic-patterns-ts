@@ -73,7 +73,16 @@ Doug's preference is the gateway, *"provided that gateway also runs through agen
 - **Clean:** one env var routes every agent through it, no code change.
 - **Presidio has a designed seam already:** `AP_GATEWAY_GUARDRAIL_IDS` → Bifrost `x-bf-guardrail-ids`, and **#407** covers typed guardrail violations + redaction events.
 - ❌ **The blocker:** the gateway configured in `.env.local` (`https://bifrost-development.findtempo.co/v1`) carries **188 models — 130 openai, 58 gemini, ZERO anthropic**. swe-brain's `workspace-analyst` declares `claude-sonnet-5`, and under a gateway the *declared* model is used. **So pointing swe-brain at that gateway fails on the first run.**
-- **There are two gateways.** The credentials in `.env.local` point at the hosted findtempo one — **not** the local box at `10.88.111.52:8080` Doug set up recently (reachable via Tailscale, ~44ms). Its API is at **`/api/v1`, not `/v1`** (the UI catches unknown routes and returns HTML, so a wrong base URL fails confusingly), and it needs credentials not in `.env.local` — catalog unread. **Presidio is probably on that box**, which would mean guardrails and the model catalog currently live in different places.
+- **There are two gateways, and they are genuinely different machines.** The credentials in `.env.local` point at `https://bifrost-development.findtempo.co/v1`, which resolves to `bifrost-alb-…us-east-1.elb.amazonaws.com` — an **AWS-hosted** deployment. Doug's own box is `http://10.88.111.51:8080` (Tailscale, ~44ms), and **Bifrost + Presidio both live there**. So the gateway the repo is configured against is *not* the one with Presidio on it. Untangle that before wiring swe-brain to either.
+- **The local box is a *governed* Bifrost instance and needs a virtual key.** Basic auth (`admin` / password in 1Password → OAuthPass) succeeds, and the request then fails at the Bifrost layer:
+  ```
+  GET http://10.88.111.51:8080/v1/models
+  401 {"type":"virtual_key_required",
+       "error":{"message":"virtual key is required. Provide a virtual key via the x-bf-vk header."}}
+  ```
+  **Nothing needs building** — `createRunner` already supports this via `AP_GATEWAY_VIRTUAL_KEY` → `x-bf-vk`, and its own doc comment says *"governed instances 401 without it."* It just needs a VK minted in the Bifrost UI. **So the local catalog is still unread, and whether it carries Claude is still unknown — but for a precise, fixable reason.**
+  - Base URL for that box is **`/v1`** (`/api/v1` returns the UI's HTML — the SPA catches unknown routes, so a wrong base URL fails confusingly rather than 404ing).
+  - ⚠️ An earlier draft of this handoff said the API was at `/api/v1`. That was probed against `10.88.111.**52**`, the wrong host. Corrected.
 - **Cheapest unblock:** point the agent at a Gemini or OpenAI id the gateway actually has.
 
 ## Two open decisions
