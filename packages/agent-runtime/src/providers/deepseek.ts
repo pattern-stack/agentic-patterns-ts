@@ -9,8 +9,10 @@ export const deepseekProvider: ProviderProtocol = {
     haiku: "deepseek-chat",
   },
   envVars: ["DEEPSEEK_API_KEY"],
+  packageName: "@ai-sdk/deepseek",
+  bundled: false,
   async load(modelId) {
-    const mod = await importProvider("@ai-sdk/deepseek", "deepseek");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     return mod.deepseek(modelId);
   },
 };

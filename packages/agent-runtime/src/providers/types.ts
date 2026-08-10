@@ -68,6 +68,24 @@ export interface ProviderProtocol {
    */
   readonly envVars: readonly string[];
   /**
+   * The npm package `load()` dynamically imports. Declared here (rather than
+   * only inlined at the `importProvider` call site) so error messages, the
+   * packaging contract test, and any tooling can name the exact package
+   * without re-deriving it from the provider name.
+   */
+  readonly packageName: string;
+  /**
+   * Whether `packageName` ships as a real dependency of
+   * `@agentic-patterns/runtime` (#472). `true` means installing the runtime is
+   * sufficient to reach this provider — a load failure is then a broken
+   * install, not a missing optional package. `false` means the consumer must
+   * install `packageName` themselves.
+   *
+   * Kept in lockstep with `packages/agent-runtime/package.json` by
+   * `providers/__tests__/bundled-providers.test.ts`.
+   */
+  readonly bundled: boolean;
+  /**
    * Dynamically import the provider's `@ai-sdk/*` (or equivalent) package
    * and return a `ResolvedLanguageModel` for the given model id. Throws a
    * helpful error if the package isn't installed.
@@ -80,18 +98,50 @@ export interface ProviderProtocol {
 // ---------------------------------------------------------------------------
 
 /**
+ * Thrown when a provider's package cannot be imported. Carries the package and
+ * provider names so callers (notably `createRunner`) can build a fix-naming
+ * message instead of string-matching a generic `Error`.
+ */
+export class ProviderPackageError extends Error {
+  override readonly name = "ProviderPackageError";
+  constructor(
+    readonly packageName: string,
+    readonly provider: string,
+    readonly bundled: boolean,
+    cause: unknown,
+  ) {
+    super(
+      bundled
+        ? [
+            `provider "${provider}" could not load "${packageName}", which ships as a dependency`,
+            "of @agentic-patterns/runtime — this usually means a broken or partial install.",
+            "Reinstall your dependencies (bun install / npm install / pnpm install).",
+          ].join(" ")
+        : [
+            `provider "${provider}" requires "${packageName}" to be installed.`,
+            `Run: bun add ${packageName}  (or npm i ${packageName})`,
+          ].join(" "),
+      { cause },
+    );
+  }
+}
+
+/**
  * Dynamically import a provider package. If it's not installed, throw an
  * error that tells the caller how to fix it.
+ *
+ * `bundled` distinguishes the two failure stories: a package the runtime ships
+ * (a broken install) from one the consumer opted into (a missing install).
  */
-// biome-ignore lint/suspicious/noExplicitAny: imported module shape is opaque
-export async function importProvider(pkg: string, provider: string): Promise<any> {
+export async function importProvider(
+  pkg: string,
+  provider: string,
+  bundled = false,
+  // biome-ignore lint/suspicious/noExplicitAny: imported module shape is opaque
+): Promise<any> {
   try {
     return await import(/* @vite-ignore */ pkg);
   } catch (e) {
-    throw new Error(
-      `createRunner: provider "${provider}" requires "${pkg}" to be installed. ` +
-        `Run: pnpm add ${pkg}`,
-      { cause: e },
-    );
+    throw new ProviderPackageError(pkg, provider, bundled, e);
   }
 }

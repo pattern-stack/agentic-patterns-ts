@@ -9,9 +9,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PROVIDERS, type ProviderProtocol } from "../../providers/index.js";
+import {
+  BUNDLED_PROVIDER_ENV_VARS,
+  PROVIDERS,
+  PROVIDER_PRIORITY,
+  ProviderPackageError,
+  type ProviderProtocol,
+} from "../../providers/index.js";
 import { AgentRunner } from "../agent-runner.js";
-import { _resetClaudeCliCache, createRunner } from "../create-runner.js";
+import { ClaudeCodeAPIRunner } from "../claude-code-api-runner.js";
+import { _resetClaudeCliCache, _setClaudeCliCache, createRunner } from "../create-runner.js";
 import { MockRunner } from "../mock-runner.js";
 
 const KEYS = [
@@ -270,6 +277,211 @@ describe("createRunner", () => {
       expect((err as Error).message).toContain("no runnable configuration");
       expect((err as Error).message).toContain("ANTHROPIC_API_KEY");
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // #472 — bundled providers + no silent degradation
+  //
+  // The regression these guard: a consumer set a provider key, no @ai-sdk
+  // package was installed, and the run landed on ClaudeCodeAPIRunner — the one
+  // runner with no read site for `options.messageHistory`. Every multi-turn
+  // conversation became a series of first turns, and nothing said so.
+  // -------------------------------------------------------------------------
+
+  describe("#472 acceptance — a key alone reaches AgentRunner", () => {
+    // Deliberately UNSTUBBED: these call the real adapters and the real
+    // `@ai-sdk/*` packages. That is the whole claim — install the runtime, set a
+    // key, name a model, get AgentRunner. A stub would pass even if the
+    // packages were missing, which is exactly how the bug survived.
+    const cases = [
+      { env: "ANTHROPIC_API_KEY", source: "env-anthropic", model: "claude-haiku-4-5" },
+      { env: "OPENAI_API_KEY", source: "env-openai", model: "gpt-4o-mini" },
+      { env: "GOOGLE_GENERATIVE_AI_API_KEY", source: "env-google", model: "gemini-2.5-flash" },
+    ] as const;
+
+    it.each(cases)("$env + a named model → AgentRunner (never the CLI fallback)", async (c) => {
+      process.env[c.env] = "test-key-not-used-offline";
+      // Pretend the claude CLI IS on PATH: if the ladder were still leaky, the
+      // fallback rung would be sitting right there to catch us.
+      _setClaudeCliCache(true);
+
+      const { runner, source, reason } = await createRunner({
+        modelId: c.model,
+        verbose: false,
+      });
+
+      expect(runner).toBeInstanceOf(AgentRunner);
+      expect(runner).not.toBeInstanceOf(ClaudeCodeAPIRunner);
+      expect(source).toBe(c.source);
+      expect(source).not.toBe("claude-cli");
+      expect(reason).toContain(c.model);
+    });
+
+    it.each(cases)("$env with no model named → AgentRunner on the tier default", async (c) => {
+      process.env[c.env] = "test-key-not-used-offline";
+      _setClaudeCliCache(true);
+      const { runner, source } = await createRunner({ verbose: false });
+      expect(runner).toBeInstanceOf(AgentRunner);
+      expect(source).toBe(c.source);
+    });
+  });
+
+  describe("#472 — a present key with an unloadable provider fails loudly", () => {
+    /** Simulate the published-consumer reality: the package isn't there. */
+    function stubMissingPackage(provider: ProviderProtocol) {
+      return vi.spyOn(provider, "load").mockImplementation(async () => {
+        throw new ProviderPackageError(
+          provider.packageName,
+          provider.name,
+          provider.bundled,
+          new Error(`Cannot find package '${provider.packageName}'`),
+        );
+      });
+    }
+
+    it("throws instead of falling through to ClaudeCodeAPIRunner", async () => {
+      process.env.OPENAI_API_KEY = "sk-openai";
+      stubMissingPackage(PROVIDERS.openai);
+      // The fallback rung is available — the point is that we refuse it.
+      _setClaudeCliCache(true);
+      await expect(createRunner({ verbose: false })).rejects.toThrow(/could not be loaded/);
+    });
+
+    it("names the provider, the package, and the credential that selected it", async () => {
+      process.env.OPENAI_API_KEY = "sk-openai";
+      stubMissingPackage(PROVIDERS.openai);
+      _setClaudeCliCache(true);
+      const err = await createRunner({ verbose: false }).catch((e: Error) => e);
+      expect(err).toBeInstanceOf(Error);
+      const msg = (err as Error).message;
+      expect(msg).toContain("openai");
+      expect(msg).toContain("@ai-sdk/openai");
+      expect(msg).toContain("OPENAI_API_KEY");
+    });
+
+    it("states the messageHistory consequence so the failure is legible", async () => {
+      process.env.OPENAI_API_KEY = "sk-openai";
+      stubMissingPackage(PROVIDERS.openai);
+      _setClaudeCliCache(true);
+      const err = await createRunner({ verbose: false }).catch((e: Error) => e);
+      expect((err as Error).message).toContain("messageHistory");
+      expect((err as Error).message).toMatch(/multi-turn conversations lose all prior context/);
+    });
+
+    it("names a reinstall (not an install) for a bundled provider", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-anthropic";
+      stubMissingPackage(PROVIDERS.anthropic);
+      const err = await createRunner({ verbose: false }).catch((e: Error) => e);
+      const msg = (err as Error).message;
+      expect(msg).toMatch(/ships as a dependency of @agentic-patterns\/runtime/);
+      expect(msg).toMatch(/reinstall dependencies/i);
+    });
+
+    it("names an install command for a non-bundled provider", async () => {
+      process.env.GROQ_API_KEY = "gsk-test";
+      stubMissingPackage(PROVIDERS.groq);
+      const err = await createRunner({ verbose: false }).catch((e: Error) => e);
+      expect((err as Error).message).toContain("bun add @ai-sdk/groq");
+    });
+
+    it("also fails loudly on the model-follows-provider path", async () => {
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = "goog-key";
+      stubMissingPackage(PROVIDERS.google);
+      _setClaudeCliCache(true);
+      await expect(createRunner({ modelId: "gemini-2.5-flash", verbose: false })).rejects.toThrow(
+        /@ai-sdk\/google/,
+      );
+    });
+
+    it("also fails loudly on the explicit-provider path", async () => {
+      stubMissingPackage(PROVIDERS.mistral);
+      _setClaudeCliCache(true);
+      await expect(createRunner({ provider: "mistral", verbose: false })).rejects.toThrow(
+        /@ai-sdk\/mistral/,
+      );
+    });
+  });
+
+  describe("#472 — the CLI fallback reason tells the truth", () => {
+    it("says the runner drops messageHistory", async () => {
+      _setClaudeCliCache(true);
+      const { source, reason } = await createRunner({ verbose: false });
+      expect(source).toBe("claude-cli");
+      expect(reason).toContain("messageHistory");
+      expect(reason).toContain("lose all prior context");
+    });
+
+    it("says no key was found — not the old, misleading 'set ANTHROPIC_API_KEY' framing alone", async () => {
+      _setClaudeCliCache(true);
+      const { reason } = await createRunner({ verbose: false });
+      expect(reason).toContain("no provider API key found");
+    });
+
+    it("names every env var that works on a stock install", async () => {
+      _setClaudeCliCache(true);
+      const { reason } = await createRunner({ verbose: false });
+      for (const v of BUNDLED_PROVIDER_ENV_VARS) expect(reason).toContain(v);
+      expect(reason).toContain("nothing else to install");
+    });
+
+    it("calls out a provider key that is set but EMPTY (the silent skip)", async () => {
+      // `OPENAI_API_KEY=` in a .env is falsy, so detection skips it exactly as
+      // if it were unset — indistinguishable from "I configured nothing".
+      process.env.OPENAI_API_KEY = "";
+      _setClaudeCliCache(true);
+      const { source, reason } = await createRunner({ verbose: false });
+      expect(source).toBe("claude-cli");
+      expect(reason).toContain("OPENAI_API_KEY");
+      expect(reason).toMatch(/set but EMPTY/);
+    });
+
+    it("the terminal throw also warns about history loss", async () => {
+      _setClaudeCliCache(false);
+      const err = await createRunner({ verbose: false }).catch((e: Error) => e);
+      expect((err as Error).message).toContain("no runnable configuration");
+      expect((err as Error).message).toContain("messageHistory");
+    });
+  });
+
+  describe("#472 — PROVIDER_PRIORITY is behaviour, not documentation", () => {
+    // Shipping three real provider dependencies changes what a bare
+    // createRunner() picks when several keys are present: all three rungs are
+    // now genuinely reachable, where before only an installed one was. Pin the
+    // documented order so a registry edit cannot quietly re-route consumers.
+    it("documents anthropic → openai → google as the first three", () => {
+      expect(PROVIDER_PRIORITY.slice(0, 3)).toEqual(["anthropic", "openai", "google"]);
+      expect(PROVIDER_PRIORITY[PROVIDER_PRIORITY.length - 1]).toBe("ollama");
+    });
+
+    it("all three keys set → anthropic wins", async () => {
+      process.env.ANTHROPIC_API_KEY = "sk-a";
+      process.env.OPENAI_API_KEY = "sk-o";
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = "goog";
+      const { source } = await createRunner({ verbose: false });
+      expect(source).toBe("env-anthropic");
+    });
+
+    it("openai + google → openai wins", async () => {
+      process.env.OPENAI_API_KEY = "sk-o";
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = "goog";
+      const { source } = await createRunner({ verbose: false });
+      expect(source).toBe("env-openai");
+    });
+
+    it("google alone → google", async () => {
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = "goog";
+      const { source } = await createRunner({ verbose: false });
+      expect(source).toBe("env-google");
+    });
+
+    it("a bundled provider outranks a non-bundled one that sits later", async () => {
+      // GROQ_API_KEY alone would need @ai-sdk/groq installed; with a google key
+      // also present, priority sends us to the provider that ships in the box.
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = "goog";
+      process.env.GROQ_API_KEY = "gsk";
+      const { source } = await createRunner({ verbose: false });
+      expect(source).toBe("env-google");
+    });
   });
 
   it("passes eventBus through to AgentRunner", async () => {

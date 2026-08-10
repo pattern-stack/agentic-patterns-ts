@@ -8,8 +8,12 @@ export const anthropicProvider: ProviderProtocol = {
     haiku: "claude-haiku-4-5",
   },
   envVars: ["ANTHROPIC_API_KEY"],
+  packageName: "@ai-sdk/anthropic",
+  // Bundled (#472): setting ANTHROPIC_API_KEY is enough to reach AgentRunner —
+  // no second package for the consumer to discover and install.
+  bundled: true,
   async load(modelId) {
-    const mod = await importProvider("@ai-sdk/anthropic", "anthropic");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     return mod.anthropic(modelId);
   },
 };
