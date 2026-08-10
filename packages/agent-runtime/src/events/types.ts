@@ -5,7 +5,12 @@
  * Trace fields (traceId, runId, spanId, parentSpanId, timestamp) on every event.
  */
 
-import type { MemoryKind, MemoryScope, RenderArtifact } from "@agentic-patterns/core";
+import type {
+  MemoryKind,
+  MemoryScope,
+  RenderArtifact,
+  TriggerSourceData,
+} from "@agentic-patterns/core";
 import type { ClaudeCodeHookEvent } from "./claude-code.js";
 
 /**
@@ -75,6 +80,14 @@ export interface MessageStartEvent extends BaseEvent {
   readonly agentConfig?: Record<string, unknown>;
   /** #117: the rendered system prompt (agent.renderInitialPrompt()) — no other event carries it. */
   readonly systemPrompt?: string;
+  /**
+   * What started this run (#437 M2 trigger contract). Copied verbatim from
+   * `RunOptions.trigger` by the runner — message.start is the run's root
+   * event, so the provenance rides here (same additive posture as
+   * `agentConfig`/`systemPrompt`) and flows into `RunStoreExporter` with no
+   * schema bump. Absent for runs no host attributed.
+   */
+  readonly trigger?: TriggerSourceData;
 }
 
 export interface MessageChunkEvent extends BaseEvent {
@@ -202,6 +215,57 @@ export interface ToolApprovalResponseEvent extends BaseEvent {
   readonly decisionKind?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Gateway guardrail events (#407) — Bifrost governance responses surfaced as
+// first-class events, per the #389 event-plumbing checklist. Both register in
+// UX + DEBUG only (event-profiles.ts); violations also reach OBSERVABILITY
+// via the enriched `agent.error` (see agent-runner.ts's `_gatewayAwareError`).
+// ---------------------------------------------------------------------------
+
+/** A configured Bifrost guardrail blocked the request (446, or
+ *  `error.type: "guardrail_violation"` — PROVISIONAL, see `providers/bifrost.ts`
+ *  § Provisional-shape discipline). Emitted BEFORE the enriched `agent.error`.
+ *
+ *  TRUST BOUNDARY (Gate 2.5 quality note): `message` prefers a structured
+ *  summary derived from `category`/`severity`/`guardrailId` (see
+ *  `providers/bifrost.ts`'s `violationSummaryMessage`) over Bifrost's raw
+ *  free-text `error.message` — the free text is provider-authored prose that
+ *  is NOT guaranteed redaction-safe the way the counts-only
+ *  `GuardrailRedactionEvent` is. When no structured field is available to
+ *  summarize from, `message` falls back to the raw text, capped at
+ *  `MAX_ERROR_MESSAGE_LENGTH` (`providers/bifrost.ts`). */
+export interface GuardrailViolationEvent extends BaseEvent {
+  readonly type: "agent.guardrail.violation";
+  readonly action: "blocked";
+  readonly message: string;
+  readonly statusCode?: number;
+  readonly bifrostType?: string;
+  readonly guardrailId?: string;
+  readonly category?: string;
+  readonly severity?: string;
+  readonly provider?: string;
+}
+
+/** Presidio-style PII redaction detected on a gateway response — in-band
+ *  `[ENTITY_TYPE-#]` placeholders and/or `bifrost_metadata` confirmation.
+ *
+ *  CARDINALITY (Gate 2.5 quality note): one event per SCAN BOUNDARY, not per
+ *  response — the boundary differs by entrypoint. `AgentRunner.run()` scans
+ *  after every LLM call, so a multi-iteration tool loop can emit several of
+ *  these per run; `stream()` scans the FULL accumulated text once, right
+ *  before the terminal `message.complete`; `runStructured()` scans the
+ *  finalized structured output once, post-validation. A consumer counting
+ *  redaction events across entrypoints should account for this — do not
+ *  assume "one redaction event == one LLM response". */
+export interface GuardrailRedactionEvent extends BaseEvent {
+  readonly type: "agent.guardrail.redaction";
+  /** Entity type -> count. NEVER raw redacted values — counts only. */
+  readonly entities: Readonly<Record<string, number>>;
+  readonly totalEntities: number;
+  readonly source: "placeholders" | "metadata" | "both";
+  readonly provider?: string;
+}
+
 export interface ToolCallStartEvent extends BaseEvent {
   readonly type: "agent.tool.start";
   readonly toolCallId: string;
@@ -305,6 +369,18 @@ export interface LLMCallEndEvent extends BaseEvent {
    * {@link TokenUsageDetails}.
    */
   readonly usageDetails?: TokenUsageDetails;
+  /**
+   * Which provider actually served a gateway response (#407) — e.g. a
+   * Bifrost `extra_fields.provider`/`resolved_model_used` passthrough.
+   * Declared structurally (not imported from `providers/bifrost.ts`) so
+   * events stay provider-agnostic; absent for non-gateway models and
+   * gateways that report no attribution.
+   */
+  readonly gateway?: {
+    readonly provider?: string;
+    readonly requestedModel?: string;
+    readonly servedModel?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -657,6 +733,8 @@ export type AgentEvent =
   | GateDecisionEvent
   | ToolApprovalRequestEvent
   | ToolApprovalResponseEvent
+  | GuardrailViolationEvent
+  | GuardrailRedactionEvent
   | ToolCallStartEvent
   | ToolCallEndEvent
   | ToolProgressEvent

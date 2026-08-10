@@ -32,13 +32,14 @@ bun run dev               # http://localhost:3456
 Or, skip the CLI and use the library directly:
 
 ```bash
-bun add @agentic-patterns/core @agentic-patterns/runtime ai @ai-sdk/anthropic
+bun add @agentic-patterns/core @agentic-patterns/runtime
 ```
+
+Anthropic, OpenAI and Google Gemini ship with the runtime — set one key, name a model, go. No provider package to install.
 
 ```typescript
 import { Persona, Mission, RoleBuilder, AgentBuilder } from "@agentic-patterns/core";
-import { AgentRunner, AgentEventBus } from "@agentic-patterns/runtime";
-import { anthropic } from "@ai-sdk/anthropic";
+import { createRunner } from "@agentic-patterns/runtime";
 
 const role = new RoleBuilder("assistant")
   .withPersona(new Persona({ identity: "a helpful assistant", tone: "concise" }))
@@ -48,10 +49,14 @@ const agent = new AgentBuilder(role)
   .withMission(new Mission({ objective: "Help the user" }))
   .build();
 
-const runner = new AgentRunner(anthropic("claude-sonnet-4-20250514"), new AgentEventBus());
+// Reads ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY.
+// Pin an exact model with `modelId` (or the AGENT_MODEL env var).
+const { runner } = await createRunner({ modelId: "claude-sonnet-4-5" });
 const result = await runner.run(agent, "Hello!");
 console.log(result.response);
 ```
+
+Any other provider (Groq, Mistral, xAI, DeepSeek, OpenRouter) works the same way once you `bun add` its `@ai-sdk/*` package. Or hand `createRunner` a model you built yourself: `createRunner({ model: myModel })`.
 
 ## Monorepo Development
 

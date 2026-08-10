@@ -89,9 +89,12 @@ interface MemoryStore {
 }
 ```
 
-Any backend that passes `runMemoryStoreConformance(makeStore)` — an exported vitest
+Any backend that passes `runMemoryStoreConformance(makeStore, options?)` — an exported vitest
 `describe`-factory — honors the same contract. That's the whole portability story: the
-SQLite→Postgres path is a conformance run, not a rewrite.
+SQLite→Postgres path is a conformance run, not a rewrite. The kit has two tiers: **Tier 1** is
+universal, **Tier 2** is keyed on what `capabilities()` declares and pins *match semantics* for
+every `search: "keyword"` backend. See [Limits](#limits-v1) for exactly what each tier pins, and
+for the one thing deliberately left unpinned.
 
 ### 2. Scope it from SessionScope
 
@@ -180,12 +183,54 @@ const prompt = agent.renderInitialPrompt({ scope: s, recall: recall.block });
 
 Under the server, recall assembly is the host's job at **first-message time** — the first user
 text is the search query, so assembly waits for it rather than running at conversation creation.
-It is driven by the same registration that carries `instantiate` — the exact registration seam
-is still open (see question 5). Recall injects at **turn 1 only** in v1; mid-conversation needs
-go through the toolbox.
+The registration seam shipped in #444: a registration declares
+`memory: { store, scope, budgetChars? }` (the scope as a static string map or a function of the
+conversation's parsed context, resolved once at creation), and `POST /conversations/:id/messages`
+assembles recall on the first turn and sets it on the conversation's host bag — both runners
+narrow `host.recall` into the `RenderContext` alongside `host.scope`. Recall injects at
+**turn 1 only** in v1; mid-conversation needs go through the toolbox.
+
+**The one invariant the seam cannot check for you:** `memory.store` must be the SAME instance
+your `instantiate` hook binds into `memoryCapability`, and `memory.scope` must derive the SAME
+partition that hook binds. They are two independent author-supplied declarations — if they
+diverge, every toolbox write succeeds and every recall comes back empty, with no error anywhere.
+Keep both in one named function (the `memoryScope(s)` pattern above) and pass it to both seams.
 
 Everything above is observable from day one: `agent.memory.write`, `agent.memory.search`, and
 `agent.memory.recall` flow through the standard event spine to exporters and the dashboard.
+
+### 5. Try it — the companion demo
+
+The repo ships a first-party memory-wired agent: **companion**
+(`agents/companion/agent.mjs` + the `buildCompanionAgent` preset). It binds the persistent
+default store (`$AP_MEMORY_DB_PATH` | `~/.local/state/ap/memory.db`) and pairs the scope-bound
+toolbox with the #444 turn-1 recall wiring over the same store instance.
+
+```bash
+just companion          # build + ap playground with the companion discovered
+```
+
+Then, in the dashboard chat:
+
+1. Tell it something durable — *"remember: I take espresso, no milk"* — and watch
+   `agent.memory.write` land in the event stream.
+2. Kill the playground, start it again, open a **fresh** conversation.
+3. Ask *"what do I drink?"* — the recall block arrives at turn 1
+   (`agent.memory.recall` appears in the chat stream with counts/chars/truncated) and the
+   answer comes from memory.
+
+Identity: `AP_USER` names the partition's `user` key (default `"local"`); per-conversation
+override via `POST /conversations` with `context: { user: "guest" }`. The reserved
+`agent: "companion"` key (ADR-0008 D8) keeps companion-specific records out of other agents'
+recall, while `user`-only records stay shared across your agents.
+
+**Which runner you resolve matters for step 1** (playground env contract: `AGENT_MODEL` /
+`AGENT_TIER` / provider keys): with a provider key — e.g. `ANTHROPIC_API_KEY` — you get
+`AgentRunner` and the full event vocabulary, `memory_save` included. The bare **claude-CLI
+fallback** (no keys) still SAVES and RECALLS correctly, but executes tools without a
+`ToolExecutionContext`, so `agent.memory.write`/`.search` don't emit — and it runs with native
+CC tools disabled, so it is not the "capable daily driver" profile. The `agent.memory.recall`
+event in step 3 is route-emitted and appears on every runner.
 
 ## Deciding what to remember
 
@@ -382,6 +427,15 @@ always-injected tier. Maintain at most a handful per scope, and prefer *replacin
 record (`supersedes`) over accumulating several — they all spend budget before relevance ranking
 applies to anything else.
 
+Because the tier is unconditional it is also unconditional *cost*, so it carries its own slice:
+`AssembleRecallOptions.profileBudgetChars`, defaulting to `DEFAULT_PROFILE_BUDGET_RATIO` (0.4) of
+`budgetChars`. Profile records are admitted newest-first until the slice is spent; the rest are
+**deferred, not dropped** — they still count toward the block's truncation marker, and one may
+still enter through the hits tier if the query earns it. Without this slice a bloated profile
+partition silently starves the tier that answers the user's actual question, and starves it worst
+in exactly the sessions where the store has learned the most. Raising the slice is the wrong
+first move: a persistently-truncated block means the write side is over-saving profiles.
+
 ### Scoping patterns
 
 Search filters use **subset-match**: a filter matches every record whose scope contains all of
@@ -536,11 +590,55 @@ Stated rather than hidden, mirroring the ADRs:
   Manual is the capture mechanism — write it accordingly.
 - **Keyword search only in the reference backends** (FTS5/bm25). No semantic/vector search until
   the Postgres/pgvector backend; the `capabilities()` flag exists so it can exceed the reference
-  without breaking the contract. Match granularity differs between reference backends and is
-  deliberately NOT pinned by the conformance kit: `InMemoryMemoryStore` matches substrings (query
-  `prefer` hits content `prefers`), while the FTS5 backend matches whole tokens (it does not). Only
-  relevance ORDERING and the filter semantics are contractual — develop against the backend you
-  ship on.
+  without breaking the contract.
+
+  **Match semantics are now pinned across backends — this bullet used to say the opposite.** It
+  read: *"Match granularity differs between reference backends and is deliberately NOT pinned by
+  the conformance kit … Only relevance ORDERING and the filter semantics are contractual — develop
+  against the backend you ship on."* That was true and it was a bug, not a feature: the shipped
+  companion runs on SQLite/FTS5 while every test and eval ran on `InMemoryMemoryStore`, and the two
+  disagreed in **opposite** directions — in-memory matched SUBSTRINGS (`am` hit `name`, `prefer`
+  hit `Prefers`) and split the query on whitespace only (so `name?` matched nothing), while FTS5
+  matched whole tokens, split on punctuation and folded diacritics (`cafe` hit `café`). "Develop
+  against the backend you ship on" is not advice a library can give about its own reference
+  implementations. [ADR-0009](../adr/0009-memory-routing-and-background-composition.md) settled it
+  (constraint D-3, Decision 13) and both backends changed.
+
+  What **is** pinned, by `runMemoryStoreConformance`:
+
+  | Tier | Applies to | Pins |
+  |---|---|---|
+  | 1 — universal | every backend | filtering (scope subset-match, `kinds`, `tags`), invalidation chains, `limit` semantics including `limit: 0`, the `updatedAt`-only-on-invalidate rule, the recency listing, more-matching-tokens-first (for non-semantic backends — a `semantic` backend may rank a conceptually closer record above one with more literal token overlap), and the **batch tie** |
+  | 2 — per `capabilities().search` | every backend declaring `keyword` | **identical match SETS** over one shared corpus: word boundaries, punctuation, case, diacritics, one-character tokens, tags-as-haystack, and multi-token OR |
+
+  Both reference backends call one exported `tokenize()` — lowercase → NFD → drop combining marks
+  → split on every non-letter/non-number. No stemming and **no stopword list**, mirroring FTS5's
+  `unicode61`: `prefer` does *not* match `prefers` on either backend, and `the` matches everything
+  containing it. The batch tie matters more than it sounds: every backend assigns one `now` per
+  batch, so `write([a,b,c])` ties all three on `createdAt`, and a `limit: 2` listing used to return
+  *different records* per backend. Last written now wins, everywhere.
+
+  What is **not** pinned, deliberately: **total rank order** for a query search. In-memory ranks by
+  matched-token count then recency, FTS5 by bm25, a Postgres backend would use `ts_rank`. Pinning
+  total order would force a bm25 reimplementation into the in-memory store and would then fail the
+  `ts_rank` backend — relocating the divergence instead of removing it. Assert on match sets and on
+  the Tier 1 ordering invariants; do not assert on positions 3-vs-4 of a relevance list.
+
+  Also not pinned: **non-Latin diacritic and combining-mark parity**. The match-set pin holds for
+  Latin-1-class content (ASCII, Latin-1, Latin Extended-A, NFD-normalized Latin); outside it the
+  shared `tokenize()` (NFD + strip combining marks) and FTS5's `unicode61` are known to diverge —
+  Vietnamese diacritics (`tieng` matches `Tiếng` in-memory, zero rows on SQLite), Greek tonos,
+  Cyrillic breve, and Hebrew/Arabic combining marks (separators to `unicode61`, stripped by
+  `tokenize()`). Non-Latin corpora should be developed against the backend you ship on.
+- **The hits tier misses when wording does not overlap.** Recall's search tier passes the first
+  user message verbatim as `query`, and the reference backends match it lexically — so a stored
+  `fact` reading "The user's name is Doug" is returned for *"what's my name?"* and **not** for
+  *"who am I?"*. There is no zero-hit fallback to the recency listing, which makes passing a query
+  strictly worse than passing none when the phrasings diverge. The block's own framing line
+  ("most relevant first") promises more than lexical matching delivers. `kind: "profile"` is the
+  v1 answer for anything that must survive rephrasing — it is injected before search runs and is
+  therefore phrasing-proof; `fact`/`preference`/`episode` are not. Retrieval quality on the
+  shipped path is unowned work, not a resolved design.
 - **Recall injects at turn 1 only.** Long conversations rely on the toolbox; per-turn
   re-injection waits for AgencyHost.
 - **Multi-agent sharing is by overlapping scope only** — no attach-by-reference memory blocks.

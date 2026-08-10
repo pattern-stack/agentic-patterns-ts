@@ -8,7 +8,7 @@
  */
 
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   discoverAgents,
@@ -202,5 +202,42 @@ describe("loadAgentsFromFile — registration `scope` declaration (#308)", () =>
     const agents = path.join(FX, "agents");
     const [a] = await loadAgentsFromFile(path.join(agents, "todo/agent.mjs"), FX);
     expect(a?.scope).toBeUndefined();
+  });
+});
+
+describe("loadAgentsFromFile — registration `memory` declaration (#444)", () => {
+  it("passes a well-formed memory declaration through by identity (store + scope fn + budget)", async () => {
+    const agents = path.join(FX, "agents");
+    const fixture = path.join(agents, "memory-decl/agent.mjs");
+    const [a] = await loadAgentsFromFile(fixture, FX);
+    expect(a?.id).toBe("memory-decl");
+    expect(a?.memory).toBeDefined();
+    // Verbatim pass-through: the fixture's OWN exported store instance made
+    // the trip (same identity rule as `scope` — turn-1 recall and the
+    // toolbox must share one store).
+    const mod = (await import(pathToFileURL(fixture).href)) as { fakeStore: unknown };
+    expect(a?.memory?.store).toBe(mod.fakeStore);
+    expect(a?.memory?.budgetChars).toBe(2000);
+    const scopeFn = a?.memory?.scope;
+    expect(typeof scopeFn).toBe("function");
+    expect(
+      (scopeFn as (ctx?: Record<string, unknown>) => Record<string, string>)({ user: "d" }),
+    ).toEqual({
+      user: "d",
+      agent: "memory-decl",
+    });
+  });
+
+  it("drops a malformed declaration entirely (store missing methods) rather than salvaging a subset", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "memory-decl-bad/agent.mjs"), FX);
+    expect(a?.id).toBe("memory-decl-bad");
+    expect(a?.memory).toBeUndefined();
+  });
+
+  it("leaves memory undefined on registrations that declare none", async () => {
+    const agents = path.join(FX, "agents");
+    const [a] = await loadAgentsFromFile(path.join(agents, "todo/agent.mjs"), FX);
+    expect(a?.memory).toBeUndefined();
   });
 });

@@ -8,8 +8,10 @@ export const groqProvider: ProviderProtocol = {
     haiku: "llama-3.1-8b-instant",
   },
   envVars: ["GROQ_API_KEY"],
+  packageName: "@ai-sdk/groq",
+  bundled: false,
   async load(modelId) {
-    const mod = await importProvider("@ai-sdk/groq", "groq");
+    const mod = await importProvider(this.packageName, this.name, this.bundled);
     return mod.groq(modelId);
   },
 };

@@ -29,7 +29,11 @@
 
 import { z } from "zod";
 
-import { BIFROST_GUARDRAILS_HEADER, BIFROST_VK_HEADER } from "./bifrost.js";
+import {
+  BIFROST_GUARDRAILS_HEADER,
+  BIFROST_VK_HEADER,
+  bifrostMetadataExtractor,
+} from "./bifrost.js";
 import { PROVIDERS, type SupportedProvider, resolveTierAlias } from "./index.js";
 import { SUPPORTED_PROVIDERS } from "./types.js";
 import type { ResolvedLanguageModel } from "./types.js";
@@ -461,6 +465,10 @@ async function buildFromGateway(
     // Provider-level in @ai-sdk/openai-compatible: gates whether the SDK SENDS the
     // json-schema `response_format` (default false → stripped). Opt-in per gateway.
     ...(gw.supportsStructuredOutputs ? { supportsStructuredOutputs: true } : {}),
+    // #407: unconditional — the extractor self-neutralizes on non-Bifrost
+    // bodies (returns `undefined`), so this is a no-op for every other
+    // OpenAI-compatible gateway.
+    metadataExtractor: bifrostMetadataExtractor,
   });
   return provider(gatewayId);
 }

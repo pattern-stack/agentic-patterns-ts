@@ -45,6 +45,7 @@ import {
 } from "./harness/claude-code/claude-code-adapter.js";
 import { CodingAgentRunner } from "./harness/coding-agent-runner.js";
 import type { HarnessAdapter, ProbeContext } from "./harness/types.js";
+import { narrowRenderCtx } from "./render-ctx.js";
 import { type AgentLikeForBridge, buildAgentServers } from "./sdk-bridge.js";
 import type { RunOptions } from "./types.js";
 
@@ -211,14 +212,9 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
   // Internal helpers
   // -------------------------------------------------------------------------
 
-  /**
-   * Narrow `RunOptions.host` down to `host.scope` (#308) — same inline
-   * structural narrow as `AgentRunner._renderCtx`; cannot import
-   * `workflows/scope-host.ts` here (reverse layering).
-   */
+  /** Shared host-bag narrowing — see `runner/render-ctx.ts` (#308/#444). */
   private _renderCtx(options?: RunOptions): RenderContext | undefined {
-    const scope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
-    return scope ? { scope } : undefined;
+    return narrowRenderCtx(options);
   }
 
   // TODO(#308): `options.host` (and therefore `host.scope`) is NOT relayed to

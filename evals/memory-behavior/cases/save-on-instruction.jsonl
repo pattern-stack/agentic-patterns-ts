@@ -1,0 +1,2 @@
+{"id":"save-preference","input":"Please remember this: my favorite working music is ambient techno.","expected":{"storeMustMatch":"ambient techno"},"tags":["memory","save-on-instruction"],"split":"dev"}
+{"id":"save-durable-fact","input":"For future reference — my timezone is US/Eastern. Keep that in mind going forward.","expected":{"storeMustMatch":"Eastern"},"tags":["memory","save-on-instruction"],"split":"dev"}

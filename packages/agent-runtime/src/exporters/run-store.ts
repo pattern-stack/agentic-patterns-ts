@@ -140,6 +140,13 @@ export class RunStoreExporter extends BaseExporter {
       this._evictOldestIfFull();
       const model =
         typeof event.agentConfig?.model === "string" ? event.agentConfig.model : undefined;
+      // #437: trigger provenance persists under metadata.trigger automatically
+      // (the bag documented for join keys). A host `metadataFor` merges OVER
+      // it, so a host that wants a different `trigger` representation wins;
+      // both absent → metadata stays undefined (byte-identical rows).
+      const hostMetadata = this._metadataFor?.(event);
+      const metadata =
+        event.trigger !== undefined ? { trigger: event.trigger, ...hostMetadata } : hostMetadata;
       this._store.startRun({
         runId: event.runId,
         traceId: event.traceId,
@@ -148,7 +155,7 @@ export class RunStoreExporter extends BaseExporter {
         model,
         systemPrompt: event.systemPrompt,
         agentConfig: event.agentConfig,
-        metadata: this._metadataFor?.(event),
+        metadata,
       });
       this._open.set(event.runId, {
         tsStart: event.timestamp,

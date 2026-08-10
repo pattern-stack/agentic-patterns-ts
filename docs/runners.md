@@ -175,6 +175,8 @@ cost display, `harness.native` panels) is out of scope here — tracked in #324.
 
 Use `ClaudeCodeAPIRunner` as the fallback when no API key is set but the user has a Claude Max login via the CLI. Prefer `AgentRunner + @ai-sdk/anthropic` when `ANTHROPIC_API_KEY` is available, since it gives richer events and doesn't require a subprocess.
 
+> **It also drops conversation history.** `ClaudeCodeAPIRunner` has no read site for `options.messageHistory` — only `AgentRunner`'s message assembly does. Landing on this runner turns every multi-turn conversation into a series of first turns, while still answering plausibly. That is why `createRunner()` refuses to fall through to it when a provider credential *is* present but its package can't load, and why the fallback's `reason` string says so out loud. See [ADR 0010](adr/0010-bundled-provider-packages.md) and #472.
+
 ---
 
 ## 4. `createRunner()` factory — proposed implementation
@@ -536,6 +538,7 @@ export type {
 | Pass `eventBus` through? | **Yes**, via `options.eventBus`. | Server needs it for SSE; live-demo.ts already wires one explicitly. |
 | `modelId`? | Yes, optional, with per-provider defaults. | Most callers want "sonnet, whatever that means this month." Per-provider defaults are updatable in one place. |
 | Dynamic imports? | **Yes**, for every `@ai-sdk/*` provider and for `ClaudeCodeAPIRunner`. | `@agentic-patterns/runtime` must stay light; we should not force users who want `@ai-sdk/openai` to also install `@ai-sdk/anthropic`. The `peerDependencies` in package.json already marks `@anthropic-ai/claude-agent-sdk` optional — providers should follow the same pattern (added as `optionalPeerDependencies` in the package.json update that ships with this factory). |
+| ~~Ship no provider packages?~~ | **SUPERSEDED by [ADR 0010](adr/0010-bundled-provider-packages.md) (#472).** `@ai-sdk/anthropic`, `@ai-sdk/openai` and `@ai-sdk/google` are now real `dependencies` of `@agentic-patterns/runtime`. The rest stay dynamic-import-only. | "Stay light" cost more than it saved: a consumer who set a key and installed nothing else was silently pinned to `ClaudeCodeAPIRunner` and lost `messageHistory` on every multi-turn conversation. The three packages share the already-present `@ai-sdk/provider` + `@ai-sdk/provider-utils` and add no transitive tree, and dynamic `import()` still means an unused provider is never evaluated. |
 | Rich return type (`{runner, reason, source}`) vs just `RunnerProtocol`? | **Rich.** Callers that just want the runner destructure `{ runner } = await createRunner()`. | `source` is useful for metrics / admin dashboard ("currently running on: env-anthropic"). Adds negligible complexity. |
 | Throw vs MockRunner fallback when nothing found? | **Throw by default, MockRunner opt-in.** | Silent mock is a footgun in production. Tests opt in explicitly. |
 
@@ -679,17 +682,19 @@ Supports substring triggers and `"*"` wildcard. Emits the full streaming event l
 
 #### Environment variables recognized by `createRunner()`
 
+"Ships in the box" = the package is a real dependency of `@agentic-patterns/runtime`, so setting the env var is the only step ([ADR 0010](adr/0010-bundled-provider-packages.md)). The rest need `bun add <package>`; if you set their key without the package, `createRunner()` throws and names it — it never degrades to the CLI fallback.
+
 | Env var | Selects |
 |---|---|
-| `ANTHROPIC_API_KEY` | `@ai-sdk/anthropic` |
-| `OPENAI_API_KEY` | `@ai-sdk/openai` |
-| `GOOGLE_GENERATIVE_AI_API_KEY` | `@ai-sdk/google` |
+| `ANTHROPIC_API_KEY` | `@ai-sdk/anthropic` — **ships in the box** |
+| `OPENAI_API_KEY` | `@ai-sdk/openai` — **ships in the box** |
+| `GOOGLE_GENERATIVE_AI_API_KEY` (or `GOOGLE_API_KEY`) | `@ai-sdk/google` — **ships in the box** |
 | `GROQ_API_KEY` | `@ai-sdk/groq` |
 | `MISTRAL_API_KEY` | `@ai-sdk/mistral` |
 | `XAI_API_KEY` | `@ai-sdk/xai` |
 | `DEEPSEEK_API_KEY` | `@ai-sdk/deepseek` |
 | `OPENROUTER_API_KEY` | `@openrouter/ai-sdk-provider` |
-| `OLLAMA_HOST` | `ollama-ai-provider` |
+| `OLLAMA_HOST` | `ollama-ai-provider-v2` — **ships in the box** |
 | `AP_GATEWAY_BASE_URL` | Routes every agent's declared model through one OpenAI-compatible gateway (Bifrost, LiteLLM, vLLM, …) instead of a single bound provider |
 | `AP_GATEWAY_API_KEY` | Gateway bearer key — sent as `Authorization: Bearer` |
 | `AP_GATEWAY_BASIC_USER` + `AP_GATEWAY_BASIC_PASS` | Gateway HTTP Basic auth (e.g. a Bifrost deployment fronted by Basic, which 401s on Bearer) — sent as a precomputed `Authorization: Basic <base64>`. Use this **or** `AP_GATEWAY_API_KEY`, not both |

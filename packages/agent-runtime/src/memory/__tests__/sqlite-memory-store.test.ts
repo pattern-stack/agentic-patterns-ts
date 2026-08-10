@@ -181,6 +181,32 @@ describe("SqliteMemoryStore (impl-specific)", () => {
       expect(hits.map((h) => h.record.id)).toContain(a!.id);
     });
 
+    /**
+     * The SQLite half of #462. Fixing only the in-memory side would have
+     * CREATED a divergence: this store used to split the query on WHITESPACE
+     * and quote each whitespace-token, so `"dark-mode"` reached FTS5 as an
+     * adjacency PHRASE requiring `dark` immediately followed by `mode`, while a
+     * punctuation-splitting in-memory store would have OR'd the two. Both now
+     * call the same `tokenize()` and both OR the sub-tokens.
+     */
+    it("a punctuated query token is OR'd, never an adjacency phrase", async () => {
+      const [adjacent] = await store.write([fact("Prefers dark-mode in the editor.")]);
+      const [apart] = await store.write([fact("mode switch, then dark theme")]);
+
+      const hits = await store.search({ scope: {}, query: "dark-mode" });
+      // A phrase query returns only `adjacent`. An OR over sub-tokens returns
+      // both — `apart` carries both tokens, just not adjacently.
+      expect(hits.map((h) => h.record.id).sort()).toEqual([adjacent!.id, apart!.id].sort());
+    });
+
+    it("multi-token queries OR rather than AND (the Postgres-portability axis)", async () => {
+      const [a] = await store.write([fact("Drinks espresso, no milk.")]);
+      const [b] = await store.write([fact("Ships the monorepo from Denver.")]);
+      // No record carries both tokens; an AND backend returns zero here.
+      const hits = await store.search({ scope: {}, query: "espresso Denver" });
+      expect(hits.map((h) => h.record.id).sort()).toEqual([a!.id, b!.id].sort());
+    });
+
     it("whitespace-only query returns [] (in-memory parity)", async () => {
       await store.write([fact("present")]);
       expect(await store.search({ scope: {}, query: " " })).toEqual([]);

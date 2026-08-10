@@ -1,6 +1,6 @@
 {
   "name": "@agentic-patterns/runtime",
-  "version": "0.38.0",
+  "version": "0.39.0",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "MIT",
   "type": "module",
@@ -57,6 +57,9 @@
   },
   "dependencies": {
     "@agentic-patterns/core": "workspace:^",
+    "@ai-sdk/anthropic": "^4.0.0",
+    "@ai-sdk/google": "^4.0.0",
+    "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/provider": "^4.0.0",
     "@ai-sdk/provider-utils": "^5.0.0",
     "@anthropic-ai/claude-agent-sdk": "^0.3.0",
@@ -66,7 +69,6 @@
     "ollama-ai-provider-v2": "^1.0.0"
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "^4.0.0",
     "@ai-sdk/openai-compatible": "^3.0.0",
     "@anthropic-ai/claude-agent-sdk": "^0.3.215",
     "@types/better-sqlite3": "^7.6.13",

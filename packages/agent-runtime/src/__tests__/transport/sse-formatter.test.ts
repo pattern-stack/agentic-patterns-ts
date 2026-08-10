@@ -69,10 +69,17 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.tool.approval.response"]).toBe("tool.approval.response");
   });
 
-  it("has exactly 36 mappings", () => {
+  // #407 — Bifrost gateway guardrail events.
+  it("maps the #407 guardrail events", () => {
+    expect(SSE_EVENT_NAMES["agent.guardrail.violation"]).toBe("guardrail.violation");
+    expect(SSE_EVENT_NAMES["agent.guardrail.redaction"]).toBe("guardrail.redaction");
+  });
+
+  it("has exactly 38 mappings", () => {
     // 31 since #323 added the `harness.native` envelope mapping, +2 for #389's
-    // tool-approval request/response pair, +3 for #420's memory events.
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(36);
+    // tool-approval request/response pair, +3 for #420's memory events, +2 for
+    // #407's guardrail pair.
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(38);
   });
 });
 

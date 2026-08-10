@@ -475,6 +475,11 @@ const RELAYED_STREAM_EVENTS: ReadonlySet<AgentEventType> = new Set<AgentEventTyp
   // is its ONLY route there (events not listed here die silently).
   "agent.tool.approval.request",
   "agent.tool.approval.response",
+  // Bifrost gateway guardrail events (#407) — a delegated/promoted sub-agent's
+  // guardrail hit must reach the parent conversation SSE; this relay is its
+  // ONLY route there (events not listed here die silently).
+  "agent.guardrail.violation",
+  "agent.guardrail.redaction",
   // State-delta events (#226) — Backpack/Scratchpad mutations the observed
   // emission layer publishes. Relayed so the playground chat can render Delta
   // Frames + the Scratchpad rail live; the conversation SSE is this path's

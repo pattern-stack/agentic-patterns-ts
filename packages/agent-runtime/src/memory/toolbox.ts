@@ -131,7 +131,15 @@ const MemoryRecordViewSchema = z.object({
 type MemoryRecordView = z.infer<typeof MemoryRecordViewSchema>;
 
 const SaveParamsSchema = z.object({
-  kind: MemoryKindSchema.describe("fact | preference | episode | profile"),
+  kind: MemoryKindSchema.describe(
+    "profile = durable identity fact about the user (name, role, who they are) — always " +
+      "injected before search runs next session (and also returned by search like any " +
+      "record), so keep these to a handful; " +
+      "fact = atomic statement still true next week; " +
+      "preference = how the user wants things done; " +
+      "episode = what happened and what it taught you. " +
+      "fact/preference/episode are only recalled when the next question's wording matches them.",
+  ),
   content: z.string().min(1).describe("One durable fact, prompt-ready, standalone"),
   tags: z.array(z.string().min(1)).optional(),
   target: MemoryTargetSchema.optional().describe(
@@ -505,6 +513,20 @@ const BASELINE_MANUAL = [
   "- secrets, credentials, or tokens of any kind,",
   "- transient state ('the build is currently red'),",
   "- restatements of instructions you were just given.",
+  "",
+  "CHOOSING A KIND decides whether you will ever see the memory again, so choose deliberately:",
+  "- `profile` — durable identity facts about the person you work with: their name, their role,",
+  "  what they are building. These are injected at the START of every future session without a",
+  "  search, so they are the ONLY kind that survives a question worded differently from the",
+  "  memory. They are also permanent context cost: keep them to a handful of short lines.",
+  "- `preference` — how they want things done ('prefers concise answers', 'deploys on Fridays').",
+  "- `fact` — an atomic statement about their environment that is still true next week.",
+  "- `episode` — what happened and what it taught you.",
+  "",
+  "`fact`, `preference`, and `episode` are recalled by keyword search against the next",
+  "conversation's opening message. If a later question would be phrased with none of the words",
+  "you are about to write, search will not find it — that is what `profile` is for. When a fact",
+  "is identity-grade, save it as `profile`; when it is merely durable, do not.",
   "",
   "Write one fact per record, in plain declarative language that makes sense without this",
   "conversation. Before saving something you suspect you already know, memory_search first.",

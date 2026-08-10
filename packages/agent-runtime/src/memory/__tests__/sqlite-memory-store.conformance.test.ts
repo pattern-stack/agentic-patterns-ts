@@ -33,9 +33,14 @@ function shimOnlyDatabase(): typeof Database {
 }
 
 // Top-level await — vitest ESM test files support it; the suites register
-// during collection. Vitest tolerates the duplicate describe label; both
-// suites run.
-await runMemoryStoreConformance(() => new SqliteMemoryStore({ path: ":memory:", Database }));
+// during collection. The `label` option keeps the two runs (and the in-memory
+// backend's run in the sibling file) distinguishable now that Tier 2 asserts
+// the SAME corpus against every backend — an unlabelled "Tier 2 › diacritics
+// fold" failure would not say which backend diverged.
+await runMemoryStoreConformance(() => new SqliteMemoryStore({ path: ":memory:", Database }), {
+  label: "SqliteMemoryStore (better-sqlite3)",
+});
 await runMemoryStoreConformance(
   () => new SqliteMemoryStore({ path: ":memory:", Database: shimOnlyDatabase() }),
+  { label: "SqliteMemoryStore (bun-adapter surface)" },
 );
