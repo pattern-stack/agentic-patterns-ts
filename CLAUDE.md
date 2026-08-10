@@ -19,7 +19,7 @@ TypeScript library for building composable LLM agents. Agents are built by compo
 Agent = Role x Background x Awareness x Mission
 
 Role = Persona + Judgments + Capabilities + Responsibilities
-Capability = Toolbox + Manual
+Capability = Toolbox + Manual + Playbook
 ```
 
 ### Layer Hierarchy
@@ -36,8 +36,10 @@ Capability = Toolbox + Manual
 | 7 - Runner | runtime | `src/runner/` | AgentRunner on Vercel AI SDK |
 | 8 - Transport | runtime | `src/transport/` | InProcessTransport, MessagingToolbox |
 | 9 - Runtime | runtime | `src/runtime/` | AgentNode, AgencyRuntime for multi-agent |
-| 10 - Exporters | runtime | `src/exporters/` | Console, Langfuse, OpenTelemetry |
-| 11 - Presets | runtime | `src/presets/` | Pre-built roles, judgments, responsibilities |
+| 10 - Workflows | runtime | `src/workflows/` | sequentialAgent, parallelAgent, Sequential, Parallel, FanOut, Loop |
+| 11 - Conversation | runtime | `src/conversation/` | Conversation, ConversationStore |
+| 12 - Exporters | runtime | `src/exporters/` | Console, Langfuse, OpenTelemetry |
+| 13 - Presets | runtime | `src/presets/` | Pre-built roles, judgments, responsibilities |
 
 ## Key Conventions
 
@@ -66,6 +68,10 @@ bun run check            # All of the above (build + typecheck + lint + test)
 bun run --filter=@agentic-patterns/core test
 bun run --filter=@agentic-patterns/runtime typecheck
 ```
+
+### Documentation
+
+`docs/` is the single source of truth, rendered in place by the `docs-site/` workspace member (Astro Starlight) and gated in CI (link check + generated-page drift checks). **Before any docs work, consult `.claude/skills/docs-management/SKILL.md`** — frontmatter contract, linking rules, sidebar placement policy, and the truth gates live there.
 
 ### Landing changes
 

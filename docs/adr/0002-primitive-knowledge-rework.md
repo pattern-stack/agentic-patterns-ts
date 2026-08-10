@@ -1,4 +1,9 @@
-# ADR 0002 — Primitive knowledge in typed slots: camelCase keys, wired Tone/Methodology/Recovery, one prompt contract
+---
+title: "ADR 0002 — Primitive knowledge in typed slots: camelCase keys, wired Tone/Methodology/Recovery, one prompt contract"
+description: "Renames 21 atom keys to camelCase, wires Tone/Methodology/Recovery into Role, and retires getSystemPrompt for a single renderInitialPrompt contract."
+sidebar:
+  label: "ADR 0002 — Primitive Knowledge Rework"
+---
 
 - **Status:** Accepted (2026-07-09) — shipped as the PK stack
   [#216](https://github.com/pattern-stack/agentic-patterns-ts/pull/216) →

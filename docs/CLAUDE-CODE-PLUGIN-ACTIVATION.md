@@ -1,4 +1,7 @@
-# Claude Code Plugin Activation
+---
+title: "Claude Code Plugin Activation"
+description: "Why ap init --with-plugin hooks didn't fire and the 0.1.5 fix (.claude/settings.json), plus the 26-event registry, failure modes, and troubleshooting."
+---
 
 **Status as of 0.1.5:** fixed. `ap init --with-plugin` now drops a third artifact — `.claude/settings.json` — that activates hooks immediately for any Claude Code session started in the project directory, without needing a marketplace install. This doc explains the original gap, the fix, and how emission is centrally controlled.
 

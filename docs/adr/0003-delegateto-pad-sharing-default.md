@@ -1,4 +1,9 @@
-# ADR 0003 — `delegateTo` pad sharing is default-on through a fork
+---
+title: "ADR 0003 — `delegateTo` pad sharing is default-on through a fork"
+description: "Run-scoped scratchpad state crosses delegateTo by fork, branch-scoped stays isolated; no sharePad knob; MockRunner now threads the same tool context."
+sidebar:
+  label: "ADR 0003 — delegateTo Pad Sharing"
+---
 
 - **Status:** Accepted (2026-07-15) — ratified for
   [#269](https://github.com/pattern-stack/agentic-patterns-ts/issues/269).

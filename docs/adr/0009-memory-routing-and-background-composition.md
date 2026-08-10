@@ -1,4 +1,9 @@
-# ADR 0009 — Memory routing and Background composition: the model saves content, a developer-declared spec decides where it lands
+---
+title: "ADR 0009 — Memory routing and Background composition: the model saves content, a developer-declared spec decides where it lands"
+description: "A developer-declared routing spec, not the model, decides where a saved memory lands; Background collapses to one nested sections[] rendered as prompt fragments."
+sidebar:
+  label: "ADR 0009 — Memory Routing"
+---
 
 - **Status:** PROPOSED — design review, **revised 2026-08-08** after the context owner withdrew compatibility as a design criterion (see [Revision](#revision--compat-constraints-withdrawn)). **Supersedes specific statements in [ADR-0008](0008-compositional-memory.md)** (named in Decision 1); leaves [ADR-0007](0007-memory-store.md)'s store contract intact except for one named protocol extension (Decision 9). Program #414; epic #415.
 - **Date:** 2026-08-08

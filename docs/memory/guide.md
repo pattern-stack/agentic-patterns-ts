@@ -1,4 +1,7 @@
-# Memory — developer guide
+---
+title: "Memory — developer guide"
+description: "How to wire a MemoryStore into an agent: scoping from SessionScope, the memory toolbox, turn-1 recall, save policy, and Phase 1 vs unbuilt Phase B limits."
+---
 
 > **Status: PHASE 1 SHIPPED** (#417–#422) — the store, its in-memory and SQLite/FTS5 backends, the
 > conformance kit, the memory events, the agent toolbox, and the turn-1 recall surface are

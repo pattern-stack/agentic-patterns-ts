@@ -1,4 +1,9 @@
-# Runner & Provider Strategy — ADR
+---
+title: "Runner & Provider Strategy — ADR"
+description: "Accepted ADR: the createRunner() selection ladder, the @ai-sdk provider matrix, when to use each of the four runners, and Claude Code event-parity caveats."
+sidebar:
+  label: "Runner & Provider Strategy"
+---
 
 Status: accepted — implementation follows in a separate PR
 Target package: `@agentic-patterns/runtime`

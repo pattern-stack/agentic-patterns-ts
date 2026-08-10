@@ -1,4 +1,9 @@
-# Closed Composition — the keystone that makes agents chainable
+---
+title: "Closed Composition — the keystone that makes agents chainable"
+description: "Design diagnosis: Agent and Node are two roots; adding asAgent() promotes any Node to a discoverable, chattable, eval-able agent, collapsing consumer sprawl."
+sidebar:
+  label: "Closed Composition"
+---
 
 > Status: **DESIGN / NORTH STAR** (2026-07-02). This is the architectural diagnosis and
 > direction, not an implementation spec — `/sdlc develop` produces the spec from here.

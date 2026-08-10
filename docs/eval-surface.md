@@ -1,9 +1,14 @@
-# Eval surface — first-class eval management in the playground
+---
+title: "Eval surface — first-class eval management in the playground"
+description: "Locked design for the eval stack E1–E6: EvalStore on RunStore, trace capture, case banks with train/dev/test splits, ap eval CLI, review UI, LLM judge."
+sidebar:
+  label: "Eval surface"
+---
 
 > **Status:** design (proposed stack). Companion to
-> [`.ai-docs/stacks/closed-composition/specs/103.md`](../.ai-docs/stacks/closed-composition/specs/103.md)
+> [`.ai-docs/stacks/closed-composition/specs/103.md`](https://github.com/pattern-stack/agentic-patterns-ts/blob/main/.ai-docs/stacks/closed-composition/specs/103.md)
 > (the eval *engine*, shipped in-memory) and the `store-family` stack
-> ([#118](../.ai-docs/stacks/store-family/specs/118.md) barrel, #117 `RunStore`). This doc is the
+> ([#118](https://github.com/pattern-stack/agentic-patterns-ts/blob/main/.ai-docs/stacks/store-family/specs/118.md) barrel, #117 `RunStore`). This doc is the
 > LOCKED design for the **fast-follows #103 explicitly deferred** — persistence, splits, a CLI,
 > a review UI, and the LLM judge — turning the engine into a surface every agency on the
 > framework gets for free (Google ADK's `adk web` "Eval" tab, but ours).
@@ -78,7 +83,7 @@ Do not rebuild these — consume them.
   - `types.ts` — `EvalCase / Score / EvalResult / EvalReport / EvalSpec` (Zod-schema'd).
 - **Persistence pattern** — `packages/agent-runtime/src/storage/event-store.ts` (`:94 verify`):
   SQLite (`better-sqlite3`), append-only, `PRAGMA user_version` migrations. **`EvalStore` mirrors
-  this file.** The `store-family` stack ([#118](../.ai-docs/stacks/store-family/specs/118.md))
+  this file.** The `store-family` stack ([#118](https://github.com/pattern-stack/agentic-patterns-ts/blob/main/.ai-docs/stacks/store-family/specs/118.md))
   establishes `src/stores/index.ts` as the curated store barrel and the naming law: **`<Noun>Store`
   = interface; `InMemory<Noun>Store` / `Sqlite<Noun>Store` = impls.** #117 adds `RunStore`
   (one-row-per-run aggregate over the EventStore substrate) — coordinate (see §12).

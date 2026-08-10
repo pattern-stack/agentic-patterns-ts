@@ -1,4 +1,9 @@
-# Cockpit → Dashboard port playbook
+---
+title: "Cockpit → Dashboard port playbook"
+description: "Playbook for porting the retrieval-agent cockpit UI into the dashboard: source→target file map, SSE event adapter spec, step checklist, verified contracts."
+sidebar:
+  label: "Cockpit → Dashboard port"
+---
 
 **Status:** Ready to start · **Created:** 2026-06-25 · **Owner:** Doug
 **Companion ADR:** [`docs/adr/0001-constellation-dashboard.md`](../adr/0001-constellation-dashboard.md)

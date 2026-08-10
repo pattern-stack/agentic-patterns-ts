@@ -1,4 +1,7 @@
-# Event Persistence
+---
+title: "Event Persistence"
+description: "How ap playground persists UX-profile events to SQLite: schema, AP_DB_PATH/retention env vars, REST hydration endpoints, and failure modes."
+---
 
 The `ap playground` server persists every UX-profile event (including all `claude_code.hook` frames) to a local SQLite database so the dashboard can render history on cold start instead of starting empty after every restart.
 

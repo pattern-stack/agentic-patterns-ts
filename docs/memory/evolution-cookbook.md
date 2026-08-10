@@ -1,4 +1,9 @@
-# How agents evolve: worked examples
+---
+title: "How agents evolve: worked examples"
+description: "Five worked scenarios of memory records promoting through auto/earned/guarded tiers, with composition diffs and rollbacks; design preview — Phase B not built."
+sidebar:
+  label: "How agents evolve"
+---
 
 > **Status: DESIGN PREVIEW (Phase B)** — every scenario below turns on **promotion**, and the
 > compositional layer (ADR-0008) is not built. The ADR-0007 substrate underneath them *has*

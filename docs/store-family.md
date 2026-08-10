@@ -1,4 +1,9 @@
-# The Store family — the framework's persistence & context layer
+---
+title: "The Store family — the framework's persistence & context layer"
+description: "Locked plan naming every durable store (Conversation, Event, Run, Memory, Artifact), the ADK mapping, and the #118 → #116/#99 → #117 execution order."
+sidebar:
+  label: "The Store family"
+---
 
 > Status: **DESIGN / PLAN (LOCKED)** (2026-07-03). Post-investigation: every claim below was
 > verified against the runtime source and the downstream consumer
