@@ -1,11 +1,24 @@
 # Handoff — 2026-08-10 (overnight session)
 
+> ## 🔊 READ THIS FIRST — Doug is driving. Speak, don't type.
+>
+> He was driving through this entire session and **cannot read the screen**. Anything you only write is invisible to him. If that is still true when you pick this up:
+>
+> 1. **Speak immediately** — `~/Projects/dealbrain/scripts/tts "…"` (or the plugin copy, sdlc 0.2.25: `driving-mode`). Confirm you are up by *speaking*, not printing.
+> 2. **One message at a time.** The script serializes playback now; three messages once played simultaneously and he understood none of them. Never remove that mutex.
+> 3. **Announce, then wait.** For anything longer than a couple of sentences: speak a short "I have X ready, say when you're ready", then **stop**. He listens to music while driving and will miss an unannounced report.
+> 4. Summaries: ≤75 words, 2–3 sentences, lead with the takeaway, no code / paths / URLs / markdown, "Heads up:" for errors, phrase decisions as spoken questions.
+> 5. He dictates back and misspeaks when tired — **clarify semantically**, and say when you think he misspoke.
+> 6. He exits with "tts off" / "I'm parked".
+>
+> Full detail in the `driving-mode` skill and in memory (`feedback_driving-mode`).
+
 **Branch:** `main` (clean). Everything in agentic-patterns is merged; **the provider fix is NOT published**.
 **Last action:** Merged #474 (bundled AI-SDK providers) — `main` green. Before that: released core 0.18.0 / lockstep 0.39.0, shipped three sdlc-plugin versions, and proved the ambient morning-brief loop end to end including a reply that the agent actually remembers.
 
 **Next action — in order:**
 1. **Cut a release** (`just bump-both`). #474 is on `main` but npm is still core 0.18.0 / runtime 0.39.0, so **no consumer can get the provider fix yet**. Everything downstream waits on this.
-2. **Decide gateway vs direct key for swe-brain** — see "The gateway decision" below. It is blocked on one fact, not on design.
+2. ~~Decide gateway vs direct key~~ — **DONE.** Local gateway is wired and verified (see below). The only blocker is that **Gemini is out of AI Studio credits**; `gpt-4o-mini` and `claude-haiku-4-5` both work today, one uncommented line away in `.env.local`.
 3. **Merge the two swe-brain branches** (below) — both green, both unmerged.
 4. **Point the morning brief at real data.** It currently reports, correctly, that the workspace is empty. That proves the machinery, not the value.
 
@@ -66,7 +79,31 @@
 - Therefore, whenever `AGENT_MODEL` disagrees with the agent's pin, **the row names a model that was never called.** That is the audit-honesty defect behind #473.
 - **With a gateway configured this inverts.** `AP_GATEWAY_BASE_URL` triggers rung 2.5 — the resolver — which resolves *each agent's declared model per run*. So declared == used, and #473 largely dissolves on that path. But `AGENT_MODEL` stops being the lever entirely (open issue **#243**, override-vs-gateway precedence), and **an agent with no declared model fails loud** under a gateway.
 
-## The gateway decision — blocked on one fact, not on design
+## ✅ The gateway decision — RESOLVED and wired (end of session)
+
+Doug pulled the credentials, authorised reading his local Bifrost, and then said: **switch to the local gateway, and use `gemini-3.5-flash-lite` instead of Claude.** Done. State:
+
+- **`.env.local` now points at the local box** — `AP_GATEWAY_BASE_URL=http://10.88.111.51:8080/v1`, basic auth `admin`, `AP_GATEWAY_VIRTUAL_KEY` = the **`pii-wrapper`** VK, `AP_GATEWAY_MODEL_PREFIX=auto` (the gateway returns `provider/model` ids). `AGENT_TIER=haiku` was **commented out** — it is superseded once a model is pinned, and having both is a quiet trap. The previous config is backed up as `.env.local.bak-<epoch>`.
+- **The VK came from the governance API, not the UI**: `GET /api/governance/virtual-keys` with basic auth returns them, each with a `value` (`sk-bf-…`). Three exist: `pii-wrapper` (anthropic + gemini + openai, **7 pinned models**), `claude-code-dev` (no provider configs), `deal brain-local-dev` (all three, `*`).
+- **The local gateway DOES carry Claude**, unlike the AWS-hosted one. Through `pii-wrapper` the catalog is exactly: `anthropic/claude-haiku-4-5-20251001`, `gemini/gemini-3.5-flash`, `gemini/gemini-3.5-flash-lite`, `gemini/gemini-flash-latest`, `openai/gpt-4.1-mini`, `openai/gpt-4o-mini`, `openai/o4-mini`.
+
+⚠️ **Gemini is blocked upstream — this is the one thing standing between you and a working run.**
+
+```
+gemini/gemini-3.5-flash-lite  → 429 RESOURCE_EXHAUSTED
+    "Your prepayment credits are depleted. Please go to AI Studio … to manage billing."
+gemini/gemini-3.5-flash       → 429 same
+openai/gpt-4o-mini            → 200 "OK"
+anthropic/claude-haiku-4-5…   → 200 "OK"
+```
+
+The 429 comes **from Google, not Bifrost** — an AI Studio billing state, not a config error. The other two prove the gateway, the basic auth, the VK and the PII path all work end to end.
+
+`AGENT_MODEL` was left at `gemini-3.5-flash-lite` because that was Doug's explicit instruction, with both verified-working alternatives written directly beneath it as commented lines. **Either top up AI Studio credits, or uncomment one line.** Nothing else needs changing.
+
+**Consequence worth carrying forward:** swe-brain now has a viable Claude path (`claude-haiku-4-5-20251001` via the local gateway) that the AWS gateway could never provide — so "gateway vs direct key" is answered in favour of the gateway, provided the agent names a model in that 7-model set. Note `workspace-analyst` still declares `claude-sonnet-5`, which is **not** in it.
+
+## Historical: how that decision looked before it was resolved
 
 Doug's preference is the gateway, *"provided that gateway also runs through agentic patterns"* and that model choice stays defined the same way. Status:
 
