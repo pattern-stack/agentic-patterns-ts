@@ -1,93 +1,98 @@
-# Handoff — 2026-08-10
+# Handoff — 2026-08-10 (overnight session)
 
-**Branch:** `main` (clean; everything from this session is merged and published)
-**Last action:** Ran the ambient test (Test A — **PASS**), then cut and verified the release: **core 0.18.0 / lockstep 0.39.0 published to npm** (#468, dist-tags confirmed). Also shipped two sdlc-plugin versions and corrected two false claims in the walkthrough.
-**Next action:** **the ambient morning-brief demo** (see "The ambient arc" below) — Doug redirected here after the release landed. Memory Phase B (#434) is still fully unblocked and is the next *framework* arc, but it is no longer the immediate next thing. When it does start: read the "widen the instantiate seam to `{agent, report}`" decision on #452 and coordinate it with `AgentRegistry.resolve()` from #462.
+**Branch:** `main` (clean). Everything in agentic-patterns is merged; **the provider fix is NOT published**.
+**Last action:** Merged #474 (bundled AI-SDK providers) — `main` green. Before that: released core 0.18.0 / lockstep 0.39.0, shipped three sdlc-plugin versions, and proved the ambient morning-brief loop end to end including a reply that the agent actually remembers.
+
+**Next action — in order:**
+1. **Cut a release** (`just bump-both`). #474 is on `main` but npm is still core 0.18.0 / runtime 0.39.0, so **no consumer can get the provider fix yet**. Everything downstream waits on this.
+2. **Decide gateway vs direct key for swe-brain** — see "The gateway decision" below. It is blocked on one fact, not on design.
+3. **Merge the two swe-brain branches** (below) — both green, both unmerged.
+4. **Point the morning brief at real data.** It currently reports, correctly, that the workspace is empty. That proves the machinery, not the value.
+
 **Obstacles:**
-- **`bump.sh` re-resolves the lockfile and will trip `sdk-contract.test.ts` on any release cut where `@anthropic-ai/claude-agent-sdk` has moved.** Happened this session (0.3.225 → 0.3.226). This is the test working as designed. Fix = review the `bun.lock` diff, then re-pin `packages/agent-runtime/src/runner/__fixtures__/claude-agent-sdk-contract.json`. Only re-pin if the platform-package *set* and `peerDependencies` are unchanged; if either moved, that is a real upstream repackaging and needs a look.
-- **`agent_runs.final_answer` is empty** on the claude-CLI path (answer lives in `agent.message.complete`). sdlc-patterns#363, unchanged.
+- **`bump.sh` re-resolves `bun.lock` and will trip `sdk-contract.test.ts`** whenever `@anthropic-ai/claude-agent-sdk` has moved (hit this session: 0.3.225 → 0.3.226). The test is working as designed. Fix: review the lock diff, then re-pin `packages/agent-runtime/src/runner/__fixtures__/claude-agent-sdk-contract.json` — **only** if the platform-package *set* and `peerDependencies` are unchanged. If either moved, that is real upstream repackaging. Already filed as **#379**.
+- **`gh` CLI cannot resolve `api.github.com` on this machine.** `dig` resolves it; `curl`/`gh` return "could not resolve host" (`github.com` itself is fine — it is a stale negative cache for that one hostname). Fix is a DNS flush (needs sudo). Workaround used all session: `curl --resolve api.github.com:443:$(dig +short api.github.com | head -1)` with `$(gh auth token)`.
+- **`agent_runs.final_answer` is empty** — and the cause is now known: **nothing in swe-brain ever writes it**. `RunFinalizePatch` omits it and no writer exists. That reframes sdlc-patterns#363 as an app-side gap, not a claude-CLI quirk.
 
-## Ambient test — Test A PASSED
+---
 
-Evidence, all verified rather than recalled:
+## Shipped
 
-- **Loop fires unattended.** Worker log shows the four-line sequence: dispatcher → `agent.run` enqueued → `AgentRunJobHandler` fired → completed run (27 events, 4/726 tokens).
-- **Provenance is durable.** `run_context.trigger` carries `kind:schedule`, `scheduleName`, `directiveName`, and the claimed slot.
-- **Lineage is right.** `agent-run` on pool `interactive`, parent `schedule-dispatcher` on `batch` — the LLM loop does not squat the concurrency-5 batch pool.
-- **The run was real.** `claude-sonnet-5`, six tools bound, substantive answer in `agent.message.complete`.
-- Stood down at 292 schedule-triggered runs; `demo-minutely` is **disabled**.
+| What | Where | State |
+|---|---|---|
+| core 0.18.0 / runtime+server+cli 0.39.0 | #468 | **published**, dist-tags verified |
+| Walkthrough §A4 corrected (two false claims) | #467 | merged |
+| Bundled AI-SDK providers + loud failure | #474 | **merged, unpublished** |
+| sdlc plugin **0.2.23** — `mcpServers` hoisted out of `components` | claudecode-patterns#114 | released |
+| sdlc plugin **0.2.24** — `guided-tour` | claudecode-patterns#115 | released |
+| sdlc plugin **0.2.25** — `driving-mode` | claudecode-patterns | released |
 
-## The finding that matters: ambient runs are invisible
+## Filed
 
-```
-schedule-triggered : 292 runs → conversation_id IS NULL  (all)
-console-started    :   4 runs → conversation_id set      (all)
-```
+- **#470** — `TRIGGER_KINDS` has no member for an internal domain event. **Decision recorded: add `event`, with a subkind.** Open design question inside: does the subkind reuse `label` (zero schema change, renders correctly today) or get an explicit field? Reuse `label` unless hosts need to *route* on it.
+- **#472** — provider packaging. **Closed by #474**, decision recorded (anthropic/openai/google).
+- **#473** — `RunResult` must carry the model actually used. Doug's requirement: *"every single run should be able to store the model that it ran with"*, and a fallback must be **resolved and written**, never dropped.
+- Design principle + adoption correction on **#438**; measured evidence on **#456**.
 
-The agent surface renders activity from `agent_conversations`; the ambient path creates none. So `workspace-analyst` reports `conversations 0 · No conversations yet` **despite 296 runs**. Not a rendering bug and not hidden behind a tab — structural.
+---
 
-This is hard evidence for **#456** (Agent Workspace epic) chunks 2–3, posted there with the query. It also means **psql is the ground truth for A3 — the browser cannot confirm the loop ran.**
+## The four bugs — three of them silent
 
-## Shipped this session
+1. **The framework never shipped its provider packages.** `@ai-sdk/anthropic` was a **devDependency** — so workspace tests passed while every published consumer got nothing. *The tests were lying by construction.* Consequence: any consumer fell through to `ClaudeCodeAPIRunner`, **the one runner that never reads `options.messageHistory`**, so every multi-turn conversation silently lost all context. Fixed in #474: all three are real deps, a present credential now **stops the ladder** with a fix-naming error rather than degrading, and a packaging-contract test fails if a provider is ever demoted again. Also found: **a provider env var set to empty string is falsy**, so detection skips it exactly as if unset.
+2. **`components` wrapper in the plugin manifest** — not a valid field, so the three browser MCP servers had never registered in any project. Invisible because `skills/`, `agents/`, `commands/` have *default directory scans*; `mcpServers` has no default location, so it alone was fatal. `claude plugin validate` catches it outright and is now wired into that repo's CI.
+3. **Ambient runs created no conversation** — one literal `null` for `conversationId` in `runTriggered`. 292 runs invisible. Fixed on branch.
+4. **Per-run `seq` collisions** — `agent_run_events.seq` restarts at 1 per run, so a multi-run thread had many rows keyed `1`; React dropped/duplicated them. 198 console errors → 0. Latent before; replying to an ambient thread makes it routine.
 
-| What | Where |
-|---|---|
-| core 0.18.0 / runtime+server+cli 0.39.0 | #468 — **published**, dist-tags verified. Unblocks sdlc-patterns#364 |
-| Walkthrough §A4 corrected (2 false claims) | #467 |
-| sdlc plugin **0.2.23** — `mcpServers` hoisted out of `components` | claudecode-patterns#114 |
-| sdlc plugin **0.2.24** — `guided-tour` capability | claudecode-patterns#115 |
-| Evidence comment on the Agent Workspace epic | #456 |
+---
+
+## The ambient demo — works, unmerged
+
+**Branch `feat/ambient-morning-brief`, draft PR sdlc-patterns#365, three commits.** Verified live, not just typechecked: shadow DB, real dispatcher, real CAS claim.
+
+- A scheduled run creates `Morning brief — <date>` with both turns (user seq 0, assistant seq 1) and a non-null `conversation_id`.
+- The console composer is **enabled** on it; a reply threads into the same conversation (seq 2, 3) and starts a second run carrying the same `conversation_id`.
+- **The agent remembers.** Passphrase `ZEBRA-7741-MARLIN` recalled two turns later; brief recalled as `emails=0, meetings=0`; input tokens grew monotonically 563 → 854. (Two *negative* probes — asking the model about its own transcript — were answered wrongly by `gpt-5.4-nano`; its self-report is not trustworthy either way, so the conclusion rests on the passphrase and the token arithmetic.)
+- **Reversibility proven live:** stripped the flag, re-fired, `conversation_id` back to NULL, byte-identical. No migration, no framework change; the on/off switch is a directive step param — a **database row**.
+
+⚠️ **Never enable the thread flag on `demo-minutely`.** The console seeds from the first page only — 50 messages, `created_at desc`, across ALL conversations. At one run/minute that window blows in ~25 minutes and the brief vanishes from the UI while still in Postgres. 9am cadence is safe.
+
+**Second swe-brain branch:** `deps/ap-core-0.18-runtime-0.39` — the core 0.18/runtime 0.39 adoption. 617 → 620 tests pass, green, pushed, **no PR** (the agent's `gh auth` reported an invalid token).
+
+---
+
+## How model selection actually works (this cost a cycle — read it)
+
+- `runTriggered` calls `createRunner()` with **no arguments**, so the model comes from **`process.env.AGENT_MODEL`**. An agent's `model_override` **never reaches runner selection**; `AgentRunner` pins the model *"regardless of what the agent declares."* The DB pin only labels the persisted rows and the console chip.
+- Therefore, whenever `AGENT_MODEL` disagrees with the agent's pin, **the row names a model that was never called.** That is the audit-honesty defect behind #473.
+- **With a gateway configured this inverts.** `AP_GATEWAY_BASE_URL` triggers rung 2.5 — the resolver — which resolves *each agent's declared model per run*. So declared == used, and #473 largely dissolves on that path. But `AGENT_MODEL` stops being the lever entirely (open issue **#243**, override-vs-gateway precedence), and **an agent with no declared model fails loud** under a gateway.
+
+## The gateway decision — blocked on one fact, not on design
+
+Doug's preference is the gateway, *"provided that gateway also runs through agentic patterns"* and that model choice stays defined the same way. Status:
+
+- **Clean:** one env var routes every agent through it, no code change.
+- **Presidio has a designed seam already:** `AP_GATEWAY_GUARDRAIL_IDS` → Bifrost `x-bf-guardrail-ids`, and **#407** covers typed guardrail violations + redaction events.
+- ❌ **The blocker:** the gateway configured in `.env.local` (`https://bifrost-development.findtempo.co/v1`) carries **188 models — 130 openai, 58 gemini, ZERO anthropic**. swe-brain's `workspace-analyst` declares `claude-sonnet-5`, and under a gateway the *declared* model is used. **So pointing swe-brain at that gateway fails on the first run.**
+- **There are two gateways.** The credentials in `.env.local` point at the hosted findtempo one — **not** the local box at `10.88.111.52:8080` Doug set up recently (reachable via Tailscale, ~44ms). Its API is at **`/api/v1`, not `/v1`** (the UI catches unknown routes and returns HTML, so a wrong base URL fails confusingly), and it needs credentials not in `.env.local` — catalog unread. **Presidio is probably on that box**, which would mean guardrails and the model catalog currently live in different places.
+- **Cheapest unblock:** point the agent at a Gemini or OpenAI id the gateway actually has.
+
+## Two open decisions
+
+1. **Gateway vs direct key for swe-brain** — see above.
+2. **Model requirement.** Doug: *"every single run should be able to store the model that it ran with"* — a fallback is fine, but it must be resolved and written. `agent_runs.model` is nullable while `agent_conversations.model` is `NOT NULL`, so an agent with no model pinned anywhere now **fails outright** once thread-mode is on. Framework half is #473; the app half needs a call.
+
+---
 
 ## Notes
 
-**The plugin MCP bug (fixed, but the lesson generalizes).** `plugin.json` nested its component fields under a `components` wrapper, which is not in the Claude Code manifest schema. `skills/`, `agents/`, `commands/` and `output-styles/` all have **default directory scans**, so they loaded anyway and masked the error for many releases — `mcpServers` has no default location, so it alone was fatal, and the three browser MCP servers silently never registered. `claude plugin validate` catches this outright (`Unknown field 'components'`); it is now wired into that repo's CI. **Run `claude plugin validate` on any plugin manifest change.**
+**`driving-mode` (plugin 0.2.25).** Doug drives for hours and cannot read the screen. Two rules learned live: **one voice message at a time** (three overlapped and he understood none — the script now holds a playback mutex; do not "simplify" it away), and **announce then wait** before any long report. Key resolution is `OPENAI_API_KEY` → `TTS_KEY_FILE` → `~/.config/claude-tts/key`; a symlink from there to `~/.config/dealbrain-tts/key` was added so the shipped skill finds his existing key instead of silently falling back to the macOS voice.
 
-**`guided-tour` (new, sdlc plugin 0.2.24).** One tour file, two modes: `narrate` drives a real browser over raw CDP with a visible cursor/highlight/ripple for watchable walkthroughs; `--verify` runs the same steps with assertions and writes `report.json`. Engine ships in the plugin; **tours live in the consuming project at `.claude/tours/<name>.mjs`**, agent-authored and reviewed. Playwright's `connectOverCDP()` **hangs against Arc** — raw CDP on the same endpoint is fine; documented in the plugin's `browser` skill. CI-native use still needs a headless Chromium on `--cdp` (untested).
+**`guided-tour` (plugin 0.2.24).** One tour file, two modes: `narrate` drives the real browser over raw CDP (Playwright's `connectOverCDP` **hangs on Arc**; raw CDP is fine), `--verify` asserts and writes `report.json`. Tours live in the consuming project at `.claude/tours/`. Uncommitted tours exist for swe-brain (`ambient-loop.mjs`, with a deliberate red check on the run surface) and agentic-patterns (`playground-inventory.mjs`).
 
-**swe-brain tour** is on branch `docs/ambient-loop-tour` (pushed, **no PR** — deliberate, Doug wants to iterate on the format first). Its last step is a **deliberate red check** asserting trigger provenance on the agent surface; it goes green when #456 chunks 2–3 land. Login fills **password before email** — 1Password clears the email field when focus enters the password input — and a non-optional `waitFor` after submit is an auth tripwire, because a failed login otherwise cascades into every later step failing for the wrong reason.
+**The dashboard already has the surfaces.** A 12-route inventory tour passed: Dashboard, Agents (6 agents, readiness badges), Roles, Capabilities, Tools, Run (constellation + full trace: setup → iterations → finish, per-step timings, tool calls, tokens), Graph, Live, Conversations, Eval, Tokens, Claude Code. **They are empty, not missing** — nothing had run into them. Two agent roots disagree: `agents/` (calculator, companion, todo, writing-coach — what `ap run` reads) vs `examples/agents/` (what `ap playground examples` reads). The memory-wired `companion` lives in the former.
 
-**Resolved: the frontend has no mock path.** `SyncMode` is `'api' | 'electric'` only, every entity resolves to `mode:'api'`, and `VITE_DATA_SOURCE` is declared in `vite-env.d.ts` but read nowhere. No `.env.local`, no `VITE_API_URL` needed. The `process-compose.yml` comment claiming mock data is stale.
-
-**Open, unfiled:** four auth-internal collections 404 on every swe-brain page load (`auth_sessions`, `email_verifications`, `password_resets`, `user_credentials`) — the generated frontend binds collections to entities the API withholds. Cosmetic but noisy; not yet filed.
-
-**Untracked in the tree** (pre-existing, not from this session): `docs-site/`, `.ai-docs/patternstack/next-session-prompt.md`, `.ai-docs/research/memory-recall-retrieval-quality.md`. `docs-site/` looks like unlanded work against #458.
-
-## The ambient arc — what Doug actually wants (2026-08-10, late session)
-
-Stated directly, and it reframes the roadmap. The target is an **ambient coordinator**, Hermes/OpenClaw-class:
-
-> Every morning at nine AM, the agent will wake up, check things that maybe have happened from the night before, and send the user a message in Slack to tell them what is going on. We're not necessarily going to use Slack immediately, but if we have a chat interface that it sends a message to, whether or not it's in real time for the user to check or if it just lives there waiting for a response later, I don't really care.
-
-**The load-bearing design decision** (recorded on #438):
-
-> All the trigger is doing is initiating that conversation, but everything thereafter is effectively the same.
-
-A trigger starts a conversation; it does not create a different kind of thing. The **only** legitimate difference is autonomy posture — a 9am agent cannot stop and ask, because the human is asleep. That makes #328 / #329 / #443 / #456-chunk-4 *the ambient autonomy story*, not generic HITL plumbing.
-
-**Time-based triggers are only the first test.** The real target is event-driven: "when an email lands", "when a transcript finishes". That reprioritizes **#470** (filed tonight — `TRIGGER_KINDS` has no member for an internal domain event) from pedantry to blocker.
-
-**The demo, and why it is the right next step.** Recon (read-only, source-verified) found the entire blocker is *one argument*: `run-agent.use-case.ts:186` passes a literal `null` for `conversationId` in `runTriggered`. That single value is why all 292 ambient runs are invisible and why a brief has nowhere to land. The fix mirrors `streamChat` a few lines away; `recordAssistantTurn` already exists and the DI is already wired. **The reply path already works server-side** — `POST /agents/:name/stream` accepts a conversation id and threads prior turns as history; the console just never sends it and hard-disables the composer during replay. So a 6pm reply to a 9am brief is a 3-line frontend unlock, not new plumbing.
-
-Reversibility (Doug asked for this explicitly): **no migration** (columns exist, FK already nullable), **no framework change**, and the on/off switch is a directive step param — a **database row**, not a deploy.
-
-⚠️ **Operational rule: never enable the thread flag on `demo-minutely`.** The console seeds from the first page only — 50 messages, `created_at desc`, across ALL conversations. At one run/minute it blows that window in ~25 minutes and the brief vanishes from the UI while still sitting in Postgres. The 9am cadence is safe.
-
-**Two corrections to earlier claims in this file's history:** the answer is *not* stranded in an event (it is returned as `finalText`), and `agent_runs.final_answer` is empty because **nothing in swe-brain ever writes it** — reframing sdlc-patterns#363 as app-side, not a claude-CLI quirk.
-
-## Adoption: done, unmerged, and a refusal worth reading
-
-swe-brain is bumped to core 0.18 / runtime 0.39 on branch `deps/ap-core-0.18-runtime-0.39` (commit `f8f2489`, pushed, **no PR** — `gh auth` reports the keyring token invalid; run `gh auth refresh -h github.com`). **617 tests pass, 0 fail — identical to baseline**, proven by reverting and diffing rather than asserted.
-
-It **refused** the `runFromTrigger()` swap. Two of its three blockers do not survive reading the source, and the correction is recorded on #438 so the next adopter does not repeat it: `runFromTrigger` *does* thread an `eventBus` into `run()`, which emits the full event set, so **no streaming variant is needed** — swe-brain simply subscribes to the bus instead of draining `stream()`. And only `AgentRegistry.list()` is sync; `resolve()` is async and is the only method `runFromTrigger` calls. The third blocker (provenance is lossy) is real and *by design*.
-
-**Also: `better-sqlite3` is not installed in swe-brain.** Wiring memory without it silently falls back to `InMemoryMemoryStore` — the exact failure mode that makes tests lie. Install it first whenever that workstream starts.
+**Still running / left behind:** swe-brain api :3100, worker, vite :8338; playground backend :3456 + dashboard :5173. `demo-minutely` is **disabled**. Untracked, pre-existing: `docs-site/`, `.ai-docs/patternstack/next-session-prompt.md`, `.ai-docs/research/memory-recall-retrieval-quality.md`.
 
 ## Where the program stands
 
-M1 memory Phase 1 and M2 ignition are **done and published**. What exists is a working *vertical slice* of ambient — a cron minute starts a real agent run and the row records why — **not a full ambient system**. Three gaps, in order of how much they hurt:
-
-1. **The agent cannot tell you anything.** `agent.run` enqueues and returns `{jobRunId, enqueued}`, not the answer, so a downstream `messaging.message.create` has nothing to bind. Scheduled directives also withhold `actuate` by design. Opening that is the pending C1 policy decision (consent-gated DM-to-owner first).
-2. **You cannot see what it did** — #456, the finding above.
-3. **It has no memory on that path** — swe-brain memory adoption is sdlc-patterns#364, now unblocked by this release.
-
-M3 (AgencyHost daemon), M4 (ChannelAdapter protocol), M5 (identity), M6 (skill synthesis) are all still open. swe-brain has app-level equivalents of M3/M4 (worker split, Slack/Google ingress) but the framework-tier protocols do not exist yet.
+M1 Phase 1 and M2 are done and published. What exists is a **working vertical slice** of ambient — and as of tonight it also *speaks and remembers*: a schedule wakes an agent, it writes a brief into a thread, and a reply hours later reaches the same agent with the brief in context. What it still cannot do is **reach you where you are** (no channel — M4 #439, deliberately deferred) and **run unattended without asking** (the autonomy story: #328 permission bridge, #329 approval components, #443 blast radius, #456 chunk 4 — all specified, all unbuilt). M3 AgencyHost (#438) is unblocked and one of its six checkboxes shipped this session. Memory Phase B (#434) remains the next *framework* arc and now ships as 0.19 / 0.40, not 0.18 / 0.39.
