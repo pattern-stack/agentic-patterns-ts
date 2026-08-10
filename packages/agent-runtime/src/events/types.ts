@@ -5,7 +5,12 @@
  * Trace fields (traceId, runId, spanId, parentSpanId, timestamp) on every event.
  */
 
-import type { MemoryKind, MemoryScope, RenderArtifact } from "@agentic-patterns/core";
+import type {
+  MemoryKind,
+  MemoryScope,
+  RenderArtifact,
+  TriggerSourceData,
+} from "@agentic-patterns/core";
 import type { ClaudeCodeHookEvent } from "./claude-code.js";
 
 /**
@@ -75,6 +80,14 @@ export interface MessageStartEvent extends BaseEvent {
   readonly agentConfig?: Record<string, unknown>;
   /** #117: the rendered system prompt (agent.renderInitialPrompt()) — no other event carries it. */
   readonly systemPrompt?: string;
+  /**
+   * What started this run (#437 M2 trigger contract). Copied verbatim from
+   * `RunOptions.trigger` by the runner — message.start is the run's root
+   * event, so the provenance rides here (same additive posture as
+   * `agentConfig`/`systemPrompt`) and flows into `RunStoreExporter` with no
+   * schema bump. Absent for runs no host attributed.
+   */
+  readonly trigger?: TriggerSourceData;
 }
 
 export interface MessageChunkEvent extends BaseEvent {

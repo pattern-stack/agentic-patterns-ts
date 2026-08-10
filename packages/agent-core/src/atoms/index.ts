@@ -87,3 +87,9 @@ export {
   WorkflowStepConfigSchema,
   type WorkflowStepConfig,
 } from "./workflow-config.js";
+export {
+  TRIGGER_KINDS,
+  TriggerSource,
+  TriggerSourceSchema,
+  type TriggerSourceData,
+} from "./trigger-source.js";

@@ -4,7 +4,11 @@
  * Ported from Python: systems/runners/base.py
  */
 
-import type { RenderContext, ToolExecutionContext } from "@agentic-patterns/core";
+import type {
+  RenderContext,
+  ToolExecutionContext,
+  TriggerSourceData,
+} from "@agentic-patterns/core";
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent, TokenUsageDetails } from "../events/types.js";
@@ -134,11 +138,23 @@ export interface RunOptions {
   /** Optional trace ID for multi-agent orchestration. */
   traceId?: string;
   /**
-   * Optional run correlation id (#226). Honored by `NodeBackedRunner`, which
+   * Optional run correlation id (#226). Honored by `NodeBackedRunner` (which
    * threads it onto `NodeRunContext.runId` so state-delta events share the
-   * stream lifecycle's runId. `AgentRunner` currently mints its own per run.
+   * stream lifecycle's runId), by `CodingAgentRunner`-based runners, and —
+   * since the #437 trigger contract — by `AgentRunner` on all three paths
+   * (`run`/`stream`/`runStructured`), so a host can pre-correlate a run with
+   * its own job/audit id (AP-29 F1). Omitted → the runner mints one.
    */
   runId?: string;
+  /**
+   * What started this run (#437 M2 trigger contract): the validated
+   * `TriggerSource` data a host constructs at its ignition point (a schedule
+   * dispatcher, a webhook ingress, a job handler). The runner copies it
+   * verbatim onto `MessageStartEvent.trigger` — the run's root event — from
+   * where `RunStoreExporter` persists it under `RunMeta.metadata.trigger`.
+   * Purely additive provenance: absent → byte-identical behavior.
+   */
+  trigger?: TriggerSourceData;
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
   /**
