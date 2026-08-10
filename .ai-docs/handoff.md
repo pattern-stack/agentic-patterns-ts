@@ -1,14 +1,20 @@
-# Handoff — 2026-08-07
+# Handoff — 2026-08-09
 
-**Branch:** `dugshub/memory-store/6-recall-surface` (this worktree; stack top `…/7-docs` is checked out at `/root/agentic-patterns-ts/m7-docs`)
-**Last action:** Memory Phase 1 shipped as a 7-PR stack — #425→#431, all CI-green, `Closes #417–#423`, stacked bases correct. Gate 2.5 closure reviews dispatched on #430 (interrupted mid-run by a process restart) and #431 (authored by a second agent outside the pipeline); their verdicts land as PR comments.
-**Next action:** Human review + merge the stack bottom-up (#425 first; `st sync` after). Then: (1) file the m8 eval issue under #415 (playground memory wiring + memory-behavior eval set — becomes ADR-0008's promotion gates later), (2) ADR-0008 Phase B in this repo, (3) M2 ignition in swe-brain.
+**Branch:** `main` (both repos; every branch from this arc is merged)
+**Last action:** Merged 12 PRs across two repos — memory stack (#447→#454), trigger contract (#460→#462), ADR-0009 (#452) in agentic-patterns-ts; upgrade + ignition wire (#360, #361) in sdlc-patterns. Verified merged `main` green (`bun run check` + SQLite memory smoke). All ADR-0009 open questions answered and recorded on #452.
+**Next action:** Run the ambient test — `.ai-docs/ambient-test-walkthrough.md`, Test A (schedule → agent run, ~15 min, no API key needed). Then decide the release: `just bump-both` → core 0.18 / lockstep 0.39 (main carries unpublished memory + trigger work; sdlc-patterns#364 is blocked on it).
 **Obstacles:**
-- Epic #415 morning-summary comment pending the two Gate 2.5 review agents (in-flight at handoff time).
-- `st` state on this box shows "No PR" for the stack (PRs were created by a second agent via gh) — cosmetic; `st stack get`/`st sync` reconciles.
-- Untracked `.ai-docs/plans/memory-store.yaml` in this worktree duplicates the copy already committed on `7-docs` — safe to delete locally once the stack merges (will otherwise block a checkout of main).
+- Version bump not cut — swe-brain's second pass (sdlc-patterns#364) needs core 0.18/0.39 on npm.
+- `bump.sh` footgun: `scripts/publish.sh` **silently** skips already-published versions; `rm bun.lock && bun install` after bumping.
+- Frontend data-source ambiguity for the browser pass: `process-compose.yml` says the frontend runs on mock, the generated store binds entities to `api`/`electric`. Unresolved — psql/API is ground truth. Details in the walkthrough §A4.
 
 ## Notes
-**Full program context for a cold session:** `.ai-docs/patternstack/ambient-platform-brief.md` (multi-repo map, competitive conclusions, decision log, roadmap M1–M5, MVP definition). Memory index also carries the durable map (`ambient-platform-program`).
-Specs of record: `docs/adr/0007-memory-store.md` + `docs/adr/0008-compositional-memory.md` (merged, PR #416). Per-issue implementation specs: `.ai-docs/stacks/memory-store/specs/417–423-*.md` (committed on their branches).
-Tooling this session added: `st` CLI installed via `bun link` from `/tmp/st-cli` (`export PATH="$HOME/.bun/bin:$PATH"`); LAN docs viewer at http://10.88.111.45:8899 (docsify over `docs/`, serves this worktree live; restart: `cd /tmp/apdocs && python3 -m http.server 8899 --bind 0.0.0.0 &`).
+**Decisions of record** (Doug, 2026-08-09, all on #452): default `promotion: locked` (guarded is a fast-follow once HITL reaches the memory lane) · Locked-tier semantic bypass = accepted limit (its real fix is the enforced-sections arc, #465) · no prompt marking of memory fragments · budgets ship as tunable defaults · **widen the instantiate seam to `{agent, report}`** so the overlay report reaches the composition lens — coordinate with `AgentRegistry.resolve()` from #462 · `label` → **`attribute`** · `asAgent()` emits a role-sourced section · section naming = look-before-merge, later renames explicitly acceptable. Trigger contract (on #460/#462): `message` stays distinct from `webhook`, `TriggerSource` stays an atom, `runFromTrigger()` lands in M2.
+
+**Next build arc** is memory Phase B (#434) — ADR-0009 is fully decided, so routing / `Background` reshape / overlay is unblocked. It breaks `buildAgentFromConfig` consumers (ships as core 0.18 / runtime 0.39); breaking swe-brain again is expected and accepted.
+
+**Filed this session:** agentic-patterns-ts #464 (recall preview puts raw memory content on the exporter bus — conflicts with ADR-0009's ids-only telemetry stance) · #465 (idea: behaviorally-enforced prompt sections) · sdlc-patterns #363 (`final_answer` empty on the CC-runner path) · #364 (swe-brain second pass: adopt TriggerSource + runFromTrigger + memory — the gate before the codegen `agents` subsystem extraction).
+
+**Review artifacts:** dossier at https://claude.ai/code/artifact/da17186b-f088-4c8c-b68f-68d8b69f984c (per-PR review paths, Gate 2.5 verdicts, decision queue, merge sequencing). Post-hoc Gate 2.5 reviews landed on #451/#453/#454 — all REVISE, 5 blockers, all fixed before merge. #455 closed as superseded; its salvage list is on the PR.
+
+**M2 (#437) is done except the last checkbox** (codegen `agents` subsystem), which stays gated until sdlc-patterns#364 proves the shape settled. Trigger contract spec: `.ai-docs/stacks/m2-ignition/trigger-contract-spec.md`. Program brief for a cold reader: `.ai-docs/patternstack/ambient-platform-brief.md`.
