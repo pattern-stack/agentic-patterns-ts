@@ -37,6 +37,10 @@ export type {
   ScratchpadReadEvent,
   ScratchpadForkEvent,
   ScratchpadJoinEvent,
+  MemoryRecordPreview,
+  MemoryWriteEvent,
+  MemorySearchEvent,
+  MemoryRecallEvent,
 } from "./types.js";
 
 export { createEvent } from "./types.js";

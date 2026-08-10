@@ -1,55 +1,20 @@
-# Handoff — 2026-07-27
+# Handoff — 2026-08-09
 
-**Branch:** `main` (this handoff lands via its own PR). Open work branch from 07-26 session: `refactor/adopt-definetool` (**open**, #382).
+**Branch:** `main` (both repos; every branch from this arc is merged)
+**Last action:** Merged 12 PRs across two repos — memory stack (#447→#454), trigger contract (#460→#462), ADR-0009 (#452) in agentic-patterns-ts; upgrade + ignition wire (#360, #361) in sdlc-patterns. Verified merged `main` green (`bun run check` + SQLite memory smoke). All ADR-0009 open questions answered and recorded on #452.
+**Next action:** Run the ambient test — `.ai-docs/ambient-test-walkthrough.md`, Test A (schedule → agent run, ~15 min, no API key needed). Then decide the release: `just bump-both` → core 0.18 / lockstep 0.39 (main carries unpublished memory + trigger work; sdlc-patterns#364 is blocked on it).
+**Obstacles:**
+- Version bump not cut — swe-brain's second pass (sdlc-patterns#364) needs core 0.18/0.39 on npm.
+- `bump.sh` footgun: `scripts/publish.sh` **silently** skips already-published versions; `rm bun.lock && bun install` after bumping.
+- Frontend data-source ambiguity for the browser pass: `process-compose.yml` says the frontend runs on mock, the generated store binds entities to `api`/`electric`. Unresolved — psql/API is ground truth. Details in the walkthrough §A4.
 
-**Last action:** **AI SDK v5 → v7 epic (#384) fully shipped and closed** — six issues through the full SDLC loop in one session (specs → Gate 1.5 critique → implement → paired Gate 2.5 diff review → Gate 3 validation, all logged on issues/PRs):
+## Notes
+**Decisions of record** (Doug, 2026-08-09, all on #452): default `promotion: locked` (guarded is a fast-follow once HITL reaches the memory lane) · Locked-tier semantic bypass = accepted limit (its real fix is the enforced-sections arc, #465) · no prompt marking of memory fragments · budgets ship as tunable defaults · **widen the instantiate seam to `{agent, report}`** so the overlay report reaches the composition lens — coordinate with `AgentRegistry.resolve()` from #462 · `label` → **`attribute`** · `asAgent()` emits a role-sourced section · section naming = look-before-merge, later renames explicitly acceptable. Trigger contract (on #460/#462): `message` stays distinct from `webhook`, `TriggerSource` stays an atom, `runFromTrigger()` lands in M2.
 
-| Issue | PR | What |
-|---|---|---|
-| #385 | #391 (0.31.0) | ESM-only output (CJS dropped), `engines.node >= 22`, both no-CJS gates flipped |
-| #386 | #393 (0.32.0) | ai@5→ai@7 + provider@2→4; codemods v6+v7; `ResolvedLanguageModel = V2\|V3\|V4` widening; `MockLanguageModelV2`→V3 across 12 suites |
-| #387 | #394 | `ClaudeCodeLanguageModel` V2→V4: nested usage w/ anthropic-parity cache formula, `{unified,raw}` finishReason, native `reasoning`→`effort`/`thinking` mapping |
-| #388 | #395 (stack-merged @ 0.34.0) | `TokenUsageDetails` through events → SSE → console/Langfuse/OTel → dashboard waterfall |
-| #390 | #402 (0.35.0) | Capability map `providers/capabilities.ts`: `{support, verifiedBy, lastVerified}` honesty refines, probe script, monthly CI job, advisory warns in `runStructured()` |
-| #389 | #403 (stack-merged @ 0.36.0) | Gates → native `toolApproval` (Option C): `runner/tool-approval-bridge.ts`, gate chain as async approval callback on the capable path; fail-closed on abort + throwing gates; deny continues the loop model-visibly |
+**Next build arc** is memory Phase B (#434) — ADR-0009 is fully decided, so routing / `Background` reshape / overlay is unblocked. It breaks `buildAgentFromConfig` consumers (ships as core 0.18 / runtime 0.39); breaking swe-brain again is expected and accepted.
 
-Published: `core@0.15.0`, lockstep `0.36.0`. Epic #384 + `ai-sdk-v7` milestone closed. Research + decisions: `.ai-docs/stacks/ai-sdk-v7/{understanding,plan}.md`; per-issue specs with all phase logs in `specs/`.
+**Filed this session:** agentic-patterns-ts #464 (recall preview puts raw memory content on the exporter bus — conflicts with ADR-0009's ids-only telemetry stance) · #465 (idea: behaviorally-enforced prompt sections) · sdlc-patterns #363 (`final_answer` empty on the CC-runner path) · #364 (swe-brain second pass: adopt TriggerSource + runFromTrigger + memory — the gate before the codegen `agents` subsystem extraction).
 
-**Superseded from the 07-26 handoff:** #374's `shims: true` fix was removed by #385 (dead once CJS output died); the dist-contract gate #374 added was flipped to assert ESM-only. #285 (justfile→pnpm) still open but note `just` isn't installed in this container — `bash scripts/bump.sh` is the direct path.
+**Review artifacts:** dossier at https://claude.ai/code/artifact/da17186b-f088-4c8c-b68f-68d8b69f984c (per-PR review paths, Gate 2.5 verdicts, decision queue, merge sequencing). Post-hoc Gate 2.5 reviews landed on #451/#453/#454 — all REVISE, 5 blockers, all fixed before merge. #455 closed as superseded; its salvage list is on the PR.
 
----
-
-## Next-action queue
-
-### 1. Resolve #382 — keep or strip the discretionary `.describe()`s, then merge (carried from 07-26, full context in git history of this file)
-
-### 2. New from the v7 epic (untracked, in rough priority order)
-- **HTTP-reachable HITL** — the approval bridge is `runStructured()`-seam-only; server's `POST /conversations/:id/messages` only calls `runner.stream()`. Deliberate Option-C scoping (spec 389 Open Q + PR #403 "Known asymmetry"). Wiring the route (or a structured-run route) to the bridge is the natural follow-up.
-- **Live-key verification wave** — real Anthropic cache numbers (#387/#388 caveat), Langfuse cost view, capability probes (`scripts/probe-capabilities.mjs`). Blocked on secrets: container has neither `pts` nor `op`; `.env.example` (PR #396) defines the 1Password contract (`pts secrets env` → `.env.local`).
-- **`scripts/bump.sh` hardening** — its lockfile refresh (`rm bun.lock && bun install`) re-resolves caret-ranged externals; broke `sdk-contract.test.ts` on 3 of 6 epic PRs, each pinned back surgically ("pin bun.lock … without dependency drift" commits are the pattern).
-- **Bifrost-native + Presidio** — user asked (2026-07-27) about first-class Bifrost gateway support with Presidio PII. Today Bifrost works via `AP_GATEWAY_BASE_URL` (openai-compatible, `buildFromGateway` in model-resolver); "native" support is unscoped. Research pending at session end.
-
-### 3. Carried over from 07-26, still open
-- #266 playbook parity — investigated, not specced; recommendation Option B (envelope-preserving discriminated `returns` violation); two spec traps documented in 07-26 handoff (git history)
-- Lint rule 5th construct for #265 (two-level `z.union` → Gemini zero tokens) — relayed, needs measurement from originating agent
-- ParallelAgent / fan-out chain — relayed, cross-repo
-- Consumer migrations: canvas-workstation (`SessionScope`, kill `ORG_ID` pin) → dealbrain `workspace-agent-v0`; both now also get v7 features (reasoning knob, token detail)
-- #234 (dup `Transfer-Encoding: chunked` on SSE under bun), #281 (menu polish), #285 (justfile pnpm)
-
----
-
-## Obstacles / notes
-
-- **Secrets:** no API keys in container. `.env.example` heads-up: exporting `ANTHROPIC_API_KEY` switches Claude Code subprocess runs from subscription to per-token API billing — prefer `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) for the CC harness path.
-- **Tests as root:** 2 `claude-code-runner.test.ts` integration tests fail locally (`--dangerously-skip-permissions` + root). Use `SKIP_SDK_TESTS=true` like CI; suite is then green (2817 tests post-epic).
-- **Fresh worktrees:** `bun install` before any build; `git fetch` before trusting local `main`.
-- The conductor worktree (`.claude/worktrees/bridge-cse_*`) carries stale staged changes duplicating #385's merged edits — safe to discard.
-- Exporter usage semantics are deliberately opposite per platform: Langfuse exclusive (non-cached) buckets, OTel inclusive totals + sub-attributes. Documented bidirectionally in both files — **do not "fix" one to match the other**.
-- Capability map: all `reasoningEffort` rows `unverified` (probe reports `UNCERTAIN` — can't distinguish accepted vs ignored); runtime `unknown` advisories are the extend-the-map feedback loop.
-- `ai@7` still accepts V2/V3-spec models (verified in d.ts) — third-party V2 providers (`ollama-ai-provider-v2`) keep working. Majors land ~every 6 months; stale `beta`/`canary` dist-tags are v7-cycle leftovers, not a pre-release train.
-- Port 5173 held by user's Vite; demos on 5174. `scope-echo` remains the keyless e2e probe.
-
-## Provenance
-
-- **Verified in-repo this session:** everything in the epic table, npm/CI state, the capability-map and bridge behavior (independent validator spot checks on built dist).
-- **Carried unverified from 07-26:** the `z.union` lint finding, the ParallelAgent chain.
+**M2 (#437) is done except the last checkbox** (codegen `agents` subsystem), which stays gated until sdlc-patterns#364 proves the shape settled. Trigger contract spec: `.ai-docs/stacks/m2-ignition/trigger-contract-spec.md`. Program brief for a cold reader: `.ai-docs/patternstack/ambient-platform-brief.md`.

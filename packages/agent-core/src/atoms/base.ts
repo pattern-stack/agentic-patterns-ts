@@ -14,15 +14,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Context threaded into a render call — currently just an optional
- * server-parsed session scope bag. Lives here at layer 0 (atoms) so both the
- * rendering layer and an atom-level render hook (see `Awareness.fromScope`)
- * can reference it without atoms ever importing upward into rendering or
- * molecules. Re-exported upward through `atoms/index.ts` and the rendering
- * barrels so callers can import it from wherever's convenient.
+ * Context threaded into a render call — an optional server-parsed session
+ * scope bag plus an optional host-assembled turn-1 recall block. Lives here
+ * at layer 0 (atoms) so both the rendering layer and an atom-level render
+ * hook (see `Awareness.fromScope` / `Awareness.fromRecall`) can reference it
+ * without atoms ever importing upward into rendering or molecules.
+ * Re-exported upward through `atoms/index.ts` and the rendering barrels so
+ * callers can import it from wherever's convenient.
  */
 export interface RenderContext {
   readonly scope?: Readonly<Record<string, unknown>>;
+  /**
+   * Pre-formatted, pre-budgeted turn-1 recall block assembled by the runtime
+   * host (ADR-0007 D8a) — a finished string, never structured data. Rendering
+   * stays pure: core places it (Awareness.fromRecall), never fetches or
+   * formats it. Absent ⇒ byte-identical pre-recall rendering.
+   */
+  readonly recall?: string;
 }
 
 /**

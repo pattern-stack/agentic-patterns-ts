@@ -236,6 +236,43 @@ export type ClientEvent =
         discarded_keys: string[];
       };
     }
+  // Memory events (ADR-0007 D10, #420) — MemoryStore write/search/recall made
+  // visible. Previews are byte-capped at construction ("… (preview only)"
+  // marker); size figures are CHARS (the memory budget unit), never tokens.
+  | {
+      name: "memory.write";
+      data: {
+        scope: Record<string, string>;
+        count: number;
+        records: { id: string; kind: string; preview: string; superseded_id?: string }[];
+        tool_call_id?: string;
+      };
+    }
+  | {
+      name: "memory.search";
+      data: {
+        scope: Record<string, string>;
+        limit: number;
+        include_invalidated: boolean;
+        result_count: number;
+        result_ids: string[];
+        query?: string;
+        kinds?: string[];
+        tags?: string[];
+        tool_call_id?: string;
+      };
+    }
+  | {
+      name: "memory.recall";
+      data: {
+        scope: Record<string, string>;
+        count: number;
+        chars: number;
+        budget_chars: number;
+        truncated: boolean;
+        preview: string;
+      };
+    }
   // Gate-decision audit signal (F-2, #324) — one post-decision record per intent
   // (allow or block), carrying provenance + the evaluation trail.
   | {
@@ -361,6 +398,9 @@ export const CLIENT_EVENT_NAMES = [
   "scratchpad.read",
   "scratchpad.fork",
   "scratchpad.join",
+  "memory.write",
+  "memory.search",
+  "memory.recall",
   "claude_code.hook",
   "harness.native",
   "error",

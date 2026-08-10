@@ -5,7 +5,12 @@
  * Trace fields (traceId, runId, spanId, parentSpanId, timestamp) on every event.
  */
 
-import type { RenderArtifact } from "@agentic-patterns/core";
+import type {
+  MemoryKind,
+  MemoryScope,
+  RenderArtifact,
+  TriggerSourceData,
+} from "@agentic-patterns/core";
 import type { ClaudeCodeHookEvent } from "./claude-code.js";
 
 /**
@@ -75,6 +80,14 @@ export interface MessageStartEvent extends BaseEvent {
   readonly agentConfig?: Record<string, unknown>;
   /** #117: the rendered system prompt (agent.renderInitialPrompt()) — no other event carries it. */
   readonly systemPrompt?: string;
+  /**
+   * What started this run (#437 M2 trigger contract). Copied verbatim from
+   * `RunOptions.trigger` by the runner — message.start is the run's root
+   * event, so the provenance rides here (same additive posture as
+   * `agentConfig`/`systemPrompt`) and flows into `RunStoreExporter` with no
+   * schema bump. Absent for runs no host attributed.
+   */
+  readonly trigger?: TriggerSourceData;
 }
 
 export interface MessageChunkEvent extends BaseEvent {
@@ -622,6 +635,86 @@ export interface ScratchpadJoinEvent extends StateEventBase {
 }
 
 // ---------------------------------------------------------------------------
+// Memory events (ADR-0007 Decision 10, #420) — MemoryStore operations made
+// visible. Emitted by the MemoryToolbox (#421, via ctx.emit) and the recall
+// assembler (#422); this file only defines the vocabulary. Content previews
+// are byte-capped AT CONSTRUCTION (512B, explicit "… (preview only)" marker —
+// `workflows/state-events.ts` `capPreview` precedent); the formatter and every
+// exporter pass them through verbatim. Budget/size figures are CHARS (issue
+// pin: budget units are chars end-to-end, model-agnostic + deterministic).
+//
+// Profile membership is OBSERVABILITY-only, deliberately: these types are NOT in
+// `workflows/as-agent.ts`'s RELAYED_STREAM_EVENTS (no live playground relay) and NOT
+// in `conversation.ts`'s STATE_DELTA_EVENT_TYPES (not replayed state parts) — the
+// dashboard memory lens is ADR-0007 future work, not this issue.
+// ---------------------------------------------------------------------------
+
+/** One written record's identity + byte-capped content preview in a {@link MemoryWriteEvent}. */
+export interface MemoryRecordPreview {
+  /** The store-assigned record id. */
+  readonly id: string;
+  readonly kind: MemoryKind;
+  /** Byte-capped preview of the record's content (512B, marked when clipped). */
+  readonly preview: string;
+  /** Id of the record this write superseded (invalidated atomically), when it did (ADR-0007 D4). */
+  readonly supersededId?: string;
+}
+
+export interface MemoryWriteEvent extends BaseEvent {
+  readonly type: "agent.memory.write";
+  /** The partition scope written into (bound at instantiate time — ADR-0007 D9). */
+  readonly scope: MemoryScope;
+  /** Records written this batch (`=== records.length`; explicit for cheap aggregation). */
+  readonly count: number;
+  /** Per-record identity + byte-capped previews, input order. */
+  readonly records: readonly MemoryRecordPreview[];
+  /** The causing tool call, when the write happened inside a tool dispatch. */
+  readonly toolCallId?: string;
+}
+
+export interface MemorySearchEvent extends BaseEvent {
+  readonly type: "agent.memory.search";
+  /** The partition scope searched. */
+  readonly scope: MemoryScope;
+  /** Byte-capped preview of the query text; absent ⇒ filtered, recency-ordered listing. */
+  readonly query?: string;
+  /** Kind filter, when one was applied. */
+  readonly kinds?: readonly MemoryKind[];
+  /** Tag filter (subset semantics), when one was applied. */
+  readonly tags?: readonly string[];
+  /** Effective limit AFTER schema defaults were applied (i.e. never absent). */
+  readonly limit: number;
+  /** Effective includeInvalidated AFTER schema defaults (never absent). */
+  readonly includeInvalidated: boolean;
+  readonly resultCount: number;
+  /** Hit record ids, relevance order (bounded by `limit` — no content, no scores). */
+  readonly resultIds: readonly string[];
+  /** The causing tool call, when the search happened inside a tool dispatch. */
+  readonly toolCallId?: string;
+}
+
+/**
+ * The turn-1 injection event (ADR-0007 D8a/D10): what recall assembled, how
+ * big it was, and whether the budget clipped it. Emitted by the recall
+ * assembler (#422) — host-side, before rendering, so there is no toolCallId.
+ */
+export interface MemoryRecallEvent extends BaseEvent {
+  readonly type: "agent.memory.recall";
+  /** The partition scope recalled from. */
+  readonly scope: MemoryScope;
+  /** Records included in the assembled block. */
+  readonly count: number;
+  /** Character count of the assembled block (budget units are CHARS — issue pin). */
+  readonly chars: number;
+  /** The character budget the assembler ran under. */
+  readonly budgetChars: number;
+  /** True when the budget clipped the block — truncation is marked, never silent. */
+  readonly truncated: boolean;
+  /** Byte-capped preview of the assembled block (512B, marked when clipped). */
+  readonly preview: string;
+}
+
+// ---------------------------------------------------------------------------
 // Discriminated union
 // ---------------------------------------------------------------------------
 
@@ -659,6 +752,9 @@ export type AgentEvent =
   | ScratchpadReadEvent
   | ScratchpadForkEvent
   | ScratchpadJoinEvent
+  | MemoryWriteEvent
+  | MemorySearchEvent
+  | MemoryRecallEvent
   | HarnessNativeEvent
   | ClaudeCodeHookEvent;
 

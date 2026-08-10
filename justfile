@@ -21,6 +21,27 @@ dev-opus:
 dev-haiku:
     AGENT_TIER=haiku bun x tsx tools/dev.ts
 
+# Companion demo (#445): build, then playground with the memory-wired
+# companion. Durable memories persist at $AP_MEMORY_DB_PATH | ~/.local/state/ap/memory.db —
+# tell it something, restart, ask again in a fresh conversation.
+# BUN, not node (Gate 2.5 B2): under node, better-sqlite3's bun-installed
+# native binding can be ABI-mismatched and memory SILENTLY degrades to
+# in-memory — the demo's whole point is persistence. bun:sqlite always works.
+companion:
+    bun run build
+    bun packages/agent-cli/dist/cli.js playground
+
+# Memory-behavior eval set (#446/#460/#461): seven families over the shipped
+# memory surface, companion as subject, run against per-family TEMP SQLite dbs
+# (the backend the companion ships on — never your real memory.db).
+#   --dry    deterministic families only (no runner needed)
+#   --tiers  list the families and their gate tiers (hard | xfail-strict), run nothing
+# Exit: 0 every executed family met its tier · 1 a `hard` family FAILED or an
+# `xfail-strict` family PASSED · 2 config error (no runner, bad AGENT_TIER, no
+# SQLite driver — the harness refuses to soft-degrade to the in-memory store).
+eval-memory *ARGS:
+    bun x tsx evals/memory-behavior/run.mts {{ARGS}}
+
 # ── Checks ───────────────────────────────────
 
 # Build + typecheck + lint + test

@@ -55,6 +55,11 @@ jobs:
       - name: Model-facing schema lint
         run: bun run check:model-facing-schemas
 
+      # bun:sqlite cannot be exercised by vitest (Node) — this proves the
+      # SqliteMemoryStore driver contract on the real bun driver (#419).
+      - name: Bun-driver memory smoke (bun:sqlite)
+        run: bun run smoke:memory
+
   # Publish to npm on every merge to main, gated on a green `check`. Packs each
   # public package (core/runtime/server/cli) and publishes it IFF its version
   # isn't already on npm — so merges without a version bump are fast no-ops, and

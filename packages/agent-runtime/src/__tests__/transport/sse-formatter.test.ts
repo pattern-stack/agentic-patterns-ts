@@ -75,10 +75,11 @@ describe("SSE_EVENT_NAMES", () => {
     expect(SSE_EVENT_NAMES["agent.guardrail.redaction"]).toBe("guardrail.redaction");
   });
 
-  it("has exactly 35 mappings", () => {
+  it("has exactly 38 mappings", () => {
     // 31 since #323 added the `harness.native` envelope mapping, +2 for #389's
-    // tool-approval request/response pair, +2 for #407's guardrail pair.
-    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(35);
+    // tool-approval request/response pair, +3 for #420's memory events, +2 for
+    // #407's guardrail pair.
+    expect(Object.keys(SSE_EVENT_NAMES)).toHaveLength(38);
   });
 });
 

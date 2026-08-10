@@ -4,7 +4,11 @@
  * Ported from Python: systems/runners/base.py
  */
 
-import type { RenderContext, ToolExecutionContext } from "@agentic-patterns/core";
+import type {
+  RenderContext,
+  ToolExecutionContext,
+  TriggerSourceData,
+} from "@agentic-patterns/core";
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent, TokenUsageDetails } from "../events/types.js";
@@ -145,11 +149,23 @@ export interface RunOptions {
   /** Optional trace ID for multi-agent orchestration. */
   traceId?: string;
   /**
-   * Optional run correlation id (#226). Honored by `NodeBackedRunner`, which
+   * Optional run correlation id (#226). Honored by `NodeBackedRunner` (which
    * threads it onto `NodeRunContext.runId` so state-delta events share the
-   * stream lifecycle's runId. `AgentRunner` currently mints its own per run.
+   * stream lifecycle's runId), by `CodingAgentRunner`-based runners, and —
+   * since the #437 trigger contract — by `AgentRunner` on all three paths
+   * (`run`/`stream`/`runStructured`), so a host can pre-correlate a run with
+   * its own job/audit id (AP-29 F1). Omitted → the runner mints one.
    */
   runId?: string;
+  /**
+   * What started this run (#437 M2 trigger contract): the validated
+   * `TriggerSource` data a host constructs at its ignition point (a schedule
+   * dispatcher, a webhook ingress, a job handler). The runner copies it
+   * verbatim onto `MessageStartEvent.trigger` — the run's root event — from
+   * where `RunStoreExporter` persists it under `RunMeta.metadata.trigger`.
+   * Purely additive provenance: absent → byte-identical behavior.
+   */
+  trigger?: TriggerSourceData;
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
   /**
@@ -200,10 +216,13 @@ export interface RunOptions {
    * uses it to carry `{ scratchpad, deps, eventBus, scope }` across the
    * agent-as-tool seam (#124). `scope` is a server-parsed `SessionScope`
    * value — read it via `readScope`/`requireScope` (`workflows/scope-host.ts`).
-   * The runner reads exactly one key off this bag — `host.scope` — to build
-   * the `RenderContext` passed to `renderInitialPrompt`; every other key
-   * (and the bag itself, when `scope` is absent) is otherwise opaque and
-   * copied verbatim.
+   * The runner reads exactly two keys off this bag to build the
+   * `RenderContext` passed to `renderInitialPrompt`: `host.scope`, and
+   * `host.recall` (#444 — the turn-1 recall block the host assembled via
+   * `assembleRecall`; set once at first-message time, it persists on the bag
+   * so every later turn re-renders the same block). Every other key (and the
+   * bag itself, when both are absent) is otherwise opaque and copied
+   * verbatim.
    */
   host?: unknown;
   /**

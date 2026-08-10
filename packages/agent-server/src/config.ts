@@ -9,6 +9,7 @@ import type {
   ConversationStore,
   EvalStore,
   EventStore,
+  MemoryStore,
   PendingInputRegistry,
   RunResult,
   RunStore,
@@ -158,6 +159,38 @@ export interface AgentRegistration {
    * should not surface, so it is opt-in at the seam that knows the deployment.
    */
   readonly publishArtifacts?: boolean;
+  /**
+   * Cross-session memory binding (#444, ADR-0007 D8a) — declared by the
+   * registration, honored by `POST /conversations/:id/messages`: at
+   * FIRST-message time the route calls `assembleRecall(store, scope, {query})`
+   * and sets the finished block on the conversation's host bag
+   * (`host.recall`), which the runner narrows into `RenderContext.recall`.
+   *
+   * The registration OWNS the store (typically `loadMemoryStore()` in the
+   * agent definition — the framework never boots one; a deliberate inversion
+   * of #444's original strategy, recorded on that issue). It MUST be the same
+   * instance the `instantiate` hook binds into `memoryCapability`, so toolbox
+   * writes and turn-1 recall share one store — AND the scope this field
+   * derives MUST equal the partition that hook binds into `memoryCapability`:
+   * they are two independent author-supplied derivations, and nothing
+   * compares them. Diverging silently splits the partitions — every write
+   * succeeds, every recall comes back empty (Gate 2.5 M2).
+   * `scope` is the author-declared partition (ADR-0007 D3 — the framework
+   * does not invent identity): a static string map, or a function of the
+   * conversation's PARSED effective context, resolved ONCE at creation and
+   * immutable for the conversation's lifetime (same posture as scope itself).
+   * A derivation that throws or returns an empty/non-string-map scope fails
+   * conversation creation with a 502 — an empty scope would make recall an
+   * unscoped search (ADR-0007).
+   */
+  readonly memory?: {
+    readonly store: MemoryStore;
+    readonly scope:
+      | Record<string, string>
+      | ((context?: Record<string, unknown>) => Record<string, string>);
+    /** Recall budget override, chars (default: assembleRecall's 4000). */
+    readonly budgetChars?: number;
+  };
 }
 
 // AdminServiceProtocol is imported from @agentic-patterns/runtime

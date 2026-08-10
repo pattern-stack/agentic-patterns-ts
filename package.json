@@ -17,7 +17,8 @@
     "format": "biome format --write .",
     "check:model-facing-schemas": "bun run tools/check-model-facing-schemas.ts",
     "check:dist-contract": "bun run tools/check-dist-contract.ts",
-    "check": "bun run build && bun run check:dist-contract && bun run typecheck && bun run lint && bun run test && bun run check:model-facing-schemas"
+    "smoke:memory": "bun packages/agent-runtime/scripts/smoke-memory-sqlite.ts",
+    "check": "bun run build && bun run check:dist-contract && bun run typecheck && bun run lint && bun run test && bun run check:model-facing-schemas && bun run smoke:memory"
   },
   "devDependencies": {
     "@agentic-patterns/core": "workspace:^",

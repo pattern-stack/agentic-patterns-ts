@@ -1,0 +1,2 @@
+{"id":"recall-espresso","input":"What do I usually drink? Check your memory if you need to.","expected":{"mustContain":["espresso"]},"tags":["memory","recall-cite"],"split":"dev"}
+{"id":"recall-editor","input":"Which editor do I prefer? Look it up in your memory.","expected":{"mustContain":["vim"]},"tags":["memory","recall-cite"],"split":"dev"}

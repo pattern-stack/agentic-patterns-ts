@@ -1,0 +1,2 @@
+{"id":"budget-marked-truncation","input":{"records":40,"budgetChars":600},"expected":{"truncated":true},"tags":["memory","budget"],"split":"dev"}
+{"id":"budget-under-no-marker","input":{"records":2,"budgetChars":4000},"expected":{"truncated":false},"tags":["memory","budget"],"split":"dev"}

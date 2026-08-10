@@ -80,6 +80,7 @@ import {
 } from "../providers/model-resolver.js";
 import type { ResolvedLanguageModel } from "../providers/types.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
+import { narrowRenderCtx } from "./render-ctx.js";
 import { guardOpenObjectSchemas } from "./schema-guard.js";
 import { type ToolArgsOverlay, createGateToolApproval } from "./tool-approval-bridge.js";
 import type {
@@ -408,6 +409,35 @@ export class AgentRunner implements RunnerProtocol {
       // ordering guarantee between Channel B and the tool's own lifecycle.
       emit: (e) => {
         try {
+          // #421 memory-event passthrough: the #420 write/search vocabulary
+          // reaches the bus TYPED instead of being coerced to progress.
+          // Correlation fields are spread LAST, and spanId is forced undefined,
+          // so `e.data` can never override them.
+          // The `as never` is the one localized cast this requires —
+          // `ToolEvent.data` is `Record<string, unknown>`, but the sole
+          // producer is MemoryToolbox, whose payloads are constructed against
+          // the typed event interfaces (and pinned by its tests). No runtime
+          // validation here — `emit` is the fire-and-forget sink (#99
+          // non-throw contract). `agent.memory.recall` is deliberately NOT
+          // bridged: it is host-side (#422), never tool-side.
+          if (e.type === "agent.memory.write" || e.type === "agent.memory.search") {
+            void this.eventBus
+              .publish(
+                createEvent(e.type, {
+                  ...(e.data ?? {}),
+                  traceId: a.traceId,
+                  runId: a.runId,
+                  parentSpanId: a.parentSpanId,
+                  toolCallId: a.parentToolCallId,
+                  // spanId is this event's own identity, never the tool's to
+                  // set — forcing it undefined makes createEvent generate a
+                  // fresh one (`data.spanId ?? generateId()`).
+                  spanId: undefined,
+                } as never),
+              )
+              .catch(() => {});
+            return;
+          }
           void this.eventBus
             .publish(
               createEvent("agent.tool.progress", {
@@ -430,16 +460,9 @@ export class AgentRunner implements RunnerProtocol {
     };
   }
 
-  /**
-   * Narrow `RunOptions.host` down to the one key the renderer cares about:
-   * `host.scope` (#308). Inline structural narrow — cannot import
-   * `workflows/scope-host.ts`'s `hostOf`/`buildScopeHost` here, since
-   * `workflows` depends on `runner` and importing it back would be a reverse
-   * layering violation. Mirrors `hostOf`'s shape without the import.
-   */
+  /** Shared host-bag narrowing — see `runner/render-ctx.ts` (#308/#444). */
   private _renderCtx(options?: RunOptions): RenderContext | undefined {
-    const scope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
-    return scope ? { scope } : undefined;
+    return narrowRenderCtx(options);
   }
 
   /**
@@ -609,7 +632,9 @@ export class AgentRunner implements RunnerProtocol {
       this._eventBus = options.eventBus;
     }
 
-    const runId = generateId();
+    // #437: honor a caller-provided correlation id (AP-29 F1) — parity with
+    // NodeBackedRunner and CodingAgentRunner. Minted only when absent.
+    const runId = options?.runId ?? generateId();
     const effectiveTraceId = options?.traceId ?? runId;
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
@@ -656,6 +681,7 @@ export class AgentRunner implements RunnerProtocol {
         tools: agentTools.map((t) => t.name),
       },
       systemPrompt: instructions,
+      trigger: options?.trigger,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -1372,7 +1398,8 @@ export class AgentRunner implements RunnerProtocol {
       this._eventBus = options.eventBus;
     }
 
-    const runId = generateId();
+    // #437: honor a caller-provided correlation id (AP-29 F1) — parity with run().
+    const runId = options?.runId ?? generateId();
     const effectiveTraceId = options?.traceId ?? runId;
     const toolExecutor = options?.toolExecutor;
 
@@ -1404,6 +1431,7 @@ export class AgentRunner implements RunnerProtocol {
         tools: agentTools.map((t) => t.name),
       },
       systemPrompt: instructions,
+      trigger: options?.trigger,
     });
     const rootSpanId = startEvent.spanId;
     await this.emit(startEvent);
@@ -1706,7 +1734,8 @@ export class AgentRunner implements RunnerProtocol {
       this._eventBus = options.eventBus;
     }
 
-    const runId = generateId();
+    // #437: honor a caller-provided correlation id (AP-29 F1) — parity with run().
+    const runId = options?.runId ?? generateId();
     const effectiveTraceId = options?.traceId ?? runId;
     const maxIterations = options?.maxIterations ?? 10;
     const toolExecutor = options?.toolExecutor;
@@ -1777,6 +1806,7 @@ export class AgentRunner implements RunnerProtocol {
         tools: agentTools.map((t) => t.name),
       },
       systemPrompt: instructions,
+      trigger: options?.trigger,
     });
     const rootSpanId = msgStart.spanId;
     await this.emit(msgStart);

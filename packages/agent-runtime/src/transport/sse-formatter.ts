@@ -140,6 +140,9 @@ export type SSEEventName =
   | "scratchpad.read"
   | "scratchpad.fork"
   | "scratchpad.join"
+  | "memory.write"
+  | "memory.search"
+  | "memory.recall"
   | "error"
   | "claude_code.hook"
   | "harness.native"
@@ -201,6 +204,9 @@ export const SSE_WIRE_EVENT_NAMES = [
   "scratchpad.read",
   "scratchpad.fork",
   "scratchpad.join",
+  "memory.write",
+  "memory.search",
+  "memory.recall",
   "error",
   "claude_code.hook",
   "harness.native",
@@ -619,6 +625,47 @@ function mapEventToSSE(event: AgentEvent, artifactByteCeiling: number): SSEMappi
           discarded_keys: event.discardedKeys,
         },
       };
+    case "agent.memory.write": {
+      const payload: Record<string, unknown> = {
+        scope: event.scope,
+        count: event.count,
+        // snake_case remap of MemoryRecordPreview (supersededId → superseded_id);
+        // conditional-key discipline per house style — absent, never null.
+        records: event.records.map((r) => {
+          const rec: Record<string, unknown> = { id: r.id, kind: r.kind, preview: r.preview };
+          if (r.supersededId !== undefined) rec.superseded_id = r.supersededId;
+          return rec;
+        }),
+      };
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      return { name: "memory.write", payload };
+    }
+    case "agent.memory.search": {
+      const payload: Record<string, unknown> = {
+        scope: event.scope,
+        limit: event.limit,
+        include_invalidated: event.includeInvalidated,
+        result_count: event.resultCount,
+        result_ids: event.resultIds,
+      };
+      if (event.query !== undefined) payload.query = event.query;
+      if (event.kinds !== undefined) payload.kinds = event.kinds;
+      if (event.tags !== undefined) payload.tags = event.tags;
+      if (event.toolCallId !== undefined) payload.tool_call_id = event.toolCallId;
+      return { name: "memory.search", payload };
+    }
+    case "agent.memory.recall":
+      return {
+        name: "memory.recall",
+        payload: {
+          scope: event.scope,
+          count: event.count,
+          chars: event.chars,
+          budget_chars: event.budgetChars,
+          truncated: event.truncated,
+          preview: event.preview,
+        },
+      };
     default: {
       // Exhaustiveness check — a new AgentEvent variant without a branch here
       // is a compile-time error.
@@ -673,6 +720,9 @@ export const SSE_EVENT_NAMES: Readonly<Record<AgentEventType, SSEEventName>> = {
   "agent.scratchpad.read": "scratchpad.read",
   "agent.scratchpad.fork": "scratchpad.fork",
   "agent.scratchpad.join": "scratchpad.join",
+  "agent.memory.write": "memory.write",
+  "agent.memory.search": "memory.search",
+  "agent.memory.recall": "memory.recall",
   "agent.error": "error",
   "claude_code.hook": "claude_code.hook",
   "harness.native": "harness.native",
