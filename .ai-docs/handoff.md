@@ -2,7 +2,7 @@
 
 **Branch:** `main` (clean; everything from this session is merged and published)
 **Last action:** Ran the ambient test (Test A — **PASS**), then cut and verified the release: **core 0.18.0 / lockstep 0.39.0 published to npm** (#468, dist-tags confirmed). Also shipped two sdlc-plugin versions and corrected two false claims in the walkthrough.
-**Next action:** **Memory Phase B (#434)** — ADR-0009 is fully decided, so routing / `Background` reshape / overlay is unblocked and nothing else gates it. Before touching code, read the "widen the instantiate seam to `{agent, report}`" decision on #452 and coordinate it with `AgentRegistry.resolve()` from #462.
+**Next action:** **the ambient morning-brief demo** (see "The ambient arc" below) — Doug redirected here after the release landed. Memory Phase B (#434) is still fully unblocked and is the next *framework* arc, but it is no longer the immediate next thing. When it does start: read the "widen the instantiate seam to `{agent, report}`" decision on #452 and coordinate it with `AgentRegistry.resolve()` from #462.
 **Obstacles:**
 - **`bump.sh` re-resolves the lockfile and will trip `sdk-contract.test.ts` on any release cut where `@anthropic-ai/claude-agent-sdk` has moved.** Happened this session (0.3.225 → 0.3.226). This is the test working as designed. Fix = review the `bun.lock` diff, then re-pin `packages/agent-runtime/src/runner/__fixtures__/claude-agent-sdk-contract.json`. Only re-pin if the platform-package *set* and `peerDependencies` are unchanged; if either moved, that is a real upstream repackaging and needs a look.
 - **`agent_runs.final_answer` is empty** on the claude-CLI path (answer lives in `agent.message.complete`). sdlc-patterns#363, unchanged.
@@ -51,6 +51,36 @@ This is hard evidence for **#456** (Agent Workspace epic) chunks 2–3, posted t
 **Open, unfiled:** four auth-internal collections 404 on every swe-brain page load (`auth_sessions`, `email_verifications`, `password_resets`, `user_credentials`) — the generated frontend binds collections to entities the API withholds. Cosmetic but noisy; not yet filed.
 
 **Untracked in the tree** (pre-existing, not from this session): `docs-site/`, `.ai-docs/patternstack/next-session-prompt.md`, `.ai-docs/research/memory-recall-retrieval-quality.md`. `docs-site/` looks like unlanded work against #458.
+
+## The ambient arc — what Doug actually wants (2026-08-10, late session)
+
+Stated directly, and it reframes the roadmap. The target is an **ambient coordinator**, Hermes/OpenClaw-class:
+
+> Every morning at nine AM, the agent will wake up, check things that maybe have happened from the night before, and send the user a message in Slack to tell them what is going on. We're not necessarily going to use Slack immediately, but if we have a chat interface that it sends a message to, whether or not it's in real time for the user to check or if it just lives there waiting for a response later, I don't really care.
+
+**The load-bearing design decision** (recorded on #438):
+
+> All the trigger is doing is initiating that conversation, but everything thereafter is effectively the same.
+
+A trigger starts a conversation; it does not create a different kind of thing. The **only** legitimate difference is autonomy posture — a 9am agent cannot stop and ask, because the human is asleep. That makes #328 / #329 / #443 / #456-chunk-4 *the ambient autonomy story*, not generic HITL plumbing.
+
+**Time-based triggers are only the first test.** The real target is event-driven: "when an email lands", "when a transcript finishes". That reprioritizes **#470** (filed tonight — `TRIGGER_KINDS` has no member for an internal domain event) from pedantry to blocker.
+
+**The demo, and why it is the right next step.** Recon (read-only, source-verified) found the entire blocker is *one argument*: `run-agent.use-case.ts:186` passes a literal `null` for `conversationId` in `runTriggered`. That single value is why all 292 ambient runs are invisible and why a brief has nowhere to land. The fix mirrors `streamChat` a few lines away; `recordAssistantTurn` already exists and the DI is already wired. **The reply path already works server-side** — `POST /agents/:name/stream` accepts a conversation id and threads prior turns as history; the console just never sends it and hard-disables the composer during replay. So a 6pm reply to a 9am brief is a 3-line frontend unlock, not new plumbing.
+
+Reversibility (Doug asked for this explicitly): **no migration** (columns exist, FK already nullable), **no framework change**, and the on/off switch is a directive step param — a **database row**, not a deploy.
+
+⚠️ **Operational rule: never enable the thread flag on `demo-minutely`.** The console seeds from the first page only — 50 messages, `created_at desc`, across ALL conversations. At one run/minute it blows that window in ~25 minutes and the brief vanishes from the UI while still sitting in Postgres. The 9am cadence is safe.
+
+**Two corrections to earlier claims in this file's history:** the answer is *not* stranded in an event (it is returned as `finalText`), and `agent_runs.final_answer` is empty because **nothing in swe-brain ever writes it** — reframing sdlc-patterns#363 as app-side, not a claude-CLI quirk.
+
+## Adoption: done, unmerged, and a refusal worth reading
+
+swe-brain is bumped to core 0.18 / runtime 0.39 on branch `deps/ap-core-0.18-runtime-0.39` (commit `f8f2489`, pushed, **no PR** — `gh auth` reports the keyring token invalid; run `gh auth refresh -h github.com`). **617 tests pass, 0 fail — identical to baseline**, proven by reverting and diffing rather than asserted.
+
+It **refused** the `runFromTrigger()` swap. Two of its three blockers do not survive reading the source, and the correction is recorded on #438 so the next adopter does not repeat it: `runFromTrigger` *does* thread an `eventBus` into `run()`, which emits the full event set, so **no streaming variant is needed** — swe-brain simply subscribes to the bus instead of draining `stream()`. And only `AgentRegistry.list()` is sync; `resolve()` is async and is the only method `runFromTrigger` calls. The third blocker (provenance is lossy) is real and *by design*.
+
+**Also: `better-sqlite3` is not installed in swe-brain.** Wiring memory without it silently falls back to `InMemoryMemoryStore` — the exact failure mode that makes tests lie. Install it first whenever that workstream starts.
 
 ## Where the program stands
 
