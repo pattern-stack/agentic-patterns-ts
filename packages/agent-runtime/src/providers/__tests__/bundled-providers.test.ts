@@ -23,6 +23,7 @@ import {
   PROVIDER_PRIORITY,
   type SupportedProvider,
 } from "../index.js";
+import { GATEWAY_PROVIDER_PACKAGE } from "../model-resolver.js";
 
 const pkg = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
   name: string;
@@ -92,6 +93,33 @@ describe("bundled providers — packaging contract (#472)", () => {
     expect(BUNDLED_PROVIDER_ENV_VARS).toContain("ANTHROPIC_API_KEY");
     expect(BUNDLED_PROVIDER_ENV_VARS).toContain("OPENAI_API_KEY");
     expect(BUNDLED_PROVIDER_ENV_VARS).toContain("GOOGLE_GENERATIVE_AI_API_KEY");
+  });
+
+  // The gateway is a fourth reachable model path, and it was left behind by the
+  // first pass: `@ai-sdk/openai-compatible` stayed a devDependency while the
+  // three direct providers were promoted, so `AP_GATEWAY_BASE_URL` — the setup
+  // we recommend, and the only one on which an agent's DECLARED model is
+  // honoured — failed on a fresh consumer with "needs the optional package".
+  // Same defect shape as #472, one rung further down the ladder.
+  describe("gateway routing package (#478)", () => {
+    it("is a real dependency of the runtime", () => {
+      expect(Object.keys(pkg.dependencies ?? {})).toContain(GATEWAY_PROVIDER_PACKAGE);
+    });
+
+    it("is NOT relegated to devDependencies", () => {
+      expect(Object.keys(pkg.devDependencies ?? {})).not.toContain(GATEWAY_PROVIDER_PACKAGE);
+    });
+
+    it("is NOT an (optional) peerDependency", () => {
+      expect(Object.keys(pkg.peerDependencies ?? {})).not.toContain(GATEWAY_PROVIDER_PACKAGE);
+    });
+
+    it("really imports, offline, unstubbed", async () => {
+      // The "install one package and the gateway works" claim itself. Importing
+      // the adapter makes no network call and reads no credential.
+      const mod = await import(GATEWAY_PROVIDER_PACKAGE);
+      expect(mod.createOpenAICompatible).toBeTypeOf("function");
+    });
   });
 
   it.each(SCOPED)("%s.load() really builds a model, offline, unstubbed", async (name) => {

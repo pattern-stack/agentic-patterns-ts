@@ -438,6 +438,17 @@ function untranslatableGatewayIdError(
 // Gateway → ResolvedLanguageModel
 // ---------------------------------------------------------------------------
 
+/**
+ * The adapter package gateway routing loads (#478).
+ *
+ * Exported so the packaging-contract test can assert against the SAME string
+ * the loader imports, rather than a second copy that can drift away from it.
+ * Bundled for the same reason the three direct providers are (#472): a gateway
+ * is a configuration, not an extra install, and an optional dependency here
+ * means the recommended setup is the one that does not work out of the box.
+ */
+export const GATEWAY_PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
+
 async function buildFromGateway(
   modelId: string,
   gw: GatewayConfig,
@@ -453,10 +464,7 @@ async function buildFromGateway(
     ...(gw.guardrailIds?.length ? { [BIFROST_GUARDRAILS_HEADER]: gw.guardrailIds.join(",") } : {}),
   };
   const headers = { ...derivedHeaders, ...gw.headers };
-  const mod = await importOptional(
-    "@ai-sdk/openai-compatible",
-    "gateway routing (openai-compatible)",
-  );
+  const mod = await importOptional(GATEWAY_PROVIDER_PACKAGE, "gateway routing (openai-compatible)");
   const provider = mod.createOpenAICompatible({
     name: "gateway",
     baseURL: gw.baseURL,
