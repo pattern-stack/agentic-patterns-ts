@@ -24,4 +24,5 @@ export {
 
 export { buildCalculatorAgent, CalculatorToolbox } from "./agents/calculator.js";
 export { buildTodoAgent, TodoToolbox } from "./agents/todo-manager.js";
+export { buildCompanionAgent, type CompanionOptions } from "./agents/companion.js";
 export { buildWritingCoachAgent } from "./agents/writing-coach.js";

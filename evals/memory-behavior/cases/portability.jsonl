@@ -1,0 +1,7 @@
+{"id":"port-stemming-prefer","input":{"query":"prefer"},"expected":{"parity":true},"tags":["memory","portability","stemming"],"split":"dev"}
+{"id":"port-substring-am","input":{"query":"am"},"expected":{"parity":true},"tags":["memory","portability","substring"],"split":"dev"}
+{"id":"port-diacritics-cafe","input":{"query":"cafe"},"expected":{"parity":true},"tags":["memory","portability","diacritics"],"split":"dev"}
+{"id":"port-punctuation-dark-mode","input":{"query":"dark-mode"},"expected":{"parity":true},"tags":["memory","portability","punctuation"],"split":"dev"}
+{"id":"port-disjoint-tokens","input":{"query":"espresso Denver"},"expected":{"parity":true},"tags":["memory","portability","boolean-combinator"],"split":"dev"}
+{"id":"port-batch-tie","input":{"limit":2},"expected":{"parity":true},"tags":["memory","portability","batch-tie"],"split":"dev"}
+{"id":"port-tag-only","input":{"query":"release"},"expected":{"parity":true},"tags":["memory","portability","tag-haystack"],"split":"dev"}

@@ -83,6 +83,54 @@ describe("InMemoryMemoryStore (impl-specific)", () => {
     expect(tied.map((hit) => hit.record.id)).toEqual([newer!.id, older!.id]);
   });
 
+  /**
+   * These are impl-specific by placement only — the SEMANTICS are the portable
+   * contract, asserted for every backend by conformance Tier 2. They live here
+   * as well because this store is the one that CHANGED at #462, and a reader
+   * of this file should be able to see the behaviour delta without opening the
+   * kit. If one of these fails and Tier 2 does not, the bug is in the fixture,
+   * not the store.
+   */
+  describe("match semantics — the #462 behaviour change", () => {
+    it("no longer matches substrings: 'am' does not hit 'name'", async () => {
+      await store.write([fact("The user's name is Doug.")]);
+      expect(await store.search({ scope: {}, query: "am" })).toEqual([]);
+      expect(await store.search({ scope: {}, query: "cat" })).toEqual([]);
+      // The whole token still hits.
+      expect(await store.search({ scope: {}, query: "name" })).toHaveLength(1);
+    });
+
+    it("no longer matches prefixes: 'prefer' does not hit 'Prefers'", async () => {
+      await store.write([fact("Prefers dark-mode in the editor.")]);
+      expect(await store.search({ scope: {}, query: "prefer" })).toEqual([]);
+      expect(await store.search({ scope: {}, query: "prefers" })).toHaveLength(1);
+    });
+
+    it("strips punctuation from the query, so 'name?' finds 'name'", async () => {
+      await store.write([fact("The user's name is Doug.")]);
+      // Pre-#462 this returned nothing: the query split on whitespace only, so
+      // the token was literally `name?` and no haystack contained it.
+      expect(await store.search({ scope: {}, query: "name?" })).toHaveLength(1);
+    });
+
+    it("folds diacritics, which this backend previously did not", async () => {
+      await store.write([fact("Met the team at the café on Tuesday.")]);
+      expect(await store.search({ scope: {}, query: "cafe" })).toHaveLength(1);
+      expect(await store.search({ scope: {}, query: "café" })).toHaveLength(1);
+    });
+
+    it("splits a punctuated query token and ORs the parts", async () => {
+      await store.write([fact("Prefers dark-mode in the editor.")]);
+      const hits = await store.search({ scope: {}, query: "dark-mode" });
+      expect(hits).toHaveLength(1);
+      // Both sub-tokens matched — an adjacency phrase would have been one
+      // match, and SQLite must not treat it as one either. Score NUMBERS are
+      // backend-advisory and never pinned (conformance.ts, ADR-0007 D5), so
+      // assert only that both tokens contributed.
+      expect(hits[0]!.score).toBeGreaterThan(1);
+    });
+  });
+
   it("capabilities resolves { search: 'keyword' }", async () => {
     expect(await store.capabilities()).toEqual({ search: "keyword" });
   });

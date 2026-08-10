@@ -26,6 +26,7 @@ import {
   memoryRecord,
 } from "@agentic-patterns/core";
 import { z } from "zod";
+import { tokenize } from "./tokenize.js";
 
 // ---------------------------------------------------------------------------
 // ID generation (local copy of the conversation/store.ts pattern)
@@ -132,9 +133,26 @@ function byCreatedAtDesc(a: MemoryRecord, b: MemoryRecord): number {
   return a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0;
 }
 
-/** In-memory reference implementation — dev/CI/tests. Keyword search only. */
+/**
+ * In-memory reference implementation — dev/CI/tests. Keyword search only.
+ *
+ * Match semantics are {@link tokenize}'s, shared verbatim with
+ * {@link SqliteMemoryStore} (ADR-0009 D-3 / Decision 13). This store used to
+ * score with `haystack.includes(token)`, which made `"am"` hit `"name"` and
+ * `"prefer"` hit `"Prefers"` here and nowhere else; that divergence is gone and
+ * the conformance kit's Tier 2 keeps it gone.
+ */
 export class InMemoryMemoryStore implements MemoryStore {
-  /** Insertion-ordered; ties in createdAt resolve by insertion order via stable sort. */
+  /**
+   * Insertion-ordered. Insertion position is this backend's `seq` — the
+   * batch-tie discriminator, pinned by conformance Tier 1: both stores assign
+   * ONE `now` per batch, so `write([a,b,c])` produces three records with
+   * identical `createdAt`, and the tie resolves by insertion position
+   * DESCENDING (last written is newest) to match `sqlite-store.ts`'s
+   * `ORDER BY … m.seq DESC`. `Map.set` on an existing key preserves the
+   * original position, so a supersede-update keeps its seq exactly as SQLite's
+   * `UPDATE` does.
+   */
   private records = new Map<string, MemoryRecord>();
 
   async write(inputs: MemoryWriteInput[]): Promise<MemoryRecord[]> {
@@ -198,7 +216,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     const q = MemorySearchQuerySchema.parse(query);
     const now = new Date().toISOString();
 
-    const filtered = [...this.records.values()].filter((record) => {
+    // `.reverse()` FIRST, then a stable sort: every ordering below falls back
+    // to insertion position DESCENDING, which is this backend's `seq DESC`
+    // (see the `records` docblock). Reversing the base array and relying on
+    // ES2019's stable sort is equivalent to carrying a seq column and cannot
+    // desync from it.
+    const filtered = [...this.records.values()].reverse().filter((record) => {
       if (!scopeMatches(record.scope, q.scope)) return false;
       if (q.kinds !== undefined && !q.kinds.includes(record.kind)) return false;
       // Tags are subset semantics, symmetric with scope: the record must carry
@@ -216,15 +239,19 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     let hits: MemoryHit[];
     if (q.query === undefined) {
-      // Recency listing: createdAt descending; ties resolve by stable sort
-      // (insertion order preserved).
+      // Recency listing: createdAt descending; ties resolve by insertion
+      // position descending (the reversed base array + stable sort).
       hits = [...filtered].sort(byCreatedAtDesc).map((record) => ({ record }));
     } else {
-      const tokens = q.query.toLowerCase().split(/\s+/).filter(Boolean);
+      // WHOLE-TOKEN matching over the shared tokenizer (ADR-0009 D-3) — never
+      // `haystack.includes(token)`, which made this backend the only one where
+      // `"am"` hit `"name"`. A blank-but-present query tokenizes to `[]` ⇒
+      // every score is 0 ⇒ no hits, which is the pinned semantics.
+      const tokens = tokenize(q.query);
       hits = filtered
         .map((record) => {
-          const haystack = `${record.content} ${(record.tags ?? []).join(" ")}`.toLowerCase();
-          const score = tokens.filter((token) => haystack.includes(token)).length;
+          const haystack = new Set(tokenize(`${record.content} ${(record.tags ?? []).join(" ")}`));
+          const score = tokens.filter((token) => haystack.has(token)).length;
           return { record, score };
         })
         .filter((hit) => hit.score > 0)

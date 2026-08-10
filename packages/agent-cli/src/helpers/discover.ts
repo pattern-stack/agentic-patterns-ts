@@ -28,6 +28,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { MemoryStore } from "@agentic-patterns/runtime";
 import type { SessionScopeLike } from "@agentic-patterns/server";
 import { glob } from "tinyglobby";
 import { register } from "tsx/esm/api";
@@ -104,6 +105,29 @@ export interface DiscoveredAgent {
     step?: string;
     scorer?: string;
   }>;
+  /**
+   * Cross-session memory binding declared by the registration wrapper (#444)
+   * — `{ store, scope }`, taken verbatim and threaded into the server's
+   * `AgentRegistration.memory` so `POST /conversations/:id/messages` can run
+   * turn-1 recall. The wrapper OWNS the store (typically `loadMemoryStore()`
+   * in the agent file — the same instance its `instantiate` hook binds into
+   * `memoryCapability`). Same all-or-nothing rule as `scope` above: the value
+   * must structurally satisfy {@link isMemoryDeclShape} or it is dropped
+   * entirely.
+   */
+  readonly memory?: {
+    /**
+     * Typed structurally as the runtime's `MemoryStore` interface — a store
+     * constructed by the agent file's OWN runtime copy satisfies it with
+     * zero runtime coupling (TS is structural; only `instanceof` would
+     * break across the built-dist boundary, and none is used).
+     */
+    readonly store: MemoryStore;
+    readonly scope:
+      | Record<string, string>
+      | ((context?: Record<string, unknown>) => Record<string, string>);
+    readonly budgetChars?: number;
+  };
 }
 
 interface RegistrationWrapper {
@@ -116,6 +140,7 @@ interface RegistrationWrapper {
   scope?: unknown;
   contextRedactKeys?: unknown;
   evals?: unknown;
+  memory?: unknown;
 }
 
 /**
@@ -192,6 +217,36 @@ function asWrapper(x: unknown): RegistrationWrapper | null {
 }
 
 /**
+ * Structural memory-declaration check (#444) — same duck-typing rationale as
+ * {@link isSessionScopeShape}: the wrapper's `store` comes from the agent
+ * file's OWN `@agentic-patterns/runtime` copy, so `instanceof` is unreliable.
+ * `store` must look like a `MemoryStore` (the four methods turn-1 recall and
+ * the toolbox actually call), and `scope` must be a derivation fn or a plain
+ * object (content is validated server-side at conversation creation, where
+ * the effective context exists). All-or-nothing: a malformed declaration is
+ * dropped entirely.
+ */
+function isMemoryDeclShape(x: unknown): x is NonNullable<DiscoveredAgent["memory"]> {
+  if (!x || typeof x !== "object") return false;
+  const m = x as Record<string, unknown>;
+  const store = m.store as Record<string, unknown> | undefined;
+  const storeOk =
+    !!store &&
+    typeof store === "object" &&
+    typeof store.search === "function" &&
+    typeof store.write === "function" &&
+    typeof store.get === "function" &&
+    typeof store.invalidate === "function";
+  const scopeOk =
+    typeof m.scope === "function" ||
+    (typeof m.scope === "object" && m.scope !== null && !Array.isArray(m.scope));
+  const budgetOk =
+    m.budgetChars === undefined ||
+    (typeof m.budgetChars === "number" && Number.isInteger(m.budgetChars) && m.budgetChars > 0);
+  return storeOk && scopeOk && budgetOk;
+}
+
+/**
  * Find agent files matching the given globs, rooted at `root`.
  * Returns absolute file paths sorted alphabetically.
  */
@@ -263,6 +318,8 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
     // dropped entirely — never `instanceof SessionScope` (decisions.md D4).
     const scope = wrapper && isSessionScopeShape(wrapper.scope) ? wrapper.scope : undefined;
     const evals = wrapper ? normalizeEvalRefs(wrapper.evals) : undefined;
+    // Same all-or-nothing rule as `scope` above (#444).
+    const memory = wrapper && isMemoryDeclShape(wrapper.memory) ? wrapper.memory : undefined;
 
     if (seenIds.has(id)) continue; // e.g. a default + named export of the same agent
     seenIds.add(id);
@@ -277,6 +334,7 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
       scope,
       contextRedactKeys,
       evals,
+      memory,
     });
   }
 

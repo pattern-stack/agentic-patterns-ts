@@ -9,7 +9,11 @@ import { describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../events/event-bus.js";
 import type { MemoryRecallEvent } from "../../events/types.js";
 import { capPreview } from "../../workflows/state-events.js";
-import { DEFAULT_RECALL_BUDGET_CHARS, assembleRecall } from "../recall.js";
+import {
+  DEFAULT_PROFILE_BUDGET_RATIO,
+  DEFAULT_RECALL_BUDGET_CHARS,
+  assembleRecall,
+} from "../recall.js";
 import { InMemoryMemoryStore, type MemoryWriteInput } from "../store.js";
 
 const SCOPE: MemoryScope = { tenant: "acme", user: "u1" };
@@ -216,6 +220,160 @@ describe("assembleRecall", () => {
       expect(result.block).toContain("small enough fact");
       expect(result.block.endsWith(marker(1))).toBe(true);
       expect(result.chars).toBeLessThanOrEqual(DEFAULT_RECALL_BUDGET_CHARS);
+    });
+  });
+
+  // -- Profile sub-budget ---------------------------------------------------
+  //
+  // The profile tier is unconditional and fills first, so without a sub-budget
+  // a bloated profile partition starves the query-driven hits tier — the tier
+  // that answers the user's actual question.
+
+  describe("profile sub-budget", () => {
+    /** `- [profile · YYYY-MM-DD] ` — 25 fixed chars before the content. */
+    const PROFILE_ENTRY_OVERHEAD = 25;
+
+    /**
+     * A query that matches nothing, so the hits tier stays empty. Needed because
+     * a query-LESS assembleRecall makes the hits tier a recency listing over all
+     * kinds, which readmits deferred profiles on their own merits (see the
+     * "defers, does not ban" test below).
+     */
+    const NO_MATCH = "zzznomatchzzz";
+
+    /** Seed `n` profile records that together overrun any plausible profile slice. */
+    const seedFatProfiles = async (store: InMemoryMemoryStore, n: number): Promise<void> => {
+      for (let i = 0; i < n; i++) {
+        await seed(store, `profile filler ${i} ${"P".repeat(200)}`, { kind: "profile" });
+        await sleep(2);
+      }
+    };
+
+    it("pins the profile entry width the slice arithmetic below depends on", async () => {
+      const store = new InMemoryMemoryStore();
+      await seed(store, "X".repeat(40), { kind: "profile" });
+      const result = await assembleRecall(store, SCOPE, { query: NO_MATCH });
+      const entry = result.block.split("\n").at(-1) as string;
+      expect(entry.length).toBe(PROFILE_ENTRY_OVERHEAD + 40);
+    });
+
+    it("keeps a query hit reachable when the profile tier would otherwise fill the budget", async () => {
+      const store = new InMemoryMemoryStore();
+      // ~4,900 chars of profile — overruns the 4,000 TOTAL budget, so without
+      // the slice the greedy assembly exhausts it on profiles alone and the
+      // hit never renders (12 seeded only ~3,083 chars and passed either way).
+      await seedFatProfiles(store, 20);
+      await sleep(10);
+      await seed(store, "deploys run through the alpha pipeline");
+
+      const result = await assembleRecall(store, SCOPE, { query: "alpha pipeline" });
+      expect(result.block).toContain("alpha pipeline");
+    });
+
+    it("counts sub-budget-deferred profiles in the truncation marker — never silent", async () => {
+      const store = new InMemoryMemoryStore();
+      await seedFatProfiles(store, 6); // entry = 25 + 217 = 242 chars each
+
+      // Slice fits exactly one entry (243 incl. joiner); the other five defer.
+      const result = await assembleRecall(store, SCOPE, {
+        profileBudgetChars: 250,
+        query: NO_MATCH,
+      });
+      expect(result.truncated).toBe(true);
+      expect(result.count).toBe(1);
+      expect(result.block.endsWith(marker(5))).toBe(true);
+    });
+
+    it("admits at least the newest profile when every entry overruns the slice", async () => {
+      const store = new InMemoryMemoryStore();
+      // One profile whose entry (~1,700 chars) alone exceeds the default slice
+      // (0.4 × 4000 = 1600). Pre-floor code deferred it entirely and, with no
+      // lexical hits, handed the model an EMPTY recall block.
+      await seed(store, `sole profile ${"P".repeat(1680)}`, { kind: "profile" });
+
+      const result = await assembleRecall(store, SCOPE, { query: NO_MATCH });
+      expect(result.block).not.toBe("");
+      expect(result.block).toContain("sole profile");
+      expect(result.count).toBe(1);
+      // Floor-admitted, so it is NOT reported omitted (no double-count).
+      expect(result.truncated).toBe(false);
+      expect(result.chars).toBeLessThanOrEqual(DEFAULT_RECALL_BUDGET_CHARS);
+    });
+
+    it("floor-admits only the newest; remaining oversized profiles still count as omitted", async () => {
+      const store = new InMemoryMemoryStore();
+      await seed(store, `older oversized ${"O".repeat(200)}`, { kind: "profile" }); // entry 241
+      await sleep(10);
+      await seed(store, `newer oversized ${"N".repeat(200)}`, { kind: "profile" }); // entry 241
+
+      // Slice of 100 fits neither: the floor admits the newest, the older one
+      // stays deferred and is reported in the marker exactly once.
+      const result = await assembleRecall(store, SCOPE, {
+        profileBudgetChars: 100,
+        query: NO_MATCH,
+      });
+      expect(result.count).toBe(1);
+      expect(result.block).toContain("newer oversized");
+      expect(result.block).not.toContain("older oversized");
+      expect(result.truncated).toBe(true);
+      expect(result.block.endsWith(marker(1))).toBe(true);
+    });
+
+    it("defers rather than bans — a later tier may readmit, without double-counting", async () => {
+      const store = new InMemoryMemoryStore();
+      // Written first ⇒ older ⇒ sorts second in the recency-ordered profile tier,
+      // so it is the one the slice defers.
+      await store.write([
+        { scope: SCOPE, kind: "profile", content: "older profile mentioning alpha" },
+      ]);
+      await sleep(10);
+      await seed(store, `newest profile ${"N".repeat(200)}`, { kind: "profile" }); // entry 240
+
+      // Nothing rescues it: deferred, reported.
+      const deferred = await assembleRecall(store, SCOPE, {
+        profileBudgetChars: 250,
+        query: NO_MATCH,
+      });
+      expect(deferred.count).toBe(1);
+      expect(deferred.block).toContain("newest profile");
+      expect(deferred.block.endsWith(marker(1))).toBe(true);
+
+      // The hits tier earns it back on relevance — so it is NOT reported omitted.
+      const rescued = await assembleRecall(store, SCOPE, {
+        profileBudgetChars: 250,
+        query: "alpha",
+      });
+      expect(rescued.count).toBe(2);
+      expect(rescued.block).toContain("older profile mentioning alpha");
+      expect(rescued.truncated).toBe(false);
+    });
+
+    it("defaults the slice to DEFAULT_PROFILE_BUDGET_RATIO of the total budget", async () => {
+      expect(DEFAULT_PROFILE_BUDGET_RATIO).toBe(0.4);
+      const store = new InMemoryMemoryStore();
+      // Entries of 319 and 320 chars against a 400-char slice: only the newest fits.
+      await seed(store, `first profile ${"A".repeat(280)}`, { kind: "profile" });
+      await sleep(10);
+      await seed(store, `second profile ${"B".repeat(280)}`, { kind: "profile" });
+
+      const result = await assembleRecall(store, SCOPE, {
+        budgetChars: 1000, // slice = 400
+        query: NO_MATCH,
+      });
+      expect(result.count).toBe(1);
+      expect(result.block).toContain("second profile"); // newest first
+      expect(result.block).not.toContain("first profile");
+      expect(result.truncated).toBe(true);
+      expect(result.chars).toBeLessThanOrEqual(1000);
+    });
+
+    it("rejects an invalid profileBudgetChars", async () => {
+      const store = new InMemoryMemoryStore();
+      for (const profileBudgetChars of [0, -5, 1.5]) {
+        await expect(assembleRecall(store, SCOPE, { profileBudgetChars })).rejects.toThrow(
+          /profileBudgetChars must be a positive integer/,
+        );
+      }
     });
   });
 

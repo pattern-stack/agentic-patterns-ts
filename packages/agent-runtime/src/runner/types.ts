@@ -189,10 +189,13 @@ export interface RunOptions {
    * uses it to carry `{ scratchpad, deps, eventBus, scope }` across the
    * agent-as-tool seam (#124). `scope` is a server-parsed `SessionScope`
    * value — read it via `readScope`/`requireScope` (`workflows/scope-host.ts`).
-   * The runner reads exactly one key off this bag — `host.scope` — to build
-   * the `RenderContext` passed to `renderInitialPrompt`; every other key
-   * (and the bag itself, when `scope` is absent) is otherwise opaque and
-   * copied verbatim.
+   * The runner reads exactly two keys off this bag to build the
+   * `RenderContext` passed to `renderInitialPrompt`: `host.scope`, and
+   * `host.recall` (#444 — the turn-1 recall block the host assembled via
+   * `assembleRecall`; set once at first-message time, it persists on the bag
+   * so every later turn re-renders the same block). Every other key (and the
+   * bag itself, when both are absent) is otherwise opaque and copied
+   * verbatim.
    */
   host?: unknown;
   /**

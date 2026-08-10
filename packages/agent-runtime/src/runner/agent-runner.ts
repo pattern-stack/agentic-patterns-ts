@@ -67,6 +67,7 @@ import {
 } from "../providers/model-resolver.js";
 import type { ResolvedLanguageModel } from "../providers/types.js";
 import { convertHistory, sanitizeResponseMessages, toJsonValue } from "./message-utils.js";
+import { narrowRenderCtx } from "./render-ctx.js";
 import { guardOpenObjectSchemas } from "./schema-guard.js";
 import { type ToolArgsOverlay, createGateToolApproval } from "./tool-approval-bridge.js";
 import type {
@@ -446,16 +447,9 @@ export class AgentRunner implements RunnerProtocol {
     };
   }
 
-  /**
-   * Narrow `RunOptions.host` down to the one key the renderer cares about:
-   * `host.scope` (#308). Inline structural narrow — cannot import
-   * `workflows/scope-host.ts`'s `hostOf`/`buildScopeHost` here, since
-   * `workflows` depends on `runner` and importing it back would be a reverse
-   * layering violation. Mirrors `hostOf`'s shape without the import.
-   */
+  /** Shared host-bag narrowing — see `runner/render-ctx.ts` (#308/#444). */
   private _renderCtx(options?: RunOptions): RenderContext | undefined {
-    const scope = (options?.host as { scope?: Record<string, unknown> } | undefined)?.scope;
-    return scope ? { scope } : undefined;
+    return narrowRenderCtx(options);
   }
 
   /**
