@@ -67,6 +67,17 @@ export interface RunResult {
    * {@link TokenUsageDetails}.
    */
   readonly usageDetails?: TokenUsageDetails;
+  /**
+   * Which provider actually served a gateway response (#407), from the
+   * last LLM call that reported one. Absent for non-gateway runs and
+   * gateways that report no attribution. See `providers/bifrost.ts`'s
+   * `GatewayAttribution` / `attributionFromProviderMetadata`.
+   */
+  readonly gateway?: {
+    readonly provider?: string;
+    readonly requestedModel?: string;
+    readonly servedModel?: string;
+  };
 }
 
 /**

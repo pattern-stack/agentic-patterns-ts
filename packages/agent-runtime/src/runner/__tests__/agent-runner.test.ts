@@ -4,16 +4,30 @@
 
 import { ToolSchema } from "@agentic-patterns/core";
 import type { ToolExecutionContext } from "@agentic-patterns/core";
-import type { LanguageModelV3Content, LanguageModelV3Usage } from "@ai-sdk/provider";
+import { APICallError } from "@ai-sdk/provider";
+import type {
+  LanguageModelV3Content,
+  LanguageModelV3StreamPart,
+  LanguageModelV3Usage,
+} from "@ai-sdk/provider";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { AgentEventBus } from "../../events/agent-event-bus.js";
-import type { AgentEvent, ToolCallIntent } from "../../events/types.js";
+import type {
+  AgentEvent,
+  GuardrailRedactionEvent,
+  GuardrailViolationEvent,
+  ToolCallIntent,
+} from "../../events/types.js";
 import type { Gate, GateResult } from "../../gates/base.js";
 import { createHumanInputApprovalGate } from "../../interaction/approval-gate.js";
 import { PendingInputRegistry } from "../../interaction/pending-input-registry.js";
+import {
+  BifrostGuardrailViolationError,
+  BifrostVirtualKeyRequiredError,
+} from "../../providers/bifrost.js";
 import { resetAdvisoryWarningsForTests } from "../../providers/capabilities.js";
 import { buildScopeHost, readScope } from "../../workflows/scope-host.js";
 import {
@@ -131,6 +145,25 @@ function toolCallsResult(
   };
 }
 
+/**
+ * #407 — an `APICallError` shaped the way the SDK throws one: `responseBody`
+ * is the raw JSON string (never `data`, which openai-compatible's default
+ * error schema strips the Bifrost envelope from — fact 2).
+ */
+function bifrostApiCallError(opts: {
+  statusCode: number;
+  body: Record<string, unknown>;
+}): APICallError {
+  return new APICallError({
+    message: (opts.body.error as { message?: string } | undefined)?.message ?? "API call failed",
+    url: "https://gw.example/v1/chat/completions",
+    requestBodyValues: {},
+    statusCode: opts.statusCode,
+    responseBody: JSON.stringify(opts.body),
+    isRetryable: false,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -181,6 +214,13 @@ function collectEvents(bus: AgentEventBus): AgentEvent[] {
     events.push(e as AgentEvent);
   });
   bus.subscribe("agent.error", (e) => {
+    events.push(e as AgentEvent);
+  });
+  // #407 — Bifrost gateway guardrail events.
+  bus.subscribe("agent.guardrail.violation", (e) => {
+    events.push(e as AgentEvent);
+  });
+  bus.subscribe("agent.guardrail.redaction", (e) => {
     events.push(e as AgentEvent);
   });
   return events;
@@ -2652,5 +2692,370 @@ describe("AgentRunner — requestHeaders (#406)", () => {
     await runner.runStructured(agent, "hi", schema);
 
     expect(captured?.["x-bf-vk"]).toBe("vk-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #407 — Bifrost gateway awareness: typed errors + guardrail/redaction events
+// ---------------------------------------------------------------------------
+
+describe("AgentRunner × Bifrost gateway awareness (#407)", () => {
+  describe("run() — typed errors", () => {
+    it("401 virtual_key_required → rejects with BifrostVirtualKeyRequiredError; agent.error carries enriched context", async () => {
+      const err = bifrostApiCallError({
+        statusCode: 401,
+        body: {
+          type: "virtual_key_required",
+          is_bifrost_error: false,
+          status_code: 401,
+          error: {
+            message: "virtual key is required. Provide a virtual key via the x-bf-vk header.",
+          },
+        },
+      });
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doGenerate: async () => {
+          throw err;
+        },
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      await expect(runner.run(agent, "hi")).rejects.toBeInstanceOf(BifrostVirtualKeyRequiredError);
+
+      const errorEvent = events.find((e) => e.type === "agent.error");
+      expect(errorEvent).toBeDefined();
+      const typed = errorEvent as Extract<AgentEvent, { type: "agent.error" }>;
+      expect(typed.errorType).toBe("BifrostVirtualKeyRequiredError");
+      expect(typed.message).toBe(
+        "virtual key is required. Provide a virtual key via the x-bf-vk header.",
+      );
+      expect(typed.context).toMatchObject({ statusCode: 401, bifrostType: "virtual_key_required" });
+      // No guardrail.violation for a non-guardrail Bifrost error.
+      expect(events.some((e) => e.type === "agent.guardrail.violation")).toBe(false);
+    });
+
+    it("446 guardrail_violation — PROVISIONAL fixture — emits agent.guardrail.violation BEFORE the typed agent.error; rejects with the typed error", async () => {
+      const err = bifrostApiCallError({
+        statusCode: 446,
+        body: {
+          type: "guardrail_violation",
+          is_bifrost_error: true,
+          status_code: 446,
+          error: {
+            message: "Request blocked by guardrail: pii-strict",
+            guardrail_id: "pii-strict",
+            category: "pii",
+            severity: "high",
+            action: "block",
+          },
+        },
+      });
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doGenerate: async () => {
+          throw err;
+        },
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      await expect(runner.run(agent, "hi")).rejects.toBeInstanceOf(BifrostGuardrailViolationError);
+
+      const violationIdx = events.findIndex((e) => e.type === "agent.guardrail.violation");
+      const errorIdx = events.findIndex((e) => e.type === "agent.error");
+      expect(violationIdx).toBeGreaterThanOrEqual(0);
+      expect(errorIdx).toBeGreaterThanOrEqual(0);
+      expect(violationIdx).toBeLessThan(errorIdx);
+
+      const violation = events[violationIdx] as GuardrailViolationEvent;
+      expect(violation.action).toBe("blocked");
+      expect(violation.guardrailId).toBe("pii-strict");
+      expect(violation.category).toBe("pii");
+      expect(violation.severity).toBe("high");
+    });
+
+    it("non-Bifrost APICallError → behavior identical to today (regression guard: generic agent.error, original rethrow, no guardrail event)", async () => {
+      const err = new APICallError({
+        message: "rate limited",
+        url: "https://api.openai.com/v1/chat/completions",
+        requestBodyValues: {},
+        statusCode: 429,
+        responseBody: JSON.stringify({ error: { message: "rate limited" } }),
+        isRetryable: false,
+      });
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw err;
+        },
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      await expect(runner.run(agent, "hi")).rejects.toBe(err);
+
+      const errorEvent = events.find((e) => e.type === "agent.error") as Extract<
+        AgentEvent,
+        { type: "agent.error" }
+      >;
+      // AISDKError's `.name` is the marker-prefixed "AI_APICallError", not
+      // the bare class name — asserted verbatim (regression guard: unchanged
+      // from today's generic path).
+      expect(errorEvent.errorType).toBe("AI_APICallError");
+      expect(errorEvent.message).toBe("rate limited");
+      expect(errorEvent.context).toEqual({});
+      expect(events.some((e) => e.type === "agent.guardrail.violation")).toBe(false);
+    });
+  });
+
+  describe("run() — redaction detection", () => {
+    it("success, provider gateway.chat, text with placeholders → ONE agent.guardrail.redaction; counts correct; no raw text in payload", async () => {
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doGenerate: async () =>
+          textResult("Contact [EMAIL-1] or [EMAIL-2], also [PHONE_NUMBER-1].", 10, 5),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      await runner.run(agent, "hi");
+
+      const redactions = events.filter((e) => e.type === "agent.guardrail.redaction");
+      expect(redactions).toHaveLength(1);
+      const redaction = redactions[0] as GuardrailRedactionEvent;
+      expect(redaction.entities).toEqual({ EMAIL: 2, PHONE_NUMBER: 1 });
+      expect(redaction.totalEntities).toBe(3);
+      expect(redaction.source).toBe("placeholders");
+      // Never raw values — only the entity-type keys and counts.
+      expect(JSON.stringify(redaction)).not.toContain("[EMAIL-1]");
+    });
+
+    it("success, direct provider anthropic.messages, same text → NO redaction event (gating test)", async () => {
+      const model = new MockLanguageModelV3({
+        provider: "anthropic.messages",
+        doGenerate: async () => textResult("Contact [EMAIL-1] please.", 10, 5),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      await runner.run(agent, "hi");
+
+      expect(events.some((e) => e.type === "agent.guardrail.redaction")).toBe(false);
+    });
+
+    it("metadata-confirmed redaction (source: both) when bifrost_metadata + placeholders both fire", async () => {
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doGenerate: async () => ({
+          content: [{ type: "text", text: "Contact [EMAIL-1] please." }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usageV3(10, 5),
+          warnings: [],
+          providerMetadata: { gateway: { bifrost_metadata: { redacted_count: 1 } } },
+        }),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      await runner.run(agent, "hi");
+
+      const redaction = events.find(
+        (e) => e.type === "agent.guardrail.redaction",
+      ) as GuardrailRedactionEvent;
+      expect(redaction.source).toBe("both");
+    });
+  });
+
+  describe("run() — gateway attribution", () => {
+    it("providerMetadata.gateway attribution → agent.llm.end.gateway + RunResult.gateway populated", async () => {
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doGenerate: async () => ({
+          content: [{ type: "text", text: "hello" }],
+          finishReason: { unified: "stop", raw: "stop" },
+          usage: usageV3(10, 5),
+          warnings: [],
+          providerMetadata: {
+            gateway: { provider: "openai", resolved_model_used: "gpt-4o-mini" },
+          },
+        }),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      const result = await runner.run(agent, "hi");
+
+      expect(result.gateway).toEqual({ provider: "openai", servedModel: "gpt-4o-mini" });
+      const llmEnd = events.find((e) => e.type === "agent.llm.end") as Extract<
+        AgentEvent,
+        { type: "agent.llm.end" }
+      >;
+      expect(llmEnd.gateway).toEqual({ provider: "openai", servedModel: "gpt-4o-mini" });
+    });
+
+    it("absent providerMetadata → gateway field absent on both llm.end and RunResult", async () => {
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => textResult("hello", 10, 5),
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+
+      const result = await runner.run(agent, "hi");
+
+      expect(result.gateway).toBeUndefined();
+      const llmEnd = events.find((e) => e.type === "agent.llm.end") as Extract<
+        AgentEvent,
+        { type: "agent.llm.end" }
+      >;
+      expect(llmEnd.gateway).toBeUndefined();
+    });
+  });
+
+  describe("runStructured() — typed errors (new behavior)", () => {
+    it("no-tools path: a thrown APICallError now emits agent.error (previously silent — pinned new behavior)", async () => {
+      const err = new APICallError({
+        message: "boom",
+        url: "https://gw.example/v1/chat/completions",
+        requestBodyValues: {},
+        statusCode: 500,
+        responseBody: JSON.stringify({ error: { message: "boom" } }),
+        isRetryable: false,
+      });
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw err;
+        },
+      });
+      const bus = new AgentEventBus();
+      const events = collectEvents(bus);
+      const runner = new AgentRunner(model, bus);
+      const agent = makeAgent();
+      const schema = z.object({ ok: z.boolean() });
+
+      await expect(runner.runStructured(agent, "hi", schema)).rejects.toBe(err);
+
+      const errorEvent = events.find((e) => e.type === "agent.error");
+      expect(errorEvent).toBeDefined();
+    });
+
+    it("no-tools path: a Bifrost-typed error rejects with the typed error", async () => {
+      const err = bifrostApiCallError({
+        statusCode: 401,
+        body: {
+          type: "virtual_key_required",
+          error: { message: "virtual key is required." },
+        },
+      });
+      const model = new MockLanguageModelV3({
+        doGenerate: async () => {
+          throw err;
+        },
+      });
+      const runner = new AgentRunner(model);
+      const agent = makeAgent();
+      const schema = z.object({ ok: z.boolean() });
+
+      await expect(runner.runStructured(agent, "hi", schema)).rejects.toBeInstanceOf(
+        BifrostVirtualKeyRequiredError,
+      );
+    });
+  });
+
+  describe("stream() — typed errors + redaction", () => {
+    it("446 error part → yields agent.guardrail.violation BEFORE agent.error, in order", async () => {
+      const err = bifrostApiCallError({
+        statusCode: 446,
+        body: {
+          type: "guardrail_violation",
+          is_bifrost_error: true,
+          error: {
+            message: "Request blocked by guardrail: pii-strict",
+            guardrail_id: "pii-strict",
+          },
+        },
+      });
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doStream: async () => ({
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: "error", error: err });
+              controller.close();
+            },
+          }),
+        }),
+      });
+      const runner = new AgentRunner(model);
+      const agent = makeAgent();
+
+      const seen: string[] = [];
+      for await (const event of runner.stream(agent, "hi")) {
+        seen.push(event.type);
+      }
+
+      const violationIdx = seen.indexOf("agent.guardrail.violation");
+      const errorIdx = seen.indexOf("agent.error");
+      expect(violationIdx).toBeGreaterThanOrEqual(0);
+      expect(errorIdx).toBeGreaterThan(violationIdx);
+    });
+
+    it("accumulated-text redaction fires before message.complete", async () => {
+      // PROVIDER-level LanguageModelV3StreamPart shapes (text-delta uses
+      // `delta`, not `text`; the SDK derives its own `finish-step`/`finish`
+      // parts from this single provider `finish`) — mirrors
+      // agent-runner-stream.test.ts's `streamFrom`/`textParts`/`finishPart`.
+      const model = new MockLanguageModelV3({
+        provider: "gateway.chat",
+        doStream: async () => ({
+          stream: new ReadableStream<LanguageModelV3StreamPart>({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({ type: "text-start", id: "txt-0" });
+              controller.enqueue({
+                type: "text-delta",
+                id: "txt-0",
+                delta: "Contact [EMAIL-1] please.",
+              });
+              controller.enqueue({ type: "text-end", id: "txt-0" });
+              controller.enqueue({
+                type: "finish",
+                finishReason: { unified: "stop", raw: "stop" },
+                usage: usageV3(10, 5),
+              });
+              controller.close();
+            },
+          }),
+        }),
+      });
+      const runner = new AgentRunner(model);
+      const agent = makeAgent();
+
+      const seen: string[] = [];
+      for await (const event of runner.stream(agent, "hi")) {
+        seen.push(event.type);
+      }
+
+      const redactionIdx = seen.indexOf("agent.guardrail.redaction");
+      const completeIdx = seen.indexOf("agent.message.complete");
+      expect(redactionIdx).toBeGreaterThanOrEqual(0);
+      expect(completeIdx).toBeGreaterThan(redactionIdx);
+    });
   });
 });

@@ -27,6 +27,12 @@ const TYPE_TONES: Record<string, Tone> = {
   // tone (the response event below is tone-branched on its own payload).
   "agent.tool.approval.request": "warn",
   "tool.approval.request": "warn",
+  // #407 — Bifrost gateway guardrail events: a violation is a block (err); a
+  // redaction is a passive PII-masking notice (warn).
+  "agent.guardrail.violation": "err",
+  "guardrail.violation": "err",
+  "agent.guardrail.redaction": "warn",
+  "guardrail.redaction": "warn",
   "agent.llm.start": "warn",
   "agent.llm.end": "warn",
   "agent.message.start": "ok",

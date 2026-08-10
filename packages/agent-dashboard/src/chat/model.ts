@@ -99,7 +99,19 @@ export type Part =
   // the `{ kind: "text" }` part that would otherwise render the raw JSON blob
   // verbatim — see `applyStructuredContent` below.
   | { kind: "answer"; value: unknown }
-  | { kind: "error"; errorType: string; message: string };
+  | { kind: "error"; errorType: string; message: string }
+  // Bifrost gateway redaction notice (#407) — Presidio-style PII masking
+  // detected on a gateway response. `entities` is ALWAYS counts by type,
+  // NEVER raw redacted values. `source` distinguishes a permissive
+  // placeholder-regex hit (can false-positive on citations like `[RFC-2119]`)
+  // from a `bifrost_metadata`-confirmed one — render code should gate any
+  // "redacted" badge on `source !== "placeholders"`.
+  | {
+      kind: "guardrail_redaction";
+      entities: Record<string, number>;
+      totalEntities: number;
+      source: "placeholders" | "metadata" | "both";
+    };
 
 /**
  * A render-ready payload delivered alongside a run's response (ADR-0006) —
@@ -699,6 +711,23 @@ export function applyParts(
         errorType: str(p.errorType) ?? str(p.error_type) ?? "error",
         message: toolErr(col, p) ?? "Run errored.",
       });
+      return { parts: next };
+    }
+    // Bifrost gateway redaction notice (#407) — violations arrive via the
+    // (enriched) `error` frame above and need no dedicated case here.
+    case "guardrail.redaction": {
+      const rawEntities = p.entities ?? col.entities;
+      const entities: Record<string, number> = {};
+      if (rawEntities && typeof rawEntities === "object") {
+        for (const [k, v] of Object.entries(rawEntities as Record<string, unknown>)) {
+          if (typeof v === "number") entities[k] = v;
+        }
+      }
+      const totalEntities = num(p.totalEntities) ?? num(p.total_entities) ?? 0;
+      const rawSource = str(p.source);
+      const source: "placeholders" | "metadata" | "both" =
+        rawSource === "metadata" || rawSource === "both" ? rawSource : "placeholders";
+      next.push({ kind: "guardrail_redaction", entities, totalEntities, source });
       return { parts: next };
     }
     case "message.complete":

@@ -51,10 +51,23 @@ import type { ZodType } from "zod";
 import { type AgentEventBus, getAgentEventBus } from "../events/agent-event-bus.js";
 import {
   type AgentEvent,
+  type ErrorEvent,
+  type GuardrailRedactionEvent,
+  type GuardrailViolationEvent,
   type TokenUsageDetails,
   type ToolCallIntent,
   createEvent,
 } from "../events/types.js";
+import {
+  BifrostGuardrailViolationError,
+  type GatewayAttribution,
+  attributionFromProviderMetadata,
+  classifyBifrostError,
+  hasBifrostRedactionMetadata,
+  scanRedactionPlaceholders,
+  truncateMessage,
+  violationSummaryMessage,
+} from "../providers/bifrost.js";
 import {
   adviseStructuredRun,
   bareModelId,
@@ -453,6 +466,136 @@ export class AgentRunner implements RunnerProtocol {
   }
 
   /**
+   * Bifrost gateway awareness (#407), part 1: classify a thrown error and
+   * emit the (possibly enriched) `agent.error` — and, when it's a
+   * {@link BifrostGuardrailViolationError}, an `agent.guardrail.violation`
+   * FIRST. Both events are emitted here (not just constructed) so every
+   * caller — generator or not — gets identical emission; generator callers
+   * (`stream()`) additionally `yield` the returned event objects themselves
+   * (never re-`createEvent` them) to keep the emitted and yielded instances
+   * identical.
+   *
+   * Returns the typed error to rethrow when classification hit, or the
+   * original `e` otherwise — classification never changes control flow, only
+   * what gets thrown and what the `agent.error` context carries.
+   */
+  private async _gatewayAwareError(
+    e: unknown,
+    scope: { traceId: string; runId: string; parentSpanId?: string },
+  ): Promise<{ error: unknown; violationEvent?: GuardrailViolationEvent; errorEvent: ErrorEvent }> {
+    const classified = classifyBifrostError(e);
+
+    let violationEvent: GuardrailViolationEvent | undefined;
+    if (classified instanceof BifrostGuardrailViolationError) {
+      // TRUST BOUNDARY (Gate 2.5 quality note): prefer a structured summary
+      // over Bifrost's free-text message on this widely-surfaced event —
+      // the free text is provider-authored prose, not guaranteed
+      // redaction-safe the way the counts-only redaction channel is. Falls
+      // back to the (capped) raw message only when no structured field is
+      // available to summarize from. See providers/bifrost.ts's
+      // MAX_ERROR_MESSAGE_LENGTH doc comment.
+      violationEvent = createEvent("agent.guardrail.violation", {
+        traceId: scope.traceId,
+        runId: scope.runId,
+        parentSpanId: scope.parentSpanId,
+        action: "blocked",
+        message: violationSummaryMessage(classified) ?? truncateMessage(classified.message),
+        ...(classified.statusCode !== undefined ? { statusCode: classified.statusCode } : {}),
+        ...(classified.bifrostType !== undefined ? { bifrostType: classified.bifrostType } : {}),
+        ...(classified.guardrailId !== undefined ? { guardrailId: classified.guardrailId } : {}),
+        ...(classified.category !== undefined ? { category: classified.category } : {}),
+        ...(classified.severity !== undefined ? { severity: classified.severity } : {}),
+        ...(classified.provider !== undefined ? { provider: classified.provider } : {}),
+      });
+      await this.emit(violationEvent);
+    }
+
+    const err: Error = classified ?? (e instanceof Error ? e : new Error(String(e)));
+    const errorEvent = createEvent("agent.error", {
+      traceId: scope.traceId,
+      runId: scope.runId,
+      parentSpanId: scope.parentSpanId,
+      errorType: err.name,
+      // TRUST BOUNDARY (Gate 2.5 quality note): capped defensively — this is
+      // the lower-level, less widely-surfaced sibling of the violation event
+      // above, which prefers a structured summary instead. Surfacing the
+      // provider's raw error message here is pre-existing generic-error
+      // behavior (unchanged for non-Bifrost errors); the cap is new.
+      message: truncateMessage(err.message),
+      recoverable: false,
+      context: classified
+        ? {
+            ...(classified.statusCode !== undefined ? { statusCode: classified.statusCode } : {}),
+            ...(classified.bifrostType !== undefined
+              ? { bifrostType: classified.bifrostType }
+              : {}),
+            ...(classified.provider !== undefined ? { provider: classified.provider } : {}),
+            ...(classified instanceof BifrostGuardrailViolationError
+              ? {
+                  ...(classified.guardrailId !== undefined
+                    ? { guardrailId: classified.guardrailId }
+                    : {}),
+                  ...(classified.category !== undefined ? { category: classified.category } : {}),
+                  ...(classified.severity !== undefined ? { severity: classified.severity } : {}),
+                  ...(classified.action !== undefined ? { action: classified.action } : {}),
+                }
+              : {}),
+          }
+        : {},
+    });
+    await this.emit(errorEvent);
+
+    return { error: classified ?? e, violationEvent, errorEvent };
+  }
+
+  /**
+   * Bifrost gateway awareness (#407), part 2: detect in-band redaction on a
+   * gateway response and emit ONE `agent.guardrail.redaction` when either
+   * signal fires. No-ops for any non-gateway model (same gate as
+   * `bifrostCorrelationHeaders`: `modelProvider.startsWith("gateway.")`).
+   *
+   * Two independent signals: {@link scanRedactionPlaceholders} (permissive —
+   * see its doc comment's false-positive caveat) and
+   * {@link hasBifrostRedactionMetadata} (PROVISIONAL, docs-derived
+   * confirmation via `bifrostMetadataExtractor`'s output). `source` records
+   * which fired — dashboard consumers should prefer gating any user-visible
+   * "redacted" badge on `source !== "placeholders"` (metadata-confirmed)
+   * rather than trusting a placeholder-only hit at face value.
+   */
+  private async _maybeEmitRedaction(
+    text: string,
+    providerMetadata: unknown,
+    scope: { traceId: string; runId: string; parentSpanId?: string; modelProvider: string },
+  ): Promise<GuardrailRedactionEvent | undefined> {
+    if (!scope.modelProvider.startsWith("gateway.")) return undefined;
+
+    const placeholderCounts = scanRedactionPlaceholders(text);
+    const metadataConfirmed = hasBifrostRedactionMetadata(providerMetadata);
+    if (!placeholderCounts && !metadataConfirmed) return undefined;
+
+    const source: "placeholders" | "metadata" | "both" = placeholderCounts
+      ? metadataConfirmed
+        ? "both"
+        : "placeholders"
+      : "metadata";
+    const entities = placeholderCounts ?? {};
+    const totalEntities = Object.values(entities).reduce((n, c) => n + c, 0);
+    const attribution = attributionFromProviderMetadata(providerMetadata);
+
+    const event = createEvent("agent.guardrail.redaction", {
+      traceId: scope.traceId,
+      runId: scope.runId,
+      parentSpanId: scope.parentSpanId,
+      entities,
+      totalEntities,
+      source,
+      ...(attribution?.provider !== undefined ? { provider: attribution.provider } : {}),
+    });
+    await this.emit(event);
+    return event;
+  }
+
+  /**
    * Convert agent tools to the Vercel AI SDK tool format.
    *
    * The SDK's tool schema field is `inputSchema` (renamed from `parameters` at
@@ -565,6 +708,9 @@ export class AgentRunner implements RunnerProtocol {
     // abortSignal at its top, before this run() bothered to describe it any
     // further below.
     let cancelledAtIteration: number | undefined;
+    // #407: the most recently observed gateway attribution (last LLM call
+    // that reported one) — threaded onto every `RunResult` return below.
+    let lastGatewayAttribution: GatewayAttribution | undefined;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       // Cheap cooperative-abort guard (#341 amendment): `run()` shares
@@ -633,19 +779,12 @@ export class AgentRunner implements RunnerProtocol {
             finishReason: "error",
           }),
         );
-        const err = e instanceof Error ? e : new Error(String(e));
-        await this.emit(
-          createEvent("agent.error", {
-            traceId: effectiveTraceId,
-            runId,
-            parentSpanId: iterSpanId,
-            errorType: err.name,
-            message: err.message,
-            recoverable: false,
-            context: {},
-          }),
-        );
-        throw e;
+        const { error } = await this._gatewayAwareError(e, {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: iterSpanId,
+        });
+        throw error;
       }
 
       const llmDuration = Date.now() - llmStartTime;
@@ -693,6 +832,12 @@ export class AgentRunner implements RunnerProtocol {
         );
       }
 
+      // #407: which provider actually served this call, when the gateway's
+      // metadataExtractor reported one — threaded onto llm.end below and the
+      // run-level RunResult return.
+      const iterGatewayAttribution = attributionFromProviderMetadata(result.providerMetadata);
+      if (iterGatewayAttribution) lastGatewayAttribution = iterGatewayAttribution;
+
       // Emit LLM call end
       await this.emit(
         createEvent("agent.llm.end", {
@@ -707,8 +852,17 @@ export class AgentRunner implements RunnerProtocol {
           hasToolCalls,
           finishReason: hasToolCalls ? "tool_calls" : (result.finishReason ?? "stop"),
           ...(iterUsageDetails ? { usageDetails: iterUsageDetails } : {}),
+          ...(iterGatewayAttribution ? { gateway: iterGatewayAttribution } : {}),
         }),
       );
+
+      // #407: one redaction scan per LLM call — no-ops for non-gateway models.
+      await this._maybeEmitRedaction(result.text ?? "", result.providerMetadata, {
+        traceId: effectiveTraceId,
+        runId,
+        parentSpanId: iterSpanId,
+        modelProvider: model.provider,
+      });
 
       // No tool calls = done
       if (!hasToolCalls) {
@@ -751,6 +905,7 @@ export class AgentRunner implements RunnerProtocol {
           iterations: iteration + 1,
           finishReason: result.finishReason ?? "stop",
           ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
+          ...(lastGatewayAttribution ? { gateway: lastGatewayAttribution } : {}),
         };
       }
 
@@ -1050,6 +1205,7 @@ export class AgentRunner implements RunnerProtocol {
         iterations: cancelledAtIteration,
         finishReason: "cancelled",
         ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
+        ...(lastGatewayAttribution ? { gateway: lastGatewayAttribution } : {}),
       };
     }
 
@@ -1080,6 +1236,7 @@ export class AgentRunner implements RunnerProtocol {
       iterations: maxIterations,
       finishReason: "max_iterations",
       ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
+      ...(lastGatewayAttribution ? { gateway: lastGatewayAttribution } : {}),
     };
   }
 
@@ -1293,21 +1450,37 @@ export class AgentRunner implements RunnerProtocol {
     let iterations = 1;
     let finishReason = "stop";
     let rawObject: unknown;
+    // #407: providerMetadata off whichever branch actually calls the
+    // provider directly (no-tools / capable / 2-tier's tier-2 finish) — the
+    // 2-tier's tier-1 delegates to `run()`, which already scans its own LLM
+    // calls; this feeds the ONE post-validation scan below.
+    let structuredProviderMetadata: unknown;
 
     if (!hasTools) {
       // No tools → single Output.object call. Works on every model.
-      const result = await generateText({
-        model,
-        instructions,
-        messages,
-        output: Output.object({ schema }),
-        headers: callHeaders,
-      });
+      let result: Awaited<ReturnType<typeof generateText>>;
+      try {
+        result = await generateText({
+          model,
+          instructions,
+          messages,
+          output: Output.object({ schema }),
+          headers: callHeaders,
+        });
+      } catch (e: unknown) {
+        const { error } = await this._gatewayAwareError(e, {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: rootSpanId,
+        });
+        throw error;
+      }
       totalInputTokens = result.usage?.inputTokens ?? 0;
       totalOutputTokens = result.usage?.outputTokens ?? 0;
       totalUsageDetails = detailsFromUsage(result.usage);
       finishReason = result.finishReason ?? "stop";
       rawObject = result.output;
+      structuredProviderMetadata = result.providerMetadata;
     } else if (modelSupportsToolsWithStructuredOutput(modelName)) {
       // Tools + capable model → single experimental_output + tools call. The
       // SDK drives the loop; execute-bearing tools keep gate interception via
@@ -1331,29 +1504,40 @@ export class AgentRunner implements RunnerProtocol {
         host: options?.host,
         publishArtifacts: options?.publishArtifacts,
       });
-      const result = await generateText({
-        model,
-        instructions,
-        messages,
-        tools,
-        stopWhen: isStepCount(options?.maxIterations ?? 10),
-        // #389 fix-round (nit): `satisfies` locks the hand-rolled
-        // `GateToolApprovalFn` (tool-approval-bridge.ts) against ai@7's own
-        // `toolApproval` callback shape AT THIS CALL SITE — an SDK release
-        // that changes the callback contract now fails typecheck here
-        // instead of silently drifting.
-        toolApproval: bridge.toolApproval satisfies GenericToolApprovalFunction<
-          ToolSet,
-          InferToolSetContext<ToolSet>,
-          Context
-        >,
-        output: Output.object({ schema }),
-        // #389 fix-round: the capable path previously omitted this (contrast
-        // stream()'s forward below) — the SDK's own abort checks (model-call
-        // timeouts, tool-execution abort merge) now see it too.
-        abortSignal: options?.abortSignal,
-        headers: callHeaders,
-      });
+      let result: Awaited<ReturnType<typeof generateText>>;
+      try {
+        result = await generateText({
+          model,
+          instructions,
+          messages,
+          tools,
+          stopWhen: isStepCount(options?.maxIterations ?? 10),
+          // #389 fix-round (nit): `satisfies` locks the hand-rolled
+          // `GateToolApprovalFn` (tool-approval-bridge.ts) against ai@7's own
+          // `toolApproval` callback shape AT THIS CALL SITE — an SDK release
+          // that changes the callback contract now fails typecheck here
+          // instead of silently drifting.
+          toolApproval: bridge.toolApproval satisfies GenericToolApprovalFunction<
+            ToolSet,
+            InferToolSetContext<ToolSet>,
+            Context
+          >,
+          output: Output.object({ schema }),
+          // #389 fix-round: the capable path previously omitted this (contrast
+          // stream()'s forward below) — the SDK's own abort checks (model-call
+          // timeouts, tool-execution abort merge) now see it too.
+          abortSignal: options?.abortSignal,
+          headers: callHeaders,
+        });
+      } catch (e: unknown) {
+        const { error } = await this._gatewayAwareError(e, {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: rootSpanId,
+        });
+        throw error;
+      }
+      structuredProviderMetadata = result.providerMetadata;
       const steps = result.steps ?? [];
       // v7: result.usage aggregates ALL steps (totalUsage is now a deprecated
       // alias for the same value), so on this multi-step capable path it IS the
@@ -1444,24 +1628,35 @@ export class AgentRunner implements RunnerProtocol {
           );
         }
 
-        const tier2 = await generateText({
-          model,
-          instructions,
-          messages: [
-            {
-              role: "user" as const,
-              content: `From the following, produce the structured object.\n\n${tier1.response}`,
-            },
-          ],
-          output: Output.object({ schema }),
-          headers: callHeaders,
-        });
+        let tier2: Awaited<ReturnType<typeof generateText>>;
+        try {
+          tier2 = await generateText({
+            model,
+            instructions,
+            messages: [
+              {
+                role: "user" as const,
+                content: `From the following, produce the structured object.\n\n${tier1.response}`,
+              },
+            ],
+            output: Output.object({ schema }),
+            headers: callHeaders,
+          });
+        } catch (e: unknown) {
+          const { error } = await this._gatewayAwareError(e, {
+            traceId: effectiveTraceId,
+            runId,
+            parentSpanId: rootSpanId,
+          });
+          throw error;
+        }
         totalInputTokens += tier2.usage?.inputTokens ?? 0;
         totalOutputTokens += tier2.usage?.outputTokens ?? 0;
         totalUsageDetails = mergeUsageDetails(totalUsageDetails, detailsFromUsage(tier2.usage));
         iterations += 1;
         finishReason = tier2.finishReason ?? "stop";
         rawObject = tier2.output;
+        structuredProviderMetadata = tier2.providerMetadata;
       }
     }
 
@@ -1500,6 +1695,19 @@ export class AgentRunner implements RunnerProtocol {
       }),
     );
 
+    // #407: ONE post-validation scan of the finalized structured output.
+    // Advisory — `JSON.stringify` can double-count an entity echoed in
+    // multiple fields (spec 407 § Open question 4, accepted).
+    await this._maybeEmitRedaction(JSON.stringify(parsed.data), structuredProviderMetadata, {
+      traceId: effectiveTraceId,
+      runId,
+      parentSpanId: rootSpanId,
+      modelProvider: model.provider,
+    });
+    const structuredGatewayAttribution = attributionFromProviderMetadata(
+      structuredProviderMetadata,
+    );
+
     return {
       response: JSON.stringify(parsed.data),
       inputTokens: totalInputTokens,
@@ -1509,6 +1717,7 @@ export class AgentRunner implements RunnerProtocol {
       finishReason,
       object: parsed.data,
       ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
+      ...(structuredGatewayAttribution ? { gateway: structuredGatewayAttribution } : {}),
     };
   }
 
@@ -1569,6 +1778,10 @@ export class AgentRunner implements RunnerProtocol {
     // BOUNDED COMPLETION (parity with run()): errored-terminal attempt tally.
     // First error continues; second ends the run as `terminal_tool_error`.
     let terminalErrorCount = 0;
+    // #407: providerMetadata off the most recent `finish-step` part — read at
+    // the redaction scan before `message.complete` below, and for each
+    // iteration's `agent.llm.end.gateway` attribution.
+    let lastStepProviderMetadata: unknown;
 
     // Conversation start
     const convStart = createEvent("agent.conversation.start", {
@@ -1765,6 +1978,9 @@ export class AgentRunner implements RunnerProtocol {
             case "finish-step": {
               stepUsage = part.usage;
               stepFinishReason = part.finishReason;
+              // #407: captured for the redaction scan + gateway attribution
+              // below (fact 6: the finish-step part carries `providerMetadata`).
+              lastStepProviderMetadata = part.providerMetadata;
               break;
             }
             // #389: KEEP — spec-mandated defensive cases (Approach step 7),
@@ -1855,18 +2071,16 @@ export class AgentRunner implements RunnerProtocol {
               await this.emit(llmEndErr);
               yield llmEndErr;
 
-              const err = part.error instanceof Error ? part.error : new Error(String(part.error));
-              const errEvent = createEvent("agent.error", {
+              // #407: classify before falling back to the generic error path.
+              // `_gatewayAwareError` already performed the emit(s) above; only
+              // yield the SAME event instances here (never re-`createEvent`).
+              const { violationEvent, errorEvent } = await this._gatewayAwareError(part.error, {
                 traceId: effectiveTraceId,
                 runId,
                 parentSpanId: iterSpanId,
-                errorType: err.name,
-                message: err.message,
-                recoverable: false,
-                context: {},
               });
-              await this.emit(errEvent);
-              yield errEvent;
+              if (violationEvent) yield violationEvent;
+              yield errorEvent;
               break;
             }
             default:
@@ -1943,6 +2157,10 @@ export class AgentRunner implements RunnerProtocol {
       const hasToolCalls = pendingToolCalls.length > 0;
       const llmDuration = Date.now() - llmStartTime;
 
+      // #407: which provider actually served this step, when the gateway's
+      // metadataExtractor reported one.
+      const iterGatewayAttribution = attributionFromProviderMetadata(lastStepProviderMetadata);
+
       // LLM end
       const llmEnd = createEvent("agent.llm.end", {
         traceId: effectiveTraceId,
@@ -1956,6 +2174,7 @@ export class AgentRunner implements RunnerProtocol {
         hasToolCalls,
         finishReason: hasToolCalls ? "tool_calls" : stepFinishReason,
         ...(iterUsageDetails ? { usageDetails: iterUsageDetails } : {}),
+        ...(iterGatewayAttribution ? { gateway: iterGatewayAttribution } : {}),
       });
       await this.emit(llmEnd);
       yield llmEnd;
@@ -1973,6 +2192,16 @@ export class AgentRunner implements RunnerProtocol {
         });
         await this.emit(iterEnd);
         yield iterEnd;
+
+        // #407: one redaction scan on the FULL accumulated text, right before
+        // the terminal `message.complete` — no-ops for non-gateway models.
+        const redactionEvent = await this._maybeEmitRedaction(fullText, lastStepProviderMetadata, {
+          traceId: effectiveTraceId,
+          runId,
+          parentSpanId: rootSpanId,
+          modelProvider: model.provider,
+        });
+        if (redactionEvent) yield redactionEvent;
 
         const msgComplete = createEvent("agent.message.complete", {
           traceId: effectiveTraceId,
