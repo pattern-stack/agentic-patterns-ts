@@ -1,4 +1,9 @@
-# ADR 0010 — Ship the three common `@ai-sdk/*` providers as real dependencies of `@agentic-patterns/runtime`
+---
+title: "ADR 0010 — Ship the three common @ai-sdk/* providers as real dependencies of @agentic-patterns/runtime"
+description: "The anthropic, openai, and google AI SDK providers become runtime dependencies so the common path works on install; adapters declare packageName/bundled and missing packages fail with a typed ProviderPackageError."
+sidebar:
+  label: "ADR 0010 — Bundled Providers"
+---
 
 - **Status:** ACCEPTED — implemented in the PR that lands this file.
 - **Date:** 2026-08-10

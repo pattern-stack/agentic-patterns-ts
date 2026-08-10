@@ -46,7 +46,7 @@ framework.
 
 ```yaml
 ---
-title: "Page Title"                    # REQUIRED (schema-enforced at build)
+title: "Page Title"                    # expected — falls back to the first h1
 description: "One sentence, <=160ch."  # required by convention — search/SEO/llms
 sidebar:
   label: "Short Label"                 # only when the title is unwieldy (ADRs)
@@ -55,6 +55,14 @@ sidebar:
 
 - The body has NO h1 — the title renders as the h1. (The 2026-08 migration
   moved every doc's first h1 into frontmatter.)
+- **`title` is not hard-required.** A doc with no `title` takes its first h1
+  instead of failing the build (`docs-site/src/content.config.ts`). This exists
+  because a strict schema turned every doc merged to `main` into a build break
+  for branches cut before it — a merge-order hazard, not a docs-accuracy one.
+  Write the frontmatter anyway: the fallback leaves the h1 in the body, so the
+  page renders its heading twice, and you lose `description` and `sidebar.label`.
+  The gates that carry real signal — link validation and manifest drift — are
+  untouched by this.
 - Descriptions state design-preview vs shipped status explicitly when it
   applies ("Status: design/mockup", "Phase B not built"). A cold reader must
   be able to tell shipped API from aspiration without opening the page.

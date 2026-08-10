@@ -8,7 +8,7 @@ description: "Every event name on the SSE wire — generated from the runtime ma
      Do not edit by hand — regenerate with:
        bun run tools/gen-docs-event-reference.ts -->
 
-The runtime speaks **38 wire events** over SSE. This catalog is
+The runtime speaks **40 wire events** over SSE. This catalog is
 generated from the same manifest the dashboard's drift test enforces, so it
 cannot silently fall behind the wire vocabulary: adding or renaming an event
 without regenerating this page fails CI.
@@ -41,6 +41,11 @@ Payload shapes live with the compiler where they are guarded by types:
 ## `gate`
 
 - `gate.decision`
+
+## `guardrail`
+
+- `guardrail.redaction`
+- `guardrail.violation`
 
 ## `harness`
 
