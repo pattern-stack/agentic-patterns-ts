@@ -20,9 +20,11 @@ import type {
   AgentLike,
   BaseEvent,
   ConversationStore,
+  Exchange,
   MemoryStore,
   PendingInputRegistry,
   RunStore,
+  StoredMessage,
   StoredMessagePart,
 } from "@agentic-patterns/runtime";
 import {
@@ -85,6 +87,46 @@ export interface ConversationEntry {
    * conversation whose first turn errored does not re-assemble on retry.
    */
   recallAssembled?: boolean;
+}
+
+/**
+ * Pair persisted request/response rows back into `Exchange`s (#480) — the
+ * StoredMessage→Exchange mapper the runtime deliberately doesn't ship
+ * (docs/ambient/conversations.md). `getMessages` returns seq-ASC order, so
+ * pairing is a single forward scan. An unpaired trailing request (a turn
+ * that never got its response — crash mid-stream) is DROPPED: replaying a
+ * user turn with an empty assistant turn is a provider hazard.
+ */
+function messagesToExchanges(messages: StoredMessage[]): Exchange[] {
+  const partText = (m: StoredMessage, type: string): string =>
+    m.parts
+      .filter((p) => p.type === type)
+      .map((p) => p.content ?? "")
+      .join("");
+  const exchanges: Exchange[] = [];
+  let pendingRequest: StoredMessage | undefined;
+  for (const m of messages) {
+    if (m.kind === "request") {
+      pendingRequest = m;
+      continue;
+    }
+    if (!pendingRequest) continue;
+    exchanges.push({
+      number: exchanges.length + 1,
+      // No invocation id was persisted — the response row id is stable,
+      // unique, and joinable back to the store, which is all callers need.
+      invocationId: m.id,
+      user: partText(pendingRequest, "user_prompt"),
+      assistant: partText(m, "text"),
+      toolCalls: [],
+      inputTokens: m.inputTokens,
+      outputTokens: m.outputTokens,
+      timestamp: m.createdAt,
+      ...(m.runId !== undefined ? { runId: m.runId } : {}),
+    });
+    pendingRequest = undefined;
+  }
+  return exchanges;
 }
 
 export function conversationRoutes(
@@ -289,9 +331,36 @@ export function conversationRoutes(
       : memoryBinding
         ? {}
         : undefined;
+    // #480: unify the public conversation id with the durable row id. When a
+    // store is configured the row is pre-created HERE (not lazily at first
+    // exchange) so list/read/reply agree on ONE identity, and the binding
+    // inputs are stamped into row metadata for post-restart rehydration.
+    // `context` is persisted UNREDACTED — redaction is a wire concern, and a
+    // redacted value could not re-instantiate the agent. Fail-soft: a store
+    // error falls back to the historical in-memory-only id.
+    let durableId: string | undefined;
+    if (store) {
+      try {
+        const roleName =
+          (agentToBind as { role?: { name?: string } }).role?.name ?? reg.name ?? reg.id;
+        const model = (agentToBind as { getModel?: () => string | undefined }).getModel?.() ?? "";
+        const durable = await store.createConversation(roleName, model);
+        await store.updateConversation(durable.id, {
+          agentId,
+          ...(effectiveContext !== undefined ? { context: effectiveContext } : {}),
+        });
+        durableId = durable.id;
+      } catch (err) {
+        console.error("conversations: durable pre-create failed (continuing in-memory):", err);
+        durableId = undefined;
+      }
+    }
     // `store` (when configured) makes `Conversation._persistExchange` actually
     // write request/response messages — previously accepted and never used.
+    // `storeConversationId` (#480) points those writes at the pre-created row
+    // instead of letting the lazy path mint a second, run-keyed identity.
     const conversation = new Conversation(agentToBind, reg.runner, {
+      ...(durableId ? { id: durableId, storeConversationId: durableId } : {}),
       toolExecutor,
       store,
       ...(host ? { host } : {}),
@@ -498,11 +567,159 @@ export function conversationRoutes(
     );
   });
 
+  /**
+   * #480 — restore a persisted conversation into the live registry so it can
+   * be continued (after a server restart, or when the caller only holds the
+   * durable id). Re-runs the creation-time binding pipeline from the context
+   * stamped into row metadata; legacy rows without metadata fall back to the
+   * persisted display name + the registration's declared scope defaults.
+   * Returns the live entry, a typed HTTP error, or null when the id is
+   * unknown to the store (the caller keeps its historical 404).
+   */
+  async function rehydrateConversation(
+    convId: string,
+  ): Promise<ConversationEntry | { status: 404 | 502; body: Record<string, unknown> } | null> {
+    if (!store) return null;
+    const stored = await store.getConversation(convId);
+    if (!stored) return null;
+
+    const meta = stored.metadata ?? {};
+    // Rows written since #480 carry the registration id; legacy rows (and
+    // rows minted by Conversation's own lazy path) only have the display
+    // name `_persistExchange` wrote — `agent.role.name`.
+    const metaAgentId = typeof meta.agentId === "string" ? meta.agentId : undefined;
+    const reg =
+      (metaAgentId ? agents.find((a) => a.id === metaAgentId) : undefined) ??
+      agents.find((a) => a.id === stored.agentName || a.name === stored.agentName) ??
+      agents.find((a) => (a.agent as { role?: { name?: string } }).role?.name === stored.agentName);
+    if (!reg) {
+      return {
+        status: 404,
+        body: { error: `conversation's agent "${stored.agentName}" is not registered` },
+      };
+    }
+
+    // Re-parse the persisted context so schema defaults/coercions stay
+    // consistent even if the registration evolved since creation. Errors are
+    // 502s: the context passed validation once, so a failure now names a
+    // registration change, not caller input.
+    let effectiveContext: Record<string, unknown> | undefined = isPlainRecord(meta.context)
+      ? (meta.context as Record<string, unknown>)
+      : undefined;
+    if (effectiveContext === undefined) {
+      const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
+      effectiveContext = declaredDefaults ? { ...declaredDefaults } : undefined;
+    }
+    if (reg.scope) {
+      try {
+        effectiveContext = reg.scope.parse(effectiveContext ?? {});
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { status: 502, body: { error: `rehydration scope parse failed: ${message}` } };
+      }
+      if (!isPlainRecord(effectiveContext)) {
+        return {
+          status: 502,
+          body: { error: "scope.parse returned a non-object — malformed scope" },
+        };
+      }
+    }
+
+    let agentToBind: AgentLike = reg.agent;
+    if (typeof reg.instantiate === "function") {
+      try {
+        agentToBind = await reg.instantiate(effectiveContext);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { status: 502, body: { error: `instantiate failed: ${message}` } };
+      }
+    }
+
+    let memoryBinding: ConversationEntry["memory"];
+    if (reg.memory) {
+      let derived: unknown;
+      try {
+        derived =
+          typeof reg.memory.scope === "function"
+            ? reg.memory.scope(effectiveContext)
+            : { ...reg.memory.scope };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { status: 502, body: { error: `memory scope derivation failed: ${message}` } };
+      }
+      if (
+        !isPlainRecord(derived) ||
+        Object.keys(derived).length === 0 ||
+        Object.values(derived).some((v) => typeof v !== "string")
+      ) {
+        return {
+          status: 502,
+          body: {
+            error: "memory scope must be a non-empty string map — got an invalid derivation",
+          },
+        };
+      }
+      memoryBinding = {
+        store: reg.memory.store,
+        scope: derived as Record<string, string>,
+        ...(reg.memory.budgetChars !== undefined ? { budgetChars: reg.memory.budgetChars } : {}),
+      };
+    }
+
+    const hasHook = typeof reg.instantiate === "function";
+    const hasScope = reg.scope !== undefined;
+    const hasMemory = reg.memory !== undefined;
+    const redactKeys = Array.from(
+      new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])]),
+    );
+    const { context: redactedContext, redactedKeys } = redactContext(effectiveContext, redactKeys);
+    const toolExecutor = deriveToolboxExecutor(
+      agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
+    );
+    const host: Record<string, unknown> | undefined = hasScope
+      ? { ...buildScopeHost(effectiveContext ?? {}) }
+      : memoryBinding
+        ? {}
+        : undefined;
+
+    const history = messagesToExchanges(await store.getMessages(convId));
+    const conversation = new Conversation(agentToBind, reg.runner, {
+      id: convId,
+      store,
+      storeConversationId: convId,
+      history,
+      toolExecutor,
+      ...(host ? { host } : {}),
+    });
+    const entry: ConversationEntry = {
+      conversation,
+      agentId: reg.id,
+      ...(hasHook || hasScope || hasMemory ? { context: redactedContext } : {}),
+      ...(redactedKeys ? { contextRedacted: redactedKeys } : {}),
+      ...(host ? { host } : {}),
+      ...(memoryBinding ? { memory: memoryBinding } : {}),
+      // recallAssembled deliberately unset: the first post-rehydration turn
+      // re-assembles recall against the CURRENT memory store — resuming
+      // yesterday's thread should see today's memories.
+    };
+    conversations.set(convId, entry);
+    return entry;
+  }
+
   // POST /conversations/:id/messages — send message, stream SSE response
   app.post("/conversations/:id/messages", async (c) => {
     const convId = c.req.param("id");
-    const entry = conversations.get(convId);
+    let entry = conversations.get(convId);
 
+    if (!entry) {
+      // #480: unknown to the live registry ≠ nonexistent — try the store.
+      const restored = await rehydrateConversation(convId);
+      if (restored && "conversation" in restored) {
+        entry = restored;
+      } else if (restored) {
+        return c.json(restored.body, restored.status);
+      }
+    }
     if (!entry) {
       return c.json({ error: "Conversation not found" }, 404);
     }

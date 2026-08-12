@@ -99,6 +99,15 @@ export class Conversation {
     options?: {
       id?: string;
       store?: ConversationStore;
+      /**
+       * Adopt an EXISTING durable conversation row instead of lazily minting
+       * one on the first persisted exchange (#480). Callers that pre-create
+       * the row (agent-server does, to unify the route id with the durable
+       * id) or rehydrate a persisted conversation pass its id here so later
+       * exchanges append to the same row rather than fragmenting one chat
+       * across run-keyed rows.
+       */
+      storeConversationId?: string;
       toolExecutor?: ToolExecutor;
       state?: Record<string, unknown>;
       history?: Exchange[];
@@ -109,6 +118,7 @@ export class Conversation {
     this.runner = runner;
     this.id = options?.id ?? generateUUID();
     this._store = options?.store;
+    this._storeConversationId = options?.storeConversationId;
     this._toolExecutor = options?.toolExecutor;
     this._state = options?.state ?? {};
     this._host = options?.host;
