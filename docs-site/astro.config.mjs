@@ -61,7 +61,7 @@ export default defineConfig({
     starlight({
       title: "Agentic Patterns",
       description:
-        "Composable primitives for building LLM agents — TypeScript. Atoms to organisms, executed by a runtime with events, gates, and exporters.",
+        "Build ambient agents that run on their own — TypeScript. Composable primitives from atoms to organisms, executed by a runtime with triggers, typed events, gates, and cross-session memory.",
       social: [
         {
           icon: "github",

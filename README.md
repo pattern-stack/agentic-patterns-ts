@@ -1,9 +1,16 @@
 # agentic-patterns (TypeScript)
 
-A compositional agent framework for TypeScript. Agents are built by
-composing frozen, immutable primitives upward through layers -- from
-atoms to organisms -- then executed by a runtime with events, gates,
-workflows, and exporters.
+A compositional agent framework for TypeScript, built for **ambient** agents —
+ones that run on their own, woken by a schedule or an event rather than by a
+person waiting on a reply.
+
+Agents are built by composing frozen, immutable primitives upward through layers
+-- from atoms to organisms -- then executed by a runtime with events, gates,
+workflows, and exporters. Triggers give a run provenance, and cross-session
+memory lets it carry something forward.
+
+Docs: <https://agentic-patterns.pattern-stack.com> · start with
+[Ambient agents](./docs/ambient/index.md).
 
 ## Packages
 
