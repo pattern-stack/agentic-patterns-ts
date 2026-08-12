@@ -12,6 +12,7 @@
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import starlight from "@astrojs/starlight";
+import mermaid from "astro-mermaid";
 import { defineConfig, passthroughImageService } from "astro/config";
 
 const DOCS_ROOT = fileURLToPath(new URL("../docs", import.meta.url));
@@ -58,6 +59,20 @@ export default defineConfig({
   // this repo before (better-sqlite3 ABI). Passthrough keeps installs boring.
   image: { service: passthroughImageService() },
   integrations: [
+    // Mermaid MUST precede starlight: it rewrites ```mermaid fences before the
+    // markdown pipeline turns them into <pre><code>.
+    //
+    // Client-side rendering on purpose. The prerendering alternatives
+    // (rehype-mermaid and friends) drive a headless browser at build time, which
+    // is exactly the native build dependency the `image` note above refuses —
+    // and CI/Cloudflare Pages would have to carry it too. This costs a lazy JS
+    // chunk on the pages that actually have a diagram and nothing anywhere else.
+    mermaid({
+      // Starlight toggles `data-theme` on <html>; astro-mermaid reads that and
+      // re-renders, so the diagrams follow the site's light/dark switch.
+      theme: "neutral",
+      autoTheme: true,
+    }),
     starlight({
       title: "Agentic Patterns",
       description:
@@ -69,6 +84,7 @@ export default defineConfig({
           href: "https://github.com/pattern-stack/agentic-patterns-ts",
         },
       ],
+      customCss: ["./src/styles/mermaid.css"],
       // Grouping follows the cold-reader audit (#458): a short, honest Guides
       // path first; dated design/plan documents live under "Design notes" so a
       // visitor can tell shipped API from aspiration at a glance.

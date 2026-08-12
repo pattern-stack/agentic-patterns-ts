@@ -218,8 +218,21 @@ Each one exists to prevent a bug class:
   never a pinned declared instance.
 - **Pre-correlatable.** The returned `runId` is chosen *before* execution — caller-supplied
   or minted here — so you can write your correlation row up front.
-- **Provenance survives.** `RunOptions.trigger` → `MessageStartEvent.trigger` →
-  `RunMeta.metadata.trigger`. The run row alone answers "why did this run happen".
+- **Provenance survives** the whole way down:
+
+  ```mermaid
+  flowchart TD
+    host["your host — schedule dispatcher, webhook ingress"]
+    opts["RunOptions.trigger"]
+    evt["agent.message.start — the run's root event"]
+    meta[("RunMeta.metadata.trigger")]
+
+    host -- "runFromTrigger" --> opts
+    opts -- "copied verbatim by the runner" --> evt
+    evt -- "persisted by RunStoreExporter" --> meta
+  ```
+
+  The run row alone answers "why did this run happen" — no join back to your scheduler.
 - **Scope reaches tools and renders** the same way the server and CLI paths do.
 
 Trigger provenance is purely additive: omit it and behavior is byte-identical.

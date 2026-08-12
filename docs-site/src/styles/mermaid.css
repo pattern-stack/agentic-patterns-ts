@@ -1,0 +1,33 @@
+/*
+ * Mermaid sizing.
+ *
+ * astro-mermaid renders client-side and mermaid stamps an inline `max-width` on
+ * the <svg> equal to the diagram's own computed width. In Starlight's ~670px
+ * content column that means any diagram wider than the column gets scaled down
+ * to fit — the text shrinks with it and the diagram becomes unreadable rather
+ * than merely small. Overriding max-width lets a diagram use the full column,
+ * and `overflow-x: auto` on the wrapper means a genuinely wide one scrolls
+ * inside its own box instead of stretching the page.
+ *
+ * Diagrams here are authored top-down for the same reason: a long left-to-right
+ * chain is exactly the shape that triggers the shrink.
+ */
+.mermaid,
+pre.mermaid {
+  overflow-x: auto;
+  margin-block: 1.5rem;
+  /* Starlight's <pre> styling would otherwise paint a code-block frame around
+     a rendered diagram. */
+  background: none;
+  padding: 0;
+  border: none;
+}
+
+.mermaid svg,
+pre.mermaid svg {
+  max-width: 100% !important;
+  width: 100%;
+  height: auto;
+  display: block;
+  margin-inline: auto;
+}

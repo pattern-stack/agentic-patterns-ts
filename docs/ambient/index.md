@@ -19,22 +19,34 @@ This page is the map. The framework ships the ignition seam that answers all thr
 
 ## The loop
 
-```
-  a schedule fires ─┐
-  a webhook lands  ─┼─→  TriggerSource  ─→  runFromTrigger  ─→  AgentRegistry.resolve
-  a message arrives─┘                              │                      │
-                                                   │              (parse scope,
-                                                   │               instantiate)
-                                                   ↓                      ↓
-                          RunMeta.metadata.trigger ←── the run ←── a scoped agent
-                                                   │
-                                                   ↓
-                                  memory written, recalled next time
+```mermaid
+flowchart TD
+  world["a schedule fires · a webhook lands · a message arrives"]
+  trig["<b>TriggerSource</b><br/>what caused this run"]
+  rft["<b>runFromTrigger</b><br/>validates the trigger, mints the runId"]
+  reg["<b>AgentRegistry.resolve</b><br/>parse scope → instantiate"]
+  agent["a scoped agent instance"]
+  run["the run"]
+  row[("run row<br/>RunMeta.metadata.trigger")]
+  mem[("memory store")]
+
+  world --> trig --> rft --> reg --> agent --> run
+  run -- "provenance" --> row
+  run -- "writes" --> mem
+  mem -. "recalled at the next firing" .-> agent
+
+  %% Stroke-only styling on purpose: a `fill` here would be a hardcoded light
+  %% colour that survives into dark mode while every unstyled node flips, so the
+  %% diagram would render half light and half dark. Borders read correctly in both.
+  classDef fw stroke:#22c55e,stroke-width:2px
+  classDef yours stroke:#6366f1,stroke-width:2px
+  class trig,rft,reg fw
+  class world,row,mem yours
 ```
 
-Read left to right: something in the world fires, the host describes it as a
-`TriggerSource`, and `runFromTrigger` turns "this agent, this input, this cause" into a
-run whose provenance survives in the run row.
+Green borders are framework surface; blue borders are yours. Something in the world fires, the
+host describes it as a `TriggerSource`, and `runFromTrigger` turns "this agent, this input,
+this cause" into a run whose provenance survives in the run row.
 
 ## The one function
 

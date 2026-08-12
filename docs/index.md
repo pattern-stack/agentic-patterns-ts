@@ -27,12 +27,19 @@ That inversion is what this framework is built for.
 
 ## The loop
 
-```
-  a schedule fires ─┐
-  a webhook lands  ─┼─→  TriggerSource ─→ runFromTrigger ─→ a scoped, named agent
-  a message arrives─┘                                              │
-                                                                   ↓
-                     the run row records WHY it happened ← ── memory carries forward
+```mermaid
+flowchart TD
+  world["a schedule fires · a webhook lands · a message arrives"]
+  trig["<b>TriggerSource</b>"]
+  rft["<b>runFromTrigger</b>"]
+  agent["a scoped, named agent"]
+  row[("the run row records<br/>WHY it happened")]
+  mem[("memory carries forward")]
+
+  world --> trig --> rft --> agent
+  agent --> row
+  agent --> mem
+  mem -. "next firing" .-> agent
 ```
 
 One function starts it, and the run's own row answers "why did this happen" without a join
