@@ -77,6 +77,15 @@ export default defineConfig({
           label: "Guides",
           items: ["getting-started", "authoring-a-toolbox", "runners"],
         },
+        // Ambient sits directly under Guides: it is the program the framework is
+        // being built toward (#414), and its ignition seam (#437) shipped in
+        // core 0.18 / lockstep 0.39 with no page at all until this group existed.
+        // Every page here states shipped-vs-roadmap explicitly — the trigger seam
+        // is real, AgencyHost (M3) and channels (M4) are not.
+        {
+          label: "Ambient",
+          items: ["ambient", "ambient/triggers", "ambient/conversations", "ambient/gateway"],
+        },
         { label: "Memory", items: [{ autogenerate: { directory: "memory" } }] },
         {
           label: "Reference",

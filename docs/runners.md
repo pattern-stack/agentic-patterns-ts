@@ -695,13 +695,10 @@ Supports substring triggers and `"*"` wildcard. Emits the full streaming event l
 | `DEEPSEEK_API_KEY` | `@ai-sdk/deepseek` |
 | `OPENROUTER_API_KEY` | `@openrouter/ai-sdk-provider` |
 | `OLLAMA_HOST` | `ollama-ai-provider-v2` — **ships in the box** |
-| `AP_GATEWAY_BASE_URL` | Routes every agent's declared model through one OpenAI-compatible gateway (Bifrost, LiteLLM, vLLM, …) instead of a single bound provider |
-| `AP_GATEWAY_API_KEY` | Gateway bearer key — sent as `Authorization: Bearer` |
-| `AP_GATEWAY_BASIC_USER` + `AP_GATEWAY_BASIC_PASS` | Gateway HTTP Basic auth (e.g. a Bifrost deployment fronted by Basic, which 401s on Bearer) — sent as a precomputed `Authorization: Basic <base64>`. Use this **or** `AP_GATEWAY_API_KEY`, not both |
-| `AP_GATEWAY_MODEL_PREFIX` | Optional id prefix qualifying the agent's declared model to the gateway's namespace (e.g. `anthropic/` turns `claude-sonnet-4-5` into `anthropic/claude-sonnet-4-5`) |
+| `AP_GATEWAY_*` (8 variables) | Routes every agent's declared model through one OpenAI-compatible gateway (Bifrost, LiteLLM, vLLM, …) instead of a single bound provider — see [Gateway routing](ambient/gateway.md) for the full table |
 | _(none, `claude` on PATH)_ | `ClaudeCodeAPIRunner` |
 
-**Gateway is a routing override, not a fallback.** `envGateway()` (`create-runner.ts`) is read at step "2.5" of the priority list — before `options.provider` and before the env-var rows above — and, when set, builds a resolver-backed runner (`HybridModelResolver`) that dispatches **each agent's own declared model** through the gateway at call time, rather than binding one model up front. That also means `tier`/`modelId` are ignored on this path: the gateway receives whatever each agent declares (optionally prefixed), so one `AP_GATEWAY_BASE_URL` is enough to route an entire multi-agent project through Bifrost (or any OpenAI-compatible endpoint) with no per-provider key. See `providers/model-resolver.ts` (`GatewayConfig`, `HybridModelResolver`) for the resolution precedence (profile → gateway → pattern-matched family → error).
+**Gateway is a routing override, not a fallback.** `envGateway()` (`create-runner.ts`) is read at step "2.5" of the priority list — before `options.provider` and before the env-var rows above — and, when set, builds a resolver-backed runner (`HybridModelResolver`) that dispatches **each agent's own declared model** through the gateway at call time, rather than binding one model up front. That also means `tier`/`modelId` are ignored on this path. See `providers/model-resolver.ts` (`GatewayConfig`, `HybridModelResolver`) for the resolution precedence (profile → gateway → pattern-matched family → error), and **[Gateway routing](ambient/gateway.md)** for the operational surface: every `AP_GATEWAY_*` variable, the Basic-vs-Bearer-vs-virtual-key distinction, Bifrost guardrail events, and the packaging fix in 0.40.0.
 
 #### Credential preflight (`ap` CLI)
 
