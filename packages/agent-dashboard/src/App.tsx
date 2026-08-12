@@ -1,5 +1,13 @@
 import { useCallback } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { AppShell } from "./components/templates/AppShell";
 import { ChatPage } from "./pages/ChatPage";
 import { ClaudeCodePage } from "./pages/ClaudeCodePage";
@@ -64,15 +72,24 @@ export function App() {
 /**
  * ChatRoute — threads the URL's `:agentId` into ChatPage and turns agent
  * selection into navigation, so each agent's chat is a deep-linkable URL
- * (`/chat/<agentId>`). Keeps the router hooks OUT of ChatPage itself.
+ * (`/chat/<agentId>`). `?continue=<conversationId>` (#480) reopens a persisted
+ * conversation live — the Conversations pages' "Continue" affordance lands
+ * here. Keeps the router hooks OUT of ChatPage itself.
  */
 function ChatRoute() {
   const { agentId } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const selectAgent = useCallback(
     (id: string, opts?: { replace?: boolean }) =>
       navigate(`/chat/${encodeURIComponent(id)}`, opts?.replace ? { replace: true } : undefined),
     [navigate],
   );
-  return <ChatPage routeAgentId={agentId ?? null} onSelectAgent={selectAgent} />;
+  return (
+    <ChatPage
+      routeAgentId={agentId ?? null}
+      onSelectAgent={selectAgent}
+      continueConversationId={searchParams.get("continue")}
+    />
+  );
 }

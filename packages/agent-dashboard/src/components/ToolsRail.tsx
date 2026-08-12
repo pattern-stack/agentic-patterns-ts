@@ -34,11 +34,15 @@ import "./tools-rail.css";
  * - `defaults` — the agent's declared seed scope, shown before the first send.
  * - `viewing` — a past session is being replayed; its run scope was not
  *   captured, so we must NOT guess it from the declared defaults.
+ * - `restored` — a persisted session was CONTINUED (#480): live, but its scope
+ *   was bound server-side before this client existed, so the same "never
+ *   guess" rule applies (optional; absent → false).
  */
 export interface ToolsScope {
   available: boolean;
   committed: boolean;
   viewing: boolean;
+  restored?: boolean;
   defaults: Record<string, unknown> | null;
   bound: Record<string, unknown> | null;
   redacted: string[] | null;
@@ -256,14 +260,22 @@ function ScopeSection({ scope }: { scope: ToolsScope }) {
   // from the declared defaults (that would assert an operator identity the
   // session may not have had). The header chip + panel both hide here, so this
   // is the only honest signal left in the rail.
-  if (scope.viewing) {
+  // A CONTINUED session (#480) is live rather than replayed, but its scope was
+  // bound server-side before this client existed — same rule, its own sentence.
+  if (scope.viewing || scope.restored) {
     return (
       <div className="scope scope--muted">
         <div className="scope__head">
           <span className="scope__title">Scope</span>
-          <span className="scope__tag">not recorded for replays</span>
+          <span className="scope__tag">
+            {scope.viewing ? "not recorded for replays" : "not echoed for restored sessions"}
+          </span>
         </div>
-        <div className="scope__none">This session's run scope wasn't captured for replay.</div>
+        <div className="scope__none">
+          {scope.viewing
+            ? "This session's run scope wasn't captured for replay."
+            : "This session's run scope was bound when it was created — the server owns it."}
+        </div>
       </div>
     );
   }

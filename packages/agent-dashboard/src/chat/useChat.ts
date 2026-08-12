@@ -4,7 +4,10 @@
  * Phase B: this replaces the cockpit's bespoke `askStream`/`lib/api` driver with
  * the dashboard's named-SSE seam (Phase A):
  *   1. `createConversation(agentId)` ONCE per thread — the id is reused for
- *      follow-ups (true conversational memory, server-threaded).
+ *      follow-ups (true conversational memory, server-threaded). `resume()`
+ *      (#480) is the other way in: adopt an already-persisted conversation id
+ *      + its restored transcript and skip the create entirely, so a session
+ *      pulled up from the store keeps going on the SAME thread.
  *   2. `streamMessage(convId, content, signal)` yields decoded `WireFrame`s
  *      (name + data, NO name allowlist — the reducer decides what renders).
  *   3. each event → `toEventLike` → folded into the assistant message's parts
@@ -68,6 +71,23 @@ export interface UseChatResult {
   abort: () => void;
   reset: () => void;
   /**
+   * Adopt an EXISTING (persisted) conversation as this hook's thread (#480) —
+   * the counterpart to the create-on-first-send path: `conversationId` is set
+   * WITHOUT calling `POST /conversations`, so the next `send()` posts straight
+   * to `POST /conversations/:id/messages` and the server rehydrates history +
+   * agent binding from its `ConversationStore`.
+   *
+   * `seed` is the restored transcript (mapped from the stored messages via
+   * `chat/stored-parts.ts`) — it becomes `messages` so the thread reads
+   * continuous instead of starting blank above a live turn.
+   *
+   * `context`/`contextRedacted` stay `null`: the bound scope of a conversation
+   * this browser never created is genuinely unknown here (the create-response
+   * echo is the only honest source), and callers are expected to suppress the
+   * scope chip/panel for a resumed thread rather than render "(no scope)".
+   */
+  resume: (conversationId: string, seed?: ChatMessage[]) => void;
+  /**
    * The raw event stream for the CURRENT (most recent) live turn — reset at
    * the start of every `send()`. Console's trace rail (port-map §4.2.3) feeds
    * this through `eventsToSteps` for the live-turn waterfall/log; the fold
@@ -108,8 +128,19 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
   runOptionsRef.current = runOptions;
   const seq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  // Ids of messages this hook did NOT mint — the restored transcript a
+  // `resume()` seeded (#480), which carries the STORE's message ids. Those ids
+  // share this counter's `m<N>` shape often enough to matter (a store that
+  // numbers its rows would collide immediately), and a duplicate React key
+  // silently drops or duplicates a message row. `nextId` skips anything
+  // already taken instead of trusting the counter alone.
+  const seededIds = useRef<Set<string>>(new Set());
 
-  const nextId = useCallback(() => `m${++seq.current}`, []);
+  const nextId = useCallback(() => {
+    let id = `m${++seq.current}`;
+    while (seededIds.current.has(id)) id = `m${++seq.current}`;
+    return id;
+  }, []);
 
   // Apply a mutation to a specific assistant message by id (immutably).
   const patch = useCallback((mid: string, fn: (m: ChatMessage) => ChatMessage) => {
@@ -207,7 +238,28 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
     setContext(null);
     setContextRedacted(null);
     setScopeIssues(null);
+    seededIds.current = new Set();
     setMessages([]);
+    setStreaming(false);
+    setError(null);
+    setTraceEvents([]);
+    setLastRunId(null);
+  }, []);
+
+  // Same teardown as `reset` (any in-flight turn/create for the OLD thread is
+  // abandoned), then bind the given id + transcript instead of clearing to
+  // empty. Set synchronously on `convIdRef` — a `send()` in the same frame
+  // must already see the adopted id, exactly like the create path's ref.
+  const resume = useCallback((id: string, seed: ChatMessage[] = []) => {
+    abortRef.current?.abort();
+    creatingRef.current = null;
+    convIdRef.current = id;
+    setConversationId(id);
+    setContext(null);
+    setContextRedacted(null);
+    setScopeIssues(null);
+    seededIds.current = new Set(seed.map((m) => m.id));
+    setMessages(seed);
     setStreaming(false);
     setError(null);
     setTraceEvents([]);
@@ -226,6 +278,7 @@ export function useChat(agentId: string | null, runOptions?: UseChatOptions): Us
     respondInput,
     abort,
     reset,
+    resume,
     traceEvents,
     lastRunId,
   };

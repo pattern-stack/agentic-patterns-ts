@@ -10,6 +10,12 @@
  *      parts and maps them onto the chat organism's `Part` union
  *      (`chat/stored-parts.ts`), rendered read-only through the SAME
  *      `ChatPanel` (`onSend` omitted). "New Chat" returns to live.
+ *   2b. Session CONTINUATION (#480) — "Continue" on that replay banner (or the
+ *      `?continue=<id>` deep link the Conversations pages navigate to) hands
+ *      the restored transcript + the durable conversation id to
+ *      `useChat.resume`, so the composer goes live on the SAME thread: sends
+ *      post to `POST /conversations/:id/messages`, which the server serves for
+ *      any persisted id (rehydrating history + agent binding server-side).
  *   3. Trace rail — the collapsible side panel (`components/ConsoleRail.tsx`)
  *      carries tabs alongside the `Tools` tab (`components/ToolsRail.tsx`,
  *      "what it can do"): `Trace` ("what just happened"), rendered via
@@ -211,6 +217,43 @@ function assembleScopeRows(
   return out;
 }
 
+/**
+ * Load one persisted session's transcript (#480 — shared by read-only replay
+ * and "Continue"): `GET /conversations/:id/messages` + one
+ * `GET /messages/:id/parts` per message (the N+1 `ConversationDetailPage`
+ * already accepts — batching is a later server nicety, port-map §10.2),
+ * mapped onto the chat organism's `Part` union (`chat/stored-parts.ts`).
+ * `runId` is the LAST linked run in the session (the most recent turn) — what
+ * the trace rail follows in replay (port-map §4.2.3).
+ */
+async function loadStoredSession(
+  id: string,
+): Promise<{ messages: ChatMessage[]; runId: string | null }> {
+  const msgs = await fetchJSON<ConversationMessage[]>(
+    `/conversations/${encodeURIComponent(id)}/messages`,
+  );
+  const withParts = await Promise.all(
+    msgs.map(async (message) => ({
+      message,
+      parts: await fetchJSON<ConversationMessagePart[]>(
+        `/messages/${encodeURIComponent(message.id)}/parts`,
+      ),
+    })),
+  );
+  const sorted = withParts
+    .slice()
+    .sort((a, b) => Date.parse(a.message.createdAt) - Date.parse(b.message.createdAt));
+  const partsById = new Map(sorted.map(({ message, parts }) => [message.id, parts]));
+  const lastLinked = [...sorted].reverse().find((s) => s.message.runId);
+  return {
+    messages: storedMessagesToChat(
+      sorted.map((s) => s.message),
+      partsById,
+    ),
+    runId: lastLinked?.message.runId ?? null,
+  };
+}
+
 /** #226 — how many Backpack/Scratchpad state frames render in the timeline.
  *  Applied as `data-density` on the chat column; chat.css does the rest
  *  (Off hides `.sd` frames, Writes compacts closed reads/innate frames). */
@@ -228,6 +271,7 @@ const DENSITY_OPTIONS: { value: ScratchpadDensity; label: string; title: string 
 export function ChatPage({
   routeAgentId,
   onSelectAgent,
+  continueConversationId,
 }: {
   /** The agent id from the URL (`/chat/:agentId`) when mounted via ChatRoute.
    *  Absent (bare `<ChatPage />` in tests) → falls back to local selection. */
@@ -235,6 +279,10 @@ export function ChatPage({
   /** Navigate to another agent's chat URL. Presence = "routed" mode; absent →
    *  legacy local-state selection (keeps the tests router-free). */
   onSelectAgent?: (id: string, opts?: { replace?: boolean }) => void;
+  /** `?continue=<conversationId>` from the URL (#480) — a persisted
+   *  conversation to reopen LIVE (transcript restored, composer active), the
+   *  deep link the Conversations pages' "Continue" affordance navigates to. */
+  continueConversationId?: string | null;
 } = {}) {
   // Routed mode: the URL owns the selection. Legacy mode (no `onSelectAgent`):
   // selection is local state, auto-picking the first agent.
@@ -336,6 +384,12 @@ export function ChatPage({
   const [viewingRunId, setViewingRunId] = useState<string | null>(null);
   const [viewingError, setViewingError] = useState<string | null>(null);
   const viewTokenRef = useRef(0);
+  // Continued session (#480): a PERSISTED conversation adopted as the live
+  // thread (`useChat.resume`) rather than replayed read-only. Distinct from
+  // `chat.conversationId != null` alone, which is also true for a conversation
+  // this browser created — the difference matters for scope honesty (the bound
+  // scope of a resumed conversation was never echoed to this client).
+  const [continuedId, setContinuedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -471,9 +525,7 @@ export function ChatPage({
     [chat.messages],
   );
 
-  // GET /conversations/:id/messages + one GET /messages/:id/parts per message
-  // (the N+1 `ConversationDetailPage` already accepts — batching is a later
-  // server nicety, port-map §10.2) -> map onto the chat Part union.
+  // Read-only replay (`loadStoredSession` does the fetching).
   const pickSession = useCallback(async (id: string) => {
     const token = ++viewTokenRef.current;
     setViewingId(id);
@@ -481,32 +533,10 @@ export function ChatPage({
     setViewingRunId(null);
     setViewingError(null);
     try {
-      const msgs = await fetchJSON<ConversationMessage[]>(
-        `/conversations/${encodeURIComponent(id)}/messages`,
-      );
-      const withParts = await Promise.all(
-        msgs.map(async (message) => ({
-          message,
-          parts: await fetchJSON<ConversationMessagePart[]>(
-            `/messages/${encodeURIComponent(message.id)}/parts`,
-          ),
-        })),
-      );
+      const { messages, runId } = await loadStoredSession(id);
       if (token !== viewTokenRef.current) return; // superseded by a newer pick / New Chat
-      const sorted = withParts
-        .slice()
-        .sort((a, b) => Date.parse(a.message.createdAt) - Date.parse(b.message.createdAt));
-      const partsById = new Map(sorted.map(({ message, parts }) => [message.id, parts]));
-      setViewingMessages(
-        storedMessagesToChat(
-          sorted.map((s) => s.message),
-          partsById,
-        ),
-      );
-      // The trace rail follows the LAST linked run in the session (the most
-      // recent turn) — "the current/selected turn's run" (port-map §4.2.3).
-      const lastLinked = [...sorted].reverse().find((s) => s.message.runId);
-      setViewingRunId(lastLinked?.message.runId ?? null);
+      setViewingMessages(messages);
+      setViewingRunId(runId);
     } catch (e) {
       if (token === viewTokenRef.current) {
         setViewingError(e instanceof Error ? e.message : "Failed to load session");
@@ -514,20 +544,71 @@ export function ChatPage({
     }
   }, []);
 
+  /**
+   * Continue a persisted session (#480) — the write counterpart to replay.
+   * Leaves replay mode, hands the restored transcript + the DURABLE
+   * conversation id to `useChat.resume`, and from there the composer is live:
+   * every send posts to `POST /conversations/:id/messages`, which the server
+   * serves for any persisted id (rehydrating history + agent binding), even
+   * after a restart. `seed` short-circuits the refetch when the transcript is
+   * already on screen (the replay banner's Continue button).
+   */
+  const continueSession = useCallback(
+    async (id: string, seed?: ChatMessage[]) => {
+      const token = ++viewTokenRef.current; // invalidates any in-flight pickSession
+      setViewingId(null);
+      setViewingMessages(null);
+      setViewingRunId(null);
+      setViewingError(null);
+      // The scope drafts belong to a NEW conversation; this one is already
+      // bound server-side (and `contextLocked` flips true the moment
+      // `conversationId` lands anyway).
+      setContextText(null);
+      setRowDraft(null);
+      try {
+        const restored = seed ?? (await loadStoredSession(id)).messages;
+        if (token !== viewTokenRef.current) return; // superseded (New Chat / another pick)
+        chat.resume(id, restored);
+        setContinuedId(id);
+      } catch (e) {
+        if (token !== viewTokenRef.current) return;
+        setContinuedId(null);
+        setViewingError(e instanceof Error ? e.message : "Failed to continue session");
+      }
+    },
+    [chat],
+  );
+
   // Returns to live mode. Also the "start fresh" affordance — resets the live
   // conversation too (matches this button's pre-S8 meaning of "New Chat").
   const newChat = useCallback(() => {
-    viewTokenRef.current += 1; // invalidate any in-flight pickSession
+    viewTokenRef.current += 1; // invalidate any in-flight pickSession/continueSession
     setViewingId(null);
     setViewingMessages(null);
     setViewingRunId(null);
     setViewingError(null);
+    setContinuedId(null);
     // Unlocks the scope editor and reseeds it from the (possibly new)
     // agent's defaults — the "New Chat to change scope" affordance (#268).
     setContextText(null);
     setRowDraft(null);
     chat.reset();
   }, [chat]);
+
+  // Deep link (`/chat/:agentId?continue=<conversationId>`, from the
+  // Conversations pages): continue that conversation once the agent selection
+  // has settled (`send` needs an agent id). The ref makes it fire exactly once
+  // per id — `continueSession`'s identity churns every render (it closes over
+  // `chat`), so it can't be an effect dependency.
+  const continueSessionRef = useRef(continueSession);
+  continueSessionRef.current = continueSession;
+  const autoContinuedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!continueConversationId || !selectedId) return;
+    if (autoContinuedRef.current === continueConversationId) return;
+    autoContinuedRef.current = continueConversationId;
+    void continueSessionRef.current(continueConversationId);
+  }, [continueConversationId, selectedId]);
 
   // Routed mode: the URL (`routeAgentId`) is the source of truth for which agent
   // is selected. Sync it into `selectedId`; a bare/unknown `/chat` redirects to
@@ -559,6 +640,10 @@ export function ChatPage({
   }, [routed, selectedId, newChat]);
 
   const viewing = viewingId != null;
+  // A restored thread is LIVE but its bound scope was never echoed to this
+  // client — the chip/panel hide (same rule replay follows) rather than
+  // rendering `chat.context`'s `null` as an authoritative "(no scope)".
+  const continued = !viewing && continuedId != null && chat.conversationId === continuedId;
   const displayMessages = viewing ? (viewingMessages ?? []) : chat.messages;
   const traceSource: TraceRailSource = viewing
     ? { kind: "replay", runId: viewingRunId }
@@ -637,18 +722,52 @@ export function ChatPage({
         onDensity={setDensity}
         sessions={sessions}
         sessionsError={sessionsError}
-        viewingId={viewingId}
+        // The menu's active row follows whichever session is on screen —
+        // replayed OR continued (#480).
+        viewingId={viewingId ?? continuedId}
         onPickSession={pickSession}
         viewing={viewing}
+        continued={continued}
         contextAvailable={contextAvailable}
         scopeForm={scopeForm}
         onOpenConsole={isNarrow ? () => setRailOpen(true) : null}
       />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         {viewing && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              fontSize: T.fz.tiny,
+              color: "var(--mute)",
+            }}
+          >
+            <span>
+              Viewing session <b style={{ color: "var(--ink-2)" }}>{shortId(viewingId)}</b> —
+              read-only. "New Chat" returns to live.
+            </span>
+            {/* #480 — adopt this session as the live thread. The transcript is
+                already loaded, so it's handed straight to `useChat.resume`
+                (no refetch). Disabled until the fetch lands: continuing with a
+                half-loaded transcript would silently drop the visible history
+                from the client's view of the thread. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void continueSession(viewingId, viewingMessages ?? [])}
+              disabled={viewingMessages === null}
+              title="Keep chatting in this conversation — new messages append to it"
+            >
+              Continue
+            </Button>
+          </div>
+        )}
+        {continued && (
           <div style={{ fontSize: T.fz.tiny, color: "var(--mute)" }}>
-            Viewing session <b style={{ color: "var(--ink-2)" }}>{shortId(viewingId)}</b> —
-            read-only. "New Chat" returns to live.
+            Continuing session <b style={{ color: "var(--ink-2)" }}>{shortId(continuedId)}</b> — new
+            messages append to it. "New Chat" starts a fresh one.
           </div>
         )}
         {viewingError && (
@@ -709,14 +828,18 @@ export function ChatPage({
                   available: contextAvailable,
                   // A live conversation exists → the scope is BOUND (even if it
                   // bound to nothing); before that it's still the declared default.
-                  committed: !viewing && chat.conversationId != null,
+                  committed: !viewing && !continued && chat.conversationId != null,
                   // A replayed session's own run scope wasn't captured — the rail
                   // shows an explicit "not recorded" state rather than guessing it
                   // from the declared defaults (which the chip/panel also hide).
                   viewing,
+                  // A CONTINUED session (#480) is live, but its scope was bound
+                  // server-side before this client existed — same "never guess"
+                  // rule, different sentence (see `ToolsRail`).
+                  restored: continued,
                   defaults: selected?.instantiation?.defaults ?? null,
-                  bound: viewing ? null : chat.context,
-                  redacted: viewing ? null : chat.contextRedacted,
+                  bound: viewing || continued ? null : chat.context,
+                  redacted: viewing || continued ? null : chat.contextRedacted,
                 }}
               />
             ) : railTab === "trace" ? (
@@ -808,6 +931,10 @@ interface HeaderProps {
   viewingId: string | null;
   onPickSession: (id: string) => void;
   viewing: boolean;
+  /** The live thread is a CONTINUED persisted session (#480) — its bound scope
+   *  was never echoed to this client, so the chip + editor hide exactly as
+   *  they do for a replay (never a guessed "(no scope)"). */
+  continued: boolean;
   /** Whether the selected agent's registration can compose a delivered
    *  instance (#268) — gates the scope editor + chip's very existence. */
   contextAvailable: boolean;
@@ -841,6 +968,7 @@ function Header({
   viewingId,
   onPickSession,
   viewing,
+  continued,
   contextAvailable,
   scopeForm,
   onOpenConsole,
@@ -875,10 +1003,12 @@ function Header({
           New Chat
         </Button>
         <div style={{ flex: 1 }} />
-        {/* Scope chip (#268) — hidden for hook-less agents and while VIEWING a
-            replayed session (its scope would be the wrong conversation's).
-            Shown only once the live conversation is bound. */}
-        {contextAvailable && !viewing && conversationId && (
+        {/* Scope chip (#268) — hidden for hook-less agents, while VIEWING a
+            replayed session (its scope would be the wrong conversation's), and
+            for a CONTINUED session (#480 — the server bound its scope; this
+            client never saw the echo). Shown only once the live conversation
+            this browser created is bound. */}
+        {contextAvailable && !viewing && !continued && conversationId && (
           <ScopeChip context={scopeForm.boundContext} redacted={scopeForm.boundContextRedacted} />
         )}
         {exchangeCount > 0 && (
@@ -934,7 +1064,7 @@ function Header({
           exchangeCount={exchangeCount}
           disabled={streaming || viewing}
         />
-        {contextAvailable && !viewing && <ScopeContextPanel {...scopeForm} />}
+        {contextAvailable && !viewing && !continued && <ScopeContextPanel {...scopeForm} />}
       </div>
       {loadError && (
         <div style={{ fontSize: T.fz.small, color: "var(--err)" }}>

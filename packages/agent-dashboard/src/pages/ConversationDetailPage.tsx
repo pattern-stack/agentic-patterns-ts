@@ -9,10 +9,21 @@
  *   tool_result        → collapsed <pre> of content / metadata
  *   other              → raw JSON fallback
  * Response messages show an input/output token pill.
+ *
+ * "Continue conversation" (#480) reopens this stored thread LIVE in the chat
+ * surface (`/chat/<agentId>?continue=<id>`), where the transcript is restored
+ * and the composer posts to `POST /conversations/:id/messages` — the server
+ * rehydrates history + agent binding for any persisted id. The route needs an
+ * AGENT id and the stored conversation only knows its agent NAME, so the
+ * registered agents are resolved by name (the same `agentName` join
+ * `lib/sessions.ts sessionsForAgent` already uses); no match (agent not
+ * registered on this server, or `GET /agents` failed) leaves the action
+ * disabled with the reason in its tooltip rather than linking somewhere broken.
  */
 
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { type AgentSummary, listAgents } from "../api/chat-client";
 import { fetchJSON } from "../api/client";
 import type {
   ConversationDetail,
@@ -20,6 +31,7 @@ import type {
   ConversationMessagePart,
 } from "../api/types";
 import { Badge, type BadgeTone } from "../components/atoms/Badge";
+import { Button } from "../components/atoms/Button";
 import { Card } from "../components/atoms/Card";
 import { AsyncState } from "../components/kit/AsyncState";
 import { JsonBlock } from "../components/kit/JsonBlock";
@@ -33,6 +45,26 @@ export function ConversationDetailPage() {
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [messages, setMessages] = useState<MessageWithParts[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Registered agents, purely to resolve `detail.agentName` -> the agent id the
+  // chat route needs (#480). A failure here must NOT fail the page — the
+  // transcript is still perfectly readable, the Continue action just can't
+  // aim anywhere, so it stays disabled.
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let cancelled = false;
+    listAgents()
+      .then((list) => {
+        if (!cancelled) setAgents(list);
+      })
+      .catch(() => {
+        if (!cancelled) setAgents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -73,10 +105,11 @@ export function ConversationDetailPage() {
   }
 
   const duration = formatDuration(detail.startedAt, detail.completedAt);
+  const agent = agents.find((a) => a.name === detail.agentName) ?? null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <Link
           to="/conversations"
           style={{ color: "var(--mute)", fontSize: 13, textDecoration: "none" }}
@@ -88,6 +121,24 @@ export function ConversationDetailPage() {
             {detail.id.slice(0, 8)}
           </span>
         </h1>
+        <div style={{ flex: 1 }} />
+        <Button
+          size="sm"
+          disabled={!agent}
+          title={
+            agent
+              ? "Reopen this conversation in Chat and keep going"
+              : `Agent "${detail.agentName}" isn't registered on this server — nothing to continue with`
+          }
+          onClick={() => {
+            if (!agent) return;
+            navigate(
+              `/chat/${encodeURIComponent(agent.id)}?continue=${encodeURIComponent(detail.id)}`,
+            );
+          }}
+        >
+          Continue conversation
+        </Button>
       </div>
 
       <Card>
