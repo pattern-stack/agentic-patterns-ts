@@ -148,6 +148,17 @@ export interface AgentRegistration {
    * show grading history and launch runs with set + target pre-bound.
    */
   readonly evals?: ReadonlyArray<AgentEvalRef>;
+  /**
+   * Canned one-click first messages (#480 follow-on): the dashboard's Actions
+   * page renders one Run button per entry — clicking sends `prompt` as the
+   * first message of a fresh conversation on this agent (default scope).
+   */
+  readonly quickActions?: ReadonlyArray<{
+    id: string;
+    label: string;
+    description?: string;
+    prompt: string;
+  }>;
   readonly runner: Pick<RunnerProtocol, "run" | "stream"> & {
     run(agent: AgentLike, message: string, options?: Record<string, unknown>): Promise<RunResult>;
   };

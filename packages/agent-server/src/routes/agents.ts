@@ -92,6 +92,12 @@ export function agentRoutes(agents: AgentRegistration[]): Hono {
           schema: scopeJsonSchema(a),
           presets: a.scope?.presets ?? null,
         },
+        quick_actions: (a.quickActions ?? []).map((q) => ({
+          id: q.id,
+          label: q.label,
+          description: q.description ?? null,
+          prompt: q.prompt,
+        })),
       };
     });
     return c.json(summaries);

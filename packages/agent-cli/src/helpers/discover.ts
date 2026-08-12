@@ -128,6 +128,17 @@ export interface DiscoveredAgent {
       | ((context?: Record<string, unknown>) => Record<string, string>);
     readonly budgetChars?: number;
   };
+  /**
+   * Canned one-click first messages from the registration wrapper — threaded
+   * into the server's AgentRegistration so the dashboard's Actions page can
+   * render Run buttons. Same all-or-nothing validation as the fields above.
+   */
+  readonly quickActions?: ReadonlyArray<{
+    id: string;
+    label: string;
+    description?: string;
+    prompt: string;
+  }>;
 }
 
 interface RegistrationWrapper {
@@ -320,6 +331,20 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
     const evals = wrapper ? normalizeEvalRefs(wrapper.evals) : undefined;
     // Same all-or-nothing rule as `scope` above (#444).
     const memory = wrapper && isMemoryDeclShape(wrapper.memory) ? wrapper.memory : undefined;
+    // Same all-or-nothing rule: every entry must carry string id/label/prompt.
+    const rawQuick = wrapper ? (wrapper as { quickActions?: unknown }).quickActions : undefined;
+    const quickActions =
+      Array.isArray(rawQuick) &&
+      rawQuick.every(
+        (q) =>
+          typeof q === "object" &&
+          q !== null &&
+          typeof (q as { id?: unknown }).id === "string" &&
+          typeof (q as { label?: unknown }).label === "string" &&
+          typeof (q as { prompt?: unknown }).prompt === "string",
+      )
+        ? (rawQuick as DiscoveredAgent["quickActions"])
+        : undefined;
 
     if (seenIds.has(id)) continue; // e.g. a default + named export of the same agent
     seenIds.add(id);
@@ -335,6 +360,7 @@ export async function loadAgentsFromFile(file: string, root: string): Promise<Di
       contextRedactKeys,
       evals,
       memory,
+      quickActions,
     });
   }
 
