@@ -13,7 +13,7 @@ That has been proven end to end — but not entirely inside this framework. This
 the line precisely, because the failure mode when you get it wrong is an agent that answers
 plausibly while remembering nothing.
 
-## What ships
+## What ships — SHIPPED
 
 **`Conversation`** — a live multi-turn conversation over an agent and a runner. It holds
 exchange history, working state, aggregate token usage, and an opaque `host` payload fixed
@@ -38,9 +38,10 @@ implementation. Pass a store and each exchange is persisted as it completes.
 **History injection** — `new Conversation(agent, runner, { history })` seeds a conversation
 with prior exchanges. This is the hook rehydration hangs off.
 
-## Where the framework stops
+## Where the framework stops — DESIGNED (M3)
 
-Two gaps, both real, both worth knowing before you design around them.
+Two gaps, both real, both worth knowing before you design around them. The interim
+answer to each is a RECIPE: app code you write today, deleted when the framework absorbs it.
 
 ### 1. `runFromTrigger` has no conversation
 
@@ -65,26 +66,14 @@ M3's `AgencyHost` is where that lands.
 objects. There is no shipped helper that turns the former into the latter — hosts write
 that mapping themselves.
 
-The practical recipe for threading a reply into an existing conversation today:
+The shape of it: load the stored messages, pair them back into `Exchange` objects, and seed
+a new `Conversation` with that history plus the same `host` the original run used. From
+there `send()` carries the full thread.
 
-```ts
-// 1. Load what was said before, from wherever you persisted it.
-const stored = await store.getMessages(conversationId);
-
-// 2. Rebuild exchanges. This mapping is yours — pair user/assistant turns
-//    in whatever way your schema guarantees.
-const history: Exchange[] = pairIntoExchanges(stored);
-
-// 3. Seed a conversation with it. Now send() carries the full history.
-const conversation = new Conversation(agent, runner, {
-  id: conversationId,
-  store,
-  history,
-  host,        // the same parsed scope the original run used
-});
-
-const reply = await conversation.send(inboundMessage);
-```
+**The full working recipe is
+[`examples/ambient-morning-brief.ts`](https://github.com/pattern-stack/agentic-patterns-ts/blob/main/examples/ambient-morning-brief.ts)** —
+a runnable end-to-end demo of the schedule → brief → reply loop, including the
+rehydration mapping. Copy it; delete it when the framework absorbs this (M3).
 
 Keep `host` consistent across rehydration. A conversation that resumes with a different
 scope is a quieter bug than one that fails to resume at all.
