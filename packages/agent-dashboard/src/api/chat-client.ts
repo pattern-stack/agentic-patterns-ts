@@ -8,10 +8,35 @@
 
 import type { WireFrame } from "./sse-events";
 
+/**
+ * One canned prompt template a registration ships (declared as `quickActions`,
+ * served under the `quick_actions` wire key on `GET /agents`). The Actions page
+ * renders these as one-click runs: navigate to the agent's chat and send
+ * `prompt` as the first message of a NEW conversation.
+ */
+export interface QuickAction {
+  id: string;
+  label: string;
+  description: string | null;
+  prompt: string;
+}
+
 export interface AgentSummary {
   id: string;
   name: string;
   description: string;
+  /**
+   * The registration's declared quick actions — `[]` when it declares none,
+   * ABSENT on a server that predates the feature (the dashboard is deployed
+   * independently of the server it talks to, the `instantiation` precedent
+   * above). Read through `quickActionsOf` so both cases and either casing
+   * degrade to "this agent has no actions" rather than a crash.
+   */
+  quick_actions?: QuickAction[];
+  /** Tolerated camelCase alias — the registration-side name is `quickActions`,
+   *  so a server that ever serializes it verbatim still works (the tolerant
+   *  snake/camel accessor style `chat/stored-parts.ts` established). */
+  quickActions?: QuickAction[];
   /**
    * Delivered-instance capability (#268, widened #308) — same sub-shape `GET
    * /agents/:id/composition` carries (`api/composition.ts`'s
@@ -54,6 +79,17 @@ export interface ConversationCreated {
   context?: Record<string, unknown> | null;
   /** Top-level context keys the server redacted, when any were (#268). */
   context_redacted?: string[];
+}
+
+/** The agent's quick actions, from either wire key, never `undefined`. Rows
+ *  missing the fields the Actions page needs (`id`/`label`/`prompt`) are
+ *  dropped rather than rendered as a run button that would send nothing. */
+export function quickActionsOf(agent: {
+  quick_actions?: QuickAction[];
+  quickActions?: QuickAction[];
+}): QuickAction[] {
+  const raw = agent.quick_actions ?? agent.quickActions ?? [];
+  return raw.filter((a) => a && typeof a.id === "string" && !!a.label && !!a.prompt);
 }
 
 /** List the agents registered on the server. */

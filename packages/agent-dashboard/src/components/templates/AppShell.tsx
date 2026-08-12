@@ -27,6 +27,7 @@ export const navGroups: {
     items: [
       { to: "/", label: "Dashboard", end: true },
       { to: "/chat", label: "Chat" },
+      { to: "/actions", label: "Actions" },
       { to: "/tools", label: "Tools" },
       { to: "/tokens", label: "Tokens" },
       { to: "/live", label: "Live" },

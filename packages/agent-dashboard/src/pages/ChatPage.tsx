@@ -16,6 +16,9 @@
  *      `useChat.resume`, so the composer goes live on the SAME thread: sends
  *      post to `POST /conversations/:id/messages`, which the server serves for
  *      any persisted id (rehydrating history + agent binding server-side).
+ *   2c. Quick actions (`/actions` Run) — `autoSendPrompt` arrives via router
+ *      state and is sent ONCE as the first message of a NEW conversation
+ *      (ordinary create-on-first-send, registration defaults intact).
  *   3. Trace rail — the collapsible side panel (`components/ConsoleRail.tsx`)
  *      carries tabs alongside the `Tools` tab (`components/ToolsRail.tsx`,
  *      "what it can do"): `Trace` ("what just happened"), rendered via
@@ -272,6 +275,7 @@ export function ChatPage({
   routeAgentId,
   onSelectAgent,
   continueConversationId,
+  autoSendPrompt,
 }: {
   /** The agent id from the URL (`/chat/:agentId`) when mounted via ChatRoute.
    *  Absent (bare `<ChatPage />` in tests) → falls back to local selection. */
@@ -283,6 +287,11 @@ export function ChatPage({
    *  conversation to reopen LIVE (transcript restored, composer active), the
    *  deep link the Conversations pages' "Continue" affordance navigates to. */
   continueConversationId?: string | null;
+  /** A quick action's prompt (`/actions` Run), handed over in router state by
+   *  ChatRoute. Sent ONCE, as the first message of a NEW conversation, as soon
+   *  as the agent is bound — the ordinary create-on-first-send path, so the
+   *  registration's default scope binds exactly as for a typed message. */
+  autoSendPrompt?: string | null;
 } = {}) {
   // Routed mode: the URL owns the selection. Legacy mode (no `onSelectAgent`):
   // selection is local state, auto-picking the first agent.
@@ -609,6 +618,37 @@ export function ChatPage({
     autoContinuedRef.current = continueConversationId;
     void continueSessionRef.current(continueConversationId);
   }, [continueConversationId, selectedId]);
+
+  /**
+   * Quick action hand-off (`/actions` Run) — send the canned prompt ONCE, as
+   * the first message of a NEW conversation, as soon as an agent is bound.
+   *
+   * Exactly-once has two halves: ChatRoute burns the router state so the
+   * prompt can't arrive twice, and `autoSentRef` here so a re-render (or the
+   * `streaming` dep below settling) can't re-fire the one that did arrive.
+   *
+   * A thread already in progress is reset first — the user asked for THIS
+   * action from a page that promises a fresh run, and silently appending it to
+   * an unrelated conversation (or dropping it) would both be worse. A turn
+   * that is mid-stream defers instead: the effect re-runs when `streaming`
+   * flips false, so the click still lands rather than being swallowed.
+   */
+  const liveRef = useRef({ send: chat.send, hasConversation: chat.conversationId != null });
+  liveRef.current = { send: chat.send, hasConversation: chat.conversationId != null };
+  const newChatRef = useRef(newChat);
+  newChatRef.current = newChat;
+  const autoSentRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoSendPrompt || !selectedId) return;
+    if (autoSentRef.current === autoSendPrompt) return;
+    if (chat.streaming) return; // defer — this effect re-runs when it settles
+    autoSentRef.current = autoSendPrompt;
+    // `reset` clears `convIdRef` synchronously, so the `send` below still
+    // takes the create-a-new-conversation path (and its functional
+    // `setMessages` lands after the reset's clear, in the same batch).
+    if (liveRef.current.hasConversation) newChatRef.current();
+    void liveRef.current.send(autoSendPrompt);
+  }, [autoSendPrompt, selectedId, chat.streaming]);
 
   // Routed mode: the URL (`routeAgentId`) is the source of truth for which agent
   // is selected. Sync it into `selectedId`; a bare/unknown `/chat` redirects to

@@ -9,6 +9,8 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { AppShell } from "./components/templates/AppShell";
+import { useAutoSendHandoff } from "./hooks/useAutoSendHandoff";
+import { ActionsPage } from "./pages/ActionsPage";
 import { ChatPage } from "./pages/ChatPage";
 import { ClaudeCodePage } from "./pages/ClaudeCodePage";
 import { ConversationDetailPage } from "./pages/ConversationDetailPage";
@@ -47,6 +49,8 @@ export function App() {
               `/chat` (no agent) redirects to the first agent inside ChatPage. */}
           <Route path="/chat" element={<ChatRoute />} />
           <Route path="/chat/:agentId" element={<ChatRoute />} />
+          {/* Quick actions — canned prompt templates, one click into a live run. */}
+          <Route path="/actions" element={<ActionsPage />} />
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tokens" element={<TokensPage />} />
           <Route path="/live" element={<LivePage />} />
@@ -85,11 +89,18 @@ function ChatRoute() {
       navigate(`/chat/${encodeURIComponent(id)}`, opts?.replace ? { replace: true } : undefined),
     [navigate],
   );
+
+  // Quick-action hand-off (`/actions` Run) — arrives in router state and is
+  // burned on arrival, so a refresh or Back can't re-run the agent
+  // (`hooks/useAutoSendHandoff.ts` documents + tests that guarantee).
+  const autoSend = useAutoSendHandoff();
+
   return (
     <ChatPage
       routeAgentId={agentId ?? null}
       onSelectAgent={selectAgent}
       continueConversationId={searchParams.get("continue")}
+      autoSendPrompt={autoSend}
     />
   );
 }
