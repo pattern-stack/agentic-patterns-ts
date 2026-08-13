@@ -12,8 +12,12 @@
  * distinguishes a resumable conversation from an unresumable one.
  */
 
-import type { AgentEvent, RunOptions } from "@agentic-patterns/runtime";
-import { AgentEventBus, InMemoryConversationStore, createEvent } from "@agentic-patterns/runtime";
+import type { AgentEvent, RunOptions } from "@pattern-stack/agentic-runtime";
+import {
+  AgentEventBus,
+  InMemoryConversationStore,
+  createEvent,
+} from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -327,5 +331,71 @@ describe("#480 — scope is re-supplied on resume, never persisted", () => {
     const res = await h.send(id, { content: "after restart", scope: { tenant: 42 } });
     expect(res.status).toBe(400);
     expect(((await h.json(res)) as { error: string }).error).toMatch(/scope validation failed/);
+  });
+});
+
+describe("#480 — concurrent resumes of the same id", () => {
+  it("builds ONE conversation, not one per racing request", async () => {
+    const h = harness();
+    const { id } = (await h.json(await h.create())) as { id: string };
+    await h.send(id, { content: "first" });
+
+    h.restart();
+
+    // Both requests observe the map-miss before either resume completes.
+    // Without the in-flight latch each builds its own `Conversation` for the
+    // same durable row, and the per-entry 409 guard can't see the other.
+    const [a, b] = await Promise.all([
+      h.send(id, { content: "racer A" }),
+      h.send(id, { content: "racer B" }),
+    ]);
+
+    // Exactly one entry — a second `Conversation` over the same row is the
+    // corruption vector, not merely a lost update.
+    expect(h.conversations.size).toBe(1);
+
+    // One turn wins; the other is refused by the 409 guard rather than
+    // streaming concurrently into the same row.
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([200, 409]);
+  });
+
+  it("keeps stored messages strictly request/response paired under a race", async () => {
+    const h = harness();
+    const { id } = (await h.json(await h.create())) as { id: string };
+    await h.send(id, { content: "first" });
+
+    h.restart();
+
+    await Promise.all([h.send(id, { content: "racer A" }), h.send(id, { content: "racer B" })]);
+
+    // Interleaved persistence would land request,request,response,response —
+    // which `exchangesFromMessages` would then pair ACROSS turns, silently
+    // corrupting replayed history.
+    const kinds = (await h.store.getMessages(id)).map((m) => m.kind);
+    for (let i = 0; i < kinds.length; i += 2) {
+      expect([kinds[i], kinds[i + 1]]).toEqual(["request", "response"]);
+    }
+    expect(await h.store.listConversations()).toHaveLength(1);
+  });
+
+  it("a later resume still sees a clean, correctly paired history", async () => {
+    const h = harness();
+    const { id } = (await h.json(await h.create())) as { id: string };
+    await h.send(id, { content: "first" });
+
+    h.restart();
+    await Promise.all([h.send(id, { content: "racer A" }), h.send(id, { content: "racer B" })]);
+
+    h.restart();
+    await h.send(id, { content: "third" });
+
+    const history = h.runner.seen.at(-1)?.messageHistory ?? [];
+    // Alternation holds: no two consecutive user turns reach the provider.
+    for (let i = 0; i < history.length; i += 2) {
+      expect(history[i]?.kind).toBe("request");
+      expect(history[i + 1]?.kind).toBe("response");
+    }
+    expect(history[0]?.parts[0]).toMatchObject({ type: "user_prompt", content: "first" });
   });
 });

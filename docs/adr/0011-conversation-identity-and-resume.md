@@ -46,7 +46,11 @@ The reported symptom also included conversations "fragmenting" into one row per 
 
 **D6 — Degrade loudly, never silently.** A third-party store that ignores the supplied id still persists coherently under whatever it returned, but warns that the conversation is not resumable. Silence is how this class of bug stayed invisible for as long as it did.
 
-**D7 — Drop an unpaired trailing request when rebuilding.** A turn whose request landed but whose response never did is not replayable: feeding it back would send two consecutive user turns to the provider, which several reject outright. Exchange numbers are re-derived densely so the drop leaves no hole.
+**D7 — One resume per id at a time.** Concurrent requests for the same non-resident conversation are collapsed onto a single rebuild. Two live `Conversation` objects over one durable row is worse than a lost update: each holds its own history, and their interleaved writes land as `request,request,response,response`, which D8's pairing then reads *across* turns — corrupting replayed history silently. Sharing one entry also restores the `activeTurn` 409 guard, which is per-entry and therefore inert when each request holds a different entry. This serializes one process; two instances over one store still need store-level locking, which is out of scope here.
+
+**D7a — The 409 guard claims its latch synchronously.** The check and the set previously straddled `streamSSE` — tested in the route, assigned inside the async callback — so two requests could both observe no active turn and both stream. The latch is now claimed before the callback can run, and released if `streamSSE` throws before ever invoking it.
+
+**D8 — Drop an unpaired trailing request when rebuilding.** A turn whose request landed but whose response never did is not replayable: feeding it back would send two consecutive user turns to the provider, which several reject outright. Exchange numbers are re-derived densely so the drop leaves no hole.
 
 ## Consequences
 

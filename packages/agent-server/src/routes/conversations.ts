@@ -88,6 +88,11 @@ export interface ConversationEntry {
   recallAssembled?: boolean;
 }
 
+/** The result of attempting to rebuild a conversation from the store (#480). */
+type ResumeOutcome =
+  | { ok: true; entry: ConversationEntry }
+  | { ok: false; status: 400 | 404 | 409 | 502; body: Record<string, unknown> };
+
 export function conversationRoutes(
   agents: AgentRegistration[],
   conversations: Map<string, ConversationEntry>,
@@ -97,6 +102,13 @@ export function conversationRoutes(
   runStore?: RunStore,
 ): Hono {
   const app = new Hono();
+
+  /**
+   * Resumes currently being built, keyed by conversation id — the dedupe latch
+   * for `resumeConversation`. An entry lives only for the duration of one
+   * rebuild; the map is empty whenever nothing is mid-resume.
+   */
+  const resumesInFlight = new Map<string, Promise<ResumeOutcome>>();
 
   // POST /conversations — create a new conversation
   app.post("/conversations", async (c) => {
@@ -383,13 +395,40 @@ export function conversationRoutes(
    * turn-1 recall latch, which a resumed conversation deliberately re-arms so
    * memory is re-queried against the resuming message.
    */
-  async function resumeConversation(
-    convId: string,
-    rawScope: unknown,
-  ): Promise<
-    | { ok: true; entry: ConversationEntry }
-    | { ok: false; status: 400 | 404 | 409 | 502; body: Record<string, unknown> }
-  > {
+  async function resumeConversation(convId: string, rawScope: unknown): Promise<ResumeOutcome> {
+    // Collapse concurrent resumes of the SAME id onto one attempt. Without
+    // this, two requests that both observe the map-miss each run the whole
+    // pipeline (`bindRegistration` and `getMessages` are both async gaps) and
+    // each construct an independent `Conversation` for the same durable row.
+    // Two live objects over one row is worse than a lost update: each holds
+    // its own `_history`, and their interleaved `_persistExchange` writes can
+    // land as `request,request,response,response`, which
+    // `exchangesFromMessages` then pairs ACROSS turns — silently corrupting
+    // replayed history rather than failing. Sharing one entry also restores
+    // the `activeTurn` 409 guard below, which is per-entry and therefore
+    // useless when each request holds a different entry.
+    //
+    // The get/set pair runs before the first `await`, so it is atomic under
+    // the single-threaded event loop. Only the request that CREATED the
+    // promise clears the latch; late joiners return early and never reach the
+    // `finally`.
+    //
+    // Scope: this serializes one process. Two server instances over one store
+    // (no sticky routing) can still each hold a live conversation for the same
+    // row — that needs store-level locking and is out of scope here.
+    const inFlight = resumesInFlight.get(convId);
+    if (inFlight) return inFlight;
+
+    const attempt = performResume(convId, rawScope);
+    resumesInFlight.set(convId, attempt);
+    try {
+      return await attempt;
+    } finally {
+      resumesInFlight.delete(convId);
+    }
+  }
+
+  async function performResume(convId: string, rawScope: unknown): Promise<ResumeOutcome> {
     // No persistence configured → the in-memory map really was the whole
     // world, and an unknown id is simply unknown (the pre-#480 answer).
     if (!store) {
@@ -528,274 +567,297 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
-    // 409 concurrency guard (#341): one turn at a time per conversation —
-    // `entry.activeTurn` is set for the duration of the streamSSE callback
-    // below and cleared in its `finally`. This also keeps `activeTurn`
-    // singular/unambiguous for `POST …/cancel`, which addresses "the" active
-    // turn without needing a run id.
+    // 409 concurrency guard (#341): one turn at a time per conversation.
+    //
+    // The check and the set must sit in ONE synchronous slice. They used to
+    // straddle `streamSSE` — tested here, assigned inside the (async)
+    // callback — so two requests could both read `activeTurn === undefined`
+    // and both stream, which is precisely the interleaved-persistence
+    // corruption the resume dedupe above also guards against. Claiming the
+    // latch here, before the callback can run, makes the guard do what its
+    // name says. Cleared in the callback's `finally` (and below, if
+    // `streamSSE` itself throws before ever invoking the callback — otherwise
+    // the conversation would 409 forever).
     if (entry.activeTurn) {
       return c.json({ error: "a turn is already streaming for this conversation" }, 409);
     }
+    // #341: one AbortController per turn, shared by the explicit cancel
+    // route and the disconnect-hardening `onAbort` wiring below — both
+    // routes converge on the same teardown.
+    const controller = new AbortController();
+    const activeTurn = { controller, startedAt: Date.now() };
+    entry.activeTurn = activeTurn;
+    const claimedEntry = entry;
 
     // SSE streaming response. We pass the server's shared eventBus so
     // emitted events reach every attached exporter (collector, SSE
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
-    return streamSSE(c, async (stream) => {
-      // #341: one AbortController per turn, shared by the explicit cancel
-      // route and the disconnect-hardening `onAbort` wiring below — both
-      // routes converge on the same teardown.
-      const controller = new AbortController();
-      entry.activeTurn = { controller, startedAt: Date.now() };
-
-      // Turn-1 recall (#444, ADR-0007 D8a — pinned ordering: instantiate →
-      // bind → FIRST user message → assemble → render). Assembled exactly
-      // once per conversation, HERE — inside the turn that WON the 409 guard
-      // and in the same synchronous slice that set `activeTurn` (Gate 2.5
-      // B1): a concurrent first message can neither double-assemble nor
-      // stream ahead with a recall-less bag while the winner is mid-await.
-      // This is where the first user text exists to serve as the search
-      // query. Best-effort by design: a failed assembly logs and the turn
-      // streams without recall (the toolbox surface still works); an EMPTY
-      // block sets nothing, keeping rendering byte-identical to the
-      // no-memory case.
-      if (entry.memory && !entry.recallAssembled) {
-        entry.recallAssembled = true;
-        try {
-          const recall = await assembleRecall(entry.memory.store, entry.memory.scope, {
-            query: content,
-            ...(entry.memory.budgetChars !== undefined
-              ? { budgetChars: entry.memory.budgetChars }
-              : {}),
-          });
-          if (recall.block.length > 0 && entry.host) {
-            entry.host.recall = recall.block;
-          }
-          // Emission is ROUTE-owned (assembleRecall's `emit` deliberately
-          // unused): ONE event, published on the shared bus AND written onto
-          // this turn's SSE stream so the chat surface watches recall arrive.
-          // traceId = the conversation id — the runner mints its run ids only
-          // after streaming starts, so a pre-stream host event cannot share
-          // them; grouping by conversation beats an unjoinable fresh uuid.
-          const recallEvent = createEvent("agent.memory.recall", {
-            traceId: convId,
-            runId: crypto.randomUUID(),
-            scope: entry.memory.scope,
-            count: recall.count,
-            chars: recall.chars,
-            budgetChars: entry.memory.budgetChars ?? DEFAULT_RECALL_BUDGET_CHARS,
-            truncated: recall.truncated,
-            preview: recall.block.slice(0, 512),
-          });
+    try {
+      return streamSSE(c, async (stream) => {
+        // Turn-1 recall (#444, ADR-0007 D8a — pinned ordering: instantiate →
+        // bind → FIRST user message → assemble → render). Assembled exactly
+        // once per conversation, HERE — inside the turn that WON the 409 guard
+        // and in the same synchronous slice that set `activeTurn` (Gate 2.5
+        // B1): a concurrent first message can neither double-assemble nor
+        // stream ahead with a recall-less bag while the winner is mid-await.
+        // This is where the first user text exists to serve as the search
+        // query. Best-effort by design: a failed assembly logs and the turn
+        // streams without recall (the toolbox surface still works); an EMPTY
+        // block sets nothing, keeping rendering byte-identical to the
+        // no-memory case.
+        if (claimedEntry.memory && !claimedEntry.recallAssembled) {
+          claimedEntry.recallAssembled = true;
           try {
-            await eventBus.publish(recallEvent);
+            const recall = await assembleRecall(
+              claimedEntry.memory.store,
+              claimedEntry.memory.scope,
+              {
+                query: content,
+                ...(claimedEntry.memory.budgetChars !== undefined
+                  ? { budgetChars: claimedEntry.memory.budgetChars }
+                  : {}),
+              },
+            );
+            if (recall.block.length > 0 && claimedEntry.host) {
+              claimedEntry.host.recall = recall.block;
+            }
+            // Emission is ROUTE-owned (assembleRecall's `emit` deliberately
+            // unused): ONE event, published on the shared bus AND written onto
+            // this turn's SSE stream so the chat surface watches recall arrive.
+            // traceId = the conversation id — the runner mints its run ids only
+            // after streaming starts, so a pre-stream host event cannot share
+            // them; grouping by conversation beats an unjoinable fresh uuid.
+            const recallEvent = createEvent("agent.memory.recall", {
+              traceId: convId,
+              runId: crypto.randomUUID(),
+              scope: claimedEntry.memory.scope,
+              count: recall.count,
+              chars: recall.chars,
+              budgetChars: claimedEntry.memory.budgetChars ?? DEFAULT_RECALL_BUDGET_CHARS,
+              truncated: recall.truncated,
+              preview: recall.block.slice(0, 512),
+            });
+            try {
+              await eventBus.publish(recallEvent);
+            } catch (err) {
+              console.error("conversations: agent.memory.recall publish failed:", err);
+            }
+            const frame = agentEventToSSE(recallEvent);
+            if (frame) await stream.writeSSE(frame);
           } catch (err) {
-            console.error("conversations: agent.memory.recall publish failed:", err);
-          }
-          const frame = agentEventToSSE(recallEvent);
-          if (frame) await stream.writeSSE(frame);
-        } catch (err) {
-          console.error(`conversations: recall assembly failed for ${convId}:`, err);
-        }
-      }
-
-      // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
-      // `bus.publish`, so the runner generator (which this loop drains) is
-      // parked and can't yield the prompt itself. The gate instead PUBLISHES
-      // an `agent.input.request` on the bus; we surface it onto THIS turn's
-      // stream, correlated by traceId so a concurrent conversation's prompt
-      // never bleeds in. The client answers via `POST /conversations/:id/input`
-      // (below), which resolves the registry and unblocks the gate.
-      let turnTraceId: string | undefined;
-      // The turn's TOP-LEVEL run id — the id `RunStoreExporter` keys the run
-      // row by, i.e. the FIRST `agent.message.start`'s runId (the conversation
-      // wrapper stamps its own runId on `conversation.start`, which never gets
-      // a row; nested sub-agent runs carry their own). Emitted on the `done`
-      // frame so the client can link straight to this turn's persisted trace
-      // (`/run?run=<id>`) without waiting for the session store to round-trip.
-      let turnRunId: string | undefined;
-      // The runId off the FIRST event this turn observes at all (conversation
-      // wrapper's own runId, since `conversation.start` always arrives first —
-      // :393 below). Used only to give a synthesized `agent.error` bus publish
-      // a runId to key on when the turn never reaches `agent.message.start`
-      // (pre-token failure ⇒ `turnRunId` stays undefined). Exporters must
-      // tolerate this runId having no run row.
-      let turnBusRunId: string | undefined;
-      const pendingForTurn = new Set<string>();
-      const onInputRequest = async (ev: BaseEvent): Promise<void> => {
-        const e = ev as AgentEvent;
-        if (e.type !== "agent.input.request") return;
-        if (turnTraceId !== undefined && e.traceId !== turnTraceId) return;
-        pendingForTurn.add(e.correlationId);
-        const msg = agentEventToSSE(e);
-        // The runner is blocked here, so no concurrent writeSSE races this.
-        if (msg) await stream.writeSSE(msg);
-      };
-      eventBus.subscribe("agent.input.request", onInputRequest);
-
-      // #341: one teardown function, two triggers — client disconnect
-      // (`stream.onAbort`) and an explicit `POST …/cancel` (the controller's
-      // own "abort" event, fired by that route calling `.abort()`). Denying
-      // pending inputs HERE (not just in `finally`, below) is what actually
-      // fixes the disconnect hang: a gate-blocked run is parked inside
-      // `bus.publish`, so the drain loop this `try` block runs never settles
-      // on its own — nothing else would ever reach the `finally` sweep.
-      // `AbortController.abort()` is a no-op once already aborted, so
-      // whichever trigger fires first "wins"; the other becomes a harmless
-      // second call. `inputRegistry.resolve` is likewise idempotent — a
-      // correlationId already resolved here is simply a no-op in the
-      // `finally` sweep below.
-      const onCancel = (): void => {
-        controller.abort();
-        if (inputRegistry) {
-          for (const correlationId of pendingForTurn) {
-            inputRegistry.resolve(correlationId, { decision: "deny" });
+            console.error(`conversations: recall assembly failed for ${convId}:`, err);
           }
         }
-      };
-      stream.onAbort(onCancel);
-      controller.signal.addEventListener("abort", onCancel, { once: true });
 
-      try {
-        for await (const event of conversation.stream(content, {
-          eventBus,
-          maxIterations,
-          signal: controller.signal,
-          // ADR-0006 §2: the registration is the caller half of the two-layer
-          // artifact opt-in. Resolved per turn from `entry.agentId` (the same
-          // lookup conversation creation does) — without this the flag has no
-          // route from config to RunOptions and the channel is unreachable.
-          ...(agents.find((a) => a.id === entry.agentId)?.publishArtifacts === true
-            ? { publishArtifacts: true }
-            : {}),
-        })) {
-          turnTraceId ??= event.traceId;
-          turnBusRunId ??= event.runId;
-          if (turnRunId === undefined && event.type === "agent.message.start") {
-            turnRunId = event.runId;
-            // Mirror the runId onto activeTurn (#341) so `POST …/cancel` can
-            // echo `run_id` back to the caller once it's known — best-effort,
-            // omitted from the 202 response before the first
-            // `agent.message.start` arrives.
-            if (entry.activeTurn) {
-              entry.activeTurn.runId = turnRunId;
+        // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
+        // `bus.publish`, so the runner generator (which this loop drains) is
+        // parked and can't yield the prompt itself. The gate instead PUBLISHES
+        // an `agent.input.request` on the bus; we surface it onto THIS turn's
+        // stream, correlated by traceId so a concurrent conversation's prompt
+        // never bleeds in. The client answers via `POST /conversations/:id/input`
+        // (below), which resolves the registry and unblocks the gate.
+        let turnTraceId: string | undefined;
+        // The turn's TOP-LEVEL run id — the id `RunStoreExporter` keys the run
+        // row by, i.e. the FIRST `agent.message.start`'s runId (the conversation
+        // wrapper stamps its own runId on `conversation.start`, which never gets
+        // a row; nested sub-agent runs carry their own). Emitted on the `done`
+        // frame so the client can link straight to this turn's persisted trace
+        // (`/run?run=<id>`) without waiting for the session store to round-trip.
+        let turnRunId: string | undefined;
+        // The runId off the FIRST event this turn observes at all (conversation
+        // wrapper's own runId, since `conversation.start` always arrives first —
+        // :393 below). Used only to give a synthesized `agent.error` bus publish
+        // a runId to key on when the turn never reaches `agent.message.start`
+        // (pre-token failure ⇒ `turnRunId` stays undefined). Exporters must
+        // tolerate this runId having no run row.
+        let turnBusRunId: string | undefined;
+        const pendingForTurn = new Set<string>();
+        const onInputRequest = async (ev: BaseEvent): Promise<void> => {
+          const e = ev as AgentEvent;
+          if (e.type !== "agent.input.request") return;
+          if (turnTraceId !== undefined && e.traceId !== turnTraceId) return;
+          pendingForTurn.add(e.correlationId);
+          const msg = agentEventToSSE(e);
+          // The runner is blocked here, so no concurrent writeSSE races this.
+          if (msg) await stream.writeSSE(msg);
+        };
+        eventBus.subscribe("agent.input.request", onInputRequest);
+
+        // #341: one teardown function, two triggers — client disconnect
+        // (`stream.onAbort`) and an explicit `POST …/cancel` (the controller's
+        // own "abort" event, fired by that route calling `.abort()`). Denying
+        // pending inputs HERE (not just in `finally`, below) is what actually
+        // fixes the disconnect hang: a gate-blocked run is parked inside
+        // `bus.publish`, so the drain loop this `try` block runs never settles
+        // on its own — nothing else would ever reach the `finally` sweep.
+        // `AbortController.abort()` is a no-op once already aborted, so
+        // whichever trigger fires first "wins"; the other becomes a harmless
+        // second call. `inputRegistry.resolve` is likewise idempotent — a
+        // correlationId already resolved here is simply a no-op in the
+        // `finally` sweep below.
+        const onCancel = (): void => {
+          controller.abort();
+          if (inputRegistry) {
+            for (const correlationId of pendingForTurn) {
+              inputRegistry.resolve(correlationId, { decision: "deny" });
             }
           }
-          const msg = agentEventToSSE(event);
-          if (msg) {
-            await stream.writeSSE(msg);
-          }
-        }
-
-        await stream.writeSSE({
-          event: "done",
-          data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
-        });
-      } catch (err) {
-        // N5: the drain loop above can throw before yielding a single event
-        // (model-resolution reject, provider construction failure — any
-        // pre-yield setup throw in the runner) or mid-stream. Either way the
-        // stream must be honestly torn on the wire, never silently swallowed
-        // by hono: write the canonical `error` frame (byte-compatible with
-        // `toSSEMapping`'s `agent.error` payload, `sse-formatter.ts:301-309`)
-        // then the `done` terminator, in that order, then swallow. We do NOT
-        // use `streamSSE`'s `onError` callback — it writes its own
-        // `event: error` frame whose data is the raw message STRING, not
-        // JSON, which the dashboard's `parseFrame` drops and the Go parser
-        // can't decode. Owning the frame shape here keeps both happy.
-        const message = err instanceof Error ? err.message : String(err);
-        const errorType = err instanceof Error ? err.name : "Error";
+        };
+        stream.onAbort(onCancel);
+        controller.signal.addEventListener("abort", onCancel, { once: true });
 
         try {
-          await stream.writeSSE({
-            event: "error",
-            data: JSON.stringify({ error_type: errorType, message, recoverable: false }),
-          });
+          for await (const event of conversation.stream(content, {
+            eventBus,
+            maxIterations,
+            signal: controller.signal,
+            // ADR-0006 §2: the registration is the caller half of the two-layer
+            // artifact opt-in. Resolved per turn from `claimedEntry.agentId` (the same
+            // lookup conversation creation does) — without this the flag has no
+            // route from config to RunOptions and the channel is unreachable.
+            ...(agents.find((a) => a.id === claimedEntry.agentId)?.publishArtifacts === true
+              ? { publishArtifacts: true }
+              : {}),
+          })) {
+            turnTraceId ??= event.traceId;
+            turnBusRunId ??= event.runId;
+            if (turnRunId === undefined && event.type === "agent.message.start") {
+              turnRunId = event.runId;
+              // Mirror the runId onto activeTurn (#341) so `POST …/cancel` can
+              // echo `run_id` back to the caller once it's known — best-effort,
+              // omitted from the 202 response before the first
+              // `agent.message.start` arrives.
+              if (claimedEntry.activeTurn) {
+                claimedEntry.activeTurn.runId = turnRunId;
+              }
+            }
+            const msg = agentEventToSSE(event);
+            if (msg) {
+              await stream.writeSSE(msg);
+            }
+          }
+
           await stream.writeSSE({
             event: "done",
             data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
           });
-        } catch {
-          // Client gone — nothing left to tell. Belt-and-braces only: under
-          // hono 4.12.31 `StreamingApi.write` already swallows write errors
-          // (`catch {}` in `dist/utils/stream.js`), so this rarely fires.
-        }
+        } catch (err) {
+          // N5: the drain loop above can throw before yielding a single event
+          // (model-resolution reject, provider construction failure — any
+          // pre-yield setup throw in the runner) or mid-stream. Either way the
+          // stream must be honestly torn on the wire, never silently swallowed
+          // by hono: write the canonical `error` frame (byte-compatible with
+          // `toSSEMapping`'s `agent.error` payload, `sse-formatter.ts:301-309`)
+          // then the `done` terminator, in that order, then swallow. We do NOT
+          // use `streamSSE`'s `onError` callback — it writes its own
+          // `event: error` frame whose data is the raw message STRING, not
+          // JSON, which the dashboard's `parseFrame` drops and the Go parser
+          // can't decode. Owning the frame shape here keeps both happy.
+          const message = err instanceof Error ? err.message : String(err);
+          const errorType = err instanceof Error ? err.name : "Error";
 
-        // Bus visibility (non-load-bearing for the wire fix): a pre-token
-        // throw never reaches the event bus otherwise — no exporter records
-        // anything — so synthesize an `agent.error` for the admin
-        // firehose/collector/exporters. Guarded on turnTraceId: it is set
-        // from the first forwarded event, and `conversation.start` always
-        // arrives first, so this only fails to fire if the wrapper itself
-        // never yielded anything at all.
-        if (turnTraceId !== undefined && turnBusRunId !== undefined) {
-          const errorEvent = createEvent("agent.error", {
-            traceId: turnTraceId,
-            runId: turnBusRunId,
-            errorType,
-            message,
-            recoverable: false,
-            context: {},
-          });
           try {
-            await eventBus.publish(errorEvent);
-          } catch (publishErr) {
-            console.error("conversations: agent.error bus publish failed:", publishErr);
-          }
-        }
-      } finally {
-        // Run-metadata stamp (#268) — the redacted effective context this
-        // conversation is bound to, written onto the turn's run row. Lives in
-        // `finally`, NOT after the drain loop inside `try`: when a turn
-        // errors mid-run, `Conversation.stream` yields `conversation.end`
-        // then RE-THROWS, so the `for await` above throws too and a
-        // try-scoped stamp would never run — exactly the runs an operator
-        // most needs to inspect. A client disconnect is NOT the same kind of
-        // teardown: under hono 4.12.31, `StreamingApi.write` silently
-        // swallows write errors on a closed connection, so the drain loop
-        // above keeps pulling runner events to completion regardless — it
-        // does not throw, and nothing here stops the runner from finishing
-        // its work server-side. #341's `onAbort` wiring is what will
-        // actually short-circuit the runner on disconnect. `updateRunMetadata` is a
-        // local DB write independent of the broken stream/generator and
-        // status-independent (it stamps a still-`running` row the same as a
-        // finalized one, see its doc comment) — it lands on whatever the row
-        // ended up as, success or error, as long as `agent.message.start`
-        // was ever observed (`turnRunId` set). Best-effort: a store failure
-        // is logged, never allowed to shadow whatever this `finally` is
-        // unwinding from — matches the exporter's own failure posture.
-        if (runStore && turnRunId !== undefined && entry.context !== undefined) {
-          try {
-            runStore.updateRunMetadata(turnRunId, {
-              context: entry.context,
-              ...(entry.contextRedacted ? { context_redacted: entry.contextRedacted } : {}),
+            await stream.writeSSE({
+              event: "error",
+              data: JSON.stringify({ error_type: errorType, message, recoverable: false }),
             });
-          } catch (err) {
-            console.error(`conversations: updateRunMetadata failed for run ${turnRunId}:`, err);
+            await stream.writeSSE({
+              event: "done",
+              data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
+            });
+          } catch {
+            // Client gone — nothing left to tell. Belt-and-braces only: under
+            // hono 4.12.31 `StreamingApi.write` already swallows write errors
+            // (`catch {}` in `dist/utils/stream.js`), so this rarely fires.
           }
-        }
 
-        eventBus.unsubscribe("agent.input.request", onInputRequest);
-        // Fail closed: if the client disconnects mid-approval, deny any of THIS
-        // turn's still-pending requests so the blocked gate resolves (deny)
-        // instead of hanging the run forever. (Belt-and-braces alongside
-        // `onCancel` above, #341 — idempotent either way.)
-        if (inputRegistry) {
-          for (const correlationId of pendingForTurn) {
-            inputRegistry.resolve(correlationId, { decision: "deny" });
+          // Bus visibility (non-load-bearing for the wire fix): a pre-token
+          // throw never reaches the event bus otherwise — no exporter records
+          // anything — so synthesize an `agent.error` for the admin
+          // firehose/collector/exporters. Guarded on turnTraceId: it is set
+          // from the first forwarded event, and `conversation.start` always
+          // arrives first, so this only fails to fire if the wrapper itself
+          // never yielded anything at all.
+          if (turnTraceId !== undefined && turnBusRunId !== undefined) {
+            const errorEvent = createEvent("agent.error", {
+              traceId: turnTraceId,
+              runId: turnBusRunId,
+              errorType,
+              message,
+              recoverable: false,
+              context: {},
+            });
+            try {
+              await eventBus.publish(errorEvent);
+            } catch (publishErr) {
+              console.error("conversations: agent.error bus publish failed:", publishErr);
+            }
+          }
+        } finally {
+          // Run-metadata stamp (#268) — the redacted effective context this
+          // conversation is bound to, written onto the turn's run row. Lives in
+          // `finally`, NOT after the drain loop inside `try`: when a turn
+          // errors mid-run, `Conversation.stream` yields `conversation.end`
+          // then RE-THROWS, so the `for await` above throws too and a
+          // try-scoped stamp would never run — exactly the runs an operator
+          // most needs to inspect. A client disconnect is NOT the same kind of
+          // teardown: under hono 4.12.31, `StreamingApi.write` silently
+          // swallows write errors on a closed connection, so the drain loop
+          // above keeps pulling runner events to completion regardless — it
+          // does not throw, and nothing here stops the runner from finishing
+          // its work server-side. #341's `onAbort` wiring is what will
+          // actually short-circuit the runner on disconnect. `updateRunMetadata` is a
+          // local DB write independent of the broken stream/generator and
+          // status-independent (it stamps a still-`running` row the same as a
+          // finalized one, see its doc comment) — it lands on whatever the row
+          // ended up as, success or error, as long as `agent.message.start`
+          // was ever observed (`turnRunId` set). Best-effort: a store failure
+          // is logged, never allowed to shadow whatever this `finally` is
+          // unwinding from — matches the exporter's own failure posture.
+          if (runStore && turnRunId !== undefined && claimedEntry.context !== undefined) {
+            try {
+              runStore.updateRunMetadata(turnRunId, {
+                context: claimedEntry.context,
+                ...(claimedEntry.contextRedacted
+                  ? { context_redacted: claimedEntry.contextRedacted }
+                  : {}),
+              });
+            } catch (err) {
+              console.error(`conversations: updateRunMetadata failed for run ${turnRunId}:`, err);
+            }
+          }
+
+          eventBus.unsubscribe("agent.input.request", onInputRequest);
+          // Fail closed: if the client disconnects mid-approval, deny any of THIS
+          // turn's still-pending requests so the blocked gate resolves (deny)
+          // instead of hanging the run forever. (Belt-and-braces alongside
+          // `onCancel` above, #341 — idempotent either way.)
+          if (inputRegistry) {
+            for (const correlationId of pendingForTurn) {
+              inputRegistry.resolve(correlationId, { decision: "deny" });
+            }
+          }
+          // #341: natural-completion belt — a turn that finished on its own
+          // (never cancelled) still needs `activeTurn` cleared so the NEXT
+          // `POST …/messages` isn't 409'd forever and `POST …/cancel` 404s the
+          // way an idle conversation should. Guarded so a stale/already-swapped
+          // reference (e.g. a fresh turn's own set, in a hypothetical future
+          // where two `finally` blocks could interleave) never clobbers it.
+          if (claimedEntry.activeTurn?.controller === controller) {
+            claimedEntry.activeTurn = undefined;
           }
         }
-        // #341: natural-completion belt — a turn that finished on its own
-        // (never cancelled) still needs `activeTurn` cleared so the NEXT
-        // `POST …/messages` isn't 409'd forever and `POST …/cancel` 404s the
-        // way an idle conversation should. Guarded so a stale/already-swapped
-        // reference (e.g. a fresh turn's own set, in a hypothetical future
-        // where two `finally` blocks could interleave) never clobbers it.
-        if (entry.activeTurn?.controller === controller) {
-          entry.activeTurn = undefined;
-        }
+      });
+    } catch (err) {
+      // `streamSSE` threw before the callback could run, so the callback's
+      // `finally` will never fire — release the latch we claimed above or the
+      // conversation 409s for the rest of the process's life.
+      if (claimedEntry.activeTurn === activeTurn) {
+        claimedEntry.activeTurn = undefined;
       }
-    });
+      throw err;
+    }
   });
 
   // POST /conversations/:id/cancel — abort the in-flight turn, if any (#341).
