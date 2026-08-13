@@ -123,6 +123,17 @@ export class Conversation {
     return this.id;
   }
 
+  /**
+   * The durable row id this conversation's messages persist under (#480).
+   * Equal to `id` under any store that honors the supplied id; differs only
+   * against a pre-#480 third-party store that mints its own (which also
+   * warns). `undefined` until the first exchange is persisted, or when no
+   * store is wired.
+   */
+  get persistedId(): string | undefined {
+    return this._storeConversationId;
+  }
+
   /** Number of completed exchanges. */
   get exchangeCount(): number {
     return this._exchangeCount;
@@ -399,11 +410,7 @@ export class Conversation {
     if (!this._store) return;
 
     if (!this._storeConversationId) {
-      const conv = await this._store.createConversation(
-        this.agent.role.name,
-        this.agent.getModel() ?? "",
-      );
-      this._storeConversationId = conv.id;
+      this._storeConversationId = await this._resolveStoreConversationId(this._store);
     }
 
     await this._store.addMessage(
@@ -423,6 +430,42 @@ export class Conversation {
         outputTokens: exchange.outputTokens,
       },
     );
+  }
+
+  /**
+   * Resolve the durable row this conversation's messages land in (#480).
+   *
+   * The row is keyed by `this.id` so the live conversation and its persisted
+   * form share ONE identity — the id `POST /conversations` hands back is the
+   * same id `GET /conversations` lists and `POST /:id/messages` accepts.
+   * Before #480 each store minted its own uuid here, so the writable id and
+   * the readable id were structurally different values and nothing in the
+   * list could ever be replied to.
+   *
+   * Adopt-then-create: a server that eagerly created the row at conversation
+   * -creation time (so an unmessaged conversation still lists), and a
+   * rehydrated conversation resuming an existing row, both find it already
+   * there; a bare library caller (`new Conversation(agent, runner, {store})`)
+   * creates it on the first persisted exchange, as before.
+   */
+  private async _resolveStoreConversationId(store: ConversationStore): Promise<string> {
+    const existing = await store.getConversation(this.id);
+    if (existing) return existing.id;
+
+    const conv = await store.createConversation(this.agent.role.name, this.agent.getModel() ?? "", {
+      id: this.id,
+    });
+    // A third-party `ConversationStore` predating the `options.id` parameter
+    // ignores it and mints its own. That's the pre-#480 split id — honor what
+    // it actually returned (messages still persist, coherently, under that
+    // id) but say so once, loudly: conversations against this store are not
+    // resumable, and a silent fallback is exactly how #480 stayed invisible.
+    if (conv.id !== this.id) {
+      console.warn(
+        `Conversation: store ignored the supplied conversation id (asked for "${this.id}", got "${conv.id}") — this conversation cannot be resumed by id. Update the ConversationStore implementation to honor \`createConversation(name, model, { id })\`.`,
+      );
+    }
+    return conv.id;
   }
 
   /**

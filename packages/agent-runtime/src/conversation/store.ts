@@ -76,9 +76,36 @@ export interface StoredConversationSummary {
 // Protocol
 // ---------------------------------------------------------------------------
 
+/** Options accepted by `ConversationStore.createConversation`. */
+export interface CreateConversationOptions {
+  /**
+   * The id to store the row under (#480). Supplied so a live `Conversation`
+   * and its durable row share ONE identity — without it each store minted its
+   * own uuid, and the id that could be replied to (the in-process route id)
+   * was structurally never the id that could be read back (the durable id),
+   * so nothing listed could be continued.
+   *
+   * Omitted -> the store mints one, the pre-#480 behavior. Implementations
+   * MUST honor a supplied id; `Conversation` verifies the returned row and
+   * degrades loudly (never silently) if an implementation ignores it.
+   */
+  readonly id?: string;
+  /**
+   * Initial `metadata` for the row. The server stamps the binding facts
+   * resume needs here (`agentId` and which of scope/hook/memory the
+   * registration declares) — never scope VALUES, which stay caller-supplied
+   * on resume so no secret is written to disk.
+   */
+  readonly metadata?: Record<string, unknown>;
+}
+
 /** Structured conversation persistence protocol. */
 export interface ConversationStore {
-  createConversation(agentName: string, model: string): Promise<StoredConversation>;
+  createConversation(
+    agentName: string,
+    model: string,
+    options?: CreateConversationOptions,
+  ): Promise<StoredConversation>;
 
   getConversation(conversationId: string): Promise<StoredConversation | null>;
 
@@ -124,15 +151,23 @@ export class InMemoryConversationStore implements ConversationStore {
   private _messages = new Map<string, StoredMessage[]>();
   private _parts = new Map<string, StoredMessagePart[]>();
 
-  async createConversation(agentName: string, model: string): Promise<StoredConversation> {
+  async createConversation(
+    agentName: string,
+    model: string,
+    options?: CreateConversationOptions,
+  ): Promise<StoredConversation> {
+    const id = options?.id ?? generateId();
+    if (this._conversations.has(id)) {
+      throw new Error(`Conversation already exists: ${id}`);
+    }
     const now = new Date();
     const conv: StoredConversation = {
-      id: generateId(),
+      id,
       agentName,
       model,
       createdAt: now,
       updatedAt: now,
-      metadata: {},
+      metadata: options?.metadata ? { ...options.metadata } : {},
     };
     this._conversations.set(conv.id, conv);
     this._messages.set(conv.id, []);

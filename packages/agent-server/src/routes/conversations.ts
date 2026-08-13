@@ -32,6 +32,7 @@ import {
   buildScopeHost,
   createEvent,
   deriveToolboxExecutor,
+  exchangesFromMessages,
 } from "@pattern-stack/agentic-runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -114,188 +115,50 @@ export function conversationRoutes(
       body.scope !== undefined ? "scope" : body.context !== undefined ? "context" : undefined;
     const rawScope = body.scope !== undefined ? body.scope : body.context;
 
-    // Shape (mirrors composition.ts:733's grammar — an explicit `null` is
-    // rejected same as any other non-object, never silently coerced to
-    // "absent").
-    if (
-      rawScope !== undefined &&
-      (typeof rawScope !== "object" || rawScope === null || Array.isArray(rawScope))
-    ) {
-      return c.json({ error: `\`${suppliedKey}\` must be a JSON object` }, 400);
+    const bound = await bindRegistration(reg, rawScope, suppliedKey);
+    if (!bound.ok) {
+      return c.json(bound.body, bound.status);
     }
+    const { agentToBind, redactedContext, redactedKeys, memoryBinding, host } = bound;
+    const { hasHook, hasScope, hasMemory } = bound;
 
-    const hasHook = typeof reg.instantiate === "function";
-    const hasScope = reg.scope !== undefined;
-    // Memory-declaring registrations accept a caller context too (#444 Gate
-    // 2.5 m5): `memory.scope` is documented as a function of the PARSED
-    // effective context, so a memory-only registration must be able to
-    // receive one — same unparsed-context posture as hook-only registrations.
-    const hasMemory = reg.memory !== undefined;
-    if (rawScope !== undefined && !hasHook && !hasScope && !hasMemory) {
-      return c.json(
-        { error: `Agent has no instantiate hook — ${suppliedKey} is not accepted` },
-        400,
-      );
-    }
-
-    // Hook-less AND scope-less registrations are byte-identical to before
-    // this feature: `agent` binds as-is, no instantiate call, no
-    // `context`/`scope` in the response.
-    let agentToBind: AgentLike = reg.agent;
-
-    // No explicit scope/context → compose with the registration's declared
-    // defaults (scope.defaults wins over the deprecated instantiateDefaults),
-    // so the echoed value always states what was actually resolved (mirror
-    // composition.ts:744-745).
-    //
-    // Shallow-copy the defaults before handing them anywhere — SessionScope
-    // freezes `.defaults` (a mutating `instantiate` hook would THROW on a
-    // frozen object rather than silently corrupt it) and `reg.
-    // instantiateDefaults` is ONE shared object across every conversation
-    // this registration ever creates. `undefined` (no defaults declared
-    // either way) is preserved as-is so the "no defaults" vs. "empty object"
-    // distinction survives.
-    const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
-    let effectiveContext: Record<string, unknown> | undefined =
-      (rawScope as Record<string, unknown> | undefined) ??
-      (declaredDefaults ? { ...declaredDefaults } : undefined);
-
-    // Scope validation (#308) — the registration's declared shape wins over
-    // ad hoc context: parse the effective value against `scope.schema` (zod
-    // defaults/coercions applied), 400 on failure. A registration that
-    // declares REQUIRED fields with no defaults turns a bare
-    // `POST /conversations` into a deliberate 400 (decisions.md D11) — the
-    // agent said it needs a scope. The PARSED value replaces
-    // `effectiveContext` for every downstream consumer: `instantiate`,
-    // redaction, the run-metadata stamp, and `buildScopeHost` injection.
-    if (reg.scope) {
-      try {
-        effectiveContext = reg.scope.parse(effectiveContext ?? {});
-      } catch (err) {
-        // Duck-typed detection: zod is a `^3.25.0 || ^4.1.8` peer dep and the
-        // throwing zod may be `@pattern-stack/agentic-core`'s copy, not the
-        // server's — never `instanceof ZodError` / `.flatten()` (v3-only
-        // shape) across that module boundary (decisions.md D3).
-        if (err && Array.isArray((err as { issues?: unknown }).issues)) {
-          return c.json(
-            { error: "scope validation failed", issues: (err as { issues: unknown[] }).issues },
-            400,
-          );
-        }
-        throw err;
-      }
-      if (!isPlainRecord(effectiveContext)) {
-        // A real SessionScope can't get here (z.object parses to an object);
-        // only a malformed hand-rolled registration scope can — 502 names the
-        // registration bug instead of crashing redaction with a raw 500.
-        return c.json({ error: "scope.parse returned a non-object — malformed scope" }, 502);
-      }
-    }
-
-    if (typeof reg.instantiate === "function") {
-      try {
-        agentToBind = await reg.instantiate(effectiveContext);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return c.json({ error: `instantiate failed: ${message}` }, 502);
-      }
-    }
-
-    // Memory binding (#444) — resolve the partition scope ONCE, at creation,
-    // from the PARSED effective context (never the redacted copy), mirroring
-    // scope's own fixed-at-creation posture. Fail LOUD here, not at
-    // first-message time: an empty or non-string-map scope would make turn-1
-    // recall an unscoped search (ADR-0007), and 502 names a registration bug
-    // (same grammar as `instantiate failed` above).
-    let memoryBinding: ConversationEntry["memory"];
-    if (reg.memory) {
-      // Same fail-loud contract as the scope checks below (Gate 2.5 m3/M1):
-      // a bad budget would otherwise throw inside the first-message
-      // try/catch, get swallowed into one console.error, and leave recall
-      // silently dead for the conversation (latch consumed, never retried).
-      if (
-        reg.memory.budgetChars !== undefined &&
-        (!Number.isInteger(reg.memory.budgetChars) || reg.memory.budgetChars <= 0)
-      ) {
-        return c.json({ error: "memory budgetChars must be a positive integer" }, 502);
-      }
-      let derived: unknown;
-      try {
-        // A static scope map is COPIED (Gate 2.5 n7): the registration object
-        // is shared across every conversation it ever creates.
-        derived =
-          typeof reg.memory.scope === "function"
-            ? reg.memory.scope(effectiveContext)
-            : { ...reg.memory.scope };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return c.json({ error: `memory scope derivation failed: ${message}` }, 502);
-      }
-      if (
-        !isPlainRecord(derived) ||
-        Object.keys(derived).length === 0 ||
-        Object.values(derived).some((v) => typeof v !== "string")
-      ) {
-        return c.json(
-          { error: "memory scope must be a non-empty string map — got an invalid derivation" },
-          502,
-        );
-      }
-      memoryBinding = {
-        store: reg.memory.store,
-        scope: derived as Record<string, string>,
-        ...(reg.memory.budgetChars !== undefined ? { budgetChars: reg.memory.budgetChars } : {}),
-      };
-    }
-
-    // Redact keys are the union of the scope's declared redactions and the
-    // deprecated `contextRedactKeys` — a hook-only registration's redaction
-    // keeps working unchanged when it later adds a `scope`.
-    const redactKeys = Array.from(
-      new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])]),
-    );
-    const { context: redactedContext, redactedKeys } = redactContext(effectiveContext, redactKeys);
-
-    // Wire a ToolExecutor so AgentRunner can actually execute tool calls
-    // from the agent's Capability toolboxes (not just format them for the LLM).
-    //
-    // DERIVE, don't force-create: `deriveToolboxExecutor` returns `undefined`
-    // for a capability-less agent. That matters for a PromotedAgent (asAgent()),
-    // whose synthetic role has NO capabilities — `createToolboxExecutor` would
-    // hand back a truthy-but-EMPTY executor that throws `Tool "X" not found` for
-    // every call, and (as a set `RunOptions.toolExecutor`) would BEAT the
-    // AgentStep-level `deriveToolboxExecutor(agent)` fallback that arms the
-    // nested agent's own tools. Leaving it `undefined` restores that per-agent
-    // derivation; real-capability agents still get their executor here.
-    //
-    // Derived from the BOUND (delivered-or-declared) instance, not always
-    // `reg.agent` — a hook-bearing registration's delivered instance is the
-    // one whose tools actually execute (#268).
-    const toolExecutor = deriveToolboxExecutor(
-      agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
-    );
-    // `host.scope` (#308) — carries the PARSED scope value across every run
-    // this conversation makes (`Conversation` forwards `_host` verbatim into
-    // every `send()`/`stream()`), so tools can read it via `readScope`/
-    // `requireScope` (`@pattern-stack/agentic-runtime`, `workflows/scope-host.js`).
-    // Scope-declaring registrations get `host.scope`; memory-declaring ones
-    // get a host bag too (#444 — even scope-less, the bag must exist for the
-    // messages route to set `host.recall` on). The bag itself is a fresh
-    // MUTABLE object (buildScopeHost's documented spread pattern) — only its
-    // `.scope` value is frozen. Plain registrations keep today's hostless
-    // behavior byte-identically.
-    const host: Record<string, unknown> | undefined = hasScope
-      ? { ...buildScopeHost(effectiveContext ?? {}) }
-      : memoryBinding
-        ? {}
-        : undefined;
     // `store` (when configured) makes `Conversation._persistExchange` actually
     // write request/response messages — previously accepted and never used.
     const conversation = new Conversation(agentToBind, reg.runner, {
-      toolExecutor,
+      toolExecutor: bound.toolExecutor,
       store,
       ...(host ? { host } : {}),
     });
+
+    // #480: create the durable row EAGERLY, under the conversation's own id.
+    // Two things follow from this that were both broken before:
+    //   1. one identity — the id returned here is the id `GET /conversations`
+    //      lists AND the id `POST /:id/messages` accepts, so a listed
+    //      conversation can actually be replied to;
+    //   2. the row exists before the first turn, so a conversation that was
+    //      created and never messaged still lists (and can still be resumed).
+    // The `binding` stamp is what makes resume possible after a restart: it
+    // records WHICH registration this conversation was bound to, and whether
+    // the caller supplied a scope at creation (so resume knows to demand one
+    // back). Scope VALUES are deliberately never written — they stay
+    // caller-supplied per resume, so no secret lands at rest (see the
+    // `resumeConversation` doc comment).
+    if (store) {
+      try {
+        await store.createConversation(agentToBind.role.name, agentToBind.getModel() ?? "", {
+          id: conversation.id,
+          metadata: { binding: { agentId, scopeSupplied: rawScope !== undefined } },
+        });
+      } catch (err) {
+        // Fail loud. Persistence IS configured, so a conversation whose row
+        // never landed is one that silently can't be listed or resumed —
+        // exactly the #480 failure mode, reintroduced quietly. Better to
+        // refuse the create than hand back an id that half-works.
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json({ error: `failed to persist conversation: ${message}` }, 502);
+      }
+    }
+
     conversations.set(conversation.id, {
       conversation,
       agentId,
@@ -498,20 +361,158 @@ export function conversationRoutes(
     );
   });
 
+  /**
+   * Rebuild a conversation from the durable store (#480) — the fix for "a
+   * chat can only continue in the process that created it".
+   *
+   * Called only on an in-memory miss, so a live conversation always wins and
+   * this never re-binds one that is already resident.
+   *
+   * SCOPE IS NOT PERSISTED, BY DESIGN. A scope can carry credentials — it is
+   * redacted before it is ever echoed back — so writing it to the SQLite file
+   * to make resume seamless would put secrets at rest in exactly the place
+   * the redaction path exists to keep them out of. Instead the row records
+   * only WHETHER a scope was supplied at creation, and the caller re-supplies
+   * the value on the resuming request. A resumed turn has to be authorized on
+   * its own terms anyway, so the caller is holding it regardless.
+   *
+   * What is faithfully restored: the registration binding (`instantiate` is
+   * re-run against the re-supplied scope), the tool executor, the host bag
+   * and the exchange history. What is NOT: the recall block (`host.recall`),
+   * which is re-derived rather than restored — see the messages route's
+   * turn-1 recall latch, which a resumed conversation deliberately re-arms so
+   * memory is re-queried against the resuming message.
+   */
+  async function resumeConversation(
+    convId: string,
+    rawScope: unknown,
+  ): Promise<
+    | { ok: true; entry: ConversationEntry }
+    | { ok: false; status: 400 | 404 | 409 | 502; body: Record<string, unknown> }
+  > {
+    // No persistence configured → the in-memory map really was the whole
+    // world, and an unknown id is simply unknown (the pre-#480 answer).
+    if (!store) {
+      return { ok: false, status: 404, body: { error: "Conversation not found" } };
+    }
+
+    const row = await store.getConversation(convId);
+    if (!row) {
+      return { ok: false, status: 404, body: { error: "Conversation not found" } };
+    }
+
+    const stamp = readBindingStamp(row.metadata);
+    if (!stamp) {
+      // Rows written before #480 carry no binding stamp, so there is no way
+      // to know which registration to re-bind. 409 (not 404) is the honest
+      // answer: the conversation exists and is readable, it just cannot be
+      // continued.
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: "conversation cannot be resumed — it was created before resume was supported",
+          hint: "start a new conversation with POST /conversations",
+        },
+      };
+    }
+
+    const reg = agents.find((a) => a.id === stamp.agentId);
+    if (!reg) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: `conversation cannot be resumed — agent "${stamp.agentId}" is not registered on this server`,
+        },
+      };
+    }
+
+    // The caller must hand the scope back when one was supplied at creation.
+    // Silently re-binding with the registration's defaults instead would
+    // produce a DIFFERENTLY-scoped agent answering under the same
+    // conversation id — a correctness and authorization bug, not a
+    // convenience gap.
+    if (stamp.scopeSupplied && rawScope === undefined) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: "conversation was created with a scope — resuming it requires `scope`",
+          hint: "re-send the same scope you created the conversation with, in the message body",
+        },
+      };
+    }
+
+    const bound = await bindRegistration(
+      reg,
+      rawScope,
+      rawScope !== undefined ? "scope" : undefined,
+    );
+    if (!bound.ok) {
+      return bound;
+    }
+
+    let history: Awaited<ReturnType<typeof store.getMessages>>;
+    try {
+      history = await store.getMessages(convId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, status: 502, body: { error: `failed to load conversation: ${message}` } };
+    }
+
+    const conversation = new Conversation(bound.agentToBind, reg.runner, {
+      // The whole point: the rebuilt conversation answers to the SAME id the
+      // store knows it by, so the next turn persists into the same row and
+      // a later resume finds one continuous thread rather than a fork.
+      id: convId,
+      store,
+      toolExecutor: bound.toolExecutor,
+      history: exchangesFromMessages(history),
+      ...(bound.host ? { host: bound.host } : {}),
+    });
+
+    const entry: ConversationEntry = {
+      conversation,
+      agentId: stamp.agentId,
+      ...(bound.hasHook || bound.hasScope || bound.hasMemory
+        ? { context: bound.redactedContext }
+        : {}),
+      ...(bound.redactedKeys ? { contextRedacted: bound.redactedKeys } : {}),
+      ...(bound.host ? { host: bound.host } : {}),
+      ...(bound.memoryBinding ? { memory: bound.memoryBinding } : {}),
+    };
+    conversations.set(convId, entry);
+    return { ok: true, entry };
+  }
+
   // POST /conversations/:id/messages — send message, stream SSE response
   app.post("/conversations/:id/messages", async (c) => {
     const convId = c.req.param("id");
-    const entry = conversations.get(convId);
 
-    if (!entry) {
-      return c.json({ error: "Conversation not found" }, 404);
-    }
-
-    const body = await c.req.json<{ content: string; maxIterations?: number }>();
+    const body = await c.req.json<{
+      content: string;
+      maxIterations?: number;
+      scope?: unknown;
+    }>();
     const content = body.content;
 
     if (!content || typeof content !== "string") {
       return c.json({ error: "content is required" }, 400);
+    }
+
+    // #480: a miss here used to be the end of the story — the in-memory map
+    // was the ONLY way to address a conversation, so a chat could only ever
+    // continue inside the process that created it, and nothing in
+    // `GET /conversations` could be replied to at all. Now a miss falls
+    // through to the durable store and rebuilds the conversation from it.
+    let entry = conversations.get(convId);
+    if (!entry) {
+      const resumed = await resumeConversation(convId, body.scope);
+      if (!resumed.ok) {
+        return c.json(resumed.body, resumed.status);
+      }
+      entry = resumed.entry;
     }
 
     // Optional per-message cap on the agent tool-loop (clamped to a sane range);
@@ -872,6 +873,266 @@ export function conversationRoutes(
 // Helpers (file-local — small helpers are deliberately not shared across
 // route files, the `routes/runs.ts` precedent)
 // ---------------------------------------------------------------------------
+
+/** Everything a bound registration contributes to a `ConversationEntry`. */
+interface BoundRegistration {
+  readonly ok: true;
+  readonly agentToBind: AgentLike;
+  readonly effectiveContext: Record<string, unknown> | undefined;
+  readonly redactedContext: Record<string, unknown> | undefined;
+  readonly redactedKeys: readonly string[] | undefined;
+  readonly memoryBinding: ConversationEntry["memory"];
+  readonly host: Record<string, unknown> | undefined;
+  readonly toolExecutor: ReturnType<typeof deriveToolboxExecutor>;
+  readonly hasHook: boolean;
+  readonly hasScope: boolean;
+  readonly hasMemory: boolean;
+}
+
+/** A bind that failed, carrying the exact response the route should return. */
+interface BindRejection {
+  readonly ok: false;
+  readonly status: 400 | 502;
+  readonly body: Record<string, unknown>;
+}
+
+/**
+ * Resolve a registration + a caller-supplied scope into everything a
+ * conversation binds at creation: the delivered agent, the parsed/redacted
+ * scope, the memory binding, the host bag and the tool executor.
+ *
+ * Extracted from `POST /conversations` (#480) so RESUME can run the identical
+ * pipeline. That equivalence is the point — a rehydrated conversation must be
+ * bound exactly the way the original was, or resuming would silently produce
+ * a differently-configured agent under the same conversation id. Behavior is
+ * unchanged from the inline version; only the error returns moved from direct
+ * `c.json(...)` calls to a `BindRejection` the caller renders.
+ */
+async function bindRegistration(
+  reg: AgentRegistration,
+  rawScope: unknown,
+  suppliedKey: "scope" | "context" | undefined,
+): Promise<BoundRegistration | BindRejection> {
+  // Shape (mirrors composition.ts:733's grammar — an explicit `null` is
+  // rejected same as any other non-object, never silently coerced to
+  // "absent").
+  if (
+    rawScope !== undefined &&
+    (typeof rawScope !== "object" || rawScope === null || Array.isArray(rawScope))
+  ) {
+    return { ok: false, status: 400, body: { error: `\`${suppliedKey}\` must be a JSON object` } };
+  }
+
+  const hasHook = typeof reg.instantiate === "function";
+  const hasScope = reg.scope !== undefined;
+  // Memory-declaring registrations accept a caller context too (#444 Gate
+  // 2.5 m5): `memory.scope` is documented as a function of the PARSED
+  // effective context, so a memory-only registration must be able to
+  // receive one — same unparsed-context posture as hook-only registrations.
+  const hasMemory = reg.memory !== undefined;
+  if (rawScope !== undefined && !hasHook && !hasScope && !hasMemory) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: `Agent has no instantiate hook — ${suppliedKey} is not accepted` },
+    };
+  }
+
+  // Hook-less AND scope-less registrations are byte-identical to before
+  // this feature: `agent` binds as-is, no instantiate call, no
+  // `context`/`scope` in the response.
+  let agentToBind: AgentLike = reg.agent;
+
+  // No explicit scope/context → compose with the registration's declared
+  // defaults (scope.defaults wins over the deprecated instantiateDefaults),
+  // so the echoed value always states what was actually resolved (mirror
+  // composition.ts:744-745).
+  //
+  // Shallow-copy the defaults before handing them anywhere — SessionScope
+  // freezes `.defaults` (a mutating `instantiate` hook would THROW on a
+  // frozen object rather than silently corrupt it) and `reg.
+  // instantiateDefaults` is ONE shared object across every conversation
+  // this registration ever creates. `undefined` (no defaults declared
+  // either way) is preserved as-is so the "no defaults" vs. "empty object"
+  // distinction survives.
+  const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
+  let effectiveContext: Record<string, unknown> | undefined =
+    (rawScope as Record<string, unknown> | undefined) ??
+    (declaredDefaults ? { ...declaredDefaults } : undefined);
+
+  // Scope validation (#308) — the registration's declared shape wins over
+  // ad hoc context: parse the effective value against `scope.schema` (zod
+  // defaults/coercions applied), 400 on failure. A registration that
+  // declares REQUIRED fields with no defaults turns a bare
+  // `POST /conversations` into a deliberate 400 (decisions.md D11) — the
+  // agent said it needs a scope. The PARSED value replaces
+  // `effectiveContext` for every downstream consumer: `instantiate`,
+  // redaction, the run-metadata stamp, and `buildScopeHost` injection.
+  if (reg.scope) {
+    try {
+      effectiveContext = reg.scope.parse(effectiveContext ?? {});
+    } catch (err) {
+      // Duck-typed detection: zod is a `^3.25.0 || ^4.1.8` peer dep and the
+      // throwing zod may be `@pattern-stack/agentic-core`'s copy, not the
+      // server's — never `instanceof ZodError` / `.flatten()` (v3-only
+      // shape) across that module boundary (decisions.md D3).
+      if (err && Array.isArray((err as { issues?: unknown }).issues)) {
+        return {
+          ok: false,
+          status: 400,
+          body: { error: "scope validation failed", issues: (err as { issues: unknown[] }).issues },
+        };
+      }
+      throw err;
+    }
+    if (!isPlainRecord(effectiveContext)) {
+      // A real SessionScope can't get here (z.object parses to an object);
+      // only a malformed hand-rolled registration scope can — 502 names the
+      // registration bug instead of crashing redaction with a raw 500.
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "scope.parse returned a non-object — malformed scope" },
+      };
+    }
+  }
+
+  if (typeof reg.instantiate === "function") {
+    try {
+      agentToBind = await reg.instantiate(effectiveContext);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, status: 502, body: { error: `instantiate failed: ${message}` } };
+    }
+  }
+
+  // Memory binding (#444) — resolve the partition scope ONCE, at creation,
+  // from the PARSED effective context (never the redacted copy), mirroring
+  // scope's own fixed-at-creation posture. Fail LOUD here, not at
+  // first-message time: an empty or non-string-map scope would make turn-1
+  // recall an unscoped search (ADR-0007), and 502 names a registration bug
+  // (same grammar as `instantiate failed` above).
+  let memoryBinding: ConversationEntry["memory"];
+  if (reg.memory) {
+    // Same fail-loud contract as the scope checks below (Gate 2.5 m3/M1):
+    // a bad budget would otherwise throw inside the first-message
+    // try/catch, get swallowed into one console.error, and leave recall
+    // silently dead for the conversation (latch consumed, never retried).
+    if (
+      reg.memory.budgetChars !== undefined &&
+      (!Number.isInteger(reg.memory.budgetChars) || reg.memory.budgetChars <= 0)
+    ) {
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "memory budgetChars must be a positive integer" },
+      };
+    }
+    let derived: unknown;
+    try {
+      // A static scope map is COPIED (Gate 2.5 n7): the registration object
+      // is shared across every conversation it ever creates.
+      derived =
+        typeof reg.memory.scope === "function"
+          ? reg.memory.scope(effectiveContext)
+          : { ...reg.memory.scope };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        status: 502,
+        body: { error: `memory scope derivation failed: ${message}` },
+      };
+    }
+    if (
+      !isPlainRecord(derived) ||
+      Object.keys(derived).length === 0 ||
+      Object.values(derived).some((v) => typeof v !== "string")
+    ) {
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "memory scope must be a non-empty string map — got an invalid derivation" },
+      };
+    }
+    memoryBinding = {
+      store: reg.memory.store,
+      scope: derived as Record<string, string>,
+      ...(reg.memory.budgetChars !== undefined ? { budgetChars: reg.memory.budgetChars } : {}),
+    };
+  }
+
+  // Redact keys are the union of the scope's declared redactions and the
+  // deprecated `contextRedactKeys` — a hook-only registration's redaction
+  // keeps working unchanged when it later adds a `scope`.
+  const redactKeys = Array.from(
+    new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])]),
+  );
+  const { context: redactedContext, redactedKeys } = redactContext(effectiveContext, redactKeys);
+
+  // Wire a ToolExecutor so AgentRunner can actually execute tool calls
+  // from the agent's Capability toolboxes (not just format them for the LLM).
+  //
+  // DERIVE, don't force-create: `deriveToolboxExecutor` returns `undefined`
+  // for a capability-less agent. That matters for a PromotedAgent (asAgent()),
+  // whose synthetic role has NO capabilities — `createToolboxExecutor` would
+  // hand back a truthy-but-EMPTY executor that throws `Tool "X" not found` for
+  // every call, and (as a set `RunOptions.toolExecutor`) would BEAT the
+  // AgentStep-level `deriveToolboxExecutor(agent)` fallback that arms the
+  // nested agent's own tools. Leaving it `undefined` restores that per-agent
+  // derivation; real-capability agents still get their executor here.
+  //
+  // Derived from the BOUND (delivered-or-declared) instance, not always
+  // `reg.agent` — a hook-bearing registration's delivered instance is the
+  // one whose tools actually execute (#268).
+  const toolExecutor = deriveToolboxExecutor(
+    agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
+  );
+  // `host.scope` (#308) — carries the PARSED scope value across every run
+  // this conversation makes (`Conversation` forwards `_host` verbatim into
+  // every `send()`/`stream()`), so tools can read it via `readScope`/
+  // `requireScope` (`@pattern-stack/agentic-runtime`, `workflows/scope-host.js`).
+  // Scope-declaring registrations get `host.scope`; memory-declaring ones
+  // get a host bag too (#444 — even scope-less, the bag must exist for the
+  // messages route to set `host.recall` on). The bag itself is a fresh
+  // MUTABLE object (buildScopeHost's documented spread pattern) — only its
+  // `.scope` value is frozen. Plain registrations keep today's hostless
+  // behavior byte-identically.
+  const host: Record<string, unknown> | undefined = hasScope
+    ? { ...buildScopeHost(effectiveContext ?? {}) }
+    : memoryBinding
+      ? {}
+      : undefined;
+
+  return {
+    ok: true,
+    agentToBind,
+    effectiveContext,
+    redactedContext,
+    redactedKeys,
+    memoryBinding,
+    host,
+    toolExecutor,
+    hasHook,
+    hasScope,
+    hasMemory,
+  };
+}
+
+/** The `metadata.binding` stamp `POST /conversations` writes (#480). */
+interface BindingStamp {
+  readonly agentId: string;
+  readonly scopeSupplied: boolean;
+}
+
+/** Read the binding stamp off a stored row, or `null` if it isn't a valid one. */
+function readBindingStamp(metadata: Record<string, unknown>): BindingStamp | null {
+  const binding = metadata.binding;
+  if (!isPlainRecord(binding)) return null;
+  const agentId = binding.agentId;
+  if (typeof agentId !== "string" || agentId.length === 0) return null;
+  return { agentId, scopeSupplied: binding.scopeSupplied === true };
+}
 
 function notConfigured(c: Context): Response {
   return c.json(
