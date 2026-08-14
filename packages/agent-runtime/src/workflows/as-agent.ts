@@ -411,7 +411,7 @@ export class NodeBackedRunner implements RunnerProtocol {
       // so adding one to the SSE/consumer stream now would be a behavior
       // change. RunStoreExporter still needs SOMETHING to finalize the open
       // `runs` row as 'error' (otherwise it lingers 'running' until the next
-      // boot's `sweepRunning()`), so it goes to the bus only.
+      // the loaders' open-time sweep, #495), so it goes to the bus only.
       await publish(
         createEvent("agent.error", {
           traceId,
