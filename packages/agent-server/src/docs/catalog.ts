@@ -107,7 +107,25 @@ const CaseBody = z
   .describe("An eval case");
 
 const SendMessageBody = z
-  .object({ message: z.string(), stream: z.boolean().optional() })
+  .object({
+    /**
+     * The user turn. (Documented as `message`/`stream` until #480 — neither
+     * key was ever read by the route, which has always taken `content`; the
+     * response is always an SSE stream, so there is no `stream` toggle.)
+     */
+    content: z.string(),
+    /** Per-message cap on the agent tool-loop, clamped to 1..50. */
+    maxIterations: z.number().optional(),
+    /**
+     * Scope for RESUMING a conversation this process doesn't hold in memory
+     * (#480) — e.g. after a server restart, or from the conversation list.
+     * Scope values are deliberately never persisted (they can carry
+     * credentials), so a conversation created WITH a scope requires the same
+     * scope back on the resuming turn; it is parsed and re-bound exactly as
+     * at creation. Ignored for a conversation that is already live.
+     */
+    scope: z.record(z.unknown()).optional(),
+  })
   .describe("A user turn for the conversation");
 
 const CreateConversationBody = z
@@ -221,7 +239,10 @@ export const OVERLAY: Readonly<Record<string, Partial<RouteDoc>>> = {
       "deprecated `context` alias — `scope` wins when both are sent) is parsed against the " +
       "declared schema, then resolves the delivered instance the conversation runs as (400 on " +
       "scope validation failure or when neither a scope nor a hook is declared; 502 if the " +
-      "hook rejects) and is echoed back redacted.",
+      "hook rejects) and is echoed back redacted. The returned `id` is durable (#480): it is " +
+      "the same id `GET /conversations` lists and `POST /:id/messages` accepts, and when " +
+      "persistence is configured the row is written before the first turn, so the " +
+      "conversation can be resumed later — including in a different process.",
     request: CreateConversationBody,
     responses: {
       201: { description: "Conversation created", schema: ConversationCreatedResponse },
@@ -242,7 +263,30 @@ export const OVERLAY: Readonly<Record<string, Partial<RouteDoc>>> = {
   },
   "POST /conversations/:id/messages": {
     summary: "Send a message to a conversation",
+    description:
+      "Streams the agent's response as SSE. The conversation id is the one " +
+      "`POST /conversations` returned — the same id `GET /conversations` lists (#480). " +
+      "A conversation the server no longer holds in memory (after a restart, or picked " +
+      "from the list) is REHYDRATED from the store and continues with its full history. " +
+      "Because scope values are never persisted, a conversation created with a scope " +
+      "requires that scope re-sent on the resuming turn (400 otherwise).",
     request: SendMessageBody,
+    responses: {
+      200: { description: "SSE stream of agent events, terminated by a `done` frame" },
+      400: {
+        description:
+          "`content` is missing, or the conversation is being resumed and its `scope` was " +
+          "omitted or failed validation",
+      },
+      404: { description: "No such conversation, live or stored" },
+      409: {
+        description:
+          "A turn is already streaming for this conversation, or the stored conversation " +
+          "cannot be resumed (written before resume was supported, or its agent is no " +
+          "longer registered)",
+      },
+      501: { description: "The bound runner does not support streaming" },
+    },
     persistenceGated: true,
   },
   "GET /messages/:id/parts": { summary: "List a message's parts", persistenceGated: true },

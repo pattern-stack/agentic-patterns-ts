@@ -26,6 +26,7 @@
 import type { Statement } from "better-sqlite3";
 import type {
   ConversationStore,
+  CreateConversationOptions,
   StoredConversation,
   StoredConversationSummary,
   StoredMessage,
@@ -138,12 +139,21 @@ export class SQLiteConversationStore extends EvalStore implements ConversationSt
     `);
   }
 
-  async createConversation(agentName: string, model: string): Promise<StoredConversation> {
-    const id = generateId();
+  async createConversation(
+    agentName: string,
+    model: string,
+    options?: CreateConversationOptions,
+  ): Promise<StoredConversation> {
+    // #480: honor a caller-supplied id so the live `Conversation` and its
+    // durable row share one identity. A duplicate id surfaces as SQLite's own
+    // PRIMARY KEY violation rather than a silent second row — callers that
+    // mean "resume" must go through `getConversation`, not create again.
+    const id = options?.id ?? generateId();
+    const metadata = options?.metadata ? { ...options.metadata } : {};
     const now = new Date();
     const nowIso = now.toISOString();
-    this._createConvStmt.run(id, agentName, model, "{}", nowIso, nowIso);
-    return { id, agentName, model, createdAt: now, updatedAt: now, metadata: {} };
+    this._createConvStmt.run(id, agentName, model, JSON.stringify(metadata), nowIso, nowIso);
+    return { id, agentName, model, createdAt: now, updatedAt: now, metadata };
   }
 
   async getConversation(conversationId: string): Promise<StoredConversation | null> {

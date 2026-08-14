@@ -32,6 +32,7 @@ import {
   buildScopeHost,
   createEvent,
   deriveToolboxExecutor,
+  exchangesFromMessages,
 } from "@pattern-stack/agentic-runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -87,6 +88,11 @@ export interface ConversationEntry {
   recallAssembled?: boolean;
 }
 
+/** The result of attempting to rebuild a conversation from the store (#480). */
+type ResumeOutcome =
+  | { ok: true; entry: ConversationEntry }
+  | { ok: false; status: 400 | 404 | 409 | 502; body: Record<string, unknown> };
+
 export function conversationRoutes(
   agents: AgentRegistration[],
   conversations: Map<string, ConversationEntry>,
@@ -96,6 +102,13 @@ export function conversationRoutes(
   runStore?: RunStore,
 ): Hono {
   const app = new Hono();
+
+  /**
+   * Resumes currently being built, keyed by conversation id — the dedupe latch
+   * for `resumeConversation`. An entry lives only for the duration of one
+   * rebuild; the map is empty whenever nothing is mid-resume.
+   */
+  const resumesInFlight = new Map<string, Promise<ResumeOutcome>>();
 
   // POST /conversations — create a new conversation
   app.post("/conversations", async (c) => {
@@ -114,188 +127,50 @@ export function conversationRoutes(
       body.scope !== undefined ? "scope" : body.context !== undefined ? "context" : undefined;
     const rawScope = body.scope !== undefined ? body.scope : body.context;
 
-    // Shape (mirrors composition.ts:733's grammar — an explicit `null` is
-    // rejected same as any other non-object, never silently coerced to
-    // "absent").
-    if (
-      rawScope !== undefined &&
-      (typeof rawScope !== "object" || rawScope === null || Array.isArray(rawScope))
-    ) {
-      return c.json({ error: `\`${suppliedKey}\` must be a JSON object` }, 400);
+    const bound = await bindRegistration(reg, rawScope, suppliedKey);
+    if (!bound.ok) {
+      return c.json(bound.body, bound.status);
     }
+    const { agentToBind, redactedContext, redactedKeys, memoryBinding, host } = bound;
+    const { hasHook, hasScope, hasMemory } = bound;
 
-    const hasHook = typeof reg.instantiate === "function";
-    const hasScope = reg.scope !== undefined;
-    // Memory-declaring registrations accept a caller context too (#444 Gate
-    // 2.5 m5): `memory.scope` is documented as a function of the PARSED
-    // effective context, so a memory-only registration must be able to
-    // receive one — same unparsed-context posture as hook-only registrations.
-    const hasMemory = reg.memory !== undefined;
-    if (rawScope !== undefined && !hasHook && !hasScope && !hasMemory) {
-      return c.json(
-        { error: `Agent has no instantiate hook — ${suppliedKey} is not accepted` },
-        400,
-      );
-    }
-
-    // Hook-less AND scope-less registrations are byte-identical to before
-    // this feature: `agent` binds as-is, no instantiate call, no
-    // `context`/`scope` in the response.
-    let agentToBind: AgentLike = reg.agent;
-
-    // No explicit scope/context → compose with the registration's declared
-    // defaults (scope.defaults wins over the deprecated instantiateDefaults),
-    // so the echoed value always states what was actually resolved (mirror
-    // composition.ts:744-745).
-    //
-    // Shallow-copy the defaults before handing them anywhere — SessionScope
-    // freezes `.defaults` (a mutating `instantiate` hook would THROW on a
-    // frozen object rather than silently corrupt it) and `reg.
-    // instantiateDefaults` is ONE shared object across every conversation
-    // this registration ever creates. `undefined` (no defaults declared
-    // either way) is preserved as-is so the "no defaults" vs. "empty object"
-    // distinction survives.
-    const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
-    let effectiveContext: Record<string, unknown> | undefined =
-      (rawScope as Record<string, unknown> | undefined) ??
-      (declaredDefaults ? { ...declaredDefaults } : undefined);
-
-    // Scope validation (#308) — the registration's declared shape wins over
-    // ad hoc context: parse the effective value against `scope.schema` (zod
-    // defaults/coercions applied), 400 on failure. A registration that
-    // declares REQUIRED fields with no defaults turns a bare
-    // `POST /conversations` into a deliberate 400 (decisions.md D11) — the
-    // agent said it needs a scope. The PARSED value replaces
-    // `effectiveContext` for every downstream consumer: `instantiate`,
-    // redaction, the run-metadata stamp, and `buildScopeHost` injection.
-    if (reg.scope) {
-      try {
-        effectiveContext = reg.scope.parse(effectiveContext ?? {});
-      } catch (err) {
-        // Duck-typed detection: zod is a `^3.25.0 || ^4.1.8` peer dep and the
-        // throwing zod may be `@pattern-stack/agentic-core`'s copy, not the
-        // server's — never `instanceof ZodError` / `.flatten()` (v3-only
-        // shape) across that module boundary (decisions.md D3).
-        if (err && Array.isArray((err as { issues?: unknown }).issues)) {
-          return c.json(
-            { error: "scope validation failed", issues: (err as { issues: unknown[] }).issues },
-            400,
-          );
-        }
-        throw err;
-      }
-      if (!isPlainRecord(effectiveContext)) {
-        // A real SessionScope can't get here (z.object parses to an object);
-        // only a malformed hand-rolled registration scope can — 502 names the
-        // registration bug instead of crashing redaction with a raw 500.
-        return c.json({ error: "scope.parse returned a non-object — malformed scope" }, 502);
-      }
-    }
-
-    if (typeof reg.instantiate === "function") {
-      try {
-        agentToBind = await reg.instantiate(effectiveContext);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return c.json({ error: `instantiate failed: ${message}` }, 502);
-      }
-    }
-
-    // Memory binding (#444) — resolve the partition scope ONCE, at creation,
-    // from the PARSED effective context (never the redacted copy), mirroring
-    // scope's own fixed-at-creation posture. Fail LOUD here, not at
-    // first-message time: an empty or non-string-map scope would make turn-1
-    // recall an unscoped search (ADR-0007), and 502 names a registration bug
-    // (same grammar as `instantiate failed` above).
-    let memoryBinding: ConversationEntry["memory"];
-    if (reg.memory) {
-      // Same fail-loud contract as the scope checks below (Gate 2.5 m3/M1):
-      // a bad budget would otherwise throw inside the first-message
-      // try/catch, get swallowed into one console.error, and leave recall
-      // silently dead for the conversation (latch consumed, never retried).
-      if (
-        reg.memory.budgetChars !== undefined &&
-        (!Number.isInteger(reg.memory.budgetChars) || reg.memory.budgetChars <= 0)
-      ) {
-        return c.json({ error: "memory budgetChars must be a positive integer" }, 502);
-      }
-      let derived: unknown;
-      try {
-        // A static scope map is COPIED (Gate 2.5 n7): the registration object
-        // is shared across every conversation it ever creates.
-        derived =
-          typeof reg.memory.scope === "function"
-            ? reg.memory.scope(effectiveContext)
-            : { ...reg.memory.scope };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return c.json({ error: `memory scope derivation failed: ${message}` }, 502);
-      }
-      if (
-        !isPlainRecord(derived) ||
-        Object.keys(derived).length === 0 ||
-        Object.values(derived).some((v) => typeof v !== "string")
-      ) {
-        return c.json(
-          { error: "memory scope must be a non-empty string map — got an invalid derivation" },
-          502,
-        );
-      }
-      memoryBinding = {
-        store: reg.memory.store,
-        scope: derived as Record<string, string>,
-        ...(reg.memory.budgetChars !== undefined ? { budgetChars: reg.memory.budgetChars } : {}),
-      };
-    }
-
-    // Redact keys are the union of the scope's declared redactions and the
-    // deprecated `contextRedactKeys` — a hook-only registration's redaction
-    // keeps working unchanged when it later adds a `scope`.
-    const redactKeys = Array.from(
-      new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])]),
-    );
-    const { context: redactedContext, redactedKeys } = redactContext(effectiveContext, redactKeys);
-
-    // Wire a ToolExecutor so AgentRunner can actually execute tool calls
-    // from the agent's Capability toolboxes (not just format them for the LLM).
-    //
-    // DERIVE, don't force-create: `deriveToolboxExecutor` returns `undefined`
-    // for a capability-less agent. That matters for a PromotedAgent (asAgent()),
-    // whose synthetic role has NO capabilities — `createToolboxExecutor` would
-    // hand back a truthy-but-EMPTY executor that throws `Tool "X" not found` for
-    // every call, and (as a set `RunOptions.toolExecutor`) would BEAT the
-    // AgentStep-level `deriveToolboxExecutor(agent)` fallback that arms the
-    // nested agent's own tools. Leaving it `undefined` restores that per-agent
-    // derivation; real-capability agents still get their executor here.
-    //
-    // Derived from the BOUND (delivered-or-declared) instance, not always
-    // `reg.agent` — a hook-bearing registration's delivered instance is the
-    // one whose tools actually execute (#268).
-    const toolExecutor = deriveToolboxExecutor(
-      agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
-    );
-    // `host.scope` (#308) — carries the PARSED scope value across every run
-    // this conversation makes (`Conversation` forwards `_host` verbatim into
-    // every `send()`/`stream()`), so tools can read it via `readScope`/
-    // `requireScope` (`@pattern-stack/agentic-runtime`, `workflows/scope-host.js`).
-    // Scope-declaring registrations get `host.scope`; memory-declaring ones
-    // get a host bag too (#444 — even scope-less, the bag must exist for the
-    // messages route to set `host.recall` on). The bag itself is a fresh
-    // MUTABLE object (buildScopeHost's documented spread pattern) — only its
-    // `.scope` value is frozen. Plain registrations keep today's hostless
-    // behavior byte-identically.
-    const host: Record<string, unknown> | undefined = hasScope
-      ? { ...buildScopeHost(effectiveContext ?? {}) }
-      : memoryBinding
-        ? {}
-        : undefined;
     // `store` (when configured) makes `Conversation._persistExchange` actually
     // write request/response messages — previously accepted and never used.
     const conversation = new Conversation(agentToBind, reg.runner, {
-      toolExecutor,
+      toolExecutor: bound.toolExecutor,
       store,
       ...(host ? { host } : {}),
     });
+
+    // #480: create the durable row EAGERLY, under the conversation's own id.
+    // Two things follow from this that were both broken before:
+    //   1. one identity — the id returned here is the id `GET /conversations`
+    //      lists AND the id `POST /:id/messages` accepts, so a listed
+    //      conversation can actually be replied to;
+    //   2. the row exists before the first turn, so a conversation that was
+    //      created and never messaged still lists (and can still be resumed).
+    // The `binding` stamp is what makes resume possible after a restart: it
+    // records WHICH registration this conversation was bound to, and whether
+    // the caller supplied a scope at creation (so resume knows to demand one
+    // back). Scope VALUES are deliberately never written — they stay
+    // caller-supplied per resume, so no secret lands at rest (see the
+    // `resumeConversation` doc comment).
+    if (store) {
+      try {
+        await store.createConversation(agentToBind.role.name, agentToBind.getModel() ?? "", {
+          id: conversation.id,
+          metadata: { binding: { agentId, scopeSupplied: rawScope !== undefined } },
+        });
+      } catch (err) {
+        // Fail loud. Persistence IS configured, so a conversation whose row
+        // never landed is one that silently can't be listed or resumed —
+        // exactly the #480 failure mode, reintroduced quietly. Better to
+        // refuse the create than hand back an id that half-works.
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json({ error: `failed to persist conversation: ${message}` }, 502);
+      }
+    }
+
     conversations.set(conversation.id, {
       conversation,
       agentId,
@@ -498,20 +373,185 @@ export function conversationRoutes(
     );
   });
 
+  /**
+   * Rebuild a conversation from the durable store (#480) — the fix for "a
+   * chat can only continue in the process that created it".
+   *
+   * Called only on an in-memory miss, so a live conversation always wins and
+   * this never re-binds one that is already resident.
+   *
+   * SCOPE IS NOT PERSISTED, BY DESIGN. A scope can carry credentials — it is
+   * redacted before it is ever echoed back — so writing it to the SQLite file
+   * to make resume seamless would put secrets at rest in exactly the place
+   * the redaction path exists to keep them out of. Instead the row records
+   * only WHETHER a scope was supplied at creation, and the caller re-supplies
+   * the value on the resuming request. A resumed turn has to be authorized on
+   * its own terms anyway, so the caller is holding it regardless.
+   *
+   * What is faithfully restored: the registration binding (`instantiate` is
+   * re-run against the re-supplied scope), the tool executor, the host bag
+   * and the exchange history. What is NOT: the recall block (`host.recall`),
+   * which is re-derived rather than restored — see the messages route's
+   * turn-1 recall latch, which a resumed conversation deliberately re-arms so
+   * memory is re-queried against the resuming message.
+   */
+  async function resumeConversation(convId: string, rawScope: unknown): Promise<ResumeOutcome> {
+    // Collapse concurrent resumes of the SAME id onto one attempt. Without
+    // this, two requests that both observe the map-miss each run the whole
+    // pipeline (`bindRegistration` and `getMessages` are both async gaps) and
+    // each construct an independent `Conversation` for the same durable row.
+    // Two live objects over one row is worse than a lost update: each holds
+    // its own `_history`, and their interleaved `_persistExchange` writes can
+    // land as `request,request,response,response`, which
+    // `exchangesFromMessages` then pairs ACROSS turns — silently corrupting
+    // replayed history rather than failing. Sharing one entry also restores
+    // the `activeTurn` 409 guard below, which is per-entry and therefore
+    // useless when each request holds a different entry.
+    //
+    // The get/set pair runs before the first `await`, so it is atomic under
+    // the single-threaded event loop. Only the request that CREATED the
+    // promise clears the latch; late joiners return early and never reach the
+    // `finally`.
+    //
+    // Scope: this serializes one process. Two server instances over one store
+    // (no sticky routing) can still each hold a live conversation for the same
+    // row — that needs store-level locking and is out of scope here.
+    const inFlight = resumesInFlight.get(convId);
+    if (inFlight) return inFlight;
+
+    const attempt = performResume(convId, rawScope);
+    resumesInFlight.set(convId, attempt);
+    try {
+      return await attempt;
+    } finally {
+      resumesInFlight.delete(convId);
+    }
+  }
+
+  async function performResume(convId: string, rawScope: unknown): Promise<ResumeOutcome> {
+    // No persistence configured → the in-memory map really was the whole
+    // world, and an unknown id is simply unknown (the pre-#480 answer).
+    if (!store) {
+      return { ok: false, status: 404, body: { error: "Conversation not found" } };
+    }
+
+    const row = await store.getConversation(convId);
+    if (!row) {
+      return { ok: false, status: 404, body: { error: "Conversation not found" } };
+    }
+
+    const stamp = readBindingStamp(row.metadata);
+    if (!stamp) {
+      // Rows written before #480 carry no binding stamp, so there is no way
+      // to know which registration to re-bind. 409 (not 404) is the honest
+      // answer: the conversation exists and is readable, it just cannot be
+      // continued.
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: "conversation cannot be resumed — it was created before resume was supported",
+          hint: "start a new conversation with POST /conversations",
+        },
+      };
+    }
+
+    const reg = agents.find((a) => a.id === stamp.agentId);
+    if (!reg) {
+      return {
+        ok: false,
+        status: 409,
+        body: {
+          error: `conversation cannot be resumed — agent "${stamp.agentId}" is not registered on this server`,
+        },
+      };
+    }
+
+    // The caller must hand the scope back when one was supplied at creation.
+    // Silently re-binding with the registration's defaults instead would
+    // produce a DIFFERENTLY-scoped agent answering under the same
+    // conversation id — a correctness and authorization bug, not a
+    // convenience gap.
+    if (stamp.scopeSupplied && rawScope === undefined) {
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error: "conversation was created with a scope — resuming it requires `scope`",
+          hint: "re-send the same scope you created the conversation with, in the message body",
+        },
+      };
+    }
+
+    const bound = await bindRegistration(
+      reg,
+      rawScope,
+      rawScope !== undefined ? "scope" : undefined,
+    );
+    if (!bound.ok) {
+      return bound;
+    }
+
+    let history: Awaited<ReturnType<typeof store.getMessages>>;
+    try {
+      history = await store.getMessages(convId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, status: 502, body: { error: `failed to load conversation: ${message}` } };
+    }
+
+    const conversation = new Conversation(bound.agentToBind, reg.runner, {
+      // The whole point: the rebuilt conversation answers to the SAME id the
+      // store knows it by, so the next turn persists into the same row and
+      // a later resume finds one continuous thread rather than a fork.
+      id: convId,
+      store,
+      toolExecutor: bound.toolExecutor,
+      history: exchangesFromMessages(history),
+      ...(bound.host ? { host: bound.host } : {}),
+    });
+
+    const entry: ConversationEntry = {
+      conversation,
+      agentId: stamp.agentId,
+      ...(bound.hasHook || bound.hasScope || bound.hasMemory
+        ? { context: bound.redactedContext }
+        : {}),
+      ...(bound.redactedKeys ? { contextRedacted: bound.redactedKeys } : {}),
+      ...(bound.host ? { host: bound.host } : {}),
+      ...(bound.memoryBinding ? { memory: bound.memoryBinding } : {}),
+    };
+    conversations.set(convId, entry);
+    return { ok: true, entry };
+  }
+
   // POST /conversations/:id/messages — send message, stream SSE response
   app.post("/conversations/:id/messages", async (c) => {
     const convId = c.req.param("id");
-    const entry = conversations.get(convId);
 
-    if (!entry) {
-      return c.json({ error: "Conversation not found" }, 404);
-    }
-
-    const body = await c.req.json<{ content: string; maxIterations?: number }>();
+    const body = await c.req.json<{
+      content: string;
+      maxIterations?: number;
+      scope?: unknown;
+    }>();
     const content = body.content;
 
     if (!content || typeof content !== "string") {
       return c.json({ error: "content is required" }, 400);
+    }
+
+    // #480: a miss here used to be the end of the story — the in-memory map
+    // was the ONLY way to address a conversation, so a chat could only ever
+    // continue inside the process that created it, and nothing in
+    // `GET /conversations` could be replied to at all. Now a miss falls
+    // through to the durable store and rebuilds the conversation from it.
+    let entry = conversations.get(convId);
+    if (!entry) {
+      const resumed = await resumeConversation(convId, body.scope);
+      if (!resumed.ok) {
+        return c.json(resumed.body, resumed.status);
+      }
+      entry = resumed.entry;
     }
 
     // Optional per-message cap on the agent tool-loop (clamped to a sane range);
@@ -527,274 +567,297 @@ export function conversationRoutes(
       return c.json({ error: "Streaming not supported by this runner" }, 501);
     }
 
-    // 409 concurrency guard (#341): one turn at a time per conversation —
-    // `entry.activeTurn` is set for the duration of the streamSSE callback
-    // below and cleared in its `finally`. This also keeps `activeTurn`
-    // singular/unambiguous for `POST …/cancel`, which addresses "the" active
-    // turn without needing a run id.
+    // 409 concurrency guard (#341): one turn at a time per conversation.
+    //
+    // The check and the set must sit in ONE synchronous slice. They used to
+    // straddle `streamSSE` — tested here, assigned inside the (async)
+    // callback — so two requests could both read `activeTurn === undefined`
+    // and both stream, which is precisely the interleaved-persistence
+    // corruption the resume dedupe above also guards against. Claiming the
+    // latch here, before the callback can run, makes the guard do what its
+    // name says. Cleared in the callback's `finally` (and below, if
+    // `streamSSE` itself throws before ever invoking the callback — otherwise
+    // the conversation would 409 forever).
     if (entry.activeTurn) {
       return c.json({ error: "a turn is already streaming for this conversation" }, 409);
     }
+    // #341: one AbortController per turn, shared by the explicit cancel
+    // route and the disconnect-hardening `onAbort` wiring below — both
+    // routes converge on the same teardown.
+    const controller = new AbortController();
+    const activeTurn = { controller, startedAt: Date.now() };
+    entry.activeTurn = activeTurn;
+    const claimedEntry = entry;
 
     // SSE streaming response. We pass the server's shared eventBus so
     // emitted events reach every attached exporter (collector, SSE
     // broadcast, etc.) in addition to flowing through the generator for
     // this client stream.
-    return streamSSE(c, async (stream) => {
-      // #341: one AbortController per turn, shared by the explicit cancel
-      // route and the disconnect-hardening `onAbort` wiring below — both
-      // routes converge on the same teardown.
-      const controller = new AbortController();
-      entry.activeTurn = { controller, startedAt: Date.now() };
-
-      // Turn-1 recall (#444, ADR-0007 D8a — pinned ordering: instantiate →
-      // bind → FIRST user message → assemble → render). Assembled exactly
-      // once per conversation, HERE — inside the turn that WON the 409 guard
-      // and in the same synchronous slice that set `activeTurn` (Gate 2.5
-      // B1): a concurrent first message can neither double-assemble nor
-      // stream ahead with a recall-less bag while the winner is mid-await.
-      // This is where the first user text exists to serve as the search
-      // query. Best-effort by design: a failed assembly logs and the turn
-      // streams without recall (the toolbox surface still works); an EMPTY
-      // block sets nothing, keeping rendering byte-identical to the
-      // no-memory case.
-      if (entry.memory && !entry.recallAssembled) {
-        entry.recallAssembled = true;
-        try {
-          const recall = await assembleRecall(entry.memory.store, entry.memory.scope, {
-            query: content,
-            ...(entry.memory.budgetChars !== undefined
-              ? { budgetChars: entry.memory.budgetChars }
-              : {}),
-          });
-          if (recall.block.length > 0 && entry.host) {
-            entry.host.recall = recall.block;
-          }
-          // Emission is ROUTE-owned (assembleRecall's `emit` deliberately
-          // unused): ONE event, published on the shared bus AND written onto
-          // this turn's SSE stream so the chat surface watches recall arrive.
-          // traceId = the conversation id — the runner mints its run ids only
-          // after streaming starts, so a pre-stream host event cannot share
-          // them; grouping by conversation beats an unjoinable fresh uuid.
-          const recallEvent = createEvent("agent.memory.recall", {
-            traceId: convId,
-            runId: crypto.randomUUID(),
-            scope: entry.memory.scope,
-            count: recall.count,
-            chars: recall.chars,
-            budgetChars: entry.memory.budgetChars ?? DEFAULT_RECALL_BUDGET_CHARS,
-            truncated: recall.truncated,
-            preview: recall.block.slice(0, 512),
-          });
+    try {
+      return streamSSE(c, async (stream) => {
+        // Turn-1 recall (#444, ADR-0007 D8a — pinned ordering: instantiate →
+        // bind → FIRST user message → assemble → render). Assembled exactly
+        // once per conversation, HERE — inside the turn that WON the 409 guard
+        // and in the same synchronous slice that set `activeTurn` (Gate 2.5
+        // B1): a concurrent first message can neither double-assemble nor
+        // stream ahead with a recall-less bag while the winner is mid-await.
+        // This is where the first user text exists to serve as the search
+        // query. Best-effort by design: a failed assembly logs and the turn
+        // streams without recall (the toolbox surface still works); an EMPTY
+        // block sets nothing, keeping rendering byte-identical to the
+        // no-memory case.
+        if (claimedEntry.memory && !claimedEntry.recallAssembled) {
+          claimedEntry.recallAssembled = true;
           try {
-            await eventBus.publish(recallEvent);
+            const recall = await assembleRecall(
+              claimedEntry.memory.store,
+              claimedEntry.memory.scope,
+              {
+                query: content,
+                ...(claimedEntry.memory.budgetChars !== undefined
+                  ? { budgetChars: claimedEntry.memory.budgetChars }
+                  : {}),
+              },
+            );
+            if (recall.block.length > 0 && claimedEntry.host) {
+              claimedEntry.host.recall = recall.block;
+            }
+            // Emission is ROUTE-owned (assembleRecall's `emit` deliberately
+            // unused): ONE event, published on the shared bus AND written onto
+            // this turn's SSE stream so the chat surface watches recall arrive.
+            // traceId = the conversation id — the runner mints its run ids only
+            // after streaming starts, so a pre-stream host event cannot share
+            // them; grouping by conversation beats an unjoinable fresh uuid.
+            const recallEvent = createEvent("agent.memory.recall", {
+              traceId: convId,
+              runId: crypto.randomUUID(),
+              scope: claimedEntry.memory.scope,
+              count: recall.count,
+              chars: recall.chars,
+              budgetChars: claimedEntry.memory.budgetChars ?? DEFAULT_RECALL_BUDGET_CHARS,
+              truncated: recall.truncated,
+              preview: recall.block.slice(0, 512),
+            });
+            try {
+              await eventBus.publish(recallEvent);
+            } catch (err) {
+              console.error("conversations: agent.memory.recall publish failed:", err);
+            }
+            const frame = agentEventToSSE(recallEvent);
+            if (frame) await stream.writeSSE(frame);
           } catch (err) {
-            console.error("conversations: agent.memory.recall publish failed:", err);
-          }
-          const frame = agentEventToSSE(recallEvent);
-          if (frame) await stream.writeSSE(frame);
-        } catch (err) {
-          console.error(`conversations: recall assembly failed for ${convId}:`, err);
-        }
-      }
-
-      // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
-      // `bus.publish`, so the runner generator (which this loop drains) is
-      // parked and can't yield the prompt itself. The gate instead PUBLISHES
-      // an `agent.input.request` on the bus; we surface it onto THIS turn's
-      // stream, correlated by traceId so a concurrent conversation's prompt
-      // never bleeds in. The client answers via `POST /conversations/:id/input`
-      // (below), which resolves the registry and unblocks the gate.
-      let turnTraceId: string | undefined;
-      // The turn's TOP-LEVEL run id — the id `RunStoreExporter` keys the run
-      // row by, i.e. the FIRST `agent.message.start`'s runId (the conversation
-      // wrapper stamps its own runId on `conversation.start`, which never gets
-      // a row; nested sub-agent runs carry their own). Emitted on the `done`
-      // frame so the client can link straight to this turn's persisted trace
-      // (`/run?run=<id>`) without waiting for the session store to round-trip.
-      let turnRunId: string | undefined;
-      // The runId off the FIRST event this turn observes at all (conversation
-      // wrapper's own runId, since `conversation.start` always arrives first —
-      // :393 below). Used only to give a synthesized `agent.error` bus publish
-      // a runId to key on when the turn never reaches `agent.message.start`
-      // (pre-token failure ⇒ `turnRunId` stays undefined). Exporters must
-      // tolerate this runId having no run row.
-      let turnBusRunId: string | undefined;
-      const pendingForTurn = new Set<string>();
-      const onInputRequest = async (ev: BaseEvent): Promise<void> => {
-        const e = ev as AgentEvent;
-        if (e.type !== "agent.input.request") return;
-        if (turnTraceId !== undefined && e.traceId !== turnTraceId) return;
-        pendingForTurn.add(e.correlationId);
-        const msg = agentEventToSSE(e);
-        // The runner is blocked here, so no concurrent writeSSE races this.
-        if (msg) await stream.writeSSE(msg);
-      };
-      eventBus.subscribe("agent.input.request", onInputRequest);
-
-      // #341: one teardown function, two triggers — client disconnect
-      // (`stream.onAbort`) and an explicit `POST …/cancel` (the controller's
-      // own "abort" event, fired by that route calling `.abort()`). Denying
-      // pending inputs HERE (not just in `finally`, below) is what actually
-      // fixes the disconnect hang: a gate-blocked run is parked inside
-      // `bus.publish`, so the drain loop this `try` block runs never settles
-      // on its own — nothing else would ever reach the `finally` sweep.
-      // `AbortController.abort()` is a no-op once already aborted, so
-      // whichever trigger fires first "wins"; the other becomes a harmless
-      // second call. `inputRegistry.resolve` is likewise idempotent — a
-      // correlationId already resolved here is simply a no-op in the
-      // `finally` sweep below.
-      const onCancel = (): void => {
-        controller.abort();
-        if (inputRegistry) {
-          for (const correlationId of pendingForTurn) {
-            inputRegistry.resolve(correlationId, { decision: "deny" });
+            console.error(`conversations: recall assembly failed for ${convId}:`, err);
           }
         }
-      };
-      stream.onAbort(onCancel);
-      controller.signal.addEventListener("abort", onCancel, { once: true });
 
-      try {
-        for await (const event of conversation.stream(content, {
-          eventBus,
-          maxIterations,
-          signal: controller.signal,
-          // ADR-0006 §2: the registration is the caller half of the two-layer
-          // artifact opt-in. Resolved per turn from `entry.agentId` (the same
-          // lookup conversation creation does) — without this the flag has no
-          // route from config to RunOptions and the channel is unreachable.
-          ...(agents.find((a) => a.id === entry.agentId)?.publishArtifacts === true
-            ? { publishArtifacts: true }
-            : {}),
-        })) {
-          turnTraceId ??= event.traceId;
-          turnBusRunId ??= event.runId;
-          if (turnRunId === undefined && event.type === "agent.message.start") {
-            turnRunId = event.runId;
-            // Mirror the runId onto activeTurn (#341) so `POST …/cancel` can
-            // echo `run_id` back to the caller once it's known — best-effort,
-            // omitted from the 202 response before the first
-            // `agent.message.start` arrives.
-            if (entry.activeTurn) {
-              entry.activeTurn.runId = turnRunId;
+        // Human-in-the-loop delivery: an approval gate BLOCKS the run inside
+        // `bus.publish`, so the runner generator (which this loop drains) is
+        // parked and can't yield the prompt itself. The gate instead PUBLISHES
+        // an `agent.input.request` on the bus; we surface it onto THIS turn's
+        // stream, correlated by traceId so a concurrent conversation's prompt
+        // never bleeds in. The client answers via `POST /conversations/:id/input`
+        // (below), which resolves the registry and unblocks the gate.
+        let turnTraceId: string | undefined;
+        // The turn's TOP-LEVEL run id — the id `RunStoreExporter` keys the run
+        // row by, i.e. the FIRST `agent.message.start`'s runId (the conversation
+        // wrapper stamps its own runId on `conversation.start`, which never gets
+        // a row; nested sub-agent runs carry their own). Emitted on the `done`
+        // frame so the client can link straight to this turn's persisted trace
+        // (`/run?run=<id>`) without waiting for the session store to round-trip.
+        let turnRunId: string | undefined;
+        // The runId off the FIRST event this turn observes at all (conversation
+        // wrapper's own runId, since `conversation.start` always arrives first —
+        // :393 below). Used only to give a synthesized `agent.error` bus publish
+        // a runId to key on when the turn never reaches `agent.message.start`
+        // (pre-token failure ⇒ `turnRunId` stays undefined). Exporters must
+        // tolerate this runId having no run row.
+        let turnBusRunId: string | undefined;
+        const pendingForTurn = new Set<string>();
+        const onInputRequest = async (ev: BaseEvent): Promise<void> => {
+          const e = ev as AgentEvent;
+          if (e.type !== "agent.input.request") return;
+          if (turnTraceId !== undefined && e.traceId !== turnTraceId) return;
+          pendingForTurn.add(e.correlationId);
+          const msg = agentEventToSSE(e);
+          // The runner is blocked here, so no concurrent writeSSE races this.
+          if (msg) await stream.writeSSE(msg);
+        };
+        eventBus.subscribe("agent.input.request", onInputRequest);
+
+        // #341: one teardown function, two triggers — client disconnect
+        // (`stream.onAbort`) and an explicit `POST …/cancel` (the controller's
+        // own "abort" event, fired by that route calling `.abort()`). Denying
+        // pending inputs HERE (not just in `finally`, below) is what actually
+        // fixes the disconnect hang: a gate-blocked run is parked inside
+        // `bus.publish`, so the drain loop this `try` block runs never settles
+        // on its own — nothing else would ever reach the `finally` sweep.
+        // `AbortController.abort()` is a no-op once already aborted, so
+        // whichever trigger fires first "wins"; the other becomes a harmless
+        // second call. `inputRegistry.resolve` is likewise idempotent — a
+        // correlationId already resolved here is simply a no-op in the
+        // `finally` sweep below.
+        const onCancel = (): void => {
+          controller.abort();
+          if (inputRegistry) {
+            for (const correlationId of pendingForTurn) {
+              inputRegistry.resolve(correlationId, { decision: "deny" });
             }
           }
-          const msg = agentEventToSSE(event);
-          if (msg) {
-            await stream.writeSSE(msg);
-          }
-        }
-
-        await stream.writeSSE({
-          event: "done",
-          data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
-        });
-      } catch (err) {
-        // N5: the drain loop above can throw before yielding a single event
-        // (model-resolution reject, provider construction failure — any
-        // pre-yield setup throw in the runner) or mid-stream. Either way the
-        // stream must be honestly torn on the wire, never silently swallowed
-        // by hono: write the canonical `error` frame (byte-compatible with
-        // `toSSEMapping`'s `agent.error` payload, `sse-formatter.ts:301-309`)
-        // then the `done` terminator, in that order, then swallow. We do NOT
-        // use `streamSSE`'s `onError` callback — it writes its own
-        // `event: error` frame whose data is the raw message STRING, not
-        // JSON, which the dashboard's `parseFrame` drops and the Go parser
-        // can't decode. Owning the frame shape here keeps both happy.
-        const message = err instanceof Error ? err.message : String(err);
-        const errorType = err instanceof Error ? err.name : "Error";
+        };
+        stream.onAbort(onCancel);
+        controller.signal.addEventListener("abort", onCancel, { once: true });
 
         try {
-          await stream.writeSSE({
-            event: "error",
-            data: JSON.stringify({ error_type: errorType, message, recoverable: false }),
-          });
+          for await (const event of conversation.stream(content, {
+            eventBus,
+            maxIterations,
+            signal: controller.signal,
+            // ADR-0006 §2: the registration is the caller half of the two-layer
+            // artifact opt-in. Resolved per turn from `claimedEntry.agentId` (the same
+            // lookup conversation creation does) — without this the flag has no
+            // route from config to RunOptions and the channel is unreachable.
+            ...(agents.find((a) => a.id === claimedEntry.agentId)?.publishArtifacts === true
+              ? { publishArtifacts: true }
+              : {}),
+          })) {
+            turnTraceId ??= event.traceId;
+            turnBusRunId ??= event.runId;
+            if (turnRunId === undefined && event.type === "agent.message.start") {
+              turnRunId = event.runId;
+              // Mirror the runId onto activeTurn (#341) so `POST …/cancel` can
+              // echo `run_id` back to the caller once it's known — best-effort,
+              // omitted from the 202 response before the first
+              // `agent.message.start` arrives.
+              if (claimedEntry.activeTurn) {
+                claimedEntry.activeTurn.runId = turnRunId;
+              }
+            }
+            const msg = agentEventToSSE(event);
+            if (msg) {
+              await stream.writeSSE(msg);
+            }
+          }
+
           await stream.writeSSE({
             event: "done",
             data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
           });
-        } catch {
-          // Client gone — nothing left to tell. Belt-and-braces only: under
-          // hono 4.12.31 `StreamingApi.write` already swallows write errors
-          // (`catch {}` in `dist/utils/stream.js`), so this rarely fires.
-        }
+        } catch (err) {
+          // N5: the drain loop above can throw before yielding a single event
+          // (model-resolution reject, provider construction failure — any
+          // pre-yield setup throw in the runner) or mid-stream. Either way the
+          // stream must be honestly torn on the wire, never silently swallowed
+          // by hono: write the canonical `error` frame (byte-compatible with
+          // `toSSEMapping`'s `agent.error` payload, `sse-formatter.ts:301-309`)
+          // then the `done` terminator, in that order, then swallow. We do NOT
+          // use `streamSSE`'s `onError` callback — it writes its own
+          // `event: error` frame whose data is the raw message STRING, not
+          // JSON, which the dashboard's `parseFrame` drops and the Go parser
+          // can't decode. Owning the frame shape here keeps both happy.
+          const message = err instanceof Error ? err.message : String(err);
+          const errorType = err instanceof Error ? err.name : "Error";
 
-        // Bus visibility (non-load-bearing for the wire fix): a pre-token
-        // throw never reaches the event bus otherwise — no exporter records
-        // anything — so synthesize an `agent.error` for the admin
-        // firehose/collector/exporters. Guarded on turnTraceId: it is set
-        // from the first forwarded event, and `conversation.start` always
-        // arrives first, so this only fails to fire if the wrapper itself
-        // never yielded anything at all.
-        if (turnTraceId !== undefined && turnBusRunId !== undefined) {
-          const errorEvent = createEvent("agent.error", {
-            traceId: turnTraceId,
-            runId: turnBusRunId,
-            errorType,
-            message,
-            recoverable: false,
-            context: {},
-          });
           try {
-            await eventBus.publish(errorEvent);
-          } catch (publishErr) {
-            console.error("conversations: agent.error bus publish failed:", publishErr);
-          }
-        }
-      } finally {
-        // Run-metadata stamp (#268) — the redacted effective context this
-        // conversation is bound to, written onto the turn's run row. Lives in
-        // `finally`, NOT after the drain loop inside `try`: when a turn
-        // errors mid-run, `Conversation.stream` yields `conversation.end`
-        // then RE-THROWS, so the `for await` above throws too and a
-        // try-scoped stamp would never run — exactly the runs an operator
-        // most needs to inspect. A client disconnect is NOT the same kind of
-        // teardown: under hono 4.12.31, `StreamingApi.write` silently
-        // swallows write errors on a closed connection, so the drain loop
-        // above keeps pulling runner events to completion regardless — it
-        // does not throw, and nothing here stops the runner from finishing
-        // its work server-side. #341's `onAbort` wiring is what will
-        // actually short-circuit the runner on disconnect. `updateRunMetadata` is a
-        // local DB write independent of the broken stream/generator and
-        // status-independent (it stamps a still-`running` row the same as a
-        // finalized one, see its doc comment) — it lands on whatever the row
-        // ended up as, success or error, as long as `agent.message.start`
-        // was ever observed (`turnRunId` set). Best-effort: a store failure
-        // is logged, never allowed to shadow whatever this `finally` is
-        // unwinding from — matches the exporter's own failure posture.
-        if (runStore && turnRunId !== undefined && entry.context !== undefined) {
-          try {
-            runStore.updateRunMetadata(turnRunId, {
-              context: entry.context,
-              ...(entry.contextRedacted ? { context_redacted: entry.contextRedacted } : {}),
+            await stream.writeSSE({
+              event: "error",
+              data: JSON.stringify({ error_type: errorType, message, recoverable: false }),
             });
-          } catch (err) {
-            console.error(`conversations: updateRunMetadata failed for run ${turnRunId}:`, err);
+            await stream.writeSSE({
+              event: "done",
+              data: JSON.stringify(turnRunId ? { run_id: turnRunId } : {}),
+            });
+          } catch {
+            // Client gone — nothing left to tell. Belt-and-braces only: under
+            // hono 4.12.31 `StreamingApi.write` already swallows write errors
+            // (`catch {}` in `dist/utils/stream.js`), so this rarely fires.
           }
-        }
 
-        eventBus.unsubscribe("agent.input.request", onInputRequest);
-        // Fail closed: if the client disconnects mid-approval, deny any of THIS
-        // turn's still-pending requests so the blocked gate resolves (deny)
-        // instead of hanging the run forever. (Belt-and-braces alongside
-        // `onCancel` above, #341 — idempotent either way.)
-        if (inputRegistry) {
-          for (const correlationId of pendingForTurn) {
-            inputRegistry.resolve(correlationId, { decision: "deny" });
+          // Bus visibility (non-load-bearing for the wire fix): a pre-token
+          // throw never reaches the event bus otherwise — no exporter records
+          // anything — so synthesize an `agent.error` for the admin
+          // firehose/collector/exporters. Guarded on turnTraceId: it is set
+          // from the first forwarded event, and `conversation.start` always
+          // arrives first, so this only fails to fire if the wrapper itself
+          // never yielded anything at all.
+          if (turnTraceId !== undefined && turnBusRunId !== undefined) {
+            const errorEvent = createEvent("agent.error", {
+              traceId: turnTraceId,
+              runId: turnBusRunId,
+              errorType,
+              message,
+              recoverable: false,
+              context: {},
+            });
+            try {
+              await eventBus.publish(errorEvent);
+            } catch (publishErr) {
+              console.error("conversations: agent.error bus publish failed:", publishErr);
+            }
+          }
+        } finally {
+          // Run-metadata stamp (#268) — the redacted effective context this
+          // conversation is bound to, written onto the turn's run row. Lives in
+          // `finally`, NOT after the drain loop inside `try`: when a turn
+          // errors mid-run, `Conversation.stream` yields `conversation.end`
+          // then RE-THROWS, so the `for await` above throws too and a
+          // try-scoped stamp would never run — exactly the runs an operator
+          // most needs to inspect. A client disconnect is NOT the same kind of
+          // teardown: under hono 4.12.31, `StreamingApi.write` silently
+          // swallows write errors on a closed connection, so the drain loop
+          // above keeps pulling runner events to completion regardless — it
+          // does not throw, and nothing here stops the runner from finishing
+          // its work server-side. #341's `onAbort` wiring is what will
+          // actually short-circuit the runner on disconnect. `updateRunMetadata` is a
+          // local DB write independent of the broken stream/generator and
+          // status-independent (it stamps a still-`running` row the same as a
+          // finalized one, see its doc comment) — it lands on whatever the row
+          // ended up as, success or error, as long as `agent.message.start`
+          // was ever observed (`turnRunId` set). Best-effort: a store failure
+          // is logged, never allowed to shadow whatever this `finally` is
+          // unwinding from — matches the exporter's own failure posture.
+          if (runStore && turnRunId !== undefined && claimedEntry.context !== undefined) {
+            try {
+              runStore.updateRunMetadata(turnRunId, {
+                context: claimedEntry.context,
+                ...(claimedEntry.contextRedacted
+                  ? { context_redacted: claimedEntry.contextRedacted }
+                  : {}),
+              });
+            } catch (err) {
+              console.error(`conversations: updateRunMetadata failed for run ${turnRunId}:`, err);
+            }
+          }
+
+          eventBus.unsubscribe("agent.input.request", onInputRequest);
+          // Fail closed: if the client disconnects mid-approval, deny any of THIS
+          // turn's still-pending requests so the blocked gate resolves (deny)
+          // instead of hanging the run forever. (Belt-and-braces alongside
+          // `onCancel` above, #341 — idempotent either way.)
+          if (inputRegistry) {
+            for (const correlationId of pendingForTurn) {
+              inputRegistry.resolve(correlationId, { decision: "deny" });
+            }
+          }
+          // #341: natural-completion belt — a turn that finished on its own
+          // (never cancelled) still needs `activeTurn` cleared so the NEXT
+          // `POST …/messages` isn't 409'd forever and `POST …/cancel` 404s the
+          // way an idle conversation should. Guarded so a stale/already-swapped
+          // reference (e.g. a fresh turn's own set, in a hypothetical future
+          // where two `finally` blocks could interleave) never clobbers it.
+          if (claimedEntry.activeTurn?.controller === controller) {
+            claimedEntry.activeTurn = undefined;
           }
         }
-        // #341: natural-completion belt — a turn that finished on its own
-        // (never cancelled) still needs `activeTurn` cleared so the NEXT
-        // `POST …/messages` isn't 409'd forever and `POST …/cancel` 404s the
-        // way an idle conversation should. Guarded so a stale/already-swapped
-        // reference (e.g. a fresh turn's own set, in a hypothetical future
-        // where two `finally` blocks could interleave) never clobbers it.
-        if (entry.activeTurn?.controller === controller) {
-          entry.activeTurn = undefined;
-        }
+      });
+    } catch (err) {
+      // `streamSSE` threw before the callback could run, so the callback's
+      // `finally` will never fire — release the latch we claimed above or the
+      // conversation 409s for the rest of the process's life.
+      if (claimedEntry.activeTurn === activeTurn) {
+        claimedEntry.activeTurn = undefined;
       }
-    });
+      throw err;
+    }
   });
 
   // POST /conversations/:id/cancel — abort the in-flight turn, if any (#341).
@@ -872,6 +935,266 @@ export function conversationRoutes(
 // Helpers (file-local — small helpers are deliberately not shared across
 // route files, the `routes/runs.ts` precedent)
 // ---------------------------------------------------------------------------
+
+/** Everything a bound registration contributes to a `ConversationEntry`. */
+interface BoundRegistration {
+  readonly ok: true;
+  readonly agentToBind: AgentLike;
+  readonly effectiveContext: Record<string, unknown> | undefined;
+  readonly redactedContext: Record<string, unknown> | undefined;
+  readonly redactedKeys: readonly string[] | undefined;
+  readonly memoryBinding: ConversationEntry["memory"];
+  readonly host: Record<string, unknown> | undefined;
+  readonly toolExecutor: ReturnType<typeof deriveToolboxExecutor>;
+  readonly hasHook: boolean;
+  readonly hasScope: boolean;
+  readonly hasMemory: boolean;
+}
+
+/** A bind that failed, carrying the exact response the route should return. */
+interface BindRejection {
+  readonly ok: false;
+  readonly status: 400 | 502;
+  readonly body: Record<string, unknown>;
+}
+
+/**
+ * Resolve a registration + a caller-supplied scope into everything a
+ * conversation binds at creation: the delivered agent, the parsed/redacted
+ * scope, the memory binding, the host bag and the tool executor.
+ *
+ * Extracted from `POST /conversations` (#480) so RESUME can run the identical
+ * pipeline. That equivalence is the point — a rehydrated conversation must be
+ * bound exactly the way the original was, or resuming would silently produce
+ * a differently-configured agent under the same conversation id. Behavior is
+ * unchanged from the inline version; only the error returns moved from direct
+ * `c.json(...)` calls to a `BindRejection` the caller renders.
+ */
+async function bindRegistration(
+  reg: AgentRegistration,
+  rawScope: unknown,
+  suppliedKey: "scope" | "context" | undefined,
+): Promise<BoundRegistration | BindRejection> {
+  // Shape (mirrors composition.ts:733's grammar — an explicit `null` is
+  // rejected same as any other non-object, never silently coerced to
+  // "absent").
+  if (
+    rawScope !== undefined &&
+    (typeof rawScope !== "object" || rawScope === null || Array.isArray(rawScope))
+  ) {
+    return { ok: false, status: 400, body: { error: `\`${suppliedKey}\` must be a JSON object` } };
+  }
+
+  const hasHook = typeof reg.instantiate === "function";
+  const hasScope = reg.scope !== undefined;
+  // Memory-declaring registrations accept a caller context too (#444 Gate
+  // 2.5 m5): `memory.scope` is documented as a function of the PARSED
+  // effective context, so a memory-only registration must be able to
+  // receive one — same unparsed-context posture as hook-only registrations.
+  const hasMemory = reg.memory !== undefined;
+  if (rawScope !== undefined && !hasHook && !hasScope && !hasMemory) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: `Agent has no instantiate hook — ${suppliedKey} is not accepted` },
+    };
+  }
+
+  // Hook-less AND scope-less registrations are byte-identical to before
+  // this feature: `agent` binds as-is, no instantiate call, no
+  // `context`/`scope` in the response.
+  let agentToBind: AgentLike = reg.agent;
+
+  // No explicit scope/context → compose with the registration's declared
+  // defaults (scope.defaults wins over the deprecated instantiateDefaults),
+  // so the echoed value always states what was actually resolved (mirror
+  // composition.ts:744-745).
+  //
+  // Shallow-copy the defaults before handing them anywhere — SessionScope
+  // freezes `.defaults` (a mutating `instantiate` hook would THROW on a
+  // frozen object rather than silently corrupt it) and `reg.
+  // instantiateDefaults` is ONE shared object across every conversation
+  // this registration ever creates. `undefined` (no defaults declared
+  // either way) is preserved as-is so the "no defaults" vs. "empty object"
+  // distinction survives.
+  const declaredDefaults = reg.scope?.defaults ?? reg.instantiateDefaults;
+  let effectiveContext: Record<string, unknown> | undefined =
+    (rawScope as Record<string, unknown> | undefined) ??
+    (declaredDefaults ? { ...declaredDefaults } : undefined);
+
+  // Scope validation (#308) — the registration's declared shape wins over
+  // ad hoc context: parse the effective value against `scope.schema` (zod
+  // defaults/coercions applied), 400 on failure. A registration that
+  // declares REQUIRED fields with no defaults turns a bare
+  // `POST /conversations` into a deliberate 400 (decisions.md D11) — the
+  // agent said it needs a scope. The PARSED value replaces
+  // `effectiveContext` for every downstream consumer: `instantiate`,
+  // redaction, the run-metadata stamp, and `buildScopeHost` injection.
+  if (reg.scope) {
+    try {
+      effectiveContext = reg.scope.parse(effectiveContext ?? {});
+    } catch (err) {
+      // Duck-typed detection: zod is a `^3.25.0 || ^4.1.8` peer dep and the
+      // throwing zod may be `@pattern-stack/agentic-core`'s copy, not the
+      // server's — never `instanceof ZodError` / `.flatten()` (v3-only
+      // shape) across that module boundary (decisions.md D3).
+      if (err && Array.isArray((err as { issues?: unknown }).issues)) {
+        return {
+          ok: false,
+          status: 400,
+          body: { error: "scope validation failed", issues: (err as { issues: unknown[] }).issues },
+        };
+      }
+      throw err;
+    }
+    if (!isPlainRecord(effectiveContext)) {
+      // A real SessionScope can't get here (z.object parses to an object);
+      // only a malformed hand-rolled registration scope can — 502 names the
+      // registration bug instead of crashing redaction with a raw 500.
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "scope.parse returned a non-object — malformed scope" },
+      };
+    }
+  }
+
+  if (typeof reg.instantiate === "function") {
+    try {
+      agentToBind = await reg.instantiate(effectiveContext);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, status: 502, body: { error: `instantiate failed: ${message}` } };
+    }
+  }
+
+  // Memory binding (#444) — resolve the partition scope ONCE, at creation,
+  // from the PARSED effective context (never the redacted copy), mirroring
+  // scope's own fixed-at-creation posture. Fail LOUD here, not at
+  // first-message time: an empty or non-string-map scope would make turn-1
+  // recall an unscoped search (ADR-0007), and 502 names a registration bug
+  // (same grammar as `instantiate failed` above).
+  let memoryBinding: ConversationEntry["memory"];
+  if (reg.memory) {
+    // Same fail-loud contract as the scope checks below (Gate 2.5 m3/M1):
+    // a bad budget would otherwise throw inside the first-message
+    // try/catch, get swallowed into one console.error, and leave recall
+    // silently dead for the conversation (latch consumed, never retried).
+    if (
+      reg.memory.budgetChars !== undefined &&
+      (!Number.isInteger(reg.memory.budgetChars) || reg.memory.budgetChars <= 0)
+    ) {
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "memory budgetChars must be a positive integer" },
+      };
+    }
+    let derived: unknown;
+    try {
+      // A static scope map is COPIED (Gate 2.5 n7): the registration object
+      // is shared across every conversation it ever creates.
+      derived =
+        typeof reg.memory.scope === "function"
+          ? reg.memory.scope(effectiveContext)
+          : { ...reg.memory.scope };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        status: 502,
+        body: { error: `memory scope derivation failed: ${message}` },
+      };
+    }
+    if (
+      !isPlainRecord(derived) ||
+      Object.keys(derived).length === 0 ||
+      Object.values(derived).some((v) => typeof v !== "string")
+    ) {
+      return {
+        ok: false,
+        status: 502,
+        body: { error: "memory scope must be a non-empty string map — got an invalid derivation" },
+      };
+    }
+    memoryBinding = {
+      store: reg.memory.store,
+      scope: derived as Record<string, string>,
+      ...(reg.memory.budgetChars !== undefined ? { budgetChars: reg.memory.budgetChars } : {}),
+    };
+  }
+
+  // Redact keys are the union of the scope's declared redactions and the
+  // deprecated `contextRedactKeys` — a hook-only registration's redaction
+  // keeps working unchanged when it later adds a `scope`.
+  const redactKeys = Array.from(
+    new Set([...(reg.scope?.redactKeys ?? []), ...(reg.contextRedactKeys ?? [])]),
+  );
+  const { context: redactedContext, redactedKeys } = redactContext(effectiveContext, redactKeys);
+
+  // Wire a ToolExecutor so AgentRunner can actually execute tool calls
+  // from the agent's Capability toolboxes (not just format them for the LLM).
+  //
+  // DERIVE, don't force-create: `deriveToolboxExecutor` returns `undefined`
+  // for a capability-less agent. That matters for a PromotedAgent (asAgent()),
+  // whose synthetic role has NO capabilities — `createToolboxExecutor` would
+  // hand back a truthy-but-EMPTY executor that throws `Tool "X" not found` for
+  // every call, and (as a set `RunOptions.toolExecutor`) would BEAT the
+  // AgentStep-level `deriveToolboxExecutor(agent)` fallback that arms the
+  // nested agent's own tools. Leaving it `undefined` restores that per-agent
+  // derivation; real-capability agents still get their executor here.
+  //
+  // Derived from the BOUND (delivered-or-declared) instance, not always
+  // `reg.agent` — a hook-bearing registration's delivered instance is the
+  // one whose tools actually execute (#268).
+  const toolExecutor = deriveToolboxExecutor(
+    agentToBind as unknown as Parameters<typeof deriveToolboxExecutor>[0],
+  );
+  // `host.scope` (#308) — carries the PARSED scope value across every run
+  // this conversation makes (`Conversation` forwards `_host` verbatim into
+  // every `send()`/`stream()`), so tools can read it via `readScope`/
+  // `requireScope` (`@pattern-stack/agentic-runtime`, `workflows/scope-host.js`).
+  // Scope-declaring registrations get `host.scope`; memory-declaring ones
+  // get a host bag too (#444 — even scope-less, the bag must exist for the
+  // messages route to set `host.recall` on). The bag itself is a fresh
+  // MUTABLE object (buildScopeHost's documented spread pattern) — only its
+  // `.scope` value is frozen. Plain registrations keep today's hostless
+  // behavior byte-identically.
+  const host: Record<string, unknown> | undefined = hasScope
+    ? { ...buildScopeHost(effectiveContext ?? {}) }
+    : memoryBinding
+      ? {}
+      : undefined;
+
+  return {
+    ok: true,
+    agentToBind,
+    effectiveContext,
+    redactedContext,
+    redactedKeys,
+    memoryBinding,
+    host,
+    toolExecutor,
+    hasHook,
+    hasScope,
+    hasMemory,
+  };
+}
+
+/** The `metadata.binding` stamp `POST /conversations` writes (#480). */
+interface BindingStamp {
+  readonly agentId: string;
+  readonly scopeSupplied: boolean;
+}
+
+/** Read the binding stamp off a stored row, or `null` if it isn't a valid one. */
+function readBindingStamp(metadata: Record<string, unknown>): BindingStamp | null {
+  const binding = metadata.binding;
+  if (!isPlainRecord(binding)) return null;
+  const agentId = binding.agentId;
+  if (typeof agentId !== "string" || agentId.length === 0) return null;
+  return { agentId, scopeSupplied: binding.scopeSupplied === true };
+}
 
 function notConfigured(c: Context): Response {
   return c.json(
