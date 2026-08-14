@@ -224,7 +224,11 @@ export interface AgentRunnerOptions {
  * 4. Repeat until LLM returns final response or maxIterations reached
  */
 export class AgentRunner implements RunnerProtocol {
-  private _eventBus: AgentEventBus | undefined;
+  // #496: readonly — the bus is resolved per public call (see busFor), never
+  // rebound mid-life. `run({eventBus})` used to mutate this field, so with a
+  // singleton runner two concurrent calls with different buses interleaved and
+  // a gate registered for one bus could adjudicate the other's tool calls.
+  private readonly _eventBus: AgentEventBus | undefined;
   private readonly _resolver: ModelResolver;
   private readonly _requestHeaders: AgentRunnerOptions["requestHeaders"];
 
@@ -290,35 +294,30 @@ export class AgentRunner implements RunnerProtocol {
     );
   }
 
-  private get eventBus(): AgentEventBus {
-    if (!this._eventBus) {
-      this._eventBus = getAgentEventBus();
-    }
-    return this._eventBus;
-  }
-
-  private async emit(event: AgentEvent): Promise<unknown[]> {
-    return this.eventBus.publish(event);
-  }
-
   /**
-   * Emit an intent event and check if it was blocked by a gate.
-   * Returns true if allowed, false if blocked.
+   * Resolve the event bus for ONE public call (#496): the per-call override,
+   * then the constructor bus, then the global singleton — lazily, never
+   * memoized onto the field. Each of `run()`/`runStructured()`/`stream()`
+   * calls this exactly once at entry and threads the result (as a local
+   * `emit`/`emitIntent` closure, or as `bus` on a helper's ctx/scope object)
+   * for the whole call. BEHAVIOUR CHANGE vs the old sticky rebind: a call
+   * that omits `eventBus` now always falls back to the constructor/global
+   * bus — it no longer inherits whatever bus a PREVIOUS call passed.
    *
-   * Delegates to {@link AgentEventBus.evaluateIntent}, which returns THIS
-   * intent's own {@link GateEvaluation} — no inference from publish()'s
-   * ambiguous `[]` return, and no bus-wide `agent.tool.rejected` subscription.
-   * The AI SDK runs a step's tool calls concurrently, and the old
-   * subscription-based inference had to hand-correlate each rejection back to
-   * its `originalIntent.toolCallId` to avoid a concurrent sibling's rejection
+   * Intent evaluation (the per-call `emitIntent` closures) delegates to
+   * {@link AgentEventBus.evaluateIntent}, which returns THIS intent's own
+   * {@link GateEvaluation} — no inference from publish()'s ambiguous `[]`
+   * return, and no bus-wide `agent.tool.rejected` subscription. The AI SDK
+   * runs a step's tool calls concurrently, and the old subscription-based
+   * inference had to hand-correlate each rejection back to its
+   * `originalIntent.toolCallId` to avoid a concurrent sibling's rejection
    * flipping this call's verdict (#288). `evaluateIntent` is per-call and
-   * definitive, so that correlation is no longer needed and the class of bug is
-   * gone. `evaluateIntent` still emits the rejection event and runs the
+   * definitive, so that correlation is no longer needed and the class of bug
+   * is gone. `evaluateIntent` still emits the rejection event and runs the
    * guaranteed audit phase, so subscriber and audit semantics are unchanged.
    */
-  private async emitIntent(event: AgentEvent): Promise<boolean> {
-    const evaluation = await this.eventBus.evaluateIntent(event as ToolCallIntent);
-    return evaluation.outcome === "allow";
+  private busFor(options?: RunOptions): AgentEventBus {
+    return options?.eventBus ?? this._eventBus ?? getAgentEventBus();
   }
 
   /**
@@ -334,6 +333,7 @@ export class AgentRunner implements RunnerProtocol {
    * existing error path's posture).
    */
   private async *emitCancellation(params: {
+    bus: AgentEventBus;
     traceId: string;
     runId: string;
     parentSpanId: string;
@@ -345,7 +345,7 @@ export class AgentRunner implements RunnerProtocol {
       parentSpanId: params.parentSpanId,
       reason: "cancelled by client",
     });
-    await this.emit(cancelEv);
+    await params.bus.publish(cancelEv);
     yield cancelEv;
 
     const convEnd = createEvent("agent.conversation.end", {
@@ -354,7 +354,7 @@ export class AgentRunner implements RunnerProtocol {
       conversationId: params.conversationId,
       reason: "cancelled" as const,
     });
-    await this.emit(convEnd);
+    await params.bus.publish(convEnd);
     yield convEnd;
   }
 
@@ -379,6 +379,7 @@ export class AgentRunner implements RunnerProtocol {
    * generated spanId — `toolCallId` IS the tool call's span id by design.
    */
   private buildToolCtx(a: {
+    bus: AgentEventBus;
     traceId: string;
     runId: string;
     parentToolCallId: string;
@@ -421,7 +422,7 @@ export class AgentRunner implements RunnerProtocol {
           // non-throw contract). `agent.memory.recall` is deliberately NOT
           // bridged: it is host-side (#422), never tool-side.
           if (e.type === "agent.memory.write" || e.type === "agent.memory.search") {
-            void this.eventBus
+            void a.bus
               .publish(
                 createEvent(e.type, {
                   ...(e.data ?? {}),
@@ -438,7 +439,7 @@ export class AgentRunner implements RunnerProtocol {
               .catch(() => {});
             return;
           }
-          void this.eventBus
+          void a.bus
             .publish(
               createEvent("agent.tool.progress", {
                 traceId: a.traceId,
@@ -481,7 +482,7 @@ export class AgentRunner implements RunnerProtocol {
    */
   private async _gatewayAwareError(
     e: unknown,
-    scope: { traceId: string; runId: string; parentSpanId?: string },
+    scope: { bus: AgentEventBus; traceId: string; runId: string; parentSpanId?: string },
   ): Promise<{ error: unknown; violationEvent?: GuardrailViolationEvent; errorEvent: ErrorEvent }> {
     const classified = classifyBifrostError(e);
 
@@ -507,7 +508,7 @@ export class AgentRunner implements RunnerProtocol {
         ...(classified.severity !== undefined ? { severity: classified.severity } : {}),
         ...(classified.provider !== undefined ? { provider: classified.provider } : {}),
       });
-      await this.emit(violationEvent);
+      await scope.bus.publish(violationEvent);
     }
 
     const err: Error = classified ?? (e instanceof Error ? e : new Error(String(e)));
@@ -543,7 +544,7 @@ export class AgentRunner implements RunnerProtocol {
           }
         : {},
     });
-    await this.emit(errorEvent);
+    await scope.bus.publish(errorEvent);
 
     return { error: classified ?? e, violationEvent, errorEvent };
   }
@@ -565,7 +566,13 @@ export class AgentRunner implements RunnerProtocol {
   private async _maybeEmitRedaction(
     text: string,
     providerMetadata: unknown,
-    scope: { traceId: string; runId: string; parentSpanId?: string; modelProvider: string },
+    scope: {
+      bus: AgentEventBus;
+      traceId: string;
+      runId: string;
+      parentSpanId?: string;
+      modelProvider: string;
+    },
   ): Promise<GuardrailRedactionEvent | undefined> {
     if (!scope.modelProvider.startsWith("gateway.")) return undefined;
 
@@ -591,7 +598,7 @@ export class AgentRunner implements RunnerProtocol {
       source,
       ...(attribution?.provider !== undefined ? { provider: attribution.provider } : {}),
     });
-    await this.emit(event);
+    await scope.bus.publish(event);
     return event;
   }
 
@@ -627,10 +634,13 @@ export class AgentRunner implements RunnerProtocol {
   }
 
   async run(agent: AgentLike, message: string, options?: RunOptions): Promise<RunResult> {
-    // Set event bus if provided
-    if (options?.eventBus) {
-      this._eventBus = options.eventBus;
-    }
+    // #496: resolved once for THIS call, closed over below — never rebinds
+    // the runner. See busFor for the fallback order and the #288 semantics
+    // of emitIntent.
+    const bus = this.busFor(options);
+    const emit = (event: AgentEvent) => bus.publish(event);
+    const emitIntent = async (event: AgentEvent) =>
+      (await bus.evaluateIntent(event as ToolCallIntent)).outcome === "allow";
 
     // #437: honor a caller-provided correlation id (AP-29 F1) — parity with
     // NodeBackedRunner and CodingAgentRunner. Minted only when absent.
@@ -684,7 +694,7 @@ export class AgentRunner implements RunnerProtocol {
       trigger: options?.trigger,
     });
     const rootSpanId = startEvent.spanId;
-    await this.emit(startEvent);
+    await emit(startEvent);
 
     // Build initial messages from history
     const messages: ModelMessage[] = [];
@@ -735,7 +745,7 @@ export class AgentRunner implements RunnerProtocol {
         maxIterations,
       });
       const iterSpanId = iterStart.spanId;
-      await this.emit(iterStart);
+      await emit(iterStart);
 
       // Emit LLM call start
       const llmStart = createEvent("agent.llm.start", {
@@ -747,7 +757,7 @@ export class AgentRunner implements RunnerProtocol {
         hasTools,
       });
       const llmSpanId = llmStart.spanId;
-      await this.emit(llmStart);
+      await emit(llmStart);
 
       const llmStartTime = Date.now();
 
@@ -765,7 +775,7 @@ export class AgentRunner implements RunnerProtocol {
         });
       } catch (e: unknown) {
         const llmDuration = Date.now() - llmStartTime;
-        await this.emit(
+        await emit(
           createEvent("agent.llm.end", {
             traceId: effectiveTraceId,
             runId,
@@ -780,6 +790,7 @@ export class AgentRunner implements RunnerProtocol {
           }),
         );
         const { error } = await this._gatewayAwareError(e, {
+          bus,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: iterSpanId,
@@ -815,14 +826,14 @@ export class AgentRunner implements RunnerProtocol {
       // unchanged through v7).
       const reasoningContent = result.reasoningText;
       if (reasoningContent && reasoningContent.length > 0) {
-        await this.emit(
+        await emit(
           createEvent("agent.thinking.start", {
             traceId: effectiveTraceId,
             runId,
             parentSpanId: llmSpanId,
           }),
         );
-        await this.emit(
+        await emit(
           createEvent("agent.reasoning", {
             traceId: effectiveTraceId,
             runId,
@@ -839,7 +850,7 @@ export class AgentRunner implements RunnerProtocol {
       if (iterGatewayAttribution) lastGatewayAttribution = iterGatewayAttribution;
 
       // Emit LLM call end
-      await this.emit(
+      await emit(
         createEvent("agent.llm.end", {
           traceId: effectiveTraceId,
           runId,
@@ -858,6 +869,7 @@ export class AgentRunner implements RunnerProtocol {
 
       // #407: one redaction scan per LLM call — no-ops for non-gateway models.
       await this._maybeEmitRedaction(result.text ?? "", result.providerMetadata, {
+        bus,
         traceId: effectiveTraceId,
         runId,
         parentSpanId: iterSpanId,
@@ -869,7 +881,7 @@ export class AgentRunner implements RunnerProtocol {
         const content = result.text ?? "";
 
         // Emit iteration end
-        await this.emit(
+        await emit(
           createEvent("agent.iteration.end", {
             traceId: effectiveTraceId,
             runId,
@@ -882,7 +894,7 @@ export class AgentRunner implements RunnerProtocol {
         );
 
         // Emit message complete
-        await this.emit(
+        await emit(
           createEvent("agent.message.complete", {
             traceId: effectiveTraceId,
             runId,
@@ -921,7 +933,7 @@ export class AgentRunner implements RunnerProtocol {
           toolName: tc.toolName,
           arguments: tc.input as Record<string, unknown>,
         });
-        const allowed = await this.emitIntent(intent);
+        const allowed = await emitIntent(intent);
         if (!allowed) {
           throw new ToolCallBlocked(tc.toolName, "Blocked by gate");
         }
@@ -949,7 +961,7 @@ export class AgentRunner implements RunnerProtocol {
               : {}),
           });
           const tcSpanId = tcStart.spanId;
-          await this.emit(tcStart);
+          await emit(tcStart);
 
           const startTime = Date.now();
           let toolResult: unknown;
@@ -964,6 +976,7 @@ export class AgentRunner implements RunnerProtocol {
                 tc.toolName,
                 tc.input as Record<string, unknown>,
                 this.buildToolCtx({
+                  bus,
                   traceId: effectiveTraceId,
                   runId,
                   parentToolCallId: tc.toolCallId,
@@ -987,7 +1000,7 @@ export class AgentRunner implements RunnerProtocol {
           const durationMs = Date.now() - startTime;
           totalToolCalls++;
 
-          await this.emit(
+          await emit(
             createEvent("agent.tool.end", {
               traceId: effectiveTraceId,
               runId,
@@ -1042,7 +1055,7 @@ export class AgentRunner implements RunnerProtocol {
             ? terminalHit.result
             : undefined;
 
-        await this.emit(
+        await emit(
           createEvent("agent.iteration.end", {
             traceId: effectiveTraceId,
             runId,
@@ -1054,7 +1067,7 @@ export class AgentRunner implements RunnerProtocol {
           }),
         );
 
-        await this.emit(
+        await emit(
           createEvent("agent.message.complete", {
             traceId: effectiveTraceId,
             runId,
@@ -1098,7 +1111,7 @@ export class AgentRunner implements RunnerProtocol {
         if (terminalErrorCount >= 2) {
           const errText = terminalError.error ?? "unknown error";
 
-          await this.emit(
+          await emit(
             createEvent("agent.iteration.end", {
               traceId: effectiveTraceId,
               runId,
@@ -1110,7 +1123,7 @@ export class AgentRunner implements RunnerProtocol {
             }),
           );
 
-          await this.emit(
+          await emit(
             createEvent("agent.message.complete", {
               traceId: effectiveTraceId,
               runId,
@@ -1162,7 +1175,7 @@ export class AgentRunner implements RunnerProtocol {
       });
 
       // Emit iteration end
-      await this.emit(
+      await emit(
         createEvent("agent.iteration.end", {
           traceId: effectiveTraceId,
           runId,
@@ -1182,7 +1195,7 @@ export class AgentRunner implements RunnerProtocol {
     // concern) — a `message.complete` with an honest finishReason is enough
     // for every existing collector/exporter to finalize the run cleanly.
     if (cancelledAtIteration !== undefined) {
-      await this.emit(
+      await emit(
         createEvent("agent.message.complete", {
           traceId: effectiveTraceId,
           runId,
@@ -1213,7 +1226,7 @@ export class AgentRunner implements RunnerProtocol {
     // loop above only ever emits it on the !hasToolCalls early return; without
     // this, a bus-finish hook like RunStoreExporter has no terminal event to
     // finalize on and the run row stays 'running' forever).
-    await this.emit(
+    await emit(
       createEvent("agent.message.complete", {
         traceId: effectiveTraceId,
         runId,
@@ -1268,6 +1281,7 @@ export class AgentRunner implements RunnerProtocol {
     toolExecutor: ToolExecutor | undefined,
     overlay: ToolArgsOverlay,
     ctx: {
+      bus: AgentEventBus;
       traceId: string;
       runId: string;
       parentSpanId: string;
@@ -1311,7 +1325,7 @@ export class AgentRunner implements RunnerProtocol {
             ...(t.displayType !== undefined ? { displayType: t.displayType } : {}),
           });
           const tcSpanId = tcStart.spanId;
-          await this.emit(tcStart);
+          await ctx.bus.publish(tcStart);
 
           const startTime = Date.now();
           let toolResult: unknown;
@@ -1324,6 +1338,7 @@ export class AgentRunner implements RunnerProtocol {
                 toolName,
                 args,
                 this.buildToolCtx({
+                  bus: ctx.bus,
                   traceId: ctx.traceId,
                   runId: ctx.runId,
                   parentToolCallId: toolCallId,
@@ -1342,7 +1357,7 @@ export class AgentRunner implements RunnerProtocol {
             errorMsg = err.message;
           }
 
-          await this.emit(
+          await ctx.bus.publish(
             createEvent("agent.tool.end", {
               traceId: ctx.traceId,
               runId: ctx.runId,
@@ -1394,9 +1409,11 @@ export class AgentRunner implements RunnerProtocol {
       );
     }
 
-    if (options?.eventBus) {
-      this._eventBus = options.eventBus;
-    }
+    // #496: resolved once for THIS call, closed over below — never rebinds
+    // the runner. (No emitIntent here: gate evaluation on this path runs
+    // inside the createGateToolApproval bridge, handed the same bus below.)
+    const bus = this.busFor(options);
+    const emit = (event: AgentEvent) => bus.publish(event);
 
     // #437: honor a caller-provided correlation id (AP-29 F1) — parity with run().
     const runId = options?.runId ?? generateId();
@@ -1434,7 +1451,7 @@ export class AgentRunner implements RunnerProtocol {
       trigger: options?.trigger,
     });
     const rootSpanId = startEvent.spanId;
-    await this.emit(startEvent);
+    await emit(startEvent);
 
     const messages: ModelMessage[] = [];
     if (options?.messageHistory) {
@@ -1469,6 +1486,7 @@ export class AgentRunner implements RunnerProtocol {
         });
       } catch (e: unknown) {
         const { error } = await this._gatewayAwareError(e, {
+          bus,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: rootSpanId,
@@ -1487,7 +1505,7 @@ export class AgentRunner implements RunnerProtocol {
       // `toolApproval` (#389, D0/Option C) — the bridge below is where
       // `AgentEventBus.evaluateIntent` runs, once per call, before `execute`.
       const bridge = createGateToolApproval({
-        bus: this.eventBus,
+        bus,
         traceId: effectiveTraceId,
         runId,
         parentSpanId: rootSpanId,
@@ -1498,6 +1516,7 @@ export class AgentRunner implements RunnerProtocol {
         pendingInputRegistry: options?.pendingInputRegistry,
       });
       const tools = this.convertExecutableTools(agent, toolExecutor, bridge.overlay, {
+        bus,
         traceId: effectiveTraceId,
         runId,
         parentSpanId: rootSpanId,
@@ -1531,6 +1550,7 @@ export class AgentRunner implements RunnerProtocol {
         });
       } catch (e: unknown) {
         const { error } = await this._gatewayAwareError(e, {
+          bus,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: rootSpanId,
@@ -1644,6 +1664,7 @@ export class AgentRunner implements RunnerProtocol {
           });
         } catch (e: unknown) {
           const { error } = await this._gatewayAwareError(e, {
+            bus,
             traceId: effectiveTraceId,
             runId,
             parentSpanId: rootSpanId,
@@ -1666,7 +1687,7 @@ export class AgentRunner implements RunnerProtocol {
       const err = new Error(
         `runStructured: model output failed schema validation — ${parsed.error.message}`,
       );
-      await this.emit(
+      await emit(
         createEvent("agent.error", {
           traceId: effectiveTraceId,
           runId,
@@ -1680,7 +1701,7 @@ export class AgentRunner implements RunnerProtocol {
       throw err;
     }
 
-    await this.emit(
+    await emit(
       createEvent("agent.message.complete", {
         traceId: effectiveTraceId,
         runId,
@@ -1699,6 +1720,7 @@ export class AgentRunner implements RunnerProtocol {
     // Advisory — `JSON.stringify` can double-count an entity echoed in
     // multiple fields (spec 407 § Open question 4, accepted).
     await this._maybeEmitRedaction(JSON.stringify(parsed.data), structuredProviderMetadata, {
+      bus,
       traceId: effectiveTraceId,
       runId,
       parentSpanId: rootSpanId,
@@ -1730,9 +1752,13 @@ export class AgentRunner implements RunnerProtocol {
     message: string,
     options?: RunOptions,
   ): AsyncGenerator<AgentEvent> {
-    if (options?.eventBus) {
-      this._eventBus = options.eventBus;
-    }
+    // #496: resolved once for THIS call, closed over below — never rebinds
+    // the runner. See busFor for the fallback order and the #288 semantics
+    // of emitIntent.
+    const bus = this.busFor(options);
+    const emit = (event: AgentEvent) => bus.publish(event);
+    const emitIntent = async (event: AgentEvent) =>
+      (await bus.evaluateIntent(event as ToolCallIntent)).outcome === "allow";
 
     // #437: honor a caller-provided correlation id (AP-29 F1) — parity with run().
     const runId = options?.runId ?? generateId();
@@ -1790,7 +1816,7 @@ export class AgentRunner implements RunnerProtocol {
       conversationId,
       agentName: agent.role.name,
     });
-    await this.emit(convStart);
+    await emit(convStart);
     yield convStart;
 
     // Message start
@@ -1809,7 +1835,7 @@ export class AgentRunner implements RunnerProtocol {
       trigger: options?.trigger,
     });
     const rootSpanId = msgStart.spanId;
-    await this.emit(msgStart);
+    await emit(msgStart);
     yield msgStart;
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
@@ -1820,6 +1846,7 @@ export class AgentRunner implements RunnerProtocol {
       // locked D1 — so bus/exporters/collector see it on every transport.
       if (options?.abortSignal?.aborted) {
         yield* this.emitCancellation({
+          bus,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: rootSpanId,
@@ -1837,7 +1864,7 @@ export class AgentRunner implements RunnerProtocol {
         maxIterations,
       });
       const iterSpanId = iterStart.spanId;
-      await this.emit(iterStart);
+      await emit(iterStart);
       yield iterStart;
 
       // LLM start
@@ -1850,7 +1877,7 @@ export class AgentRunner implements RunnerProtocol {
         hasTools,
       });
       const llmSpanId = llmStart.spanId;
-      await this.emit(llmStart);
+      await emit(llmStart);
       yield llmStart;
 
       const llmStartTime = Date.now();
@@ -1915,7 +1942,7 @@ export class AgentRunner implements RunnerProtocol {
                   content: reasoningText,
                   isComplete: true,
                 });
-                await this.emit(reasoningCompleteEvent);
+                await emit(reasoningCompleteEvent);
                 yield reasoningCompleteEvent;
                 reasoningActive = false;
                 reasoningText = "";
@@ -1927,7 +1954,7 @@ export class AgentRunner implements RunnerProtocol {
                 delta: part.text,
                 chunkIndex: chunkIndex++,
               });
-              await this.emit(chunkEvent);
+              await emit(chunkEvent);
               yield chunkEvent;
               break;
             }
@@ -1940,7 +1967,7 @@ export class AgentRunner implements RunnerProtocol {
                   runId,
                   parentSpanId: llmSpanId,
                 });
-                await this.emit(startEvent);
+                await emit(startEvent);
                 yield startEvent;
               }
               reasoningText += part.text;
@@ -1950,7 +1977,7 @@ export class AgentRunner implements RunnerProtocol {
                 content: part.text,
                 isComplete: false,
               });
-              await this.emit(deltaEvent);
+              await emit(deltaEvent);
               yield deltaEvent;
               break;
             }
@@ -1963,7 +1990,7 @@ export class AgentRunner implements RunnerProtocol {
                   content: reasoningText,
                   isComplete: true,
                 });
-                await this.emit(reasoningCompleteEvent);
+                await emit(reasoningCompleteEvent);
                 yield reasoningCompleteEvent;
                 reasoningActive = false;
                 reasoningText = "";
@@ -2002,7 +2029,7 @@ export class AgentRunner implements RunnerProtocol {
                 toolName: part.toolCall.toolName,
                 arguments: (part.toolCall.input ?? {}) as Record<string, unknown>,
               });
-              await this.emit(reqEvent);
+              await emit(reqEvent);
               yield reqEvent;
               break;
             }
@@ -2017,7 +2044,7 @@ export class AgentRunner implements RunnerProtocol {
                 settledBy: "gate" as const,
                 ...(part.reason !== undefined ? { reason: part.reason } : {}),
               });
-              await this.emit(respEvent);
+              await emit(respEvent);
               yield respEvent;
               break;
             }
@@ -2039,7 +2066,7 @@ export class AgentRunner implements RunnerProtocol {
                   arguments: {},
                 }),
               });
-              await this.emit(rejEvent);
+              await emit(rejEvent);
               yield rejEvent;
               break;
             }
@@ -2068,13 +2095,14 @@ export class AgentRunner implements RunnerProtocol {
                 hasToolCalls: false,
                 finishReason: "error",
               });
-              await this.emit(llmEndErr);
+              await emit(llmEndErr);
               yield llmEndErr;
 
               // #407: classify before falling back to the generic error path.
               // `_gatewayAwareError` already performed the emit(s) above; only
               // yield the SAME event instances here (never re-`createEvent`).
               const { violationEvent, errorEvent } = await this._gatewayAwareError(part.error, {
+                bus,
                 traceId: effectiveTraceId,
                 runId,
                 parentSpanId: iterSpanId,
@@ -2110,7 +2138,7 @@ export class AgentRunner implements RunnerProtocol {
           content: reasoningText,
           isComplete: true,
         });
-        await this.emit(reasoningCompleteEvent);
+        await emit(reasoningCompleteEvent);
         yield reasoningCompleteEvent;
         reasoningActive = false;
         reasoningText = "";
@@ -2123,7 +2151,7 @@ export class AgentRunner implements RunnerProtocol {
           conversationId,
           reason: "error" as const,
         });
-        await this.emit(convEnd);
+        await emit(convEnd);
         yield convEnd;
         return;
       }
@@ -2134,6 +2162,7 @@ export class AgentRunner implements RunnerProtocol {
       // `message.complete` (accepted per the human gate's Q2 answer).
       if (aborted) {
         yield* this.emitCancellation({
+          bus,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: rootSpanId,
@@ -2176,7 +2205,7 @@ export class AgentRunner implements RunnerProtocol {
         ...(iterUsageDetails ? { usageDetails: iterUsageDetails } : {}),
         ...(iterGatewayAttribution ? { gateway: iterGatewayAttribution } : {}),
       });
-      await this.emit(llmEnd);
+      await emit(llmEnd);
       yield llmEnd;
 
       // No tool calls = done
@@ -2190,12 +2219,13 @@ export class AgentRunner implements RunnerProtocol {
           toolCallsCount: 0,
           hasMore: false,
         });
-        await this.emit(iterEnd);
+        await emit(iterEnd);
         yield iterEnd;
 
         // #407: one redaction scan on the FULL accumulated text, right before
         // the terminal `message.complete` — no-ops for non-gateway models.
         const redactionEvent = await this._maybeEmitRedaction(fullText, lastStepProviderMetadata, {
+          bus,
           traceId: effectiveTraceId,
           runId,
           parentSpanId: rootSpanId,
@@ -2215,7 +2245,7 @@ export class AgentRunner implements RunnerProtocol {
           finishReason: stepFinishReason,
           ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         });
-        await this.emit(msgComplete);
+        await emit(msgComplete);
         yield msgComplete;
 
         const convEnd = createEvent("agent.conversation.end", {
@@ -2224,7 +2254,7 @@ export class AgentRunner implements RunnerProtocol {
           conversationId,
           reason: "completed" as const,
         });
-        await this.emit(convEnd);
+        await emit(convEnd);
         yield convEnd;
         return;
       }
@@ -2243,6 +2273,7 @@ export class AgentRunner implements RunnerProtocol {
         // this batch have already run; this only stops the NEXT one.
         if (options?.abortSignal?.aborted) {
           yield* this.emitCancellation({
+            bus,
             traceId: effectiveTraceId,
             runId,
             parentSpanId: rootSpanId,
@@ -2259,10 +2290,10 @@ export class AgentRunner implements RunnerProtocol {
           toolName: tc.toolName,
           arguments: tc.args,
         });
-        await this.emit(intent);
+        await emit(intent);
         yield intent;
 
-        const allowed = await this.emitIntent(intent);
+        const allowed = await emitIntent(intent);
         if (!allowed) {
           const errEvent = createEvent("agent.error", {
             traceId: effectiveTraceId,
@@ -2273,7 +2304,7 @@ export class AgentRunner implements RunnerProtocol {
             recoverable: false,
             context: {},
           });
-          await this.emit(errEvent);
+          await emit(errEvent);
           yield errEvent;
 
           const convEnd = createEvent("agent.conversation.end", {
@@ -2282,7 +2313,7 @@ export class AgentRunner implements RunnerProtocol {
             conversationId,
             reason: "error" as const,
           });
-          await this.emit(convEnd);
+          await emit(convEnd);
           yield convEnd;
           return;
         }
@@ -2301,7 +2332,7 @@ export class AgentRunner implements RunnerProtocol {
           ...(displayTypes.has(tc.toolName) ? { displayType: displayTypes.get(tc.toolName) } : {}),
         });
         const tcSpanId = tcStart.spanId;
-        await this.emit(tcStart);
+        await emit(tcStart);
         yield tcStart;
 
         const startTime = Date.now();
@@ -2316,6 +2347,7 @@ export class AgentRunner implements RunnerProtocol {
               tc.toolName,
               tc.args,
               this.buildToolCtx({
+                bus,
                 traceId: effectiveTraceId,
                 runId,
                 parentToolCallId: tc.toolCallId,
@@ -2371,7 +2403,7 @@ export class AgentRunner implements RunnerProtocol {
           ...(displayTypes.has(tc.toolName) ? { displayType: displayTypes.get(tc.toolName) } : {}),
           ...(publishedArtifacts.length > 0 ? { artifacts: publishedArtifacts } : {}),
         });
-        await this.emit(tcEnd);
+        await emit(tcEnd);
         yield tcEnd;
       }
 
@@ -2398,7 +2430,7 @@ export class AgentRunner implements RunnerProtocol {
           toolCallsCount: pendingToolCalls.length,
           hasMore: false,
         });
-        await this.emit(iterEnd);
+        await emit(iterEnd);
         yield iterEnd;
 
         const msgComplete = createEvent("agent.message.complete", {
@@ -2414,7 +2446,7 @@ export class AgentRunner implements RunnerProtocol {
           ...(structuredContent !== undefined ? { structuredContent } : {}),
           ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         });
-        await this.emit(msgComplete);
+        await emit(msgComplete);
         yield msgComplete;
 
         const convEnd = createEvent("agent.conversation.end", {
@@ -2423,7 +2455,7 @@ export class AgentRunner implements RunnerProtocol {
           conversationId,
           reason: "completed" as const,
         });
-        await this.emit(convEnd);
+        await emit(convEnd);
         yield convEnd;
         return;
       }
@@ -2447,7 +2479,7 @@ export class AgentRunner implements RunnerProtocol {
             toolCallsCount: pendingToolCalls.length,
             hasMore: false,
           });
-          await this.emit(iterEnd);
+          await emit(iterEnd);
           yield iterEnd;
 
           const msgComplete = createEvent("agent.message.complete", {
@@ -2462,7 +2494,7 @@ export class AgentRunner implements RunnerProtocol {
             finishReason: "terminal_tool_error",
             ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
           });
-          await this.emit(msgComplete);
+          await emit(msgComplete);
           yield msgComplete;
 
           const convEnd = createEvent("agent.conversation.end", {
@@ -2471,7 +2503,7 @@ export class AgentRunner implements RunnerProtocol {
             conversationId,
             reason: "completed" as const,
           });
-          await this.emit(convEnd);
+          await emit(convEnd);
           yield convEnd;
           return;
         }
@@ -2511,7 +2543,7 @@ export class AgentRunner implements RunnerProtocol {
         toolCallsCount: pendingToolCalls.length,
         hasMore: true,
       });
-      await this.emit(iterEnd);
+      await emit(iterEnd);
       yield iterEnd;
     }
 
@@ -2531,7 +2563,7 @@ export class AgentRunner implements RunnerProtocol {
       finishReason: "max_iterations",
       ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
     });
-    await this.emit(msgComplete);
+    await emit(msgComplete);
     yield msgComplete;
 
     const convEnd = createEvent("agent.conversation.end", {
@@ -2540,7 +2572,7 @@ export class AgentRunner implements RunnerProtocol {
       conversationId,
       reason: "completed" as const,
     });
-    await this.emit(convEnd);
+    await emit(convEnd);
     yield convEnd;
   }
 }

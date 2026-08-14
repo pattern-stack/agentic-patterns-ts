@@ -51,6 +51,8 @@ import type {
 type MessageStartEvent = AgentEvent & { type: "agent.message.start" };
 
 interface StartRunCommon {
+  /** The bus resolved for THIS call (#496) — see {@link CodingAgentRunner.busFor}. */
+  readonly bus: AgentEventBus;
   readonly startEvent: MessageStartEvent;
   readonly model: string;
   readonly traceId: string;
@@ -83,11 +85,26 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     return {};
   }
 
+  /**
+   * The runner's OWN bus (constructor bus, else the global singleton — lazy,
+   * never memoized onto the field). Kept for out-of-repo subclasses; the
+   * run/stream paths do NOT read it — they resolve per call via
+   * {@link busFor} (#496), so a per-call `options.eventBus` never leaks into
+   * a later call.
+   */
   protected get eventBus(): AgentEventBus {
-    if (!this._eventBus) {
-      this._eventBus = getAgentEventBus();
-    }
-    return this._eventBus;
+    return this._eventBus ?? getAgentEventBus();
+  }
+
+  /**
+   * Resolve the event bus for ONE call (#496): per-call override, then the
+   * constructor bus, then the global singleton. `_startRun` used to rebind
+   * `this._eventBus` from `options.eventBus`, so with a shared runner two
+   * concurrent calls with different buses interleaved — and the gate seam
+   * handed to the adapter could adjudicate the other call's proposals.
+   */
+  protected busFor(options?: RunOptions): AgentEventBus {
+    return options?.eventBus ?? this._eventBus ?? getAgentEventBus();
   }
 
   protected async emit(event: AgentEvent): Promise<void> {
@@ -128,12 +145,12 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
 
   async run(agent: TAgent, message: string, options?: RunOptions): Promise<RunResult> {
     const prep = await this._startRun(agent, message, options, /* streaming */ false);
-    const { startEvent, model, traceId, runId, parentSpanId } = prep;
+    const { bus, startEvent, model, traceId, runId, parentSpanId } = prep;
 
     // #368 entry guard: an already-fired abortSignal never launches the
     // harness subprocess — `_startRun` skipped `adapter.start()` entirely.
     if (prep.cancelled) {
-      return this._emitCancelledRun(startEvent, model);
+      return this._emitCancelledRun(bus, startEvent, model);
     }
     const { session, translator } = prep;
 
@@ -141,11 +158,11 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     try {
       for await (const hEvent of this._drainSession(session, options, cancelledRef)) {
         for (const apEvent of translator.translate(hEvent)) {
-          await this.emit(apEvent);
+          await bus.publish(apEvent);
         }
       }
     } catch (err) {
-      await this._emitError(err, traceId, runId, parentSpanId);
+      await this._emitError(bus, err, traceId, runId, parentSpanId);
       throw err;
     } finally {
       // Idempotent (a no-op if `_drainSession` already tore the session down
@@ -154,24 +171,24 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     }
 
     if (cancelledRef.value) {
-      return this._emitCancelledRun(startEvent, model, translator);
+      return this._emitCancelledRun(bus, startEvent, model, translator);
     }
 
     const acc = translator.finalize();
-    await this.emit(this._completeEvent(startEvent, acc, model));
+    await bus.publish(this._completeEvent(startEvent, acc, model));
     return this._result(acc);
   }
 
   async *stream(agent: TAgent, message: string, options?: RunOptions): AsyncGenerator<AgentEvent> {
     const prep = await this._startRun(agent, message, options, /* streaming */ true);
-    const { startEvent, traceId, runId, parentSpanId } = prep;
+    const { bus, startEvent, traceId, runId, parentSpanId } = prep;
 
     yield startEvent;
 
     // #368 entry guard — mirrors run()'s above. `message.start` still fired
     // (parity with AgentRunner.stream()'s posture), but nothing past it did.
     if (prep.cancelled) {
-      yield* this._emitCancelSignal(traceId, runId, startEvent.spanId);
+      yield* this._emitCancelSignal(bus, traceId, runId, startEvent.spanId);
       return;
     }
     const { session, translator, model } = prep;
@@ -180,12 +197,12 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     try {
       for await (const hEvent of this._drainSession(session, options, cancelledRef)) {
         for (const apEvent of translator.translate(hEvent)) {
-          await this.emit(apEvent);
+          await bus.publish(apEvent);
           yield apEvent;
         }
       }
     } catch (err) {
-      await this._emitError(err, traceId, runId, parentSpanId);
+      await this._emitError(bus, err, traceId, runId, parentSpanId);
       throw err;
     } finally {
       await session.close();
@@ -201,13 +218,13 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
       // is `Conversation.stream()`'s job, one layer up, and it derives
       // "cancelled" from `options.signal.aborted` independent of what this
       // runner emits.
-      yield* this._emitCancelSignal(traceId, runId, startEvent.spanId);
+      yield* this._emitCancelSignal(bus, traceId, runId, startEvent.spanId);
       return;
     }
 
     const acc = translator.finalize();
     const complete = this._completeEvent(startEvent, acc, model);
-    await this.emit(complete);
+    await bus.publish(complete);
     yield complete;
   }
 
@@ -297,6 +314,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
 
   /** `run()`'s cancelled-`RunResult` path — entry guard AND mid-stream abort. */
   private async _emitCancelledRun(
+    bus: AgentEventBus,
     startEvent: MessageStartEvent,
     model: string,
     translator?: HarnessEventTranslator,
@@ -316,12 +334,13 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
           iterations: 0,
           finishReason: "cancelled",
         };
-    await this.emit(this._completeEvent(startEvent, acc, model));
+    await bus.publish(this._completeEvent(startEvent, acc, model));
     return this._result(acc);
   }
 
   /** `stream()`'s cancel signal — mirrors `AgentRunner`'s `agent.message.cancel`. */
   private async *_emitCancelSignal(
+    bus: AgentEventBus,
     traceId: string,
     runId: string,
     parentSpanId: string,
@@ -332,7 +351,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
       parentSpanId,
       reason: "cancelled by client",
     });
-    await this.emit(cancelEvent);
+    await bus.publish(cancelEvent);
     yield cancelEvent;
   }
 
@@ -346,9 +365,9 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     options: RunOptions | undefined,
     streaming: boolean,
   ): Promise<StartRunPrep> {
-    if (options?.eventBus) {
-      this._eventBus = options.eventBus;
-    }
+    // #496: resolved once for THIS call and carried on the prep — never
+    // rebinds the runner.
+    const bus = this.busFor(options);
 
     const runId = options?.runId ?? generateId();
     const traceId = options?.traceId ?? runId;
@@ -362,7 +381,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // session starts if a configured gate needs an interception/rewrite the
     // harness can't provide.
     const probe = await adapter.probe(this.probeContext(agent, options));
-    assertGateRequirements(this.eventBus.gates, probe, adapter.name);
+    assertGateRequirements(bus.gates, probe, adapter.name);
 
     const startEvent = createEvent("agent.message.start", {
       traceId,
@@ -378,7 +397,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
       // #437: trigger provenance rides the root event — parity with AgentRunner.
       trigger: options?.trigger,
     }) as AgentEvent & { type: "agent.message.start" };
-    await this.emit(startEvent);
+    await bus.publish(startEvent);
 
     // #368 entry guard: an already-fired abortSignal must never be silently
     // ignored, and must never launch the harness subprocess in the first
@@ -388,7 +407,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // parity with AgentRunner.run()/stream(), which do the same; only
     // `runStructured()` (not implemented by this base) skips it.
     if (options?.abortSignal?.aborted) {
-      return { cancelled: true, startEvent, model, traceId, runId, parentSpanId };
+      return { cancelled: true, bus, startEvent, model, traceId, runId, parentSpanId };
     }
 
     const req: HarnessRunRequest<TAgent> = {
@@ -400,7 +419,9 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
       parentSpanId,
       correlationId,
       streaming,
-      evaluateIntent: this.intentEvaluator,
+      // #496: the gate seam is bound to THIS call's bus — parity with the
+      // publish path above, so gates and subscribers always share a bus.
+      evaluateIntent: bus.evaluateIntent.bind(bus),
     };
     const session = await adapter.start(req);
 
@@ -417,6 +438,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
 
     return {
       cancelled: false,
+      bus,
       session,
       translator,
       startEvent,
@@ -459,13 +481,14 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
   }
 
   private async _emitError(
+    bus: AgentEventBus,
     err: unknown,
     traceId: string,
     runId: string,
     parentSpanId: string | undefined,
   ): Promise<void> {
     const error = err instanceof Error ? err : new Error(String(err));
-    await this.emit(
+    await bus.publish(
       createEvent("agent.error", {
         traceId,
         runId,
