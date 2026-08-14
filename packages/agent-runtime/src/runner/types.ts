@@ -4,6 +4,7 @@
  * Ported from Python: systems/runners/base.py
  */
 
+import type { ProviderOptions } from "@ai-sdk/provider-utils";
 import type {
   RenderContext,
   ToolExecutionContext,
@@ -13,6 +14,7 @@ import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent, TokenUsageDetails } from "../events/types.js";
 import type { PendingInputRegistry } from "../interaction/pending-input-registry.js";
+import type { ReasoningEffortLevel } from "../providers/capabilities.js";
 
 // ---------------------------------------------------------------------------
 // AgentLike — canonical minimal agent shape at the runner protocol boundary
@@ -128,6 +130,30 @@ export interface CanonicalMessagePart {
 export interface CanonicalMessage {
   readonly kind: "request" | "response";
   readonly parts: CanonicalMessagePart[];
+}
+
+// ---------------------------------------------------------------------------
+// ModelParams (#514)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-run generation-control knobs, forwarded to the SDK's `CallSettings`
+ * (#514). One nested bag — not flat fields on {@link RunOptions} — so this
+ * surface can grow without widening the top-level options interface every
+ * time.
+ */
+export interface ModelParams {
+  temperature?: number;
+  /** `ai@7`'s `CallSettings` spells this `maxOutputTokens`, not `maxTokens`. */
+  maxOutputTokens?: number;
+  topP?: number;
+  topK?: number;
+  seed?: number;
+  stopSequences?: string[];
+  /** Mapped to the SDK's top-level `reasoning` call setting. */
+  reasoningEffort?: ReasoningEffortLevel;
+  /** Passed through verbatim as call-level `providerOptions`. */
+  providerOptions?: ProviderOptions;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +298,21 @@ export interface RunOptions {
    * run via `bifrostRunHeaders`). Inert for non-HTTP providers (SDK contract).
    */
   requestHeaders?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Per-run generation-control knobs (#514) — `temperature`, `maxOutputTokens`,
+   * `topP`, `topK`, `seed`, `stopSequences`, `reasoningEffort` (mapped to the
+   * SDK's `reasoning` call setting), and `providerOptions` (passed through
+   * verbatim). See {@link ModelParams}.
+   *
+   * UNLIKE `abortSignal` (`:209` above), this is honored by **`AgentRunner`'s
+   * five provider calls only** today — harness-backed runners
+   * (`CodingAgentRunner` subclasses, e.g. `ClaudeCodeRunner` /
+   * `ClaudeCodeAPIRunner`) and `MockRunner` ignore it; there is no per-call
+   * provider request for them to thread it onto. Workflow-seam forwarding
+   * (so a workflow step can set this and have it reach whichever runner it's
+   * wired to) is a follow-up, not shipped here.
+   */
+  modelParams?: ModelParams;
 }
 
 // ---------------------------------------------------------------------------
