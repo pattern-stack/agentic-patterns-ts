@@ -91,7 +91,6 @@ export default defineConfig({
             "store-family",
             "node-context",
             "closed-composition",
-            "eval-surface",
             "playground-redesign",
             "claude-code-plugin-activation",
             "migration/cockpit-port",

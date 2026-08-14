@@ -10,7 +10,7 @@ sidebar:
 > `with-persistence.ts` dissolve: **#116** (per-node runner policy) and **#99** (scratchpad +
 > deps propagation across the agent-as-tool seam). Plus the deferred **AgentNode ↔ Node-world**
 > consolidation. All claims below were verified against the runtime source and the downstream
-> consumer (`~/retrieval-agent-2.0/canvas-workstation`) on 2026-07-03.
+> consumer (a private consumer repo) on 2026-07-03.
 
 ## Background: what a run threads down the Node tree
 

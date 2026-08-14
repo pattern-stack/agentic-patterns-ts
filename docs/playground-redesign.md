@@ -7,7 +7,7 @@ sidebar:
 
 > Status: **DRAFT for review** (2026-07-01, Doug + Claude). Supersedes the "observability
 > console" framing of `ap playground`. Companion doctrine:
-> `~/retrieval-agent-2.0/canvas-workstation/docs/retrieval-workflow-design.md` (slot
+> a private consumer repo's retrieval-workflow design doc (slot
 > placement, the lens, the no-LLM workbench methodology).
 
 ## 1. Motivation
