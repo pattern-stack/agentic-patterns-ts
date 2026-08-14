@@ -26,6 +26,9 @@
 
   The layer numbering in `CLAUDE.md` is deliberately **not** compacted — layer 1 is now a gap, because ADR-0005 and ADR-0009 cite layers by number and renumbering would silently falsify them.
 
+### Behavior changes
+
+- **agent-runtime**: `AgentRunner` and `CodingAgentRunner` no longer let a per-call `eventBus` REBIND the runner (#496) — the sticky-bus removal. Previously `run({eventBus: X})` mutated `this._eventBus`, so every later `run`/`runStructured`/`stream` that omitted `eventBus` kept publishing to X — and with a shared runner (NestJS default scope, `createRunner()`), two concurrent calls with different buses interleaved, letting a gate registered for one bus adjudicate the other call's tool intents. The bus now resolves once per public call (`options.eventBus ?? constructor bus ?? global singleton`) and never sticks. **If you relied on the rebind** — passing `eventBus` once to "configure" the runner — pass it on every call, or hand it to the constructor. `CodingAgentRunner` subclasses keep the `protected eventBus` accessor (now un-memoized) and gain `protected busFor(options)`.
 
 ### Fixes
 
