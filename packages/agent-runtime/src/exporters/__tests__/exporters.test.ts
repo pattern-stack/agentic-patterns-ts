@@ -910,3 +910,117 @@ describe("OTelExporter", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fail-safe dispatch + non-silent default logger (#491)
+// ---------------------------------------------------------------------------
+
+describe("BaseExporter — a throwing handler never reaches the run (#491)", () => {
+  /** Exporter whose handler always throws. */
+  class ThrowingExporter extends BaseExporter {
+    async _onMessageStart(): Promise<void> {
+      throw new Error("exporter is broken");
+    }
+  }
+
+  /** Exporter that records that it was called. */
+  class RecordingExporter extends BaseExporter {
+    calls = 0;
+    async _onMessageStart(): Promise<void> {
+      this.calls += 1;
+    }
+  }
+
+  const startEvent = () =>
+    createEvent("agent.message.start", { traceId: "t", runId: "r", agentName: "a" }) as never;
+
+  it("leaves bus.publish() resolved and still calls the sibling exporter", async () => {
+    const bus = new EventBus();
+    const boom = new ThrowingExporter();
+    const ok = new RecordingExporter();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    boom.attach(bus as never);
+    ok.attach(bus as never);
+
+    try {
+      // publish() resolves (to its handler-result array) rather than rejecting.
+      await expect(bus.publish(startEvent())).resolves.toBeInstanceOf(Array);
+      // The sibling ran — a broken exporter does not starve the others.
+      expect(ok.calls).toBe(1);
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("routes the failure to onExporterError when set, and does not log", async () => {
+    const bus = new EventBus();
+    const boom = new ThrowingExporter();
+    const seen: unknown[] = [];
+    boom.onExporterError = (err) => void seen.push(err);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    boom.attach(bus as never);
+
+    try {
+      await bus.publish(startEvent());
+
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as Error).message).toBe("exporter is broken");
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a throwing onExporterError does not escalate either", async () => {
+    const bus = new EventBus();
+    const boom = new ThrowingExporter();
+    boom.onExporterError = () => {
+      throw new Error("handler is also broken");
+    };
+    boom.attach(bus as never);
+
+    await expect(bus.publish(startEvent())).resolves.toBeInstanceOf(Array);
+  });
+});
+
+describe("ConsoleExporter — default logger writes to stderr, never stdout (#491)", () => {
+  it("writes by default (it used to be a silent no-op)", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const outWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    const exporter = new ConsoleExporter();
+    await exporter.handleEvent(
+      createEvent("agent.message.start", { traceId: "t", runId: "r", agentName: "a" }) as never,
+    );
+
+    // Something was emitted...
+    expect(err.mock.calls.length + errWrite.mock.calls.length).toBeGreaterThan(0);
+    // ...and none of it went to stdout, which may be carrying a protocol.
+    expect(log).not.toHaveBeenCalled();
+    expect(outWrite).not.toHaveBeenCalled();
+
+    for (const s of [err, errWrite, log, outWrite]) s.mockRestore();
+  });
+
+  it("an explicit logger still wins", async () => {
+    const calls: string[] = [];
+    const logger: ConsoleLogger = {
+      log: (m) => void calls.push(m),
+      error: (m) => void calls.push(m),
+      write: (t) => void calls.push(t),
+    };
+    const outWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    const exporter = new ConsoleExporter({ logger });
+    await exporter.handleEvent(
+      createEvent("agent.message.start", { traceId: "t", runId: "r", agentName: "a" }) as never,
+    );
+
+    expect(calls.length).toBeGreaterThan(0);
+    expect(outWrite).not.toHaveBeenCalled();
+    outWrite.mockRestore();
+  });
+});

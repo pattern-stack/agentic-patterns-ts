@@ -47,8 +47,13 @@ export interface ConsoleLogger {
   write(text: string): void;
 }
 
-/** No-op logger that silently discards output. */
-function noopLogger(): ConsoleLogger {
+/**
+ * No-op logger that silently discards output — the explicit opt-out.
+ *
+ * Was the DEFAULT until #491, which made silence something you ask for rather
+ * than something you get by surprise.
+ */
+export function noopLogger(): ConsoleLogger {
   return {
     log: () => {},
     error: () => {},
@@ -57,9 +62,33 @@ function noopLogger(): ConsoleLogger {
 }
 
 /**
- * Console exporter that prints agent events to stdout.
+ * Logger bound to STDERR — the default since #491.
+ *
+ * Deliberately not stdout. A process that speaks a protocol over stdout — an
+ * MCP stdio server, `ap` piping JSON to a consumer — would have its wire
+ * format corrupted by a bare `new ConsoleExporter()` if the default printed
+ * there. Diagnostics belong on stderr; stdout belongs to the protocol.
+ *
+ * Pass `{ logger: console }` to opt into stdout explicitly, or
+ * `{ logger: noopLogger() }` for silence.
+ */
+export function stderrLogger(): ConsoleLogger {
+  return {
+    log: (message: string) => console.error(message),
+    error: (message: string) => console.error(message),
+    write: (text: string) => void process.stderr.write(text),
+  };
+}
+
+/**
+ * Console exporter that prints agent events to STDERR by default.
  *
  * Subscribes to UX profile events and renders them as plain text.
+ *
+ * BEHAVIOUR CHANGE (#491): constructing with no `logger` used to install
+ * `noopLogger()` and print nothing at all — a silent no-op that looked like a
+ * working exporter. It now writes to stderr. Pass `{ logger: console }` for
+ * stdout, or `{ logger: noopLogger() }` to restore silence.
  */
 export class ConsoleExporter extends BaseExporter {
   override profile = EventProfile.UX;
@@ -72,7 +101,7 @@ export class ConsoleExporter extends BaseExporter {
   constructor(options?: { verbose?: boolean; logger?: ConsoleLogger }) {
     super();
     this._verbose = options?.verbose ?? true;
-    this._logger = options?.logger ?? noopLogger();
+    this._logger = options?.logger ?? stderrLogger();
   }
 
   /** @internal */

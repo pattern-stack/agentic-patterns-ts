@@ -71,8 +71,41 @@ export abstract class BaseExporter implements Exporter {
     // biome-ignore lint/suspicious/noExplicitAny: dynamic dispatch by design
     const handler = (this as any)[handlerName];
     if (typeof handler === "function") {
-      await handler.call(this, event);
+      // FAIL-SAFE (#491): observability must never take the agent loop down.
+      // This is the single dispatch site for every exporter, so one catch here
+      // covers all of them. A handler that throws — a broken Langfuse client,
+      // a closed SQLite handle, an OTel tracer mid-shutdown — is reported and
+      // swallowed. It must not propagate into `EventBus.publish` and from
+      // there into the run.
+      try {
+        await handler.call(this, event);
+      } catch (err) {
+        this._reportExporterError(err, event);
+      }
     }
+  }
+
+  /**
+   * Called when an `_on*` handler throws. Override by assignment to route
+   * exporter failures somewhere useful (a logger, a counter, an alert).
+   * Never rethrow from here — the whole point is that the run survives.
+   */
+  onExporterError?: (err: unknown, event: BaseEvent) => void;
+
+  /** Invoke the caller's handler if set, else log and continue. */
+  private _reportExporterError(err: unknown, event: BaseEvent): void {
+    if (this.onExporterError) {
+      try {
+        this.onExporterError(err, event);
+      } catch {
+        // A throwing error handler is not allowed to escalate either.
+      }
+      return;
+    }
+    console.error(
+      `[${this.constructor.name}] handler for "${event.type}" threw and was swallowed:`,
+      err,
+    );
   }
 
   /** Bound reference for subscribe/unsubscribe identity. */
