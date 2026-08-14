@@ -12,6 +12,8 @@
 
 ### Fixes
 
+- **examples**: `examples/agents` is typechecked, and the silent schema drift it was hiding is fixed (#489) — the workspace member had no `tsconfig.json` and no `typecheck` script, so `bun run typecheck` (`--filter='*'`) skipped it entirely. Adding both surfaced exactly two errors, both the same live bug: `pipeline2/subagents/curator.ts` and `toolsmith/agent.ts` passed `success_criteria:` where the schema is `successCriteria`. Zod strips the unknown key, so BOTH missions rendered with no Success Criteria section at all — silently, in the canonical multi-agent example the docs point newcomers at. `include` is scoped to this member only; `examples/live-demo.ts` and `server-demo.ts` sit one level up and carry 14 further errors, a deliberate follow-on.
+
 - **agent-runtime**: bound `@anthropic-ai/sdk` below the next major (#494) — the range was `>=0.93.0`, an unbounded runtime *dependency*, so any future major would install automatically into every consumer and could break their build with no upper guard. The string had been copied from `claude-agent-sdk`'s *peer* range, which is a different contract. Now `>=0.93.0 <1.0.0`; deliberately not `^0.116.0`, because a pre-1.0 caret pins the minor and would conflict with the claude-agent-sdk peer range. Lock still resolves current `0.116.x`. Audited every `dependencies`/`peerDependencies`/`devDependencies` range across all packages and the root — this was the only unbounded spec in the repo.
 
 ## core 0.16.0 (2026-07-26)

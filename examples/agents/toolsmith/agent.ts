@@ -236,7 +236,7 @@ function buildToolsmithAgent() {
 
   const mission = new Mission({
     objective: "Demonstrate the Tool Workbench's direct-invoke path, key-free",
-    success_criteria: ["Every tool call round-trips through its own Zod schema"],
+    successCriteria: ["Every tool call round-trips through its own Zod schema"],
   });
 
   return new AgentBuilder(role).withMission(mission).build();
