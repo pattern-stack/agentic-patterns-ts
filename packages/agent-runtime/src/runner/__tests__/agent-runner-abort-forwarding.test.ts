@@ -53,17 +53,18 @@ function textResult(text: string): V3Result {
  * The #504 proving fixture: settles ONLY when the signal the provider call
  * actually received fires. If the runner drops the signal, this never
  * settles and the test times out — reaching the assertion at all proves the
- * forwarding.
+ * forwarding. Rejects with the signal's own `reason`, which is what `fetch`
+ * rejects an in-flight request with (a `DOMException("AbortError")` for a
+ * plain `abort()`, a `TimeoutError` for `AbortSignal.timeout`, the caller's
+ * value for `abort(customReason)`).
  */
 function hangUntilAbort(signal: AbortSignal | undefined): Promise<never> {
   return new Promise((_, reject) => {
     if (signal?.aborted) {
-      reject(new DOMException("aborted", "AbortError"));
+      reject(signal.reason);
       return;
     }
-    signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), {
-      once: true,
-    });
+    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
   });
 }
 
@@ -77,15 +78,24 @@ function makeAgent(overrides: Partial<AgentLike> = {}): AgentLike {
   };
 }
 
-/** Collect the two event types the normalization assertions care about. */
+/** Collect the event types the normalization assertions care about. */
 function collect(bus: AgentEventBus): AgentEvent[] {
   const events: AgentEvent[] = [];
-  for (const t of ["agent.llm.end", "agent.error"] as const) {
+  for (const t of ["agent.llm.end", "agent.error", "agent.message.complete"] as const) {
     bus.subscribe(t, (e) => {
       events.push(e as AgentEvent);
     });
   }
   return events;
+}
+
+/** The cancelled-terminal finalizer (#504 Gate 2.5 B2) a run-store exporter needs. */
+function cancelledComplete(events: AgentEvent[]): boolean {
+  return events.some(
+    (e) =>
+      e.type === "agent.message.complete" &&
+      (e as { finishReason?: string }).finishReason === "cancelled",
+  );
 }
 
 /** Abort `controller` once the event loop has let the run get in-flight. */
@@ -134,6 +144,10 @@ describe("AgentRunner — abortSignal forwarding (#504)", () => {
       runner.runStructured(makeAgent(), "hi", schema, { abortSignal: controller.signal }),
     ).rejects.toThrow(RunCancelledError);
     expect(events.some((e) => e.type === "agent.error")).toBe(false);
+    // Gate 2.5 B2: the run still FINALIZES — a terminal message.complete with
+    // finishReason "cancelled" precedes the throw, so run-store exporters
+    // never leave the row stuck 'running'.
+    expect(cancelledComplete(events)).toBe(true);
   });
 
   it("runStructured() tier-2 fallback: a mid-call abort in the structured finish throws RunCancelledError", async () => {
@@ -179,6 +193,43 @@ describe("AgentRunner — abortSignal forwarding (#504)", () => {
       runner.runStructured(agent, "hi", schema, { abortSignal: controller.signal }),
     ).rejects.toThrow(RunCancelledError);
     expect(events.some((e) => e.type === "agent.error")).toBe(false);
+    expect(cancelledComplete(events)).toBe(true);
+  });
+
+  it("run(): AbortSignal.timeout — the reason is a TimeoutError, still a cancel, not an error (Gate 2.5 B1)", async () => {
+    // fetch rejects an in-flight request with the SIGNAL'S REASON, and
+    // AbortSignal.timeout's reason is a DOMException named "TimeoutError" —
+    // the most common way a caller hands a signal to an LLM call.
+    const model = new MockLanguageModelV3({
+      doGenerate: (options) => hangUntilAbort(options.abortSignal),
+    });
+    const bus = new AgentEventBus();
+    const events = collect(bus);
+    const runner = new AgentRunner(model, bus);
+
+    const result = await runner.run(makeAgent(), "hi", {
+      abortSignal: AbortSignal.timeout(30),
+    });
+
+    expect(result.finishReason).toBe("cancelled");
+    expect(events.some((e) => e.type === "agent.error")).toBe(false);
+  });
+
+  it("runStructured(): controller.abort(customReason) — reason identity proves causality, still RunCancelledError (Gate 2.5 B1)", async () => {
+    const model = new MockLanguageModelV3({
+      doGenerate: (options) => hangUntilAbort(options.abortSignal),
+    });
+    const bus = new AgentEventBus();
+    const events = collect(bus);
+    const runner = new AgentRunner(model, bus);
+    const controller = new AbortController();
+
+    setTimeout(() => controller.abort(new Error("user clicked stop")), 30);
+    await expect(
+      runner.runStructured(makeAgent(), "hi", schema, { abortSignal: controller.signal }),
+    ).rejects.toThrow(RunCancelledError);
+    expect(events.some((e) => e.type === "agent.error")).toBe(false);
+    expect(cancelledComplete(events)).toBe(true);
   });
 
   it("a provider AbortError WITHOUT our signal having fired stays a genuine error (the AND in the detector)", async () => {

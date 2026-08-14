@@ -172,16 +172,19 @@ export interface RunOptions {
    * Abort the run cooperatively (#341, #504). Every `AgentRunner` provider
    * call forwards it (`generateText`/`streamText({ abortSignal })`), so a
    * cancel interrupts an in-flight model call instead of burning tokens
-   * until it returns; the runner also checks it at the top of each iteration
-   * and before each tool dispatch (never silently ignored on any
-   * `RunOptions` path). On abort: `stream()` emits `agent.message.cancel` +
-   * `agent.conversation.end {reason:"cancelled"}` and returns — it does NOT
-   * throw (locked D1); `run()` closes the interrupted call with
-   * `agent.llm.end {finishReason:"cancelled"}` — no `agent.error` — and
-   * returns a `RunResult` with `finishReason: "cancelled"`; `runStructured()`
-   * cannot fabricate a schema-valid `object` on abort, so it throws a
-   * `RunCancelledError` (never a raw `AbortError`) whether the signal fires
-   * before, during, or between its provider calls.
+   * until it returns. The cheap cooperative guards are per-method: `run()`
+   * and `stream()` check it at the top of each iteration; `stream()`
+   * additionally checks before each tool dispatch. It is never silently
+   * ignored on any `RunOptions` path. On abort: `stream()` emits
+   * `agent.message.cancel` + `agent.conversation.end {reason:"cancelled"}`
+   * and returns — it does NOT throw (locked D1); `run()` closes the
+   * interrupted call with `agent.llm.end {finishReason:"cancelled"}` — no
+   * `agent.error` — and returns a `RunResult` with `finishReason:
+   * "cancelled"`; `runStructured()` cannot fabricate a schema-valid `object`
+   * on abort, so it emits a terminal `agent.message.complete
+   * {finishReason:"cancelled"}` (so run-store exporters still finalize the
+   * run) and then throws a `RunCancelledError` (never a raw `AbortError`)
+   * whether the signal fires before, during, or between its provider calls.
    *
    * `CodingAgentRunner`-based runners (`ClaudeCodeRunner` /
    * `ClaudeCodeAPIRunner`, #368) honor it too, with a shape suited to owning a
