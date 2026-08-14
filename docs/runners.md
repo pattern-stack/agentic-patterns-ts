@@ -96,9 +96,9 @@ These are not required for `createRunner()` but worth tracking — some of them 
 4. **Image / multimodal inputs** — `CoreMessage` content can be `{ type: "image", image: ... }`. Our `CanonicalMessage` shape is text-only. Out of scope for this doc.
 5. **Prompt caching headers** — The Anthropic SDK supports `cacheControl` per message part; we don't set it. For long system prompts this is a real cost win. Out of scope, but flagged.
 6. **`experimental_telemetry`** — The SDK can emit OTel spans on its own. We emit our own event stream; duplicating is undesirable. Leave as-is.
-7. **`abortSignal`** — **partially shipped.** `RunOptions.abortSignal` exists and `stream()` / `runStructured()` forward it. `run()` does **not**: it only checks `options?.abortSignal?.aborted` between iterations (`agent-runner.ts:715-727`), so a cancel during a long model call keeps burning tokens until that call returns. Tracked as its own issue.
+7. **`abortSignal`** — **shipped.** `RunOptions.abortSignal` is forwarded to every provider call — `run()`, both of `runStructured()`'s single-call paths and its tier-2 fallback, and `stream()` (#504) — so a cancel interrupts an in-flight model call rather than burning tokens until it returns; the runner also checks the signal between iterations and before each tool dispatch. On an in-flight abort, `run()` returns `finishReason: "cancelled"` (no `agent.error`) and `runStructured()` throws `RunCancelledError`, never a raw `AbortError`.
 
-**Net:** `AgentRunner` uses the SDK correctly for the single-step-with-intercepted-tool-loop pattern. The main missing bits are `reasoning` events, a `providerOptions` passthrough, and `abortSignal` forwarding on the non-streaming path. The factory does not need to solve these; it just needs to pick the right `LanguageModelV1`.
+**Net:** `AgentRunner` uses the SDK correctly for the single-step-with-intercepted-tool-loop pattern. The main missing bits are `reasoning` events and a `providerOptions` passthrough. The factory does not need to solve these; it just needs to pick the right `LanguageModelV1`.
 
 ---
 

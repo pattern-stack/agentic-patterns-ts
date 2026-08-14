@@ -134,6 +134,18 @@ export class RunCancelledError extends Error {
   }
 }
 
+/**
+ * #504: an abort-shaped rejection that our own forwarded signal explains.
+ * Both conditions are deliberate: the name check alone would misclassify a
+ * provider's unrelated `AbortError` (e.g. its own internal timeout) as our
+ * cancel; the signal check alone would misclassify a genuine provider
+ * failure that happens to race our abort. Never string-matches messages.
+ * (`DOMException` abort rejections pass `instanceof Error` + the name check.)
+ */
+function isAbortRejection(e: unknown, signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true && e instanceof Error && e.name === "AbortError";
+}
+
 // ---------------------------------------------------------------------------
 // Structured-output capability table (DESIGN §9.4 / §9.5)
 // ---------------------------------------------------------------------------
@@ -771,10 +783,36 @@ export class AgentRunner implements RunnerProtocol {
           instructions,
           messages,
           tools: hasTools ? tools : undefined,
+          // #504: forwarded so an abort actually interrupts the in-flight
+          // provider call (stops token burn) instead of waiting for the
+          // top-of-iteration check above.
+          abortSignal: options?.abortSignal,
           headers: callHeaders,
         });
       } catch (e: unknown) {
         const llmDuration = Date.now() - llmStartTime;
+        // #504: our own forwarded signal aborted the call mid-flight — a
+        // cancel, not a failure. Close the LLM span honestly and fall into
+        // the shared cancelled return below (D1 posture: run() never throws
+        // on abort). No `agent.error`, no gateway classification.
+        if (isAbortRejection(e, options?.abortSignal)) {
+          await emit(
+            createEvent("agent.llm.end", {
+              traceId: effectiveTraceId,
+              runId,
+              spanId: llmSpanId,
+              parentSpanId: iterSpanId,
+              model: modelName,
+              inputTokens: 0,
+              outputTokens: 0,
+              durationMs: llmDuration,
+              hasToolCalls: false,
+              finishReason: "cancelled",
+            }),
+          );
+          cancelledAtIteration = iteration;
+          break;
+        }
         await emit(
           createEvent("agent.llm.end", {
             traceId: effectiveTraceId,
@@ -1482,9 +1520,19 @@ export class AgentRunner implements RunnerProtocol {
           instructions,
           messages,
           output: Output.object({ schema }),
+          // #504: forwarded — an abort interrupts the in-flight call.
+          abortSignal: options?.abortSignal,
           headers: callHeaders,
         });
       } catch (e: unknown) {
+        // #504: a deliberate cancel surfaces as RunCancelledError (see the
+        // class doc — there is no schema-valid object to fabricate), never a
+        // raw AbortError, and emits no `agent.error`.
+        if (isAbortRejection(e, options?.abortSignal)) {
+          throw new RunCancelledError(
+            "runStructured: aborted during the provider call (no structured output available)",
+          );
+        }
         const { error } = await this._gatewayAwareError(e, {
           bus,
           traceId: effectiveTraceId,
@@ -1549,6 +1597,14 @@ export class AgentRunner implements RunnerProtocol {
           headers: callHeaders,
         });
       } catch (e: unknown) {
+        // #504: parity with the no-tools path — this call already forwarded
+        // the signal (#389), but its abort used to escape as a raw AbortError
+        // plus a spurious `agent.error`. Normalized to RunCancelledError.
+        if (isAbortRejection(e, options?.abortSignal)) {
+          throw new RunCancelledError(
+            "runStructured: aborted during the provider call (no structured output available)",
+          );
+        }
         const { error } = await this._gatewayAwareError(e, {
           bus,
           traceId: effectiveTraceId,
@@ -1660,9 +1716,17 @@ export class AgentRunner implements RunnerProtocol {
               },
             ],
             output: Output.object({ schema }),
+            // #504: forwarded — an abort interrupts the in-flight call.
+            abortSignal: options?.abortSignal,
             headers: callHeaders,
           });
         } catch (e: unknown) {
+          // #504: same normalization as the paths above.
+          if (isAbortRejection(e, options?.abortSignal)) {
+            throw new RunCancelledError(
+              "runStructured: aborted during the provider call (no structured output available)",
+            );
+          }
           const { error } = await this._gatewayAwareError(e, {
             bus,
             traceId: effectiveTraceId,
