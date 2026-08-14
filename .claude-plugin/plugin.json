@@ -1,7 +1,7 @@
 {
   "name": "agentic-patterns",
   "version": "0.1.0",
-  "description": "Streams all 26 Claude Code lifecycle events (tool calls, permissions, subagents, compaction, sessions) into the @agentic-patterns/server dashboard for live observability, and ships the `build-on-agentic-patterns` skill (how to register + build agents on the framework). Pair with `ap playground`. See https://github.com/pattern-stack/agentic-patterns-ts/blob/main/docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md for activation + troubleshooting.",
+  "description": "Streams all 26 Claude Code lifecycle events (tool calls, permissions, subagents, compaction, sessions) into the @pattern-stack/agentic-server dashboard for live observability, and ships the `build-on-agentic-patterns` skill (how to register + build agents on the framework). Pair with `ap playground`. See https://github.com/pattern-stack/agentic-patterns-ts/blob/main/docs/CLAUDE-CODE-PLUGIN-ACTIVATION.md for activation + troubleshooting.",
   "author": {
     "name": "pattern-stack",
     "url": "https://github.com/pattern-stack"

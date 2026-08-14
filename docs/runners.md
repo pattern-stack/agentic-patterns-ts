@@ -6,7 +6,7 @@ sidebar:
 ---
 
 Status: accepted — implementation follows in a separate PR
-Target package: `@agentic-patterns/runtime`
+Target package: `@pattern-stack/agentic-runtime`
 Scope: a `createRunner()` factory + documentation clarifying when to use each of the four existing runners.
 
 **Decisions ratified before drafting:**
@@ -114,7 +114,7 @@ The subtle type issue: `RunnerProtocol.run` declares `agent: AgentLike`. `Claude
 
 `@anthropic-ai/claude-agent-sdk`'s `query()` runs Claude Code as a subprocess. As of SDK `0.3.x` the SDK **bundles its own platform-specific executable**: it ships a per-platform package (`@anthropic-ai/claude-agent-sdk-<os>-<arch>`, one of its `optionalDependencies`, pinned to the SDK's own version) and "uses the built-in executable if `pathToClaudeCodeExecutable` is not specified." The SDK↔Claude-Code pair is therefore pinned by the lockfile, and the committed contract fixture (`packages/agent-runtime/src/runner/__fixtures__/claude-agent-sdk-contract.json`, asserted by `sdk-contract.test.ts` in CI) records the tested pair (SDK `0.3.215` ↔ CC `2.1.215`). So in practice:
 
-1. **The SDK must be installed.** `@anthropic-ai/claude-agent-sdk` is a **hard dependency** of `@agentic-patterns/runtime` (pulled in transitively — *not* an optional peer dep). It brings its own executable, so a separately-installed `claude` on PATH is **not required** to run the Claude-Code runners. Since 0.3 the SDK also declares `@anthropic-ai/sdk` and `@modelcontextprotocol/sdk` as peer deps; `@agentic-patterns/runtime` absorbs both as direct dependencies so consumer installs stay whole.
+1. **The SDK must be installed.** `@anthropic-ai/claude-agent-sdk` is a **hard dependency** of `@pattern-stack/agentic-runtime` (pulled in transitively — *not* an optional peer dep). It brings its own executable, so a separately-installed `claude` on PATH is **not required** to run the Claude-Code runners. Since 0.3 the SDK also declares `@anthropic-ai/sdk` and `@modelcontextprotocol/sdk` as peer deps; `@pattern-stack/agentic-runtime` absorbs both as direct dependencies so consumer installs stay whole.
 2. Auth is one of:
    * An active `claude` login in `~/.claude/` (Max subscription OAuth token) — via `claude login`.
    * `ANTHROPIC_API_KEY` exported in the environment.
@@ -537,8 +537,8 @@ export type {
 | Sync wrapper? | Not in v1. If someone needs it we can ship `createRunnerSync(options)` that skips the CLI probe and requires an explicit provider/model/runner. | Keeps the surface small. |
 | Pass `eventBus` through? | **Yes**, via `options.eventBus`. | Server needs it for SSE; live-demo.ts already wires one explicitly. |
 | `modelId`? | Yes, optional, with per-provider defaults. | Most callers want "sonnet, whatever that means this month." Per-provider defaults are updatable in one place. |
-| Dynamic imports? | **Yes**, for every `@ai-sdk/*` provider and for `ClaudeCodeAPIRunner`. | `@agentic-patterns/runtime` must stay light; we should not force users who want `@ai-sdk/openai` to also install `@ai-sdk/anthropic`. The `peerDependencies` in package.json already marks `@anthropic-ai/claude-agent-sdk` optional — providers should follow the same pattern (added as `optionalPeerDependencies` in the package.json update that ships with this factory). |
-| ~~Ship no provider packages?~~ | **SUPERSEDED by [ADR 0010](adr/0010-bundled-provider-packages.md) (#472).** `@ai-sdk/anthropic`, `@ai-sdk/openai` and `@ai-sdk/google` are now real `dependencies` of `@agentic-patterns/runtime`. The rest stay dynamic-import-only. | "Stay light" cost more than it saved: a consumer who set a key and installed nothing else was silently pinned to `ClaudeCodeAPIRunner` and lost `messageHistory` on every multi-turn conversation. The three packages share the already-present `@ai-sdk/provider` + `@ai-sdk/provider-utils` and add no transitive tree, and dynamic `import()` still means an unused provider is never evaluated. |
+| Dynamic imports? | **Yes**, for every `@ai-sdk/*` provider and for `ClaudeCodeAPIRunner`. | `@pattern-stack/agentic-runtime` must stay light; we should not force users who want `@ai-sdk/openai` to also install `@ai-sdk/anthropic`. The `peerDependencies` in package.json already marks `@anthropic-ai/claude-agent-sdk` optional — providers should follow the same pattern (added as `optionalPeerDependencies` in the package.json update that ships with this factory). |
+| ~~Ship no provider packages?~~ | **SUPERSEDED by [ADR 0010](adr/0010-bundled-provider-packages.md) (#472).** `@ai-sdk/anthropic`, `@ai-sdk/openai` and `@ai-sdk/google` are now real `dependencies` of `@pattern-stack/agentic-runtime`. The rest stay dynamic-import-only. | "Stay light" cost more than it saved: a consumer who set a key and installed nothing else was silently pinned to `ClaudeCodeAPIRunner` and lost `messageHistory` on every multi-turn conversation. The three packages share the already-present `@ai-sdk/provider` + `@ai-sdk/provider-utils` and add no transitive tree, and dynamic `import()` still means an unused provider is never evaluated. |
 | Rich return type (`{runner, reason, source}`) vs just `RunnerProtocol`? | **Rich.** Callers that just want the runner destructure `{ runner } = await createRunner()`. | `source` is useful for metrics / admin dashboard ("currently running on: env-anthropic"). Adds negligible complexity. |
 | Throw vs MockRunner fallback when nothing found? | **Throw by default, MockRunner opt-in.** | Silent mock is a footgun in production. Tests opt in explicitly. |
 
@@ -581,7 +581,7 @@ createRunner(options)
 
 ### Runners
 
-`@agentic-patterns/runtime` ships four runners. They all implement `RunnerProtocol` — any agent runs under any runner. Pick based on what you care about: multi-provider support, Claude Code's native tools, your Claude Max subscription, or deterministic tests.
+`@pattern-stack/agentic-runtime` ships four runners. They all implement `RunnerProtocol` — any agent runs under any runner. Pick based on what you care about: multi-provider support, Claude Code's native tools, your Claude Max subscription, or deterministic tests.
 
 #### Choice matrix
 
@@ -596,7 +596,7 @@ createRunner(options)
 #### `createRunner()` — the easy path
 
 ```ts
-import { createRunner } from "@agentic-patterns/runtime";
+import { createRunner } from "@pattern-stack/agentic-runtime";
 
 // Zero-config: picks up ANTHROPIC_API_KEY, OPENAI_API_KEY, etc., or falls back to Claude CLI.
 const { runner, reason } = await createRunner();
@@ -615,7 +615,7 @@ const { runner } = await createRunner({
 });
 
 // In tests
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agentic-runtime";
 const { runner } = await createRunner({
   runner: new MockRunner().addResponse("*", { content: "ok" }),
 });
@@ -624,7 +624,7 @@ const { runner } = await createRunner({
 #### `AgentRunner` — multi-provider via Vercel AI SDK
 
 ```ts
-import { AgentRunner } from "@agentic-patterns/runtime";
+import { AgentRunner } from "@pattern-stack/agentic-runtime";
 import { openai } from "@ai-sdk/openai";
 
 const runner = new AgentRunner(openai("gpt-4o"));
@@ -641,7 +641,7 @@ Emits the full event vocabulary including `agent.iteration.*` and per-call `agen
 #### `ClaudeCodeAPIRunner` — zero-config Claude Max
 
 ```ts
-import { ClaudeCodeAPIRunner } from "@agentic-patterns/runtime";
+import { ClaudeCodeAPIRunner } from "@pattern-stack/agentic-runtime";
 
 const runner = new ClaudeCodeAPIRunner();
 const result = await runner.run(agent, "What is 2 + 2?");
@@ -654,7 +654,7 @@ Uses the Claude Agent SDK subprocess but blocks Claude Code's native tools (`Rea
 #### `ClaudeCodeRunner` — Claude Code's native tools
 
 ```ts
-import { ClaudeCodeRunner } from "@agentic-patterns/runtime";
+import { ClaudeCodeRunner } from "@pattern-stack/agentic-runtime";
 
 const runner = new ClaudeCodeRunner();
 await runner.run(agent, "Review the last commit and fix the typo in README.md");
@@ -665,7 +665,7 @@ Same as the API runner but leaves Claude Code's native tools (`Read`, `Write`, `
 #### `MockRunner` — deterministic tests
 
 ```ts
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agentic-runtime";
 
 const runner = new MockRunner()
   .addResponse("add", {
@@ -682,7 +682,7 @@ Supports substring triggers and `"*"` wildcard. Emits the full streaming event l
 
 #### Environment variables recognized by `createRunner()`
 
-"Ships in the box" = the package is a real dependency of `@agentic-patterns/runtime`, so setting the env var is the only step ([ADR 0010](adr/0010-bundled-provider-packages.md)). The rest need `bun add <package>`; if you set their key without the package, `createRunner()` throws and names it — it never degrades to the CLI fallback.
+"Ships in the box" = the package is a real dependency of `@pattern-stack/agentic-runtime`, so setting the env var is the only step ([ADR 0010](adr/0010-bundled-provider-packages.md)). The rest need `bun add <package>`; if you set their key without the package, `createRunner()` throws and names it — it never degrades to the CLI fallback.
 
 | Env var | Selects |
 |---|---|
@@ -705,7 +705,7 @@ Supports substring triggers and `"*"` wildcard. Emits the full streaming event l
 
 #### Credential preflight (`ap` CLI)
 
-§3.4 above treats `ClaudeCodeAPIRunner` as `createRunner()`'s last-resort default — fine for local dev on a Claude Max subscription, but a deploy trap: a real deployment has no `claude` binary, no interactive login, and gets the degraded event vocabulary from §3.3. The CLI package (`@agentic-patterns/cli`) puts a credential preflight in front of that fallback so it's a loud, explicit choice rather than a silent one.
+§3.4 above treats `ClaudeCodeAPIRunner` as `createRunner()`'s last-resort default — fine for local dev on a Claude Max subscription, but a deploy trap: a real deployment has no `claude` binary, no interactive login, and gets the degraded event vocabulary from §3.3. The CLI package (`@pattern-stack/agentic-cli`) puts a credential preflight in front of that fallback so it's a loud, explicit choice rather than a silent one.
 
 `packages/agent-cli/src/services/execution-service.ts` exports `ExecutionService`, which `ap eval`, `ap run`, and `ap playground` now all construct and call instead of `createRunner()` directly:
 

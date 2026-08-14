@@ -10,8 +10,8 @@ sidebar:
   PR-2 (dashboard surfaces) and PR-3 (CLI parity) land separately.
 - **Date:** 2026-07-15
 - **Context owner:** Doug
-- **Scope:** `@agentic-patterns/runtime` (`RunStore.updateRunMetadata`,
-  `as-agent.ts` doc comment) + `@agentic-patterns/server`
+- **Scope:** `@pattern-stack/agentic-runtime` (`RunStore.updateRunMetadata`,
+  `as-agent.ts` doc comment) + `@pattern-stack/agentic-server`
   (`AgentRegistration.instantiate`/`contextRedactKeys`, `POST /conversations`,
   `POST /conversations/:id/messages`, `GET /agents`). Core is untouched.
 

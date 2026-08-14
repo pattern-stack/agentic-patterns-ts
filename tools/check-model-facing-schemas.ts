@@ -9,7 +9,7 @@
  * Runs via `bun run check:model-facing-schemas` (wired into the root
  * `check` script, after build/typecheck/lint/test — see root package.json)
  * and therefore requires `packages/*` to already be built: it imports the
- * public surface of `@agentic-patterns/core` and `@agentic-patterns/runtime`,
+ * public surface of `@pattern-stack/agentic-core` and `@pattern-stack/agentic-runtime`,
  * not source files.
  *
  * Sweep targets (spec: `.ai-docs/specs/tool-authoring-sugar.md` § Test plan
@@ -32,14 +32,14 @@ import {
   TextManual,
   type ToolDefinition,
   lintModelFacingSchema,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import {
   buildCalculatorAgent,
   buildTodoAgent,
   buildWritingCoachAgent,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 // The workspace-member example agent (examples/agents/package.json depends on
-// @agentic-patterns/core + runtime as real workspace deps) — its default
+// @pattern-stack/agentic-core + runtime as real workspace deps) — its default
 // export is an already-built Agent instance (see agent.ts's final line).
 import toolsmith from "../examples/agents/toolsmith/agent.js";
 

@@ -4,7 +4,7 @@
  * and agent.memory.recall emission.
  */
 
-import type { MemoryScope, MemoryTarget } from "@agentic-patterns/core";
+import type { MemoryScope, MemoryTarget } from "@pattern-stack/agentic-core";
 import { describe, expect, it, vi } from "vitest";
 import { EventBus } from "../../events/event-bus.js";
 import type { MemoryRecallEvent } from "../../events/types.js";

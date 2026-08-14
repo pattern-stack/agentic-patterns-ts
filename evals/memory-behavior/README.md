@@ -130,7 +130,7 @@ the `assembleRecall` block's record lines. Cases: `port-stemming-prefer`, `port-
 `port-tag-only`.
 
 **The corpus is imported, not copied.** `PORTABILITY_CORPUS` *is* `MEMORY_MATCH_CORPUS`, the
-conformance kit's Tier 2 corpus, exported from `@agentic-patterns/runtime`. The unit layer and this
+conformance kit's Tier 2 corpus, exported from `@pattern-stack/agentic-runtime`. The unit layer and this
 behaviour layer assert over one object or they drift, and a drifted corpus stops covering an axis
 without anything going red. `port-tag-only` exists because the corpus gained a tagged entry at
 #463: the SQLite backend indexes `tags` as raw JSON text and relies on `unicode61` treating `[`,

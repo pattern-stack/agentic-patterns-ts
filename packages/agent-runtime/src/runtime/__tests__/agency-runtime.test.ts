@@ -1,6 +1,6 @@
 declare function setTimeout(callback: () => void, ms: number): number;
 
-import { Agency } from "@agentic-patterns/core";
+import { Agency } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import type { RunResult, RunnerProtocol } from "../../runner/types.js";
 import { AgencyRuntime } from "../agency-runtime.js";

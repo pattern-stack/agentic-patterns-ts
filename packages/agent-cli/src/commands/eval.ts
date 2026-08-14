@@ -44,7 +44,7 @@ import {
   loadGold,
   runEval,
   setMembership,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import type {
   EvalCase,
   EvalCaseRow,
@@ -55,7 +55,7 @@ import type {
   JudgeThresholds,
   RunnerProtocol,
   Scorer,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import { ensureParentDir, resolveDbPath } from "../helpers/db.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 import { ExecutionService } from "../services/execution-service.js";

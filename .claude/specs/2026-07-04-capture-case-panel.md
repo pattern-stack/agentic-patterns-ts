@@ -137,7 +137,7 @@ vitest + `@testing-library/react`, mirroring `evalApi.test.ts`/page-test idioms
 10. Latest exchange is the default selected option; snippets come from user turns.
 
 ## Acceptance
-- `bun run --filter=@agentic-patterns/dashboard test` green incl. the new suite.
+- `bun run --filter=@pattern-stack/agentic-dashboard test` green incl. the new suite.
 - `bun run typecheck` + `bun run lint` (biome: double quotes, semicolons, 2-space,
   100 col) clean.
 - No diff outside `src/chat/CaptureCasePanel.tsx`, `src/chat/__tests__/…`, and the

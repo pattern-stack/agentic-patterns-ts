@@ -25,7 +25,7 @@
  * stays race-free under the runner's `Promise.all` tool dispatch.
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core"; // type-only — core never learns the word Backpack
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core"; // type-only — core never learns the word Backpack
 import type { DepRegistry } from "./deps.js";
 import {
   type Scratchpad,

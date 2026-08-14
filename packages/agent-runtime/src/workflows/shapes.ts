@@ -8,7 +8,7 @@
  * Lives in `workflows/` because that is the layer that OWNS both shapes (`Node`,
  * `AgentLike`) and the layer that discriminates them at composition time
  * (`sequentialAgent`'s stages array). `eval/target.ts` — where these two guards
- * originally landed — re-exports them, so the public `@agentic-patterns/runtime`
+ * originally landed — re-exports them, so the public `@pattern-stack/agentic-runtime`
  * surface is unchanged.
  */
 

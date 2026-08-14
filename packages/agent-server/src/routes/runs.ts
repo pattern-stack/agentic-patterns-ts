@@ -14,7 +14,7 @@
  * so it inherits prefix support without duplicating the matching logic.
  */
 
-import type { RunStore } from "@agentic-patterns/runtime";
+import type { RunStore } from "@pattern-stack/agentic-runtime";
 import { type Context, Hono } from "hono";
 
 const RUN_STATUSES = ["running", "ok", "error"] as const;

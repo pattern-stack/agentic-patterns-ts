@@ -14,7 +14,7 @@ import type {
   RunResult,
   RunStore,
   RunnerProtocol,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 
 /**
  * One declared grading link: an eval set that grades this agent. The mapping
@@ -34,9 +34,9 @@ export interface AgentEvalRef {
 }
 
 /**
- * Structural (duck-typed) view of a `SessionScope` (`@agentic-patterns/core`,
+ * Structural (duck-typed) view of a `SessionScope` (`@pattern-stack/agentic-core`,
  * #308) — read without importing the class, so a registration built against
- * a DIFFERENT `@agentic-patterns/core` module instance (a CLI-discovered
+ * a DIFFERENT `@pattern-stack/agentic-core` module instance (a CLI-discovered
  * agent, notably) still satisfies this. NEVER `instanceof SessionScope`
  * across that boundary (decisions.md D4) — follows the `AgentIntrospect`/
  * `CapabilityLike` structural-typing precedent (`routes/agents.ts:14-45`).
@@ -193,7 +193,7 @@ export interface AgentRegistration {
   };
 }
 
-// AdminServiceProtocol is imported from @agentic-patterns/runtime
+// AdminServiceProtocol is imported from @pattern-stack/agentic-runtime
 export type { AdminServiceProtocol };
 
 /**

@@ -1,7 +1,7 @@
 # Structured terminal answer — closing ADR-0006 §9 in the dashboard
 
 **Date:** 2026-07-26
-**Package:** `@agentic-patterns/dashboard` (`packages/agent-dashboard/`)
+**Package:** `@pattern-stack/agentic-dashboard` (`packages/agent-dashboard/`)
 **Status:** Spec — ready for implementation
 **Source of truth:** `docs/adr/0006-render-artifacts.md` (Accepted, on `origin/main`
 as of this branch's fetch — merged via PR #377; not present in this worktree's
@@ -288,7 +288,7 @@ render-artifacts tests):
 
 ## Verification
 
-- `bun run --filter=@agentic-patterns/dashboard typecheck`
-- `bun run --filter=@agentic-patterns/dashboard test` — baseline 511 tests
+- `bun run --filter=@pattern-stack/agentic-dashboard typecheck`
+- `bun run --filter=@pattern-stack/agentic-dashboard test` — baseline 511 tests
   passing must stay green; new tests add to the count.
 - Do **not** run `build`/`lint`/full `check` per the task's process rules.

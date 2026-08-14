@@ -28,14 +28,14 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { MemoryStore } from "@agentic-patterns/runtime";
-import type { SessionScopeLike } from "@agentic-patterns/server";
+import type { MemoryStore } from "@pattern-stack/agentic-runtime";
+import type { SessionScopeLike } from "@pattern-stack/agentic-server";
 import { glob } from "tinyglobby";
 import { register } from "tsx/esm/api";
 import type { AgentProvenance } from "./provenance.js";
 
 /**
- * Structural (duck-typed) view of a `SessionScope` (`@agentic-patterns/core`,
+ * Structural (duck-typed) view of a `SessionScope` (`@pattern-stack/agentic-core`,
  * #308) — the server's `SessionScopeLike` (`config.ts`), re-exported so a
  * `DiscoveredAgent.scope` value is BY CONSTRUCTION assignable to
  * `AgentRegistration.scope` at the `playground.ts` map site. NEVER
@@ -166,7 +166,7 @@ function isAgentShape(x: unknown): boolean {
 
 /**
  * Structural `AgentLike` check — recognizes a promoted `Node` (`asAgent()`,
- * `@agentic-patterns/runtime` `workflows/as-agent.ts`) alongside a full core
+ * `@pattern-stack/agentic-runtime` `workflows/as-agent.ts`) alongside a full core
  * Agent. Same duck-type rationale as {@link isAgentShape}: `instanceof` is
  * unreliable across the built-`dist/` module boundary. `role:{name}` plus
  * `getModel`/`renderInitialPrompt` both being functions is a
@@ -188,7 +188,7 @@ export function isAgentLikeShape(x: unknown): boolean {
 
 /**
  * Structural `SessionScope` check (#308) — same duck-typing rationale as
- * {@link isAgentShape}: an agent file's copy of `@agentic-patterns/core` can
+ * {@link isAgentShape}: an agent file's copy of `@pattern-stack/agentic-core` can
  * resolve to a DIFFERENT module instance than the CLI's own, so `instanceof
  * SessionScope` is silently false across that boundary (decisions.md D4).
  * Mirrors `SessionScope`'s flat public surface — `.schema`, `.redactKeys`
@@ -219,7 +219,7 @@ function asWrapper(x: unknown): RegistrationWrapper | null {
 /**
  * Structural memory-declaration check (#444) — same duck-typing rationale as
  * {@link isSessionScopeShape}: the wrapper's `store` comes from the agent
- * file's OWN `@agentic-patterns/runtime` copy, so `instanceof` is unreliable.
+ * file's OWN `@pattern-stack/agentic-runtime` copy, so `instanceof` is unreliable.
  * `store` must look like a `MemoryStore` (the four methods turn-1 recall and
  * the toolbox actually call), and `scope` must be a derivation fn or a plain
  * object (content is validated server-side at conversation creation, where

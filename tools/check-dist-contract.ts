@@ -26,9 +26,9 @@ const ROOT = resolve(import.meta.dir, "..");
 
 /** Importable ESM libraries — mirrors LIB_PKGS in run-tarball-smoke.ts. */
 const LIB_PKGS = [
-  { dir: "agent-core", name: "@agentic-patterns/core" },
-  { dir: "agent-runtime", name: "@agentic-patterns/runtime" },
-  { dir: "agent-server", name: "@agentic-patterns/server" },
+  { dir: "agent-core", name: "@pattern-stack/agentic-core" },
+  { dir: "agent-runtime", name: "@pattern-stack/agentic-runtime" },
+  { dir: "agent-server", name: "@pattern-stack/agentic-server" },
 ] as const;
 
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;

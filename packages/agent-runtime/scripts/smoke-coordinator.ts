@@ -18,7 +18,7 @@
  *   export SMOKE_MODEL="gemini/gemini-2.5-flash"   # or openai/gpt-4o
  *   bun run packages/agent-runtime/scripts/smoke-coordinator.ts
  */
-import { Agent, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
+import { Agent, Mission, Persona, RoleBuilder } from "@pattern-stack/agentic-core";
 import { z } from "zod";
 import { AgentRunner } from "../src/runner/agent-runner.js";
 import type { AgentLike } from "../src/runner/agent-runner.js";

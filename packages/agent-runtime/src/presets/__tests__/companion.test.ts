@@ -4,7 +4,7 @@
  * `memory/__tests__`; these tests pin what the PRESET assembles.
  */
 
-import type { ToolSchema } from "@agentic-patterns/core";
+import type { ToolSchema } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import { InMemoryMemoryStore } from "../../memory/store.js";
 import { buildCompanionAgent } from "../agents/companion.js";

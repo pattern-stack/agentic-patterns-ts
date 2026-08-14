@@ -88,7 +88,7 @@ export function docsRoutes(
   sub.get("/openapi.json", (c) => c.json(openapi().document));
 
   sub.get("/docs", (c) =>
-    c.html(scalarPage(info.title ?? "@agentic-patterns/server", scalarJsUrl)),
+    c.html(scalarPage(info.title ?? "@pattern-stack/agentic-server", scalarJsUrl)),
   );
 
   sub.get("/llms.txt", (c) =>

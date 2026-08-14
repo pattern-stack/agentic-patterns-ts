@@ -13,7 +13,7 @@ its own wire types, and validates its own output (or forgets to):
 
 ```typescript
 import { z } from "zod";
-import { Capability, TextManual, type ToolDefinition, Toolbox } from "@agentic-patterns/core";
+import { Capability, TextManual, type ToolDefinition, Toolbox } from "@pattern-stack/agentic-core";
 
 const MeetingList = z.object({ meetings: z.array(z.string()) });
 
@@ -46,7 +46,7 @@ const capability = new Capability(
 
 ```typescript
 import { z } from "zod";
-import { capability, defineTool, TextManual, toolbox } from "@agentic-patterns/core";
+import { capability, defineTool, TextManual, toolbox } from "@pattern-stack/agentic-core";
 
 const MeetingList = z.object({ meetings: z.array(z.string()) });
 
@@ -98,14 +98,14 @@ What changed:
 ## Reading the run scope
 
 A tool that needs to know who it's acting for reads the conversation's bound `SessionScope`
-(`@agentic-patterns/core`) via `requireScope`/`readScope` (`@agentic-patterns/runtime`) instead of a
+(`@pattern-stack/agentic-core`) via `requireScope`/`readScope` (`@pattern-stack/agentic-runtime`) instead of a
 constructor closure. Both accept a tool's `execute(args, ctx)` second argument directly:
 
 ```typescript
 import { z } from "zod";
-import { defineTool } from "@agentic-patterns/core";
-import type { ToolExecutionContext } from "@agentic-patterns/core";
-import { requireScope } from "@agentic-patterns/runtime";
+import { defineTool } from "@pattern-stack/agentic-core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
+import { requireScope } from "@pattern-stack/agentic-runtime";
 
 const whoami = defineTool({
   description: "Who this run is acting on behalf of.",
@@ -125,7 +125,7 @@ which returns `undefined` rather than throwing; branch on that explicitly instea
 is always present.
 
 This only works when the agent's registration declares a `scope` (a `SessionScope` from
-`@agentic-patterns/core`) — see `examples/agents/support-desk` for the full pattern, including the
+`@pattern-stack/agentic-core`) — see `examples/agents/support-desk` for the full pattern, including the
 case where the registration has no `instantiate` hook at all and tools read scope live at call time
 instead of from a build-time closure.
 
@@ -139,7 +139,7 @@ by default.
 
 ```typescript
 import { z } from "zod";
-import { definePlay, playbook } from "@agentic-patterns/core";
+import { definePlay, playbook } from "@pattern-stack/agentic-core";
 
 const plays = playbook("recipes", "Named multi-step recipes", {
   slug_and_span: definePlay({
@@ -212,7 +212,7 @@ only the Zod type surface — no vendor SDKs, no runtime code, no network/enviro
 never mutates the schema or throws for a finding; it just returns `SchemaLintFinding[]`.
 
 ```typescript
-import { lintModelFacingSchema } from "@agentic-patterns/core";
+import { lintModelFacingSchema } from "@pattern-stack/agentic-core";
 
 const findings = lintModelFacingSchema(schema, {
   dialect: "gemini-bifrost", // @default — see the dialect matrix below

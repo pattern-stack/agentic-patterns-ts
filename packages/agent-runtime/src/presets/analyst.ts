@@ -10,7 +10,7 @@ import {
   Persona,
   type Role,
   RoleBuilder,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { EVIDENCE_QUALITY } from "./judgments.js";
 import { ANALYSIS } from "./responsibilities.js";
 

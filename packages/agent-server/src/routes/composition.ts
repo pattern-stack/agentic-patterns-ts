@@ -15,8 +15,8 @@
  * never imported, so any AgentLike introspects safely.
  */
 
-import type { AgentEventBus } from "@agentic-patterns/runtime";
-import { createEvent } from "@agentic-patterns/runtime";
+import type { AgentEventBus } from "@pattern-stack/agentic-runtime";
+import { createEvent } from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 import { ZodError } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";

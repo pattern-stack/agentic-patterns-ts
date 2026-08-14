@@ -1,7 +1,7 @@
 /**
  * Packaging contract for the bundled providers (#472).
  *
- * The bug: `@agentic-patterns/runtime` imported every `@ai-sdk/*` provider
+ * The bug: `@pattern-stack/agentic-runtime` imported every `@ai-sdk/*` provider
  * dynamically and shipped none, so a consumer who installed the runtime and set
  * a provider key still could not construct a model — and, because
  * `ClaudeCodeAPIRunner` has no read site for `options.messageHistory`, the
@@ -9,7 +9,7 @@
  *
  * The fix has two halves. This file guards the packaging half: the providers a
  * `ProviderProtocol` advertises as `bundled` must genuinely be `dependencies` of
- * `@agentic-patterns/runtime` — not devDependencies, not peerDependencies, not
+ * `@pattern-stack/agentic-runtime` — not devDependencies, not peerDependencies, not
  * an aspiration in a comment. A test, because a comment cannot fail CI.
  */
 
@@ -37,7 +37,7 @@ const SCOPED: readonly SupportedProvider[] = ["anthropic", "openai", "google"];
 
 describe("bundled providers — packaging contract (#472)", () => {
   it("is the runtime package we think it is", () => {
-    expect(pkg.name).toBe("@agentic-patterns/runtime");
+    expect(pkg.name).toBe("@pattern-stack/agentic-runtime");
   });
 
   it.each(SCOPED)("%s is marked bundled", (name) => {

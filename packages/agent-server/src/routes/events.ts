@@ -7,7 +7,7 @@
  * can degrade gracefully.
  */
 
-import type { AgentEventBus, EventStore } from "@agentic-patterns/runtime";
+import type { AgentEventBus, EventStore } from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 
 export function eventRoutes(eventStore: EventStore | undefined, eventBus?: AgentEventBus): Hono {

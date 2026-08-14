@@ -63,17 +63,17 @@ describe("fs-backed helpers", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it("collectApDeps returns only @agentic-patterns/* deps (deps + devDeps), sorted", () => {
+  it("collectApDeps returns only @pattern-stack/agentic-* deps (deps + devDeps), sorted", () => {
     fs.writeFileSync(
       path.join(dir, "package.json"),
       JSON.stringify({
-        dependencies: { "@agentic-patterns/runtime": "^0.9.0", zod: "^3.0.0" },
-        devDependencies: { "@agentic-patterns/cli": "^0.7.0" },
+        dependencies: { "@pattern-stack/agentic-runtime": "^0.9.0", zod: "^3.0.0" },
+        devDependencies: { "@pattern-stack/agentic-cli": "^0.7.0" },
       }),
     );
     expect(collectApDeps(dir)).toEqual([
-      { name: "@agentic-patterns/cli", range: "^0.7.0" },
-      { name: "@agentic-patterns/runtime", range: "^0.9.0" },
+      { name: "@pattern-stack/agentic-cli", range: "^0.7.0" },
+      { name: "@pattern-stack/agentic-runtime", range: "^0.9.0" },
     ]);
   });
 
@@ -87,11 +87,11 @@ describe("fs-backed helpers", () => {
   });
 
   it("readInstalledVersion reads node_modules/<pkg>/package.json", () => {
-    const pkgDir = path.join(dir, "node_modules", "@agentic-patterns", "runtime");
+    const pkgDir = path.join(dir, "node_modules", "@pattern-stack", "agentic-runtime");
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.writeFileSync(path.join(pkgDir, "package.json"), JSON.stringify({ version: "0.9.0" }));
-    expect(readInstalledVersion(dir, "@agentic-patterns/runtime")).toBe("0.9.0");
-    expect(readInstalledVersion(dir, "@agentic-patterns/absent")).toBeNull();
+    expect(readInstalledVersion(dir, "@pattern-stack/agentic-runtime")).toBe("0.9.0");
+    expect(readInstalledVersion(dir, "@pattern-stack/agentic-absent")).toBeNull();
   });
 
   it("readSelfVersion walks UP from a nested dir to the nearest package.json", () => {

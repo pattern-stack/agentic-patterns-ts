@@ -131,7 +131,7 @@ magic, never hand-written.
 
 ```sh
 bun run docs:dev            # live-reload authoring server
-bun run --filter=@agentic-patterns/docs-site build   # build + link gate
+bun run --filter=@pattern-stack/agentic-docs-site build   # build + link gate
 bun run docs:events         # regenerate the events reference
 bun run check:docs-events   # drift gate (what CI runs)
 cd docs-site && bunx astro preview        # serve the built site (daemonized)

@@ -24,7 +24,7 @@ import {
   MemoryTargetSchema,
   ProvenanceSchema,
   memoryRecord,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { z } from "zod";
 import { tokenize } from "./tokenize.js";
 

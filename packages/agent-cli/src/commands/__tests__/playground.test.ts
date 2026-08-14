@@ -13,7 +13,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { AgentRegistration } from "@agentic-patterns/server";
+import type { AgentRegistration } from "@pattern-stack/agentic-server";
 import { describe, expect, it } from "vitest";
 import type { DiscoveredAgent } from "../../helpers/discover.js";
 import {
@@ -38,7 +38,7 @@ describe("toAgentRegistration — DiscoveredAgent -> AgentRegistration field map
     }),
   };
 
-  // A duck-typed fake SessionScope (no `@agentic-patterns/core` import,
+  // A duck-typed fake SessionScope (no `@pattern-stack/agentic-core` import,
   // same posture as the discovery fixtures) — its identity is what this
   // test proves survives the map, not its behavior.
   const fakeScope: NonNullable<DiscoveredAgent["scope"]> = {

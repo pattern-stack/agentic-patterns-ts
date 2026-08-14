@@ -19,7 +19,7 @@ import {
   unionRedactKeys,
 } from "../run.js";
 
-// A duck-typed fake SessionScope (#308) — no `@agentic-patterns/core` import,
+// A duck-typed fake SessionScope (#308) — no `@pattern-stack/agentic-core` import,
 // same posture as the discovery fixtures.
 function fakeScope(
   overrides: Partial<NonNullable<DiscoveredAgent["scope"]>> = {},

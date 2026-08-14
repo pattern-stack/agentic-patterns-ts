@@ -26,7 +26,7 @@
  * (`workflows/index.ts`); no consumer imports the raw ones directly.
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core"; // type-only
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core"; // type-only
 import { createEvent } from "../events/types.js";
 import type { BackpackRowPreview } from "../events/types.js";
 import {

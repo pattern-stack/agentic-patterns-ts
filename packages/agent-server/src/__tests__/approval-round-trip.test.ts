@@ -12,7 +12,7 @@
  * it, and the run then either executes the tool (approve) or errors (deny).
  */
 
-import type { AgentEvent, BaseEvent, RunOptions } from "@agentic-patterns/runtime";
+import type { AgentEvent, BaseEvent, RunOptions } from "@pattern-stack/agentic-runtime";
 import {
   AgentEventBus,
   InMemoryAdminService,
@@ -21,7 +21,7 @@ import {
   SSEExporter,
   createEvent,
   createHumanInputApprovalGate,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import { describe, expect, it } from "vitest";
 import { createServer } from "../app.js";
 import type { AgentRegistration } from "../config.js";

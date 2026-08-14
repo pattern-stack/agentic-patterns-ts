@@ -27,7 +27,7 @@ import type {
   EvalStore,
   JoinedEvalResultRow,
   Scorer,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import {
   EvalSplitSchema,
   HeldOutSplitError,
@@ -38,7 +38,7 @@ import {
   filterBySplit,
   runEval,
   setMembership,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration, EvalExecutionConfig } from "../config.js";

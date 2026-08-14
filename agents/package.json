@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@agentic-patterns/runtime": "workspace:*"
+    "@pattern-stack/agentic-runtime": "workspace:*"
   }
 }

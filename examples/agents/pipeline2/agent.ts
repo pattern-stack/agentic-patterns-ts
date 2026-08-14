@@ -31,7 +31,7 @@ import {
   provideDeps,
   retry,
   slot,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import { CATALOG, type Tip, catalogKey } from "./deps.js";
 import { curateStep } from "./subagents/curator.js";
 

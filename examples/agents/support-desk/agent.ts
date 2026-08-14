@@ -11,7 +11,7 @@
  * `instantiation.available = hasHook || hasScope`) and stamps it onto
  * `RunOptions.host.scope` for every turn — this agent's tools just read
  * that live, at CALL TIME, via `readScope`/`requireScope`
- * (`@agentic-patterns/runtime`) instead of a constructor closure. Same
+ * (`@pattern-stack/agentic-runtime`) instead of a constructor closure. Same
  * scope-bound behavior, no per-conversation object rebuild.
  *
  * The scope is deliberately widget-diverse to exercise more of
@@ -47,8 +47,8 @@ import {
   defineTool,
   scopeItem,
   toolbox,
-} from "@agentic-patterns/core";
-import { requireScopeAs } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-core";
+import { requireScopeAs } from "@pattern-stack/agentic-runtime";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------

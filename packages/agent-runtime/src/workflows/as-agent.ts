@@ -16,7 +16,7 @@
  * `isAgentShape`, or the server routes.
  */
 
-import type { Role } from "@agentic-patterns/core";
+import type { Role } from "@pattern-stack/agentic-core";
 import { generateId } from "ai";
 import { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent, AgentEventType, BaseEvent } from "../events/types.js";

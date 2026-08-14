@@ -1,19 +1,19 @@
-# @agentic-patterns/cli
+# @pattern-stack/agentic-cli
 
 `ap` — the command-line entry point for agentic-patterns. Discovers agents in a project, wires runners + event bus, and launches a Hono server with an admin dashboard SPA.
 
 ## Installation
 
 ```bash
-bun add -g @agentic-patterns/cli
+bun add -g @pattern-stack/agentic-cli
 # or
-npm install -g @agentic-patterns/cli
+npm install -g @pattern-stack/agentic-cli
 ```
 
 Or use without installing:
 
 ```bash
-npx @agentic-patterns/cli <command>
+npx @pattern-stack/agentic-cli <command>
 ```
 
 ## Quick Start
@@ -72,7 +72,7 @@ The CLI walks `agents/**/agent.ts` (or `agents/**/*.agent.ts`) from your project
 
 ```typescript
 // agents/demo/agent.ts
-import { AgentBuilder, RoleBuilder, Persona, Mission } from "@agentic-patterns/core";
+import { AgentBuilder, RoleBuilder, Persona, Mission } from "@pattern-stack/agentic-core";
 
 const role = new RoleBuilder("demo")
   .withPersona(new Persona({ identity: "a demo assistant", tone: "concise" }))
@@ -92,7 +92,7 @@ export default {
 
 The CLI injects the runner from your environment — you don't construct one yourself.
 
-A registration may also declare `scope: SessionScope` (`@agentic-patterns/core`) — validated per-conversation fields with optional defaults and named presets, superseding ad hoc `context`. `ap run <agent>` validates and injects the effective scope (an explicit `--context '<json>'` flag or `AP_CONTEXT` env var, falling back to `scope.defaults`) before the first turn, the same precedence the server applies for `POST /conversations`. `ap playground` serves a typed scope form — one input per declared field, generated from `GET /agents`' `instantiation.schema` — with a preset picker sourced from `instantiation.presets`.
+A registration may also declare `scope: SessionScope` (`@pattern-stack/agentic-core`) — validated per-conversation fields with optional defaults and named presets, superseding ad hoc `context`. `ap run <agent>` validates and injects the effective scope (an explicit `--context '<json>'` flag or `AP_CONTEXT` env var, falling back to `scope.defaults`) before the first turn, the same precedence the server applies for `POST /conversations`. `ap playground` serves a typed scope form — one input per declared field, generated from `GET /agents`' `instantiation.schema` — with a preset picker sourced from `instantiation.presets`.
 
 Override the discovery glob: `ap --agents "src/bots/*/index.ts" playground`
 

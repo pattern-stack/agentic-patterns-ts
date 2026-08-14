@@ -1,7 +1,7 @@
 /**
  * Tests for `ap tools list` / `ap tools call`.
  *
- * The agent under test is built from real `@agentic-patterns/core`
+ * The agent under test is built from real `@pattern-stack/agentic-core`
  * builders (Persona, Mission, RoleBuilder, AgentBuilder, Capability,
  * Toolbox) so the capability-walk path is exercised end-to-end. The
  * toolbox itself is a minimal `EchoToolbox` with one trivial tool —
@@ -16,7 +16,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { DiscoveredAgent } from "../../helpers/discover.js";

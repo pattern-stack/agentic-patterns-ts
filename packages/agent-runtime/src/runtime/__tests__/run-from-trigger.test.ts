@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { TriggerSourceData } from "@agentic-patterns/core";
+import type { TriggerSourceData } from "@pattern-stack/agentic-core";
 
 import type { AgentLike, RunOptions, RunResult, RunnerProtocol } from "../../runner/types.js";
 import type { AgentRegistry } from "../registry.js";

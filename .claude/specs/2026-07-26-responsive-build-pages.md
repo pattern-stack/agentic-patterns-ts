@@ -81,7 +81,7 @@ The brief called out three ranges; all were already compliant:
    `CapabilitiesPage.responsive.test.tsx` since there's no behavior change to pin —
    the existing `CapabilitiesPage.test.tsx` desktop suite already covers it and stays
    green untouched.
-5. `bun run --filter=@agentic-patterns/dashboard typecheck` and the targeted test
+5. `bun run --filter=@pattern-stack/agentic-dashboard typecheck` and the targeted test
    filters (`-- Roles`, `-- Capabilities`, `-- Agents`).
 
 ## Test plan

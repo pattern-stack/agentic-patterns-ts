@@ -1,6 +1,7 @@
 {
-  "name": "@agentic-patterns/dashboard",
+  "name": "@pattern-stack/agentic-dashboard",
   "version": "0.10.2",
+  "license": "FSL-1.1-ALv2",
   "private": true,
   "type": "module",
   "scripts": {

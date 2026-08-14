@@ -24,6 +24,7 @@
  * so tools can read it via `readScope`/`requireScope`.
  */
 
+import { isCancel, text } from "@clack/prompts";
 import {
   Conversation,
   NodeBackedRunner,
@@ -31,9 +32,8 @@ import {
   deriveToolboxExecutor,
   getAgentEventBus,
   isPromotedAgent,
-} from "@agentic-patterns/runtime";
-import type { AgentEvent } from "@agentic-patterns/runtime";
-import { isCancel, text } from "@clack/prompts";
+} from "@pattern-stack/agentic-runtime";
+import type { AgentEvent } from "@pattern-stack/agentic-runtime";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 import { ExecutionService } from "../services/execution-service.js";
 
@@ -179,7 +179,7 @@ export async function runRunCommand(opts: RunOptions): Promise<void> {
   // whose tools actually execute (#268, mirrors `conversations.ts`).
   // `host.scope` (#308) — carries the PARSED scope value across every run
   // this conversation makes, so tools can read it via `readScope`/
-  // `requireScope` (`@agentic-patterns/runtime`, `workflows/scope-host.js`).
+  // `requireScope` (`@pattern-stack/agentic-runtime`, `workflows/scope-host.js`).
   // Only scope-declaring registrations get a host — hook-only (no scope)
   // registrations keep today's hostless behavior (mirrors
   // `routes/conversations.ts`).
@@ -288,7 +288,7 @@ export function resolveRunContext(
  * Render a `scope.parse` failure for the terminal — duck-typed `err.issues`
  * detection (decisions.md D3): the throwing zod may be a DIFFERENT module
  * instance than the CLI's own (agent files often resolve
- * `@agentic-patterns/core` through a built `dist/`), so this NEVER checks
+ * `@pattern-stack/agentic-core` through a built `dist/`), so this NEVER checks
  * `instanceof ZodError` / calls `.flatten()` (v3-only shape) across that
  * boundary. A non-zod throw degrades to its bare message. Exported for
  * testing.

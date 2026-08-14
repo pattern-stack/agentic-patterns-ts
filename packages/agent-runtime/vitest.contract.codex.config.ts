@@ -8,7 +8,7 @@ import { defineConfig } from "vitest/config";
  * found in ~/.codex/auth.json (copied into isolated CODEX_HOME dirs — the
  * host login is never mutated). Run explicitly with:
  *
- *   bun run --filter=@agentic-patterns/runtime test:contract:codex
+ *   bun run --filter=@pattern-stack/agentic-runtime test:contract:codex
  *
  * Requirements: codex CLI matching fixtures/manifest.json cliVersion on PATH,
  * and a logged-in ~/.codex/auth.json.

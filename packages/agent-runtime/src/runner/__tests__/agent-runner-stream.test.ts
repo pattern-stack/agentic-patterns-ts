@@ -2,12 +2,12 @@
  * Tests for AgentRunner.stream() using MockLanguageModelV3.
  */
 
-import { ToolSchema } from "@agentic-patterns/core";
 import type {
   LanguageModelV3FinishReason,
   LanguageModelV3StreamPart,
   LanguageModelV3Usage,
 } from "@ai-sdk/provider";
+import { ToolSchema } from "@pattern-stack/agentic-core";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

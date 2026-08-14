@@ -3,7 +3,7 @@
  * (`CLIENT_EVENT_NAMES`) must cover every wire event name the runtime emits.
  *
  * WHY A MANIFEST, NOT A DIRECT RUNTIME IMPORT:
- * The dashboard is architecturally STANDALONE — no `@agentic-patterns/runtime`
+ * The dashboard is architecturally STANDALONE — no `@pattern-stack/agentic-runtime`
  * dependency (CLAUDE.md), and #291 forbids its browser bundle (`graph/`,
  * `chat/`) from importing runtime/server code (the `bun:sqlite` hazard). So the
  * dashboard cannot import the runtime's `SSE_WIRE_EVENT_NAMES` directly. Instead

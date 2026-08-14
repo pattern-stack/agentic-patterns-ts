@@ -9,17 +9,17 @@ workflows, and exporters.
 
 | Package | Description |
 |---------|-------------|
-| [`@agentic-patterns/core`](./packages/agent-core) | Atoms, protocols, molecules, rendering, organisms |
-| [`@agentic-patterns/runtime`](./packages/agent-runtime) | Runner, events, gates, workflows, transport, multi-agent, exporters |
-| [`@agentic-patterns/server`](./packages/agent-server) | Hono HTTP server — routes, SSE, admin API, Claude Code hook bridge |
-| [`@agentic-patterns/cli`](./packages/agent-cli) | `ap` — discover agents, chat in terminal, launch dashboard |
+| [`@pattern-stack/agentic-core`](./packages/agent-core) | Atoms, protocols, molecules, rendering, organisms |
+| [`@pattern-stack/agentic-runtime`](./packages/agent-runtime) | Runner, events, gates, workflows, transport, multi-agent, exporters |
+| [`@pattern-stack/agentic-server`](./packages/agent-server) | Hono HTTP server — routes, SSE, admin API, Claude Code hook bridge |
+| [`@pattern-stack/agentic-cli`](./packages/agent-cli) | `ap` — discover agents, chat in terminal, launch dashboard |
 
 Runtime depends on core. Server depends on runtime + core. Core never imports runtime.
 
 ## Quick Start
 
 ```bash
-npm install -g @agentic-patterns/cli
+npm install -g @pattern-stack/agentic-cli
 ap init my-agents --provider=anthropic --with-plugin
 cd my-agents
 cp .env.example .env   # add ANTHROPIC_API_KEY
@@ -32,14 +32,14 @@ bun run dev               # http://localhost:3456
 Or, skip the CLI and use the library directly:
 
 ```bash
-bun add @agentic-patterns/core @agentic-patterns/runtime
+bun add @pattern-stack/agentic-core @pattern-stack/agentic-runtime
 ```
 
 Anthropic, OpenAI and Google Gemini ship with the runtime — set one key, name a model, go. No provider package to install.
 
 ```typescript
-import { Persona, Mission, RoleBuilder, AgentBuilder } from "@agentic-patterns/core";
-import { createRunner } from "@agentic-patterns/runtime";
+import { Persona, Mission, RoleBuilder, AgentBuilder } from "@pattern-stack/agentic-core";
+import { createRunner } from "@pattern-stack/agentic-runtime";
 
 const role = new RoleBuilder("assistant")
   .withPersona(new Persona({ identity: "a helpful assistant", tone: "concise" }))
@@ -76,7 +76,7 @@ answers one question about the agent's behavior.
 ### Persona -- WHO the agent is
 
 ```typescript
-import { Persona } from "@agentic-patterns/core";
+import { Persona } from "@pattern-stack/agentic-core";
 
 const persona = new Persona({
   identity: "a research assistant specializing in data analysis",
@@ -88,7 +88,7 @@ const persona = new Persona({
 ### Mission -- WHAT the agent is doing
 
 ```typescript
-import { Mission } from "@agentic-patterns/core";
+import { Mission } from "@pattern-stack/agentic-core";
 
 const mission = new Mission({
   objective: "Analyze the provided dataset and produce a summary.",
@@ -103,7 +103,7 @@ const mission = new Mission({
 ### Judgment -- HOW the agent decides
 
 ```typescript
-import { Judgment } from "@agentic-patterns/core";
+import { Judgment } from "@pattern-stack/agentic-core";
 
 const sourceQuality = new Judgment({
   domain: "source-quality",
@@ -123,7 +123,7 @@ A Role composes primitives into a reusable template. Build one with
 the fluent `RoleBuilder`.
 
 ```typescript
-import { RoleBuilder, Responsibility } from "@agentic-patterns/core";
+import { RoleBuilder, Responsibility } from "@pattern-stack/agentic-core";
 
 const role = new RoleBuilder("research-assistant")
   .withPersona(persona)
@@ -141,7 +141,7 @@ const role = new RoleBuilder("research-assistant")
 An Agent is a Role instantiated with a Mission and optional context.
 
 ```typescript
-import { AgentBuilder } from "@agentic-patterns/core";
+import { AgentBuilder } from "@pattern-stack/agentic-core";
 
 const agent = new AgentBuilder(role)
   .withMission(mission)
@@ -154,7 +154,7 @@ const agent = new AgentBuilder(role)
 Agents that need to know WHO they're running for -- a tenant, an operator, a plan tier -- declare a `SessionScope`: named, Zod-validated fields with optional defaults and presets.
 
 ```typescript
-import { scopeItem, sessionScope } from "@agentic-patterns/core";
+import { scopeItem, sessionScope } from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 const scope = sessionScope({
@@ -175,7 +175,7 @@ import {
   AgentRunner,
   AgentEventBus,
   ConsoleExporter,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 
 const bus = new AgentEventBus();
 const exporter = new ConsoleExporter(bus);
@@ -203,7 +203,7 @@ own capabilities. A stage may be a bare agent, a spec with knobs
 `CoordinatorStep` spine, a deterministic `FunctionStep` tail.
 
 ```typescript
-import { type Node, sequentialAgent } from "@agentic-patterns/runtime";
+import { type Node, sequentialAgent } from "@pattern-stack/agentic-runtime";
 
 // A COMPOSITE-designated emitting stage types the pipeline: its output IS
 // that stage's emission (zero casts), and input:'prior' hands the tail the
@@ -222,7 +222,7 @@ one bad branch never fails the fan-out. (`FanOut` remains the tool for
 dynamic-N over runtime lists.)
 
 ```typescript
-import { parallelAgent } from "@agentic-patterns/runtime";
+import { parallelAgent } from "@pattern-stack/agentic-runtime";
 
 const sections = parallelAgent<{ overview: string; pricing: Pricing }>(
   [
@@ -237,7 +237,7 @@ const sections = parallelAgent<{ overview: string; pricing: Pricing }>(
 ### Sequential -- chain agents in order
 
 ```typescript
-import { Sequential } from "@agentic-patterns/runtime";
+import { Sequential } from "@pattern-stack/agentic-runtime";
 
 const pipeline = new Sequential([
   { agent: researcher, messageTemplate: "Research: {{topic}}" },
@@ -251,7 +251,7 @@ const result = await pipeline.run({ topic: "AI trends" }, { runner });
 ### Parallel -- fan-out with concurrency control
 
 ```typescript
-import { Parallel, collectByName } from "@agentic-patterns/runtime";
+import { Parallel, collectByName } from "@pattern-stack/agentic-runtime";
 
 const fanout = new Parallel(
   [
@@ -271,7 +271,7 @@ const result = await fanout.run({}, { runner });
 Run an agent iteratively toward a goal, evaluating progress each turn.
 
 ```typescript
-import { TaskLoop, SimpleGoalEvaluator } from "@agentic-patterns/runtime";
+import { TaskLoop, SimpleGoalEvaluator } from "@pattern-stack/agentic-runtime";
 
 const evaluator = new SimpleGoalEvaluator({
   successPatterns: ["TASK_COMPLETE"],
@@ -289,7 +289,7 @@ Self-critique loop: a producer generates, an evaluator scores and
 critiques, and the producer refines.
 
 ```typescript
-import { EvaluatorLoop, RubricEvaluator } from "@agentic-patterns/runtime";
+import { EvaluatorLoop, RubricEvaluator } from "@pattern-stack/agentic-runtime";
 
 const evaluator = new RubricEvaluator([
   { name: "clarity", description: "Writing is clear and concise", weight: 0.4 },
@@ -309,7 +309,7 @@ const result = await loop.run("Write a technical blog post about RAG");
 Generic retry wrapper for any async operation. Not agent-specific.
 
 ```typescript
-import { RetryLoop, ExponentialBackoff } from "@agentic-patterns/runtime";
+import { RetryLoop, ExponentialBackoff } from "@pattern-stack/agentic-runtime";
 
 const retry = new RetryLoop({
   maxAttempts: 5,
@@ -326,7 +326,7 @@ const result = await retry.run(() => callExternalAPI());
 Multi-turn conversation with external input/output callbacks.
 
 ```typescript
-import { ConversationLoop } from "@agentic-patterns/runtime";
+import { ConversationLoop } from "@pattern-stack/agentic-runtime";
 
 const loop = new ConversationLoop(agent, {
   maxExchanges: 10,
@@ -344,7 +344,7 @@ const result = await loop.run({ runner });
 `MockRunner` enables deterministic testing without LLM calls.
 
 ```typescript
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agentic-runtime";
 
 const mock = new MockRunner()
   .addResponse("analyze", { content: "Analysis: revenue up 15%" })
@@ -363,8 +363,8 @@ For coordination across multiple agents, define an Agency and run it
 with the `AgencyRuntime`.
 
 ```typescript
-import { Agency } from "@agentic-patterns/core";
-import { AgencyRuntime } from "@agentic-patterns/runtime";
+import { Agency } from "@pattern-stack/agentic-core";
+import { AgencyRuntime } from "@pattern-stack/agentic-runtime";
 
 const agency = new Agency({
   name: "sales-team",
@@ -430,8 +430,8 @@ bun run check       # all of the above
 
 ## Releasing
 
-The four public packages -- `@agentic-patterns/{core,runtime,server,cli}` -- are
-versioned in lockstep and published to npm automatically. `@agentic-patterns/dashboard`
+The four public packages -- `@pattern-stack/agentic-{core,runtime,server,cli}` -- are
+versioned in lockstep and published to npm automatically. `@pattern-stack/agentic-dashboard`
 is `private: true` and never publishes.
 
 **To cut a release:**
@@ -480,4 +480,16 @@ publish fails with an auth error.
 
 ## License
 
-MIT
+[Functional Source License, Version 1.1, ALv2 Future License](./LICENSE) (`FSL-1.1-ALv2`).
+
+You may use, copy, modify, and redistribute this software for any purpose other
+than a **Competing Use** -- broadly, making it available to others in a commercial
+product or service that substitutes for, or offers substantially similar
+functionality to, this software. Internal use, non-commercial education and
+research, and professional services for other licensees are all permitted.
+
+Each version converts to the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)
+on the second anniversary of its release.
+
+Versions published under the former `@agentic-patterns/*` scope remain MIT-licensed
+and are no longer maintained.

@@ -44,7 +44,7 @@ export interface InitOptions {
   provider?: Provider;
   /**
    * Scaffold INTO the local monorepo's `examples/<name>/` with `workspace:*`
-   * deps. Required for dogfooding until the `@agentic-patterns/*` packages
+   * deps. Required for dogfooding until the `@pattern-stack/agentic-*` packages
    * are published. Overrides `targetDir`.
    */
   link?: boolean;
@@ -236,7 +236,7 @@ export async function runInitCommand(opts: InitOptions): Promise<void> {
 
   if (opts.link && monorepoRoot) {
     // Install runs at the monorepo root so workspace:* resolves for every
-    // transitive @agentic-patterns/* dep.
+    // transitive @pattern-stack/agentic-* dep.
     const rootRel = path.relative(process.cwd(), monorepoRoot) || ".";
     const projRel = path.relative(monorepoRoot, targetDir);
     if (rootRel !== ".") {
@@ -291,9 +291,9 @@ function renderPackageJson(name: string, provider: Provider, link: boolean): str
       agents: "ap agents",
     },
     dependencies: {
-      "@agentic-patterns/core": apVersion,
-      "@agentic-patterns/runtime": apVersion,
-      "@agentic-patterns/cli": apVersion,
+      "@pattern-stack/agentic-core": apVersion,
+      "@pattern-stack/agentic-runtime": apVersion,
+      "@pattern-stack/agentic-cli": apVersion,
       ai: "^7.0.0",
       [providerDep]: providerSdkVersion(provider),
       zod: "^3.23.0",
@@ -384,7 +384,7 @@ import {
   RoleBuilder,
   defineTool,
   toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -447,7 +447,7 @@ const role = new RoleBuilder("demo-assistant")
   .build();
 
 const mission = new Mission({
-  objective: "Demonstrate the @agentic-patterns/core building blocks end-to-end",
+  objective: "Demonstrate the @pattern-stack/agentic-core building blocks end-to-end",
   successCriteria: ["Greets users by name", "Uses the greet tool for every greeting"],
 });
 
@@ -595,7 +595,7 @@ function mergeHookSettings(settingsPath: string, ours: HookSettings): MergeOutco
  * Two possible locations:
  *   1. Bundled inside the published CLI tarball at
  *      `packages/agent-cli/assets/plugin-template/` (checked first — works
- *      when the CLI is installed via `npm install -g @agentic-patterns/cli`)
+ *      when the CLI is installed via `npm install -g @pattern-stack/agentic-cli`)
  *   2. The monorepo root (dogfood path — walks up from the running script)
  */
 export function resolvePluginSource(): {

@@ -7,8 +7,15 @@
  * (never aliases — parallel tool calls would otherwise race).
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core";
-import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
+import {
+  Agent,
+  Capability,
+  Mission,
+  Persona,
+  RoleBuilder,
+  Toolbox,
+} from "@pattern-stack/agentic-core";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

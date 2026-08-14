@@ -6,7 +6,7 @@
  * happy + missing-store paths.
  */
 
-import { EventStore } from "@agentic-patterns/runtime";
+import { EventStore } from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

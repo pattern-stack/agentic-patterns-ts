@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import {
   type Backpack,

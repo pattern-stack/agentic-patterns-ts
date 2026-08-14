@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# scripts/bump.sh — bump @agentic-patterns/* versions across two tracks.
+# scripts/bump.sh — bump @pattern-stack/agentic-* versions across two tracks.
 #
 # The published packages version on TWO independent tracks:
 #   • lockstep — agent-runtime + agent-server + agent-cli MUST share a version

@@ -8,7 +8,7 @@ import { defineConfig } from "vitest/config";
  * Max login (host `~/.claude`), model `haiku`, cheap deterministic prompts. Run
  * explicitly with:
  *
- *   bun run --filter=@agentic-patterns/runtime test:contract:cc
+ *   bun run --filter=@pattern-stack/agentic-runtime test:contract:cc
  *
  * Requirements: `claude` CLI on PATH + a logged-in Claude Max subscription (or
  * ANTHROPIC_API_KEY). Mirrors the Codex harness placement (R-1): separate config,

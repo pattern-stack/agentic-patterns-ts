@@ -14,7 +14,7 @@
  * reserved `DepKey` singleton (see decisions.md D1).
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 
 /** The slice of the host bag this module reads/writes. */
 interface ScopeHost {
@@ -95,7 +95,7 @@ export function requireScope(
 /**
  * Typed cast sugar — trusts that the server-side `scope.parse()` already ran
  * (decisions.md D10) and casts the raw scope bag to `T` (typically
- * `ScopeValue<typeof myScope>` from `@agentic-patterns/core`). Deliberately
+ * `ScopeValue<typeof myScope>` from `@pattern-stack/agentic-core`). Deliberately
  * does NOT re-parse per tool call — that would mean shipping the
  * `SessionScope` instance itself down every seam just to read one field.
  * Keep it honest: this is a cast, not a validation.

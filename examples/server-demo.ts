@@ -20,9 +20,9 @@ import {
   Persona,
   RoleBuilder,
   Toolbox,
-} from "@agentic-patterns/core";
-import { MockRunner } from "@agentic-patterns/runtime";
-import { createApp } from "@agentic-patterns/server";
+} from "@pattern-stack/agentic-core";
+import { MockRunner } from "@pattern-stack/agentic-runtime";
+import { createApp } from "@pattern-stack/agentic-server";
 
 // ---------------------------------------------------------------------------
 // Build a simple echo agent

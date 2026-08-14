@@ -1,5 +1,5 @@
 /**
- * Dashboard API types — aligned with @agentic-patterns/runtime admin schemas.
+ * Dashboard API types — aligned with @pattern-stack/agentic-runtime admin schemas.
  *
  * These mirror the Zod-inferred types from the runtime's admin/schemas.ts,
  * representing the JSON shapes returned by the server's admin routes.
@@ -119,7 +119,7 @@ export interface ConversationMessagePart {
 }
 
 /**
- * Eval types — hand-mirrored from `@agentic-patterns/runtime`'s `EvalStore`
+ * Eval types — hand-mirrored from `@pattern-stack/agentic-runtime`'s `EvalStore`
  * row types (the dashboard has no runtime dependency, `ConversationSummary`
  * precedent above). Wire shapes served by #136's four `/eval/*` GETs.
  */
@@ -241,7 +241,7 @@ export interface SplitAggregate {
 }
 
 /**
- * Run-history types — hand-mirrored from `@agentic-patterns/runtime`'s
+ * Run-history types — hand-mirrored from `@pattern-stack/agentic-runtime`'s
  * `RunStore`/`EventStore` row types (the `ConversationSummary` precedent
  * above), per house rule (port-map §3.1/3.2). Wire shapes served by the
  * `/admin/runs*` routes (`packages/agent-server/src/routes/runs.ts`).

@@ -24,7 +24,7 @@ import {
   type MemoryScope,
   MemoryScopeSchema,
   canonicalMemoryScope,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type { EventBus } from "../events/event-bus.js";
 import { createEvent } from "../events/types.js";
 import { capPreview } from "../workflows/state-events.js";

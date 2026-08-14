@@ -31,7 +31,7 @@ import {
   type MemoryRecord,
   MemoryRecordSchema,
   MemoryStoreCapabilitiesSchema,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type { MemoryStore, MemoryWriteInput } from "./store.js";
 
 /**
@@ -99,7 +99,7 @@ export interface MemoryStoreConformanceOptions {
  * portability contract. Registers a vitest `describe` suite; call from a test
  * file with top-level await:
  *
- *   import { runMemoryStoreConformance } from "@agentic-patterns/runtime";
+ *   import { runMemoryStoreConformance } from "@pattern-stack/agentic-runtime";
  *   await runMemoryStoreConformance(() => new InMemoryMemoryStore());
  *   await runMemoryStoreConformance(makeSqlite, { label: "SqliteMemoryStore" });
  *

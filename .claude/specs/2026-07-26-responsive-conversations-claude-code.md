@@ -188,9 +188,9 @@ suites are new, following the `<Page>.responsive.test.tsx` naming used by
    - Header row style (lines 62-69): add
      `...(isPhone ? { flexWrap: "wrap" as const, rowGap: 8 } : {})`.
 4. Add the three new test files per §5.
-5. Gate: `bun run --filter=@agentic-patterns/dashboard typecheck` and
-   `bun run --filter=@agentic-patterns/dashboard test -- Conversation` and
-   `bun run --filter=@agentic-patterns/dashboard test -- ClaudeCode` (per the
+5. Gate: `bun run --filter=@pattern-stack/agentic-dashboard typecheck` and
+   `bun run --filter=@pattern-stack/agentic-dashboard test -- Conversation` and
+   `bun run --filter=@pattern-stack/agentic-dashboard test -- ClaudeCode` (per the
    builder brief — not build/lint/full-check).
 
 Conventions: strict TS (`as const` on `"wrap"`), biome (double quotes, 2-space

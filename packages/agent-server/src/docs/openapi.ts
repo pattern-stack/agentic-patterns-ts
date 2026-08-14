@@ -189,7 +189,7 @@ export function buildOpenApiDocument(app: HonoLike, info: OpenApiInfo = {}): Ope
     openapi: "3.1.0",
     jsonSchemaDialect: JSON_SCHEMA_DIALECT,
     info: {
-      title: info.title ?? "@agentic-patterns/server",
+      title: info.title ?? "@pattern-stack/agentic-server",
       version: info.version ?? "0",
       description:
         info.description ??

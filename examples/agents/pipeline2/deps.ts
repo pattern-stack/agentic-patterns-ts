@@ -8,7 +8,7 @@
  * closures.
  */
 
-import { depKey } from "@agentic-patterns/runtime";
+import { depKey } from "@pattern-stack/agentic-runtime";
 
 // ---------------------------------------------------------------------------
 // Domain types

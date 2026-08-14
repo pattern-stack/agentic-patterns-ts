@@ -16,7 +16,7 @@
  * validation.
  */
 
-import type { Capability, ToolDefinition, Toolbox } from "@agentic-patterns/core";
+import type { Capability, ToolDefinition, Toolbox } from "@pattern-stack/agentic-core";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 
 /**

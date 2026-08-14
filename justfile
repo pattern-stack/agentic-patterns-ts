@@ -61,23 +61,23 @@ test:
     pnpm test
 
 test-runtime:
-    pnpm --filter @agentic-patterns/runtime test
+    pnpm --filter @pattern-stack/agentic-runtime test
 
 test-server:
-    pnpm --filter @agentic-patterns/server test
+    pnpm --filter @pattern-stack/agentic-server test
 
 test-dashboard:
-    pnpm --filter @agentic-patterns/dashboard test
+    pnpm --filter @pattern-stack/agentic-dashboard test
 
 # ── Live tests ───────────────────────────────
 
 # Ollama live test (needs OLLAMA_HOST in .env)
 test-live:
-    pnpm --filter @agentic-patterns/runtime test
+    pnpm --filter @pattern-stack/agentic-runtime test
 
 # Claude live test (needs claude CLI)
 test-claude:
-    RUN_LIVE_CLAUDE=1 pnpm --filter @agentic-patterns/runtime test
+    RUN_LIVE_CLAUDE=1 pnpm --filter @pattern-stack/agentic-runtime test
 
 # ── Worktrees ────────────────────────────────
 

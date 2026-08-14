@@ -166,8 +166,8 @@ tablet-width viewport (640-899px) still sees all 5 columns; only phones
 2. **`DashboardPage.tsx`** — no changes (§2a).
 3. **Tests** — add `__tests__/TokensPage.responsive.test.tsx` per §5.
 4. **Gate** (per task's STRICT process rules — do NOT run build/lint/full
-   check): `bun run --filter=@agentic-patterns/dashboard typecheck` and
-   `bun run --filter=@agentic-patterns/dashboard test -- Tokens` (also rerun
+   check): `bun run --filter=@pattern-stack/agentic-dashboard typecheck` and
+   `bun run --filter=@pattern-stack/agentic-dashboard test -- Tokens` (also rerun
    `test -- Dashboard` to confirm the untouched `DashboardPage.test.tsx`
    still passes, as a regression guard for the "no change" claim).
 
@@ -208,7 +208,7 @@ already covered elsewhere).
    intended columns drop and the identity/summary/conversations columns
    survive.
 
-Regression gate: `bun run --filter=@agentic-patterns/dashboard test -- Tokens`
+Regression gate: `bun run --filter=@pattern-stack/agentic-dashboard test -- Tokens`
 plus re-running the existing `DashboardPage.test.tsx` unmodified (`test --
 Dashboard`) to confirm the "no change" claim in §2a doesn't regress the one
 existing dashboard test.

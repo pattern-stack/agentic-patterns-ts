@@ -44,13 +44,13 @@ const APPS: readonly AppSpec[] = [
     name: "server",
     color: "36", // cyan
     command: "bun",
-    args: ["run", "--filter", "@agentic-patterns/server", "dev"],
+    args: ["run", "--filter", "@pattern-stack/agentic-server", "dev"],
   },
   {
     name: "dashboard",
     color: "35", // magenta
     command: "bun",
-    args: ["run", "--filter", "@agentic-patterns/dashboard", "dev"],
+    args: ["run", "--filter", "@pattern-stack/agentic-dashboard", "dev"],
   },
 ];
 
@@ -66,7 +66,7 @@ class Orchestrator {
     this.installSignalHandlers();
 
     // Build workspace packages so dist/ is current before tsx resolves
-    // @agentic-patterns/* imports. Fast if nothing changed (tsup caches).
+    // @pattern-stack/agentic-* imports. Fast if nothing changed (tsup caches).
     process.stdout.write("\x1b[2mbuilding packages...\x1b[0m\n");
     execSync("bun run build", { stdio: "inherit" });
 

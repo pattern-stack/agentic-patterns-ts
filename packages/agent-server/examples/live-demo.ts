@@ -5,6 +5,7 @@
  * Dashboard: http://localhost:5173/chat
  */
 
+import { serve } from "@hono/node-server";
 import {
   AgentEventBus,
   AgentRunner,
@@ -16,8 +17,7 @@ import {
   buildWritingCoachAgent,
   claudeCode,
   createRunner,
-} from "@agentic-patterns/runtime";
-import { serve } from "@hono/node-server";
+} from "@pattern-stack/agentic-runtime";
 import { createServer } from "../src/app.js";
 import type { ServerConfig } from "../src/config.js";
 

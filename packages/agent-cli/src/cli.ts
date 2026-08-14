@@ -46,7 +46,7 @@ Commands:
   init [<dir>]                    scaffold a new agent project
   claude-skill [<name>]           install the bundled Claude Code skill(s)
                                     into .claude/skills (standalone)
-  update [--check]                update @agentic-patterns/* deps to latest
+  update [--check]                update @pattern-stack/agentic-* deps to latest
                                     (--check: report only, exit 1 if behind)
   config                          show env detection status
   config set                      interactive .env editor

@@ -1,5 +1,5 @@
 ---
-title: "ADR 0010 — Ship the three common @ai-sdk/* providers as real dependencies of @agentic-patterns/runtime"
+title: "ADR 0010 — Ship the three common @ai-sdk/* providers as real dependencies of @pattern-stack/agentic-runtime"
 description: "The anthropic, openai, and google AI SDK providers become runtime dependencies so the common path works on install; adapters declare packageName/bundled and missing packages fail with a typed ProviderPackageError."
 sidebar:
   label: "ADR 0010 — Bundled Providers"
@@ -19,7 +19,7 @@ sidebar:
 
 ## Context
 
-`createRunner()` imported every provider package dynamically and `@agentic-patterns/runtime` shipped none of them. A consuming app that installed the runtime and set `OPENAI_API_KEY` had no `@ai-sdk/openai` on disk, so no model could be constructed.
+`createRunner()` imported every provider package dynamically and `@pattern-stack/agentic-runtime` shipped none of them. A consuming app that installed the runtime and set `OPENAI_API_KEY` had no `@ai-sdk/openai` on disk, so no model could be constructed.
 
 That would be an ordinary missing-dependency papercut except for what sits at the bottom of the ladder. `ClaudeCodeAPIRunner` has **no read site for `options.messageHistory`** — the `CodingAgentRunner` → `ClaudeCodeRunner` → `ClaudeCodeAPIRunner` chain never reads it; only `AgentRunner`'s message assembly does. So an app with no provider package installed and `claude` on PATH was pinned to the one runner that drops conversation history, and nothing said so. It answered. It just had amnesia.
 
@@ -33,7 +33,7 @@ Doug's framing:
 
 ## Decision 1 — the three scoped providers ship as real `dependencies`
 
-`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google` are declared in `dependencies` of `@agentic-patterns/runtime`. Setting any of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` reaches `AgentRunner` with nothing installed beyond the runtime.
+`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google` are declared in `dependencies` of `@pattern-stack/agentic-runtime`. Setting any of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_GENERATIVE_AI_API_KEY` reaches `AgentRunner` with nothing installed beyond the runtime.
 
 **Why this and not the alternatives.**
 
@@ -41,7 +41,7 @@ Doug's framing:
 |---|---|---|
 | **Real `dependencies` (chosen)** | ✅ | Delivers the asked-for contract literally: one package, name a model, go. Install weight is near-zero (below). Precedent already exists in this package — `ollama-ai-provider-v2`, `ai`, `@anthropic-ai/claude-agent-sdk`, `@modelcontextprotocol/sdk` are all real dependencies. |
 | Optional `peerDependencies` + a loud preflight | ❌ as the packaging answer | An optional peer is *absent by default*. It converts silent amnesia into a legible error, which is necessary — but it does not make the thing work, and the ask was that it work. We took its preflight anyway (Decision 3): the two are orthogonal, and every argument for the preflight survives bundling. |
-| A `@agentic-patterns/providers` companion package | ❌ | Still a second package to discover — the exact failure mode of the report, moved one hop. It also creates a version-skew surface (runtime ↔ providers) for no gain, since the three packages are thin. |
+| A `@pattern-stack/agentic-providers` companion package | ❌ | Still a second package to discover — the exact failure mode of the report, moved one hop. It also creates a version-skew surface (runtime ↔ providers) for no gain, since the three packages are thin. |
 | Document it | ❌ | Leaves a trap whose symptom is a *plausible wrong answer*, not an error. Documentation does not defend against that. |
 
 **Install weight is not the objection it looks like.** All three packages depend on exactly `@ai-sdk/provider@4.0.7` and `@ai-sdk/provider-utils@5.0.25` — both already direct dependencies of the runtime. They add no transitive tree, only three small provider modules. Nothing is imported at module load: `createRunner` still reaches them through `await import()`, so a consumer who never touches Gemini never evaluates `@ai-sdk/google`.
@@ -80,7 +80,7 @@ Shipping three real provider dependencies changes what a bare `createRunner()` p
 
 ## Consequences
 
-- A consumer installs `@agentic-patterns/runtime`, sets one key, names a model, and reaches `AgentRunner` with full events and `messageHistory`. This is asserted by unstubbed tests that load the real packages offline.
+- A consumer installs `@pattern-stack/agentic-runtime`, sets one key, names a model, and reaches `AgentRunner` with full events and `messageHistory`. This is asserted by unstubbed tests that load the real packages offline.
 - Provider majors for the three are pinned by the runtime; `options.model` is the escape hatch.
 - `ap init` still writes the matching provider package into scaffolded projects. Redundant now, harmless, and it keeps generated projects explicit about their provider. Removing it is a follow-up.
 

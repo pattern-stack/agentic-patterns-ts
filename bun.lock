@@ -5,41 +5,41 @@
     "": {
       "name": "agentic-patterns-ts",
       "devDependencies": {
-        "@agentic-patterns/core": "workspace:^",
-        "@agentic-patterns/runtime": "workspace:^",
         "@biomejs/biome": "^1.9.0",
+        "@pattern-stack/agentic-core": "workspace:^",
+        "@pattern-stack/agentic-runtime": "workspace:^",
         "node-gyp": "^10.2.0",
         "tsx": "^4.21.0",
         "typescript": "^5.7.0",
       },
     },
     "docs-site": {
-      "name": "@agentic-patterns/docs-site",
+      "name": "@pattern-stack/agentic-docs-site",
       "dependencies": {
         "@astrojs/starlight": "^0.41.7",
         "astro": "^7.2.0",
       },
     },
     "examples/agents": {
-      "name": "@agentic-patterns/examples-agents",
+      "name": "@pattern-stack/agentic-examples-agents",
       "dependencies": {
-        "@agentic-patterns/core": "workspace:^",
-        "@agentic-patterns/runtime": "workspace:^",
+        "@pattern-stack/agentic-core": "workspace:^",
+        "@pattern-stack/agentic-runtime": "workspace:^",
         "zod": "^3.23.0",
       },
     },
     "packages/agent-cli": {
-      "name": "@agentic-patterns/cli",
+      "name": "@pattern-stack/agentic-cli",
       "version": "0.40.0",
       "bin": {
         "ap": "./dist/cli.js",
       },
       "dependencies": {
-        "@agentic-patterns/core": "workspace:^",
-        "@agentic-patterns/runtime": "workspace:^",
-        "@agentic-patterns/server": "workspace:^",
         "@clack/prompts": "^0.8.0",
         "@hono/node-server": "^1.13.0",
+        "@pattern-stack/agentic-core": "workspace:^",
+        "@pattern-stack/agentic-runtime": "workspace:^",
+        "@pattern-stack/agentic-server": "workspace:^",
         "better-sqlite3": "^12.0.0",
         "hono": "^4.0.0",
         "tinyglobby": "^0.2.0",
@@ -56,7 +56,7 @@
       },
     },
     "packages/agent-core": {
-      "name": "@agentic-patterns/core",
+      "name": "@pattern-stack/agentic-core",
       "version": "0.18.0",
       "dependencies": {
         "zod-to-json-schema": "^3.24.0",
@@ -72,7 +72,7 @@
       },
     },
     "packages/agent-dashboard": {
-      "name": "@agentic-patterns/dashboard",
+      "name": "@pattern-stack/agentic-dashboard",
       "version": "0.10.2",
       "dependencies": {
         "@xyflow/react": "^12.11.1",
@@ -94,10 +94,9 @@
       },
     },
     "packages/agent-runtime": {
-      "name": "@agentic-patterns/runtime",
+      "name": "@pattern-stack/agentic-runtime",
       "version": "0.40.0",
       "dependencies": {
-        "@agentic-patterns/core": "workspace:^",
         "@ai-sdk/anthropic": "^4.0.0",
         "@ai-sdk/google": "^4.0.0",
         "@ai-sdk/openai": "^4.0.0",
@@ -107,6 +106,7 @@
         "@anthropic-ai/claude-agent-sdk": "^0.3.0",
         "@anthropic-ai/sdk": ">=0.93.0",
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "@pattern-stack/agentic-core": "workspace:^",
         "ai": "^7.0.0",
         "ollama-ai-provider-v2": "^1.0.0",
       },
@@ -137,11 +137,11 @@
       ],
     },
     "packages/agent-server": {
-      "name": "@agentic-patterns/server",
+      "name": "@pattern-stack/agentic-server",
       "version": "0.40.0",
       "dependencies": {
-        "@agentic-patterns/core": "workspace:^",
-        "@agentic-patterns/runtime": "workspace:^",
+        "@pattern-stack/agentic-core": "workspace:^",
+        "@pattern-stack/agentic-runtime": "workspace:^",
         "hono": "^4.0.0",
         "zod-to-json-schema": "^3.24.0",
       },
@@ -163,20 +163,6 @@
   },
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
-
-    "@agentic-patterns/cli": ["@agentic-patterns/cli@workspace:packages/agent-cli"],
-
-    "@agentic-patterns/core": ["@agentic-patterns/core@workspace:packages/agent-core"],
-
-    "@agentic-patterns/dashboard": ["@agentic-patterns/dashboard@workspace:packages/agent-dashboard"],
-
-    "@agentic-patterns/docs-site": ["@agentic-patterns/docs-site@workspace:docs-site"],
-
-    "@agentic-patterns/examples-agents": ["@agentic-patterns/examples-agents@workspace:examples/agents"],
-
-    "@agentic-patterns/runtime": ["@agentic-patterns/runtime@workspace:packages/agent-runtime"],
-
-    "@agentic-patterns/server": ["@agentic-patterns/server@workspace:packages/agent-server"],
 
     "@ai-sdk/anthropic": ["@ai-sdk/anthropic@4.0.36", "", { "dependencies": { "@ai-sdk/provider": "4.0.7", "@ai-sdk/provider-utils": "5.0.25" }, "peerDependencies": { "zod": "^3.25.76 || ^4.1.8" } }, "sha512-Wg5jfray0X4+qkrr73GZ7U7K2JNGx+S+rNY9LorVlXhkhTqnvtNLYWRA1WxSxlCDCw3yjRCJdL9kyc+b7naAog=="],
 
@@ -595,6 +581,20 @@
     "@pagefind/windows-arm64": ["@pagefind/windows-arm64@1.5.2", "", { "os": "win32", "cpu": "arm64" }, "sha512-hN9Nh90fNW61nNRCW9ZyQrAj/mD0eRvmJ8NlTUzkbuW8kIzGJUi3cxjFkEcMZ5h/8FsKWD/VcouZl4yo1F7B6g=="],
 
     "@pagefind/windows-x64": ["@pagefind/windows-x64@1.5.2", "", { "os": "win32", "cpu": "x64" }, "sha512-Fa2Iyw7kaDRzGMfNYNUXNW2zbL5FQVDgSOcbDHdzBrDEdpqOqg8TcZ68F22ol6NJ9IGzvUdmeyZypLW5dyhqsg=="],
+
+    "@pattern-stack/agentic-cli": ["@pattern-stack/agentic-cli@workspace:packages/agent-cli"],
+
+    "@pattern-stack/agentic-core": ["@pattern-stack/agentic-core@workspace:packages/agent-core"],
+
+    "@pattern-stack/agentic-dashboard": ["@pattern-stack/agentic-dashboard@workspace:packages/agent-dashboard"],
+
+    "@pattern-stack/agentic-docs-site": ["@pattern-stack/agentic-docs-site@workspace:docs-site"],
+
+    "@pattern-stack/agentic-examples-agents": ["@pattern-stack/agentic-examples-agents@workspace:examples/agents"],
+
+    "@pattern-stack/agentic-runtime": ["@pattern-stack/agentic-runtime@workspace:packages/agent-runtime"],
+
+    "@pattern-stack/agentic-server": ["@pattern-stack/agentic-server@workspace:packages/agent-server"],
 
     "@phosphor-icons/core": ["@phosphor-icons/core@2.1.1", "", {}, "sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ=="],
 

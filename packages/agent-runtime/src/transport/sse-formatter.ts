@@ -11,7 +11,7 @@ import {
   DEFAULT_ARTIFACT_BYTE_CEILING,
   type RenderArtifact,
   artifactMarker,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type { AgentEvent, AgentEventType, TokenUsageDetails } from "../events/types.js";
 
 /**

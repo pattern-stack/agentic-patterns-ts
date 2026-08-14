@@ -373,7 +373,7 @@ describe("createRunner", () => {
       stubMissingPackage(PROVIDERS.anthropic);
       const err = await createRunner({ verbose: false }).catch((e: Error) => e);
       const msg = (err as Error).message;
-      expect(msg).toMatch(/ships as a dependency of @agentic-patterns\/runtime/);
+      expect(msg).toMatch(/ships as a dependency of @pattern-stack\/agentic-runtime/);
       expect(msg).toMatch(/reinstall dependencies/i);
     });
 

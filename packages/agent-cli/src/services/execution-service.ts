@@ -26,6 +26,7 @@
  */
 
 import path from "node:path";
+import { isCancel, password, select, text } from "@clack/prompts";
 import {
   type CreateRunnerOptions,
   PROVIDERS,
@@ -34,8 +35,7 @@ import {
   type SupportedProvider,
   createRunner,
   inferProvider,
-} from "@agentic-patterns/runtime";
-import { isCancel, password, select, text } from "@clack/prompts";
+} from "@pattern-stack/agentic-runtime";
 import { upsertEnvFile } from "../commands/config.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
 

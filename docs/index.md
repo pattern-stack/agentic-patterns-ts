@@ -23,17 +23,17 @@ Capability = Toolbox + Manual + Playbook
 ```
 
 Everything composes upward through layers — atoms → protocols → molecules →
-rendering → organisms in `@agentic-patterns/core`, then events → gates →
+rendering → organisms in `@pattern-stack/agentic-core`, then events → gates →
 runner → transport → runtime → workflows → conversation → exporters →
-presets in `@agentic-patterns/runtime`. Core never imports runtime.
+presets in `@pattern-stack/agentic-runtime`. Core never imports runtime.
 
 ## Install
 
 ```sh
-bun add @agentic-patterns/core @agentic-patterns/runtime
+bun add @pattern-stack/agentic-core @pattern-stack/agentic-runtime
 ```
 
-The server (`@agentic-patterns/server`) and CLI (`@agentic-patterns/cli`)
+The server (`@pattern-stack/agentic-server`) and CLI (`@pattern-stack/agentic-cli`)
 version in lockstep with the runtime; core floats independently.
 
 ## Where to start

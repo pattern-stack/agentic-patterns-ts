@@ -19,12 +19,12 @@
  * Claude Code manages its own tool loop; `toolExecutor` is unused.
  */
 
-import type { RenderContext } from "@agentic-patterns/core";
 import type {
   HookCallback,
   HookCallbackMatcher,
   Options as SDKOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { RenderContext } from "@pattern-stack/agentic-core";
 import { generateId } from "ai";
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";

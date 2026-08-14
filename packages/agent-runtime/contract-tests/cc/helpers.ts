@@ -20,7 +20,7 @@ import {
   RoleBuilder,
   type ToolDefinition,
   Toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 import { AgentEventBus } from "../../src/events/agent-event-bus.js";

@@ -19,9 +19,9 @@
  * `Playbook.execute` ever regresses to throwing instead of enveloping.
  */
 
-import { Capability, definePlay, playbook, toolbox } from "@agentic-patterns/core";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Capability, definePlay, playbook, toolbox } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildCapabilityServer } from "../sdk-bridge.js";

@@ -8,7 +8,7 @@ import type {
   RenderContext,
   ToolExecutionContext,
   TriggerSourceData,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type { ZodType } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent, TokenUsageDetails } from "../events/types.js";
@@ -22,7 +22,7 @@ import type { PendingInputRegistry } from "../interaction/pending-input-registry
  * The minimal agent shape consumed by runners, workflows, conversations,
  * and transport adapters.
  *
- * This is a projection of the full `Agent` class (from @agentic-patterns/core)
+ * This is a projection of the full `Agent` class (from @pattern-stack/agentic-core)
  * containing only the methods and properties needed to execute a tool loop.
  * `getTools()` returns `unknown[]` so protocol consumers don't need to import
  * `ToolSchema` from core — only `AgentRunner` itself narrows the type when

@@ -1,11 +1,11 @@
-# @agentic-patterns/core
+# @pattern-stack/agentic-core
 
 Core primitives for building compositional agents. This package provides the atom-to-organism hierarchy: frozen data models, protocol interfaces, molecules (toolbox/manual/capability), section-based prompt rendering, and builders for roles and agents.
 
 ## Installation
 
 ```bash
-bun add @agentic-patterns/core zod
+bun add @pattern-stack/agentic-core zod
 ```
 
 ## API Overview
@@ -31,7 +31,7 @@ Frozen, immutable data models validated by Zod schemas. Every atom implements `t
 | `Roster` | Agent deployment roster |
 
 ```typescript
-import { Persona, Mission, Judgment } from "@agentic-patterns/core";
+import { Persona, Mission, Judgment } from "@pattern-stack/agentic-core";
 
 const persona = new Persona({
   identity: "a data analyst who analyzes datasets with precision",
@@ -81,7 +81,7 @@ Composable building blocks that combine atoms into functional units.
 
 ```typescript
 import { z } from "zod";
-import { capability, defineTool, TextManual, toolbox } from "@agentic-patterns/core";
+import { capability, defineTool, TextManual, toolbox } from "@pattern-stack/agentic-core";
 
 const docsToolbox = toolbox("docs", "Documentation tools", {
   search_docs: defineTool({
@@ -114,7 +114,7 @@ instead of thrown — unknown play, parameter-validation failure, or execution e
 
 ```typescript
 import { z } from "zod";
-import { definePlay, playbook } from "@agentic-patterns/core";
+import { definePlay, playbook } from "@pattern-stack/agentic-core";
 
 const analysis = playbook("analysis", "Data analysis plays", {
   summarize: definePlay({
@@ -152,7 +152,7 @@ Definitions module provides Zod schemas for workflow configuration: `WorkflowSte
 Declarative, per-conversation configuration. `sessionScope(items, options)` composes named `scopeItem(schema, options)` field declarations into one Zod object schema. `defaults` and every named `preset` are validated against that composed schema at construction — a malformed declaration throws immediately, at agent-authoring time, rather than on the first request.
 
 ```typescript
-import { scopeItem, sessionScope, type ScopeValue } from "@agentic-patterns/core";
+import { scopeItem, sessionScope, type ScopeValue } from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 const workspaceScope = sessionScope(
@@ -177,7 +177,7 @@ type WorkspaceScope = ScopeValue<typeof workspaceScope>;
 Give the agent a scope-derived identity line with `Awareness.fromScope(scope, fn)` — a render-time-only function whose output `Awareness.toPrompt()` appends when the caller supplies `{ scope }`, and silently omits otherwise:
 
 ```typescript
-import { Awareness } from "@agentic-patterns/core";
+import { Awareness } from "@pattern-stack/agentic-core";
 
 const awareness = Awareness.fromScope(
   workspaceScope,
@@ -185,7 +185,7 @@ const awareness = Awareness.fromScope(
 );
 ```
 
-`SessionScope` itself is a core-only declaration. Carrying a parsed value across a run (`host.scope`), reading it from a tool, and wiring it through `POST /conversations` are `@agentic-patterns/runtime` and `@agentic-patterns/server` concerns — see those packages' READMEs.
+`SessionScope` itself is a core-only declaration. Carrying a parsed value across a run (`host.scope`), reading it from a tool, and wiring it through `POST /conversations` are `@pattern-stack/agentic-runtime` and `@pattern-stack/agentic-server` concerns — see those packages' READMEs.
 
 ### Rendering (`src/rendering/`)
 
@@ -210,7 +210,7 @@ import {
   ContextSection,
   MissionSection,
   MethodologySection,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 
 const renderer = new PromptRenderer(
   new IdentitySection(persona, responsibilities),
@@ -231,7 +231,7 @@ High-level builders that compose atoms and molecules into complete agent definit
 **RoleBuilder** -- fluent API for reusable agent templates:
 
 ```typescript
-import { RoleBuilder } from "@agentic-patterns/core";
+import { RoleBuilder } from "@pattern-stack/agentic-core";
 
 const role = new RoleBuilder("analyst")
   .withPersona(persona)
@@ -245,7 +245,7 @@ const role = new RoleBuilder("analyst")
 **AgentBuilder** -- instantiate a role with runtime context:
 
 ```typescript
-import { AgentBuilder } from "@agentic-patterns/core";
+import { AgentBuilder } from "@pattern-stack/agentic-core";
 
 const agent = new AgentBuilder(role)
   .withBackground(background)

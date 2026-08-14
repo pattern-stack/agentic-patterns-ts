@@ -185,7 +185,7 @@ describe("buildLlmsTxt", () => {
         { method: "GET", path: "/unknown/thing" }, // not annotated → bare
       ]),
     );
-    expect(txt).toContain("# @agentic-patterns/server");
+    expect(txt).toContain("# @pattern-stack/agentic-server");
     expect(txt).toContain("- `GET /health` — Liveness probe");
     expect(txt).toContain("- `GET /unknown/thing`\n"); // no " — " suffix
   });
@@ -196,7 +196,7 @@ describe("buildLlmsTxt", () => {
 const testConfig = {
   agents: [],
   cors: { origin: "*" },
-  docs: { title: "@agentic-patterns/server", version: "0.16.0" },
+  docs: { title: "@pattern-stack/agentic-server", version: "0.16.0" },
 } as unknown as ServerConfig;
 
 describe("docs routes (served)", () => {
@@ -225,7 +225,7 @@ describe("docs routes (served)", () => {
   it("docs.scalarJsUrl overrides the Scalar bundle URL (offline / self-hosted)", async () => {
     const app = createServer({
       ...testConfig,
-      docs: { title: "@agentic-patterns/server", scalarJsUrl: "/docs/scalar.js" },
+      docs: { title: "@pattern-stack/agentic-server", scalarJsUrl: "/docs/scalar.js" },
     } as unknown as ServerConfig);
     const html = await (await app.request("/docs")).text();
     expect(html).toContain('src="/docs/scalar.js"');
@@ -236,7 +236,7 @@ describe("docs routes (served)", () => {
     const app = createServer(testConfig);
     const res = await app.request("/llms.txt");
     expect(res.headers.get("content-type")).toContain("text/markdown");
-    expect(await res.text()).toContain("# @agentic-patterns/server");
+    expect(await res.text()).toContain("# @pattern-stack/agentic-server");
   });
 
   it("GET /mcp/tools.json serves the manifest", async () => {

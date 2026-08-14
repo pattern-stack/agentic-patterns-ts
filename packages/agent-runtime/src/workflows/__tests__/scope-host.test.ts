@@ -4,7 +4,7 @@
  * `openBackpack`/`requireBackpack`'s undefined/throw edges.
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import {
   ScopeUnavailableError,

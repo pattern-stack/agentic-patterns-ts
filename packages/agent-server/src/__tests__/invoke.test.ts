@@ -15,8 +15,8 @@ import {
   Role,
   type ToolDefinition,
   Toolbox,
-} from "@agentic-patterns/core";
-import { type AgentEvent, AgentEventBus } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-core";
+import { type AgentEvent, AgentEventBus } from "@pattern-stack/agentic-runtime";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createServer } from "../app.js";

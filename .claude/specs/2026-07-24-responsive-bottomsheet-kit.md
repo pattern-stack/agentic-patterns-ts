@@ -1,7 +1,7 @@
 # F3 — Overlay kit: BottomSheet primitive + ConsoleRail sheet mode + Modal phone polish
 
 **Date:** 2026-07-24
-**Package:** `@agentic-patterns/dashboard` (`packages/agent-dashboard/`)
+**Package:** `@pattern-stack/agentic-dashboard` (`packages/agent-dashboard/`)
 **Size:** ~300 lines (1 new component ~110, 1 new test ~120, ConsoleRail delta ~40, Modal delta ~10, barrel +1)
 
 ## Goal
@@ -202,8 +202,8 @@ byte-identical to today.
 6. **Write `src/__tests__/BottomSheet.test.tsx`** per the test plan below.
 7. **Update `ConsoleRail`'s header comment** (lines 1-16) with one sentence noting the new
    sheet mode. Do NOT touch `src/pages/ChatPage.tsx` — adoption is W1-Chat's job.
-8. Run `bun run --filter=@agentic-patterns/dashboard typecheck`, `bun run lint`,
-   `bun run --filter=@agentic-patterns/dashboard test`.
+8. Run `bun run --filter=@pattern-stack/agentic-dashboard typecheck`, `bun run lint`,
+   `bun run --filter=@pattern-stack/agentic-dashboard test`.
 
 ## Test plan — `src/__tests__/BottomSheet.test.tsx`
 

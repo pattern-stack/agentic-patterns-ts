@@ -11,7 +11,7 @@
  * while the object-attached `Symbol.for` brand still resolves.
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { BaseEvent } from "../../events/types.js";

@@ -17,6 +17,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { serve } from "@hono/node-server";
 import {
   AgentEventBus,
   EVAL_TRACE_PREFIX,
@@ -32,11 +33,10 @@ import {
   isPromotedAgent,
   loadConversationStore,
   setAgentEventBus,
-} from "@agentic-patterns/runtime";
-import type { SQLiteConversationStore } from "@agentic-patterns/runtime";
-import { createServer } from "@agentic-patterns/server";
-import type { AgentRegistration } from "@agentic-patterns/server";
-import { serve } from "@hono/node-server";
+} from "@pattern-stack/agentic-runtime";
+import type { SQLiteConversationStore } from "@pattern-stack/agentic-runtime";
+import { createServer } from "@pattern-stack/agentic-server";
+import type { AgentRegistration } from "@pattern-stack/agentic-server";
 import { DEFAULT_DASHBOARD_PORT } from "../constants.js";
 import { ensureParentDir, resolveDbPath } from "../helpers/db.js";
 import type { DiscoveredAgent } from "../helpers/discover.js";
@@ -216,7 +216,7 @@ export async function runPlaygroundCommand(opts: PlaygroundOptions): Promise<voi
     } else {
       const where = dashboardDir ?? "<unresolved>";
       process.stderr.write(
-        `[playground] warning: dashboard assets not found at ${where} — API-only mode.\n           run \`pnpm --filter @agentic-patterns/cli build\` (or \`build:dashboard\`) to build the SPA bundle.\n`,
+        `[playground] warning: dashboard assets not found at ${where} — API-only mode.\n           run \`pnpm --filter @pattern-stack/agentic-cli build\` (or \`build:dashboard\`) to build the SPA bundle.\n`,
       );
     }
   }
@@ -299,7 +299,7 @@ export function toAgentRegistration(
 /**
  * Resolve the absolute path to the bundled dashboard assets.
  *
- * Layout after `pnpm --filter @agentic-patterns/cli build`:
+ * Layout after `pnpm --filter @pattern-stack/agentic-cli build`:
  *   packages/agent-cli/
  *     dist/cli.js               ← import.meta.url lands here
  *     assets/dashboard/         ← built SPA

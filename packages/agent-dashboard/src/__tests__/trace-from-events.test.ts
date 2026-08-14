@@ -15,7 +15,7 @@
  * port-map) — S5's own event/run-store test idioms (`agent-runner.test.ts`'s
  * `collectEvents` helper, `run-store.test.ts`'s `runEval`-seeded suite) are
  * the sanctioned fallback source and are what produced this dump. Repro
- * (package: @agentic-patterns/runtime):
+ * (package: @pattern-stack/agentic-runtime):
  *
  *   const store = new RunStore({ path: ":memory:", Database });
  *   const bus = new AgentEventBus();

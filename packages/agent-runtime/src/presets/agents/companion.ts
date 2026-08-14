@@ -33,7 +33,7 @@ import {
   Persona,
   Responsibility,
   RoleBuilder,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type { MemoryStore } from "../../memory/store.js";
 import { memoryCapability } from "../../memory/toolbox.js";
 

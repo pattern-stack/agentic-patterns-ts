@@ -127,8 +127,8 @@ packages/agent-dashboard/src/
 3. Extend `src/__tests__/ToolRunner.test.tsx` with a phone-stubbed describe
    block (see §5).
 4. Add `src/__tests__/ToolsPage.responsive.test.tsx` (see §5).
-5. Gate: `bun run --filter=@agentic-patterns/dashboard typecheck` and
-   `bun run --filter=@agentic-patterns/dashboard test -- Tool` (per the
+5. Gate: `bun run --filter=@pattern-stack/agentic-dashboard typecheck` and
+   `bun run --filter=@pattern-stack/agentic-dashboard test -- Tool` (per the
    builder brief — not the full suite/build/lint).
 
 Conventions: strict TS, biome (double quotes, 2-space indent, semicolons,

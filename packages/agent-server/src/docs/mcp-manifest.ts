@@ -145,7 +145,10 @@ export function buildMcpManifest(
 ): McpManifest {
   return {
     schemaVersion: "mcp-tools/1",
-    server: { name: server.name ?? "@agentic-patterns/server", version: server.version ?? "0" },
+    server: {
+      name: server.name ?? "@pattern-stack/agentic-server",
+      version: server.version ?? "0",
+    },
     tools: [...apiTools(app), ...capabilityTools(agents)],
   };
 }

@@ -27,8 +27,8 @@
  * `agent-cli`'s `isAgentLikeShape` expect.
  */
 
-import { type ScopeValue, SessionScope, scopeItem } from "@agentic-patterns/core";
-import { FunctionStep, asAgent, readScope } from "@agentic-patterns/runtime";
+import { type ScopeValue, SessionScope, scopeItem } from "@pattern-stack/agentic-core";
+import { FunctionStep, asAgent, readScope } from "@pattern-stack/agentic-runtime";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------

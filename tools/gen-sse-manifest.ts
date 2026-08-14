@@ -5,7 +5,7 @@
  *
  * WHY A MANIFEST (and not a direct import from the dashboard):
  * The dashboard is architecturally STANDALONE — it declares no dependency on
- * `@agentic-patterns/runtime` (see CLAUDE.md), and #291 exists to keep its
+ * `@pattern-stack/agentic-runtime` (see CLAUDE.md), and #291 exists to keep its
  * browser bundle (`graph/`, `chat/`) from importing runtime/server code (the
  * `bun:sqlite` hazard). So the dashboard union cannot import the runtime union
  * directly. Instead this generator — which runs under Bun at the repo root,
@@ -22,7 +22,7 @@
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SSE_WIRE_EVENT_NAMES } from "@agentic-patterns/runtime";
+import { SSE_WIRE_EVENT_NAMES } from "@pattern-stack/agentic-runtime";
 
 const MANIFEST_PATH = join(
   import.meta.dir,

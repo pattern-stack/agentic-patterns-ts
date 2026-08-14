@@ -28,7 +28,7 @@ import {
   type RunnerProtocol,
   asAgent,
   createEvent,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiscoveredAgent } from "../../helpers/discover.js";

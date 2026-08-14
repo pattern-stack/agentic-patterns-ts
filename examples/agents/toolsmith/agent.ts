@@ -50,7 +50,7 @@ import {
   definePlay,
   defineTool,
   toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------

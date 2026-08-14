@@ -2,14 +2,14 @@
  * Tests for AgentRunner using MockLanguageModelV3.
  */
 
-import { ToolSchema } from "@agentic-patterns/core";
-import type { ToolExecutionContext } from "@agentic-patterns/core";
 import { APICallError } from "@ai-sdk/provider";
 import type {
   LanguageModelV3Content,
   LanguageModelV3StreamPart,
   LanguageModelV3Usage,
 } from "@ai-sdk/provider";
+import { ToolSchema } from "@pattern-stack/agentic-core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 import { MockLanguageModelV3 } from "ai/test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";

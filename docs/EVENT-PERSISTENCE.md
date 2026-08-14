@@ -69,7 +69,7 @@ Override via env:
 
 ## Optional dep
 
-`better-sqlite3` is an **optional peer dependency** of `@agentic-patterns/runtime`. The CLI (`@agentic-patterns/cli`) declares it as a regular dep so `ap playground` users get persistence by default. Library consumers who only use the in-memory bus pay nothing.
+`better-sqlite3` is an **optional peer dependency** of `@pattern-stack/agentic-runtime`. The CLI (`@pattern-stack/agentic-cli`) declares it as a regular dep so `ap playground` users get persistence by default. Library consumers who only use the in-memory bus pay nothing.
 
 If `better-sqlite3` can't load (missing, native binary mismatch, etc.), the playground falls back to memory-only mode and prints a banner like:
 

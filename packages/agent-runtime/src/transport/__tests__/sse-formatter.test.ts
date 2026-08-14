@@ -1,4 +1,4 @@
-import { tableArtifact } from "@agentic-patterns/core";
+import { tableArtifact } from "@pattern-stack/agentic-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createEvent } from "../../events/types.js";
 import {

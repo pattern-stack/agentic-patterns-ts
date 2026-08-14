@@ -1,6 +1,6 @@
 // Registration wrapper carrying a `memory` declaration (#444) — a
 // hand-rolled duck-typed fake mimicking `MemoryStore`'s method surface. No
-// `@agentic-patterns/runtime` import: fixtures prove the STRUCTURAL check
+// `@pattern-stack/agentic-runtime` import: fixtures prove the STRUCTURAL check
 // discovery performs (isMemoryDeclShape), not real store behavior.
 const mk = () => ({ role: {}, mission: {}, awareness: {}, background: {} });
 export const fakeStore = {

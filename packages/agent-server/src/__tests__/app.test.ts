@@ -1,4 +1,4 @@
-import { AgentEventBus, createEvent } from "@agentic-patterns/runtime";
+import { AgentEventBus, createEvent } from "@pattern-stack/agentic-runtime";
 import { describe, expect, it } from "vitest";
 import { createServer } from "../app.js";
 import type { AgentRegistration, ServerConfig } from "../config.js";
