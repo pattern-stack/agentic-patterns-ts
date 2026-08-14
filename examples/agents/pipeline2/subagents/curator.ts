@@ -57,7 +57,7 @@ function buildCuratorAgent() {
 
   const mission = new Mission({
     objective: "Turn a list of candidate tips into a short, well-written digest",
-    success_criteria: ["At most 3 tips", "One line per tip", "No fabricated tips"],
+    successCriteria: ["At most 3 tips", "One line per tip", "No fabricated tips"],
   });
 
   return new AgentBuilder(role).withMission(mission).build();

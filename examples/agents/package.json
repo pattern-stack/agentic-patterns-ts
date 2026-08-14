@@ -2,7 +2,10 @@
   "name": "@pattern-stack/agentic-examples-agents",
   "private": true,
   "type": "module",
-  "description": "Workspace member so dogfood agent examples under examples/agents/ resolve @pattern-stack/agentic-* as real deps (bun install symlinks) and load as ESM — required for `ap playground examples` to run them.",
+  "description": "Workspace member so dogfood agent examples under examples/agents/ resolve @pattern-stack/agentic-* as real deps (bun install symlinks) and load as ESM \u2014 required for `ap playground examples` to run them.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@pattern-stack/agentic-core": "workspace:^",
     "@pattern-stack/agentic-runtime": "workspace:^",

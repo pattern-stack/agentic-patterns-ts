@@ -1,0 +1,18 @@
+{
+  // Typechecks the dogfood agent examples so a schema drift can't ship
+  // silently again (#489). Scoped to this workspace member only —
+  // `examples/live-demo.ts` and `examples/server-demo.ts` sit one level up and
+  // carry 14 further errors; widening `include` to `../*.ts` is a separate
+  // call, deliberately not made here.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // These examples are never emitted — they run from source via the
+    // playground's dynamic import. Turn off the project-reference machinery
+    // the base config sets up for the publishable packages.
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}
