@@ -90,15 +90,15 @@ From `packages/agent-runtime/src/runner/agent-runner.ts`:
 
 These are not required for `createRunner()` but worth tracking — some of them meaningfully improve provider-specific UX.
 
-1. **`generateObject` / `streamObject`** — structured-output path. We could use this for agents whose whole job is producing a validated Zod object. Today, agents emulate this through tool calls.
+1. ~~**`generateObject` / `streamObject`** — structured-output path.~~ **Shipped.** `AgentRunner.runStructured()` provides the validated-Zod-object path; agents no longer have to emulate it through tool calls.
 2. **Provider-specific `providerOptions`** — e.g. `providerOptions.anthropic.thinking = { type: "enabled", budgetTokens: 10_000 }` to turn on extended thinking, or `providerOptions.openai.reasoningEffort = "high"`. `AgentRunner` accepts only the raw `LanguageModelV1` and never forwards these, so agents that want reasoning have to bake it into the model factory themselves. Not a blocker, but a future `RunOptions.providerOptions` passthrough is cheap.
 3. **Reasoning deltas** — `fullStream` emits `reasoning` parts for extended-thinking models. `AgentRunner.stream()`'s switch statement drops them on the floor. We already have `agent.reasoning` in the event vocabulary and `ClaudeCodeRunner` emits it from `thinking` blocks — `AgentRunner` should do the same. (Tracked separately; mentioned here so we don't forget when we land the factory.)
 4. **Image / multimodal inputs** — `CoreMessage` content can be `{ type: "image", image: ... }`. Our `CanonicalMessage` shape is text-only. Out of scope for this doc.
 5. **Prompt caching headers** — The Anthropic SDK supports `cacheControl` per message part; we don't set it. For long system prompts this is a real cost win. Out of scope, but flagged.
 6. **`experimental_telemetry`** — The SDK can emit OTel spans on its own. We emit our own event stream; duplicating is undesirable. Leave as-is.
-7. **`abortSignal`** — `RunOptions` has no `signal`. Adding one later and forwarding to `generateText`/`streamText` is trivial.
+7. **`abortSignal`** — **partially shipped.** `RunOptions.abortSignal` exists and `stream()` / `runStructured()` forward it. `run()` does **not**: it only checks `options?.abortSignal?.aborted` between iterations (`agent-runner.ts:715-727`), so a cancel during a long model call keeps burning tokens until that call returns. Tracked as its own issue.
 
-**Net:** `AgentRunner` uses the SDK correctly for the single-step-with-intercepted-tool-loop pattern. The main missing bits are `reasoning` events and a `providerOptions` passthrough. The factory does not need to solve these; it just needs to pick the right `LanguageModelV1`.
+**Net:** `AgentRunner` uses the SDK correctly for the single-step-with-intercepted-tool-loop pattern. The main missing bits are `reasoning` events, a `providerOptions` passthrough, and `abortSignal` forwarding on the non-streaming path. The factory does not need to solve these; it just needs to pick the right `LanguageModelV1`.
 
 ---
 

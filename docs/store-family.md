@@ -7,7 +7,7 @@ sidebar:
 
 > Status: **DESIGN / PLAN (LOCKED)** (2026-07-03). Post-investigation: every claim below was
 > verified against the runtime source and the downstream consumer
-> (`~/retrieval-agent-2.0/canvas-workstation`). Companion: `docs/node-context.md` (the runner +
+> (a private consumer repo). Companion: `docs/node-context.md` (the runner +
 > scratchpad threading tracks — **#116 / #99** — that aren't Stores but dissolve
 > `with-persistence.ts`), `docs/agent-packages.md`, `docs/closed-composition.md`.
 

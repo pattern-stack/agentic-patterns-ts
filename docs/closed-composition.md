@@ -8,7 +8,7 @@ sidebar:
 > Status: **DESIGN / NORTH STAR** (2026-07-02). This is the architectural diagnosis and
 > direction, not an implementation spec — `/sdlc develop` produces the spec from here.
 > Companion: `docs/playground-redesign.md` (the lens/three-doors, already partly shipped),
-> and the retrieval build at `~/retrieval-agent-2.0/canvas-workstation/src/query-surface`
+> and the retrieval build at a private consumer repo's `query-surface`
 > (the real consumer whose `workflow/` sprawl is the evidence).
 
 ## 1. The goal (in the author's words)
@@ -157,7 +157,7 @@ have a healthy, growing framework.
   where the run's `eventBus` gets threaded into tool execution.
 - `packages/agent-cli/src/helpers/discover.ts:75` — `isAgentShape` (already recognizes any
   `AgentLike`, so promoted Nodes get discovered for free).
-- Consumer evidence: `~/retrieval-agent-2.0/canvas-workstation/src/query-surface/workflow/`
+- Consumer evidence: a private consumer repo's `query-surface/workflow/`
   — `playground.ts` (496), `escalate.ts` (260), `structured-retry.ts` (49) are the userland
   code that closing composition + DI + retry/loop primitives collapse.
 
