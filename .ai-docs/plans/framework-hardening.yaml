@@ -82,7 +82,8 @@ plan:
 issues:
   # ── Wave 1 — all landable now in parallel ──────────────────────────────────
 
-  - key_original: docs-1
+  - key: "485"
+    key_original: docs-1
     title: "docs: rewrite the root README workflow examples against the shipped Node API"
     depends_on: []
     labels: [documentation, audit, workflows]
@@ -114,7 +115,8 @@ issues:
       the built packages before commit; `grep -E 'TaskLoop|EvaluatorLoop|ConversationLoop|RubricEvaluator|RetryLoop|GoalEvaluator|collectByName|collectContents|messageTemplate|outputKey|consolidatedOutput' README.md`
       returns nothing; "Known limitations" section exists; Loop example is the canonical one docs-2 reuses.
 
-  - key_original: docs-4
+  - key: "486"
+    key_original: docs-4
     title: "docs: gate subsystem guide — the differentiator with zero documentation"
     depends_on: []
     labels: [documentation, audit, runtime]
@@ -148,7 +150,8 @@ issues:
       not-wired-by-default caveat above the fold; no statement on the page is false at merge time;
       sidebar entry renders.
 
-  - key_original: docs-5
+  - key: "487"
+    key_original: docs-5
     title: "docs: retire the internal eval-surface roadmap and correct runners.md's stale gap list"
     depends_on: []
     labels: [documentation, audit]
@@ -173,7 +176,8 @@ issues:
       delisted; `grep -rn '~/retrieval-agent' docs/` empty; runners.md §2.5 contains no claim
       contradicted by `packages/agent-runtime/src`.
 
-  - key_original: docs-6
+  - key: "488"
+    key_original: docs-6
     title: "ci: standalone check:docs-links script + an explicit CI step for the link gate"
     depends_on: []
     labels: [documentation, audit]
@@ -200,7 +204,8 @@ issues:
       build and exits 1 with a clear message before one; named CI step in the check job; SKILL
       Commands block lists it.
 
-  - key_original: docs-7
+  - key: "489"
+    key_original: docs-7
     title: "examples: typecheck examples/agents and fix the curator's silently-dropped success criteria"
     depends_on: []
     labels: [documentation, audit, bug]
@@ -225,7 +230,8 @@ issues:
       passes; reverting either rename makes it fail (prove the gate bites); the curator's rendered
       mission contains its three success criteria.
 
-  - key_original: core-1
+  - key: "490"
+    key_original: core-1
     title: "core: delete the project-tracker protocol layer from the public surface"
     depends_on: []
     labels: [core, documentation]
@@ -260,7 +266,8 @@ issues:
       Breaking-changes entry names every removed export with the migration note and a dedicated
       `ProtocolModel` line; no version bump.
 
-  - key_original: gates-1
+  - key: "491"
+    key_original: gates-1
     title: "runtime: exporters must not take the agent loop down — fail-safe dispatch + real ConsoleExporter default"
     depends_on: []
     labels: [runtime, bug]
@@ -289,7 +296,8 @@ issues:
       stderr-bound double and NOTHING reaches stdout by default; CHANGELOG flags the default-logger
       behaviour change including the stderr choice.
 
-  - key_original: gates-3
+  - key: "492"
+    key_original: gates-3
     title: "runtime: stateful gates go production-shaped — keyed RateLimitGate buckets + bounded AuditGate"
     depends_on: []
     labels: [runtime, bug]
@@ -316,7 +324,8 @@ issues:
       `droppedCount` all tested; CHANGELOG notes the new 1000-entry default cap; gates.md rider
       applied when applicable.
 
-  - key_original: storage-10a
+  - key: "493"
+    key_original: storage-10a
     title: "release: tag + GitHub release become part of the publish job — forward automation"
     depends_on: []
     labels: [release, documentation]
@@ -339,7 +348,8 @@ issues:
       **Acceptance:** `bun run check` green; publish job creates tag + release on a
       version-changing merge, no-op on re-run; tag scheme documented; just recipe present.
 
-  - key_original: storage-11
+  - key: "494"
+    key_original: storage-11
     title: "runtime: bound @anthropic-ai/sdk below the next major (currently \">=0.93.0\", unbounded)"
     depends_on: []
     labels: [runtime, bug]
@@ -359,7 +369,8 @@ issues:
       **Acceptance:** `bun run check` green; `bun install --frozen-lockfile` succeeds from a clean
       checkout; lock still resolves current 0.116.x; one-line CHANGELOG entry under Unreleased.
 
-  - key_original: storage-5
+  - key: "495"
+    key_original: storage-5
     title: "runtime+server: run the orphan sweep at store open — sweepRunning is wired only in the CLI playground"
     depends_on: []
     labels: [runtime, bug]
@@ -384,7 +395,8 @@ issues:
       `loadRunStore` comes back errored with `swept: 1`; `sweepOnOpen: false` leaves it untouched;
       playground banner behaviour unchanged; the three comments corrected.
 
-  - key_original: runner-1
+  - key: "496"
+    key_original: runner-1
     title: "runtime: per-call event bus in AgentRunner — stop mutating this._eventBus mid-run"
     depends_on: []
     labels: [runtime, bug]
@@ -426,7 +438,8 @@ issues:
       outside the constructor in either file; existing host-propagation and as-agent relay tests
       unchanged; CHANGELOG Unreleased → **Behaviour changes** entry naming the sticky-bus removal.
 
-  - key_original: runner-3
+  - key: "497"
+    key_original: runner-3
     title: "runtime: NodeBackedRunner.stream() honors options.runId"
     depends_on: []
     labels: [runtime, workflows, bug]
@@ -447,7 +460,8 @@ issues:
       `agent.message.start` (and every relayed downstream event) carrying that runId and publishes
       it on the external bus; omitting `runId` still mints one.
 
-  - key_original: server-1
+  - key: "498"
+    key_original: server-1
     title: "server: optional verify(req) auth seam mounted before every route + token-gated hooks ingest"
     depends_on: []
     labels: [server, audit]
@@ -484,7 +498,8 @@ issues:
       reaches the bus on the 401 path; new `docs/server-auth.md` per the docs-management SKILL, with
       ADR-0004's deferral note amended to point at it.
 
-  - key_original: server-2
+  - key: "499"
+    key_original: server-2
     title: "server: land conversation resume from the store (#480) — rebase PR #481, re-verify, document the resume contract"
     depends_on: []
     labels: [server, runtime]
@@ -522,7 +537,8 @@ issues:
       produce one `Conversation`; pre-stamp row returns the named 4xx; PR #481 merged, #480 closed
       by it.
 
-  - key_original: server-6a
+  - key: "500"
+    key_original: server-6a
     title: "runtime: nullable tenant_id on runs/events/conversations + tenant-filtered reads"
     depends_on: []
     labels: [runtime]
@@ -551,9 +567,10 @@ issues:
 
   # ── Wave 2 — unblocked by wave-1 landings ──────────────────────────────────
 
-  - key_original: docs-2
+  - key: "501"
+    key_original: docs-2
     title: "docs(runtime): delete the legacy pattern layer from the runtime README, incl. two classes that never existed"
-    depends_on: [docs-1]
+    depends_on: ["485"]
     labels: [documentation, audit, runtime, workflows]
     description: |
       **Size M · branch `docs/482-runtime-readme-workflows` · packages: runtime (docs only) · closes T0 "Runtime README documents classes that never existed"**
@@ -575,9 +592,10 @@ issues:
       `grep -E 'LLMRefinementEvaluator|CompositeRefinementEvaluator|TaskLoop|EvaluatorLoop|ConversationLoop|RetryLoop|RubricEvaluator|GoalEvaluator|StepResult|executeStep|resolveMessage' packages/agent-runtime/README.md`
       returns nothing; Loop example byte-identical to docs-1's.
 
-  - key_original: docs-3
+  - key: "502"
+    key_original: docs-3
     title: "docs: fix the ConsoleExporter examples in both READMEs and list the four missing exporters"
-    depends_on: [gates-1]
+    depends_on: ["491"]
     labels: [documentation, audit, runtime]
     description: |
       **Size S · branch `docs/482-exporter-docs` · packages: none (docs) · closes T0 "ConsoleExporter example doesn't compile" + T0 "exporter table omits the four exporters people actually want"**
@@ -601,9 +619,10 @@ issues:
       `grep -n 'ConsoleExporter(bus)\|exporter.start()\|exporter.stop()' README.md packages/agent-runtime/README.md`
       returns nothing.
 
-  - key_original: core-2
+  - key: "503"
+    key_original: core-2
     title: "core: fix replace()/merge() on composite models and cover every AgenticModel subclass"
-    depends_on: [core-1]
+    depends_on: ["490"]
     labels: [core, bug, testing]
     description: |
       **Size M (budget L review) · branch `harden/core-2-composite-replace-merge` · packages: core · closes T1 "agent.replace()/role.replace() throw at runtime while typechecking clean"**
@@ -633,9 +652,10 @@ issues:
       drift guard fails when a new `extends AgenticModel` class lacks a fixture; `Agency`/`Roster`
       merge asserted either way; CHANGELOG Unreleased → Bug Fixes entry.
 
-  - key_original: runner-2
+  - key: "504"
+    key_original: runner-2
     title: "runtime: forward abortSignal to every provider call — cancel must stop token burn, not just the loop"
-    depends_on: [runner-1, docs-5]
+    depends_on: ["496", "487"]
     labels: [runtime, bug]
     description: |
       **Size S · branch `hr/runner-2-abort-forwarding` · packages: runtime · closes T1 "run() never forwards abortSignal to generateText" (`agent-runner.ts:715-727`)**
@@ -662,9 +682,10 @@ issues:
       `RunCancelledError`; existing `stream()` cancellation tests (#341) unchanged; docstring +
       runners.md sentence match shipped behaviour.
 
-  - key_original: gates-2
+  - key: "505"
+    key_original: gates-2
     title: "runtime: SafetyGate argument-aware rules — predicates over tool input, not just tool names"
-    depends_on: [docs-4]
+    depends_on: ["486"]
     labels: [runtime, enhancement]
     description: |
       **Size M · branch `gates/2-safety-arg-predicates` · packages: runtime · closes T2 "SafetyGate inspects tool names only" (`gates/safety.ts:33-45`)**
@@ -688,9 +709,10 @@ issues:
       propagation into `agent.tool.rejected`/`agent.gate.decision`; gates.md name-only limitation
       line updated.
 
-  - key_original: gates-4
+  - key: "506"
+    key_original: gates-4
     title: "server+runtime: wire a default gate chain — no more shipped-but-unwired governance"
-    depends_on: [gates-3, storage-5, docs-4]
+    depends_on: ["492", "495", "486"]
     labels: [runtime, server, enhancement]
     description: |
       **Size M · branch `gates/4-default-chain` · packages: runtime, server, cli · closes T2 "No gate is wired by default"**
@@ -717,9 +739,10 @@ issues:
       `AP_APPROVAL_TOOLS` with unchanged behaviour; README no longer implies gates run unwired;
       gates.md wiring note updated.
 
-  - key_original: gates-6
+  - key: "507"
+    key_original: gates-6
     title: "runtime: OTel span parentage — real span trees from the injected tracer, proved by an in-memory SpanExporter"
-    depends_on: [gates-1]
+    depends_on: ["491"]
     labels: [runtime, enhancement, testing]
     description: |
       **Size L (endorsed, do not split) · branch `gates/6-otel-span-parentage` · packages: runtime · closes T3 "OTel span parentage" — flagged highest-leverage in the epic**
@@ -749,9 +772,10 @@ issues:
       agent.run nested under its invoking tool span, and unmapped-parent degrading to flat; no-api
       path byte-identical; span map empty after run completion; existing mock-based OTel tests pass.
 
-  - key_original: server-5a
+  - key: "508"
+    key_original: server-5a
     title: "server: SSE id: frames + a bounded replay ring + GET /conversations/:id/stream reattach"
-    depends_on: [server-2]
+    depends_on: ["499"]
     labels: [server]
     description: |
       **Size M · branch `srv/s5a-sse-replay` · packages: server · replay half of T2 "SSE replay" (item recorded here; the disconnect-behaviour half is server-5b)**
@@ -777,9 +801,10 @@ issues:
       disconnect/cancel behaviour byte-identical to today (`conversations-cancel.test.ts`
       unchanged); new `docs/server-sse.md` per the docs-management SKILL; CHANGELOG entry.
 
-  - key_original: storage-8
+  - key: "509"
+    key_original: storage-8
     title: "ci: gate the deterministic eval families on every PR — and fix the two portability cases that are red today"
-    depends_on: [docs-6, storage-10a]
+    depends_on: ["488", "493"]
     labels: [testing]
     description: |
       **Size M · branch `hard/eval-gate-ci` · packages: none (evals + CI) · closes T3 "Gate the eval harness in CI"**
@@ -808,9 +833,10 @@ issues:
       runs in ci.yml and in the root `check`; the two cases assert mutual-miss explicitly with the
       family kept at tier hard; README family section + run log corrected; no leftover temp dbs.
 
-  - key_original: storage-10b
+  - key: "510"
+    key_original: storage-10b
     title: "release: backfill git tags, GitHub releases and the changelog for already-published versions"
-    depends_on: [storage-10a]
+    depends_on: ["493"]
     labels: [release, documentation]
     description: |
       **Size S · branch `hard/release-hygiene-backfill` · packages: none (release tooling) · backfill half of T0 "Release hygiene" (item recorded on storage-10a)**
@@ -832,9 +858,10 @@ issues:
       output committed as evidence); every released version has a CHANGELOG entry or an explicit
       "no changelog recorded" marker; maintainer run procedure documented.
 
-  - key_original: storage-1
+  - key: "511"
+    key_original: storage-1
     title: "docs(adr): durable execution — turn journal, step-level persistence, interrupted-turn recovery"
-    depends_on: [docs-1]
+    depends_on: ["485"]
     labels: [documentation]
     description: |
       **Size S · branch `dur/1-adr-durable-execution` · packages: none (docs) · anchors T2 "Durable execution" (leaves: storage-2/3/4)**
@@ -861,9 +888,10 @@ issues:
       notes the durability posture per store; README Known-limitations line added; link check +
       drift checks pass.
 
-  - key_original: server-3
+  - key: "512"
+    key_original: server-3
     title: "runtime: PendingInputStore — pending approvals survive a process restart"
-    depends_on: [server-6a]
+    depends_on: ["500"]
     labels: [runtime]
     description: |
       **Size M · branch `srv/s3-pending-input-store` · packages: runtime · closes T2 "Durable pending-input registry" (delivery half is server-4) · takes migration-ladder v7 (after server-6a's v6)**
@@ -894,9 +922,10 @@ issues:
 
   # ── Wave 3 ─────────────────────────────────────────────────────────────────
 
-  - key_original: docs-8
+  - key: "513"
+    key_original: docs-8
     title: "ci: README fence-compilation gate — every README code sample typechecks against the built packages, in CI"
-    depends_on: [docs-1, docs-2, docs-3, docs-4]
+    depends_on: ["485", "501", "502", "486"]
     labels: [documentation, audit, testing]
     description: |
       **Size M · branch `ci/482-readme-fence-gate` · packages: none (repo tooling) · closes epic DoD #1 "every README sample compiles, verified in CI" — the gate the plan previously did not own**
@@ -929,9 +958,10 @@ issues:
       bites); all root + package README fences either compile or carry the visible marker; named
       ci.yml step in the check job; docs-6's step comment updated.
 
-  - key_original: runner-4
+  - key: "514"
+    key_original: runner-4
     title: "runtime: model-parameter passthrough — reasoningEffort / temperature / maxOutputTokens / providerOptions per run"
-    depends_on: [runner-1, runner-2]
+    depends_on: ["496", "504"]
     labels: [runtime, enhancement]
     description: |
       **Size M · branch `hr/runner-4-model-params` · packages: runtime · closes T2 "No reasoningEffort / providerOptions / temperature / maxTokens passthrough" (jointly with runner-6, which delivers the item's stated per-step close condition)**
@@ -961,9 +991,10 @@ issues:
       asserted); `reasoningEffort: "high"` arrives as `reasoning: "high"`; `adviseReasoningEffort`
       warns once and never throws or alters the call; no `MODEL_CAPABILITIES` rows change.
 
-  - key_original: gates-5
+  - key: "515"
+    key_original: gates-5
     title: "runtime: Langfuse exporter targets the real Langfuse JS v4 client — kill the Python-SDK transliteration"
-    depends_on: [gates-1, gates-6]
+    depends_on: ["491", "507"]
     labels: [runtime, bug]
     description: |
       **Size M · branch `gates/5-langfuse-real-client` · packages: runtime · closes T1 "Langfuse exporter cannot accept a real Langfuse JS client" · BREAKING**
@@ -995,9 +1026,10 @@ issues:
       an ai-style `generateId`; trace input asserted present; flush no longer drops batches; no dead
       private fields remain; CHANGELOG Breaking-changes entry.
 
-  - key_original: server-5b
+  - key: "516"
+    key_original: server-5b
     title: "server: disconnect no longer destroys the run — abortOnDisconnect defaults off"
-    depends_on: [server-5a]
+    depends_on: ["508"]
     labels: [server]
     description: |
       **Size S · branch `srv/s5b-disconnect-detach` · packages: server · disconnect half of T2 "SSE replay" (item recorded on server-5a) — a deliberate reversal of #341's disconnect decision**
@@ -1022,9 +1054,10 @@ issues:
       `POST …/cancel` still aborts and denies with `conversations-cancel.test.ts` unchanged;
       `abortOnDisconnect: true` reproduces today exactly; CHANGELOG Behaviour-changes entry.
 
-  - key_original: server-7
+  - key: "517"
+    key_original: server-7
     title: "runtime: store-backed AdminService — dashboard stats survive a restart"
-    depends_on: [server-6a, gates-4]
+    depends_on: ["500", "506"]
     labels: [runtime]
     description: |
       **Size M · branch `srv/s7-admin-store` · packages: runtime · stats half of T2 "Tenancy" ("admin stats are an in-memory ring buffer, lost on restart"; item recorded on server-6b)**
@@ -1051,9 +1084,10 @@ issues:
       the same file; playground with persistence off still gets the in-memory service;
       `docs/store-family.md` notes both implementations.
 
-  - key_original: core-3
+  - key: "518"
+    key_original: core-3
     title: "core+runtime: curated public surface — demo agents behind a /demo subpath, Start-here export map"
-    depends_on: [core-1, docs-2]
+    depends_on: ["490", "501"]
     labels: [core, runtime, documentation, enhancement]
     description: |
       **Size M · branch `harden/core-3-curated-surface` · packages: core, runtime · closes T3 "Discoverability" · BREAKING**
@@ -1092,9 +1126,10 @@ issues:
       RUNNING with the updated agent.mjs paths; both READMEs open with the Start-here table;
       CHANGELOG Unreleased → Breaking changes for the three relocated exports; no version bump.
 
-  - key_original: storage-9
+  - key: "519"
+    key_original: storage-9
     title: "runtime: PostgresMemoryStore — the second durable backend, proven by the exported conformance kit"
-    depends_on: [storage-8]
+    depends_on: ["509"]
     labels: [runtime, enhancement]
     description: |
       **Size L (endorsed, do not split) · branch `hard/pg-memory-store` · packages: runtime · closes T3 "Postgres store implementations" · spec: ADR-0007 D11, ADR-0009 D13**
@@ -1129,9 +1164,10 @@ issues:
       style; `loadMemoryStore()` selection + degrade tested; `docs/store-family.md` and
       `docs/memory/guide.md` updated.
 
-  - key_original: storage-2
+  - key: "520"
+    key_original: storage-2
     title: "runtime: ConversationStore step-level write surface — open/append/finalize, tool parts, message status"
-    depends_on: [storage-1, server-2, server-3]
+    depends_on: ["511", "499", "512"]
     labels: [runtime]
     description: |
       **Size M · branch `dur/2-store-incremental-writes` · packages: runtime · leaf 1 of T2 "Durable execution" (item recorded on storage-1) · takes migration-ladder v8 (after server-3's v7)**
@@ -1160,9 +1196,10 @@ issues:
 
   # ── Wave 4 ─────────────────────────────────────────────────────────────────
 
-  - key_original: runner-5
+  - key: "521"
+    key_original: runner-5
     title: "runtime+core: RunOptions.timeout — deadlines on model calls, tool calls, and the whole run"
-    depends_on: [runner-2, runner-4, docs-1]
+    depends_on: ["504", "514", "485"]
     labels: [runtime, core, enhancement]
     description: |
       **Size M (upper — split model-side/tool-side if diff nears 500 lines) · branch `hr/runner-5-timeouts` · packages: runtime, core · closes T2 "No timeouts on model or tool calls" (`workflows/node-tool.ts:151` documents the absence)**
@@ -1197,9 +1234,10 @@ issues:
       the timed-out tool and documented cooperative-only; omitting `timeout` leaves every call
       object byte-identical; README Known-limitations line added.
 
-  - key_original: storage-6
+  - key: "522"
+    key_original: storage-6
     title: "runtime: model price table as data + costUsd on every AgentRunner run"
-    depends_on: [runner-4]
+    depends_on: ["514"]
     labels: [runtime, enhancement]
     description: |
       **Size M · branch `cost/1-price-table` · packages: runtime, dashboard · anchors T2 "Cost" (leaf: storage-7)**
@@ -1231,9 +1269,10 @@ issues:
       undefined, harness-wins, gateway servedModel pricing; module-load self-validation that every
       row parses; events reference regenerated via `bun run docs:events`.
 
-  - key_original: server-6b
+  - key: "523"
+    key_original: server-6b
     title: "server: tenant comes from the verified principal, never from the request body"
-    depends_on: [server-1, server-6a, server-5b]
+    depends_on: ["498", "500", "516"]
     labels: [server, audit]
     description: |
       **Size M · branch `srv/s6b-tenant-enforcement` · packages: server · closes T2 "Tenancy" (with server-6a + server-7 as its storage/stats halves)**
@@ -1263,9 +1302,10 @@ issues:
       read made as principal B and present for A; cross-tenant resume 403s; with tenancy unset, the
       full existing suite passes unchanged; `docs/server-auth.md` gains the tenancy section.
 
-  - key_original: server-4
+  - key: "524"
+    key_original: server-4
     title: "server+cli: wire the durable pending-input store and surface orphaned approvals"
-    depends_on: [server-3, server-1, server-7]
+    depends_on: ["512", "498", "517"]
     labels: [server]
     description: |
       **Size S · branch `srv/s4-pending-input-routes` · packages: server, cli · delivery half of T2 "Durable pending-input registry" (item recorded on server-3) — DoD #3 gating**
@@ -1296,9 +1336,10 @@ issues:
       behaves byte-identically (404/501 paths unchanged); the existing approval round-trip test
       passes untouched.
 
-  - key_original: storage-3
+  - key: "525"
+    key_original: storage-3
     title: "runtime: step-level turn persistence — request row up front, flush on tool result, real toolCalls"
-    depends_on: [storage-2]
+    depends_on: ["520"]
     labels: [runtime]
     description: |
       **Size M · branch `dur/3-step-level-persistence` · packages: runtime · leaf 2 of T2 "Durable execution" (item recorded on storage-1) — the PR that clears the VoltAgent bar**
@@ -1328,9 +1369,10 @@ issues:
 
   # ── Wave 5 ─────────────────────────────────────────────────────────────────
 
-  - key_original: runner-6
+  - key: "526"
+    key_original: runner-6
     title: "runtime: forward per-step model params + timeout through the workflow seam (AgentStep / delegateTo / Sequential)"
-    depends_on: [runner-4, runner-5]
+    depends_on: ["514", "521"]
     labels: [runtime, workflows, enhancement]
     description: |
       **Size S · branch `hr/runner-6-step-seam-run-controls` · packages: runtime · completion half of T2 "model-param passthrough" (item recorded on runner-4) — the epic item's stated blocker is "per-step effort tiering in the consuming product", which runner-4's run-level bag alone cannot deliver; this seam is the item's actual close condition, not scope creep**
@@ -1357,9 +1399,10 @@ issues:
       `RunOptions`; specs without the new fields produce byte-identical `RunOptions`; the knob guard
       rejects the new knobs on non-agent nodes.
 
-  - key_original: storage-4
+  - key: "527"
+    key_original: storage-4
     title: "runtime: interrupted-turn recovery — rehydrate partial turns with their tool results, never re-execute"
-    depends_on: [storage-3, server-2, storage-5]
+    depends_on: ["525", "499", "495"]
     labels: [runtime]
     description: |
       **Size M · branch `dur/4-interrupted-turn-recovery` · packages: runtime · leaf 3 of T2 "Durable execution" (item recorded on storage-1) — the read half**
@@ -1386,9 +1429,10 @@ issues:
       turns); boot-sweep test for streaming→interrupted; the ADR's recovery section updated to what
       shipped.
 
-  - key_original: storage-7
+  - key: "528"
+    key_original: storage-7
     title: "runtime: run budgets that actually halt — RunOptions.budget and a top-of-iteration spend seam"
-    depends_on: [storage-6, runner-5, storage-3, docs-1]
+    depends_on: ["522", "521", "525", "485"]
     labels: [runtime, enhancement]
     description: |
       **Size M · branch `cost/2-budget-halt` · packages: runtime · budgets half of T2 "Cost" (item recorded on storage-6)**
@@ -1419,9 +1463,10 @@ issues:
 
   # ── Wave 6 ─────────────────────────────────────────────────────────────────
 
-  - key_original: docs-9
+  - key: "529"
+    key_original: docs-9
     title: "docs: re-release README pass — terminal Known-limitations sweep + the positioning claim"
-    depends_on: [storage-4, storage-7, server-4, server-6b, docs-8, core-3, storage-9]
+    depends_on: ["527", "528", "524", "523", "513", "518", "519"]
     labels: [documentation, audit]
     description: |
       **Size S · branch `docs/482-rerelease-readme-pass` · packages: none (docs) · closes epic DoD #6 "every remaining gap stated plainly in the README under a Known limitations heading" — the terminal owner the plan previously lacked**
@@ -1458,9 +1503,10 @@ issues:
   # track (the Postgres deployment path) — they run AFTER storage-9 proves the
   # swap-the-backend pattern against the conformance kit.
 
-  - key_original: docs-10
+  - key: "530"
+    key_original: docs-10
     title: "docs: generated preset prompt reference — show what a preset actually injects"
-    depends_on: [docs-4]
+    depends_on: ["486"]
     labels: [documentation, runtime]
     description: |
       **Size S · branch `docs/10-preset-reference` · packages: runtime, docs-site · closes Gate 0 ruling 1's follow-on (preset legibility) · wave 2**
@@ -1487,9 +1533,10 @@ issues:
       editing a preset's persona without regenerating FAILS the check; page renders the role/instance
       tags; frontmatter contract satisfied.
 
-  - key_original: storage-12
+  - key: "531"
+    key_original: storage-12
     title: "runtime: SQL dialect seam under the EventStore chain — widen storage/load.ts to a driver contract"
-    depends_on: [storage-9]
+    depends_on: ["519"]
     labels: [runtime, enhancement]
     description: |
       **Size L (justified — this is the seam, splitting it ships half a contract) · branch `pg/12-dialect-seam` · packages: runtime · leaf 1 of the Postgres deployment track · wave 5**
@@ -1513,9 +1560,10 @@ issues:
       unchanged against the seam; no new dependency; `docs/store-family.md` documents the driver
       contract and states that SQLite remains the default.
 
-  - key_original: storage-13
+  - key: "532"
+    key_original: storage-13
     title: "runtime: PostgresEventStore + PostgresRunStore behind the dialect seam"
-    depends_on: [storage-12]
+    depends_on: ["531"]
     labels: [runtime, enhancement]
     description: |
       **Size L (justified — RunStore extends EventStore; separating them ships an unusable half) · branch `pg/13-event-run` · packages: runtime · leaf 2 · wave 5**
@@ -1535,9 +1583,10 @@ issues:
       suite runs green against BOTH backends; ladder-parity test; retention/pruning verified on
       Postgres; admin stats identical across backends for the same event sequence.
 
-  - key_original: storage-14
+  - key: "533"
+    key_original: storage-14
     title: "runtime: PostgresEvalStore + PostgresConversationStore — the rest of the chain"
-    depends_on: [storage-13]
+    depends_on: ["532"]
     labels: [runtime, enhancement]
     description: |
       **Size L (justified — the two remaining chain links) · branch `pg/14-eval-conversation` · packages: runtime · leaf 3 · wave 6**
@@ -1557,9 +1606,10 @@ issues:
       `compareEvalRuns` bucket-parity fixture; conversation resume (server-2) verified against
       Postgres end to end.
 
-  - key_original: storage-15
+  - key: "534"
+    key_original: storage-15
     title: "ci: dual-backend gate — docker-compose Postgres running the full store suite on every PR"
-    depends_on: [storage-14]
+    depends_on: ["533"]
     labels: [runtime, documentation]
     description: |
       **Size M · branch `pg/15-dual-backend-ci` · packages: runtime, docs-site · leaf 4, closes the Postgres deployment track · wave 6**
