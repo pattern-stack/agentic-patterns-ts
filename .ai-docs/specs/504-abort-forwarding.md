@@ -279,3 +279,15 @@ section records the same call.
 **Also verified this round:** all five provider call sites now forward the signal (`:792`, `:1551`, `:1610`, `:1747`, `:1991`) and no sixth `generateText`/`streamText` call exists in the runner, so `docs/runners.md` §2.5 item 7's "forwarded to every provider call" is literally true. `emitCancelledTerminal` reads the accumulators at call time and every accumulator is declared above it — the tier-1 site correctly reports the tokens tier-1 already folded in. The cancelled terminal mirrors the success terminal's shape (`:1807-1819`) field for field. New suite: 7/7 green across three runs; the 125 failures in the full runtime suite are the known local `better-sqlite3` native-module env break, unrelated to this diff.
 
 **Reviewed by:** reviewer agent · 2026-08-14T20:31:00Z
+
+## Live Validate
+<!-- written by: validator · gate 3 -->
+
+**Branch:** `hr/runner-2-abort-forwarding` @ `13a5af8`
+**Profile:** `strict`
+**Result:** ✅ all active gates passed (2 known-environment test failures, unrelated to this diff)
+**Gates:** build=PASS · dist-contract=PASS · typecheck=PASS · lint=PASS · tests=PASS* · model-facing-schemas=PASS · smoke:memory=PASS · docs-events=PASS
+**Acceptance:** 6/6 mechanically verifiable items met — new suite 8/8 green; `agent-runner.test.ts` 97, `agent-runner-stream.test.ts` 27, `agent-runner-event-bus.test.ts` 3 unchanged and green; `types.ts` + `docs/runners.md` §2.5 + CHANGELOG all updated.
+**\*** `claude-code-runner.test.ts` 2 failures are container-only (`--dangerously-skip-permissions cannot be used with root`), pre-existing, pass in CI.
+**Posted to:** PR #544
+**Validated by:** validator agent · 2026-08-14T20:35:00Z
