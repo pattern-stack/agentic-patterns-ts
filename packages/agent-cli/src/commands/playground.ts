@@ -570,9 +570,10 @@ interface PersistenceAttachment {
  *   - `AP_PERSISTENCE=0` is set, or
  *   - `better-sqlite3` cannot be loaded.
  *
- * Boot hygiene: `sweepRunning()` closes any `runs` rows left `'running'` by a
- * previous process that died mid-run (crash, kill -9) before this process's
- * own runs start landing — otherwise those orphans linger "running" forever.
+ * Boot hygiene: the loader's open-time sweep (#495) closes any `runs` rows
+ * left `'running'` by a previous process that died mid-run (crash, kill -9)
+ * before this process's own runs start landing — otherwise those orphans
+ * linger "running" forever. Opt out with `sweepOnOpen: false`.
  */
 async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<PersistenceAttachment> {
   if (process.env.AP_PERSISTENCE === "0") {
@@ -601,7 +602,9 @@ async function maybeAttachPersistence(eventBus: AgentEventBus): Promise<Persiste
   });
   runStoreExporter.attach(eventBus);
 
-  const swept = result.store.sweepRunning();
+  // The sweep now happens inside `loadConversationStore` (#495) — the seam
+  // every consumer goes through, not just this one. We only report its count.
+  const swept = result.swept ?? 0;
   const sweptNote = swept > 0 ? `; swept ${swept} orphaned run(s)` : "";
 
   return {

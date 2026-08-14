@@ -24,7 +24,7 @@
  * First terminal event wins — a later terminal for the same `runId` is
  * ignored (the accumulator is already deleted). `maxOpenRuns` (default 1000,
  * evict-oldest) bounds orphan growth in long-lived processes; rows left
- * 'running' (evicted, or the process died) are swept by `RunStore.sweepRunning()`.
+ * 'running' (evicted, or the process died) are swept by the loaders' open-time sweep (`loadRunStore`/`loadEvalStore`/`loadConversationStore`, #495).
  *
  * `metadataFor` (optional, #149): a per-run function from the `message.start`
  * event to metadata merged into `RunMeta.metadata` on `startRun()` — the seam

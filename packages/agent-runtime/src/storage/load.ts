@@ -31,6 +31,40 @@ import type { RunStore } from "./run-store.js";
 /** Inputs for {@link loadEventStore}. The `Database` field is auto-resolved. */
 export type LoadEventStoreOptions = Omit<EventStoreOptions, "Database">;
 
+/**
+ * Options for the loaders that return a `RunStore` or one of its subclasses.
+ *
+ * These stores carry a `runs` table, so reopening one is the natural moment to
+ * close out rows left `'running'` by a process that died mid-run (#495).
+ */
+export type LoadRunStoreOptions = LoadEventStoreOptions & {
+  /**
+   * Close out orphaned `'running'` rows when the store is opened. Default
+   * `true` — an opt-OUT, because a stuck `'running'` row is never what the
+   * operator wants and forgetting to opt in is how they accumulated.
+   *
+   * A directly-constructed `new RunStore(...)` still sweeps nothing: the
+   * constructor stays side-effect-free, and this seam is the one every
+   * consumer already goes through.
+   */
+  readonly sweepOnOpen?: boolean;
+};
+
+/** Reason recorded on rows closed out by an open-time sweep. */
+const SWEEP_ON_OPEN_REASON = "orphaned: process exited before a terminal event (swept at open)";
+
+/**
+ * Run the open-time sweep unless the caller opted out. Shared by every
+ * run-store-family loader so the three cannot drift.
+ */
+function sweepAtOpen(
+  store: { sweepRunning(reason?: string): number },
+  opts: LoadRunStoreOptions,
+): number {
+  if (opts.sweepOnOpen === false) return 0;
+  return store.sweepRunning(SWEEP_ON_OPEN_REASON);
+}
+
 /** True when running under the Bun runtime (its built-in `bun:sqlite` is available). */
 function isBun(): boolean {
   return (
@@ -206,6 +240,8 @@ export interface LoadRunStoreResult {
   unavailable: boolean;
   /** Human-readable reason; surfaced in the CLI banner. */
   reason: string;
+  /** Orphaned `'running'` rows closed out at open (#495). `0` when opted out. */
+  swept?: number;
 }
 
 /**
@@ -213,7 +249,7 @@ export interface LoadRunStoreResult {
  * {@link loadEventStore} — same driver resolution, `RunStore` instead of
  * `EventStore`.
  */
-export async function loadRunStore(opts: LoadEventStoreOptions): Promise<LoadRunStoreResult> {
+export async function loadRunStore(opts: LoadRunStoreOptions): Promise<LoadRunStoreResult> {
   const resolved = await resolveDatabase();
   if ("reason" in resolved) {
     return { unavailable: true, reason: resolved.reason };
@@ -221,15 +257,18 @@ export async function loadRunStore(opts: LoadEventStoreOptions): Promise<LoadRun
 
   const { RunStore } = await import("./run-store.js");
   try {
+    const { sweepOnOpen: _sweepOnOpen, ...storeOpts } = opts;
     const store = new RunStore({
-      ...opts,
+      ...storeOpts,
       // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
       Database: resolved.Database as any,
     });
+    const swept = sweepAtOpen(store, opts);
     return {
       store,
       unavailable: false,
       reason: `connected to ${opts.path} via ${resolved.driver}`,
+      swept,
     };
   } catch (err) {
     return {
@@ -247,6 +286,8 @@ export interface LoadEvalStoreResult {
   unavailable: boolean;
   /** Human-readable reason; surfaced in the CLI banner. */
   reason: string;
+  /** Orphaned `'running'` rows closed out at open (#495). `0` when opted out. */
+  swept?: number;
 }
 
 /**
@@ -254,7 +295,7 @@ export interface LoadEvalStoreResult {
  * {@link loadRunStore} — same driver resolution, `EvalStore` instead of
  * `RunStore`.
  */
-export async function loadEvalStore(opts: LoadEventStoreOptions): Promise<LoadEvalStoreResult> {
+export async function loadEvalStore(opts: LoadRunStoreOptions): Promise<LoadEvalStoreResult> {
   const resolved = await resolveDatabase();
   if ("reason" in resolved) {
     return { unavailable: true, reason: resolved.reason };
@@ -262,15 +303,18 @@ export async function loadEvalStore(opts: LoadEventStoreOptions): Promise<LoadEv
 
   const { EvalStore } = await import("./eval-store.js");
   try {
+    const { sweepOnOpen: _sweepOnOpen, ...storeOpts } = opts;
     const store = new EvalStore({
-      ...opts,
+      ...storeOpts,
       // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
       Database: resolved.Database as any,
     });
+    const swept = sweepAtOpen(store, opts);
     return {
       store,
       unavailable: false,
       reason: `connected to ${opts.path} via ${resolved.driver}`,
+      swept,
     };
   } catch (err) {
     return {
@@ -288,6 +332,8 @@ export interface LoadConversationStoreResult {
   unavailable: boolean;
   /** Human-readable reason; surfaced in the CLI banner. */
   reason: string;
+  /** Orphaned `'running'` rows closed out at open (#495). `0` when opted out. */
+  swept?: number;
 }
 
 /**
@@ -301,7 +347,7 @@ export interface LoadConversationStoreResult {
  * from the same instance.
  */
 export async function loadConversationStore(
-  opts: LoadEventStoreOptions,
+  opts: LoadRunStoreOptions,
 ): Promise<LoadConversationStoreResult> {
   const resolved = await resolveDatabase();
   if ("reason" in resolved) {
@@ -310,15 +356,18 @@ export async function loadConversationStore(
 
   const { SQLiteConversationStore } = await import("./conversation-store.js");
   try {
+    const { sweepOnOpen: _sweepOnOpen, ...storeOpts } = opts;
     const store = new SQLiteConversationStore({
-      ...opts,
+      ...storeOpts,
       // biome-ignore lint/suspicious/noExplicitAny: dynamic dep
       Database: resolved.Database as any,
     });
+    const swept = sweepAtOpen(store, opts);
     return {
       store,
       unavailable: false,
       reason: `connected to ${opts.path} via ${resolved.driver}`,
+      swept,
     };
   } catch (err) {
     return {

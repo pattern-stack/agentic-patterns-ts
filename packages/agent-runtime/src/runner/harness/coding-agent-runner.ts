@@ -195,7 +195,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
       // #368: mirrors AgentRunner.stream()'s `emitCancellation` — emit
       // `agent.message.cancel` and skip `message.complete` for this turn (the
       // same accepted RunStoreExporter posture: a cancelled run's row stays
-      // 'running' until `RunStore.sweepRunning()`, exactly as it already does
+      // 'running' until the loaders' open-time sweep (#495), exactly as it already does
       // for AgentRunner's own cancel path). No `agent.conversation.end` here —
       // this base never emits conversation events on ANY path; that pairing
       // is `Conversation.stream()`'s job, one layer up, and it derives
