@@ -232,6 +232,30 @@ describe("AgentRunner — abortSignal forwarding (#504)", () => {
     expect(cancelledComplete(events)).toBe(true);
   });
 
+  it("the name-set leg: an abort-shaped rejection that is NOT the signal's reason still counts once our signal fired", async () => {
+    // Some transports wrap or re-mint the abort error, breaking reason
+    // identity — the ABORT_ERROR_NAMES leg must then carry each member.
+    // (Every other abort test here rejects with signal.reason, which
+    // short-circuits the identity leg — this is the set's only coverage.)
+    for (const name of ["AbortError", "TimeoutError", "ResponseAborted"]) {
+      const model = new MockLanguageModelV3({
+        doGenerate: (options) =>
+          new Promise((_, reject) => {
+            options.abortSignal?.addEventListener(
+              "abort",
+              () => reject(new DOMException("wrapped by transport", name)),
+              { once: true },
+            );
+          }),
+      });
+      const runner = new AgentRunner(model);
+      const controller = new AbortController();
+      abortSoon(controller);
+      const result = await runner.run(makeAgent(), "hi", { abortSignal: controller.signal });
+      expect(result.finishReason).toBe("cancelled");
+    }
+  });
+
   it("a provider AbortError WITHOUT our signal having fired stays a genuine error (the AND in the detector)", async () => {
     const model = new MockLanguageModelV3({
       doGenerate: () => Promise.reject(new DOMException("provider hiccup", "AbortError")),

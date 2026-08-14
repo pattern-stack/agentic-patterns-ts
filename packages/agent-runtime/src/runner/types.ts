@@ -181,10 +181,13 @@ export interface RunOptions {
    * interrupted call with `agent.llm.end {finishReason:"cancelled"}` — no
    * `agent.error` — and returns a `RunResult` with `finishReason:
    * "cancelled"`; `runStructured()` cannot fabricate a schema-valid `object`
-   * on abort, so it emits a terminal `agent.message.complete
-   * {finishReason:"cancelled"}` (so run-store exporters still finalize the
-   * run) and then throws a `RunCancelledError` (never a raw `AbortError`)
-   * whether the signal fires before, during, or between its provider calls.
+   * on abort, so it throws a `RunCancelledError` (never a raw `AbortError`)
+   * whether the signal fires before, during, or between its provider calls —
+   * and when the abort lands during or between calls (i.e. after
+   * `message.start` opened the run), it first emits a terminal
+   * `agent.message.complete {finishReason:"cancelled"}` so run-store
+   * exporters still finalize the row. A pre-start abort throws before any
+   * event; there is no run to finalize.
    *
    * `CodingAgentRunner`-based runners (`ClaudeCodeRunner` /
    * `ClaudeCodeAPIRunner`, #368) honor it too, with a shape suited to owning a

@@ -92,121 +92,190 @@ Existing suites (`agent-runner.test.ts` 97, `agent-runner-stream.test.ts` 27 inc
 ## Diff Review — Adherence
 <!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
 
-**Target:** `git diff origin/main...HEAD` on `hr/runner-2-abort-forwarding` (impl commit `5c5dc76`; spec commit `ca46d49` excluded from review)
+**Target:** `git diff origin/main...HEAD` on `hr/runner-2-abort-forwarding` (PR #544, head `ba9b19c`; base `origin/main` = `17b7523`. Spec commit `ca46d49` excluded from review)
 **Against:** `.ai-docs/specs/504-abort-forwarding.md`
-**Verdict:** REVISE
+**Verdict:** PASS_WITH_NOTES
+**Run:** re-run #2, after the Gate 2.5 fix round (`ba9b19c`). Supersedes the `5c5dc76` REVISE below.
 
-Approach §1–§2 are implemented exactly as specified and verified against the tree:
-the three `abortSignal` adds land at `agent-runner.ts:789` (`run()`), `:1524`
-(`runStructured()` no-tools), `:1720` (tier-2); `isAbortRejection`
-(`agent-runner.ts:145-147`) is byte-equivalent to the spec's snippet; `run()`'s
-catch emits `agent.llm.end {finishReason:"cancelled"}`, skips
-`_gatewayAwareError`, sets `cancelledAtIteration = iteration` and breaks into
-the shared cancelled return (`:1235-1260`, `finishReason: "cancelled"`, never
-throws — D1 held); all three `runStructured()` catches (`:1531`, `:1603`,
-`:1725`) throw `RunCancelledError` before `_gatewayAwareError`; `stream()` is
-untouched. All five spec'd tests exist in
-`agent-runner-abort-forwarding.test.ts` in the spec'd order, with the
-hang-until-signal fixture as written. Verified green locally: 5 new + 97
-(`agent-runner.test.ts`) + 27 (`agent-runner-stream.test.ts`) + 3
-(`agent-runner-event-bus.test.ts`) = 132 passed, unchanged counts; `typecheck`
-and `lint` clean. (The full runtime suite has 125 pre-existing failures from a
-`better-sqlite3` NODE_MODULE_VERSION mismatch in this container — environmental,
-unrelated to this diff.)
+**Prior blocker — CLEARED.** The docstring (`types.ts:175-178`) and `runners.md:99`
+now scope the cooperative guards per method: "`run()` and `stream()` check it at
+the top of each iteration; `stream()` additionally checks before each tool
+dispatch." Verified against the tree — `run()`'s top-of-iteration guard is at
+`agent-runner.ts:757`, `stream()`'s at `:1950`, and `stream()`'s
+pre-tool-dispatch guard at `:2377` is the only one of its kind. Neither document
+now claims a guard `run()` does not have. Acceptance item 6 (docstring +
+runners.md match shipped behaviour) is met modulo Note 1 below.
+
+**Post-review amendments — accepted, not drift.** Two deltas in `ba9b19c` go
+beyond the spec's letter; both implement the fixes prescribed verbatim in the
+`Diff Review — Quality` section of this same file, so they are Gate-2.5
+amendments to the spec, not deviations from it:
+
+- *Detector widened* (spec §2 vs `agent-runner.ts:143-158`). `isAbortRejection`
+  is no longer byte-equivalent to the spec snippet: it gained an `e ===
+  signal.reason` identity leg and an `ABORT_ERROR_NAMES` set
+  (`AbortError | TimeoutError | ResponseAborted`, mirroring the SDK's own
+  `isAbortError`). This is exactly the predicate Quality B1 prescribed, and the
+  `signal.aborted` conjunct the spec argued for is preserved as an early return
+  — the negative test (`:235`) still pins it.
+- *Structured runs finalize* (`agent-runner.ts:1530-1544`). A closure
+  `emitCancelledTerminal()` emits `agent.message.complete
+  {content:"", finishReason:"cancelled"}` with the accrued token totals before
+  each `RunCancelledError` throw that follows `agent.message.start` — the three
+  catches (`:1565`, `:1638`, `:1764`) *and* the tier-1-cancelled path (`:1706`,
+  a fourth site Quality B1 didn't enumerate but which has the same requirement).
+  The pre-start guard (`:1455`) correctly emits nothing: it throws before
+  `message.start` at `:1489`, so no row is ever opened. The event body is
+  field-for-field identical to `run()`'s cancelled terminal (`:1248-1259`), and
+  `RunStoreExporter` finalizes on it (`exporters/run-store.ts:225-227`) —
+  `status: "ok"` with `finishReason: "cancelled"`, which is the only shape the
+  store's status enum (`storage/run-store.ts:83`) can express, matching `run()`.
+
+**Everything else still holds.** Re-verified after the fix round: the three
+`abortSignal` adds at `:800` (`run()`), `:1557` (no-tools), `:1758` (tier-2);
+the already-forwarding sites at `:1597` (capable) and `:2001` (`stream()`)
+un-regressed; `run()`'s catch (`:809-822`) emits `agent.llm.end
+{finishReason:"cancelled"}`, skips `_gatewayAwareError`, sets
+`cancelledAtIteration` and breaks into the shared cancelled return
+(`:1246-1270`) — D1 held, `run()` still never throws on abort; no cancel-event
+changes to `run()` this round (pinned decision respected); `stream()` untouched.
+The 5 spec'd tests remain in the spec'd order with the hang-until-signal
+fixture; 2 were added for the amendments (7 total). Verified green locally:
+7 + 97 (`agent-runner.test.ts`) + 27 (`agent-runner-stream.test.ts`, incl. the
+#341 set) + 3 (`agent-runner-event-bus.test.ts`) = **134 passed**, pre-existing
+counts unchanged; `bun run typecheck` and `bun run lint` clean across all six
+workspaces. (`src/exporters src/admin src/runner` shows 25 failures, all from
+the container's `better-sqlite3` NODE_MODULE_VERSION mismatch — environmental,
+30 matching stack frames, unrelated to this diff.)
+
+**Blockers (0):** none.
+
+**Notes (4):**
+- [`packages/agent-runtime/src/runner/types.ts:183-187`] The new emit clause is
+  not scoped to the paths that emit. The sentence reads "`runStructured()` …
+  emits a terminal `agent.message.complete {finishReason:"cancelled"}` (so
+  run-store exporters still finalize the run) and then throws a
+  `RunCancelledError` … whether the signal fires **before**, during, or between
+  its provider calls." On the *before* path the pre-start guard (`:1455`) throws
+  with no terminal event at all — correctly, since `message.start` (`:1489`) has
+  not fired and there is no row to finalize. This is the same shape as the
+  blocker just fixed (a doc claim overreaching its actual scope), one notch
+  weaker: nothing observable is misdescribed, because the emit is vacuous
+  exactly where it's absent, so no reader acts wrongly on it. Flagging as a note
+  rather than a blocker for that reason — but `runners.md:99` got this right
+  ("On an in-flight abort, … `runStructured()` emits …"), and the docstring
+  should match. · _Suggested:_ "…emits a terminal `agent.message.complete
+  {finishReason:"cancelled"}` when the abort lands after the run has started
+  (nothing is opened, so nothing is emitted, when it fires first), then throws…"
+- [`agent-runner-abort-forwarding.test.ts:153-177`] The terminal-event
+  assertion (`cancelledComplete`) covers only 2 of the 4 emission sites: the
+  no-tools catch (tests at `:150`, `:232`) and the capable-path catch (`:196`).
+  The tier-2 catch (`agent-runner.ts:1764`) is exercised by test 3 but that test
+  constructs `new AgentRunner(model)` with no bus, so it asserts nothing about
+  events; the tier-1-cancelled site (`:1706`) is exercised only by the
+  pre-existing `agent-runner.test.ts:1784`, which predates the emission and
+  asserts only the thrown type. Quality B1's prescribed fix said "assert the
+  terminal event in the suite" — half the sites are unpinned, so a future
+  refactor could drop either emission silently. · _Suggested:_ pass a collected
+  bus to test 3 and add `expect(cancelledComplete(events)).toBe(true)`; add one
+  tier-1-cancelled case (abort during the tier-1 delegate).
+- [`packages/agent-runtime/src/runner/agent-runner.ts:2229`] Carried from the
+  prior round, and the gap widened. `stream()`'s belt-and-braces catch is still
+  `e instanceof Error && e.name === "AbortError"` — no `signal.aborted`
+  conjunct, no reason-identity leg, no `TimeoutError`/`ResponseAborted`. After
+  this round `isAbortRejection` (`:154`) and the streaming path disagree in
+  *both* directions on the same input: an `AbortSignal.timeout` that fires
+  mid-stream is not recognized as a cancel there, while a provider's unrelated
+  `AbortError` is. The spec scoped `stream()` out and the #341 tests pin its
+  behaviour, so this remains not-a-deviation — but it is now the only detector
+  in the file that the new suite does not describe. Follow-up issue.
+- [`agent-runner-abort-forwarding.test.ts:102`, `:172`, `:211`, `:227`] The
+  wall-clock race flagged last round is unaddressed and now has two more
+  instances (`AbortSignal.timeout(30)` at `:211`, `setTimeout(…, 30)` at
+  `:227`). Every abort is scheduled *before* the run is awaited, so a slow box
+  can land the abort before the provider call is reached: test 1 then routes
+  through the top-of-iteration guard and `expect(llmEnds).toHaveLength(1)`
+  fails; test 3's abort can land inside the tier-1 delegate, leaving
+  `tier2Called` false. All fail rather than false-pass, so correctness of the
+  gate is preserved — but these are avoidable CI flakes. Firing
+  `controller.abort()` from inside `doGenerate` (after the listener registers)
+  removes the race and proves forwarding at least as well.
+
+**Nits (3):**
+- [`agent-runner.ts:1566`, `:1639`, `:1765`] The
+  `"runStructured: aborted during the provider call (no structured output
+  available)"` literal is still written three times — and the fix round added a
+  fourth copy of the `await emitCancelledTerminal(); throw new
+  RunCancelledError(…)` pair at each site. Now that the emit half *is* factored
+  into a closure, folding the throw half in with it (`await
+  cancelAndThrow(...)`) is a smaller change than it was last round.
+- [`agent-runner.ts:822`] Carried: the `run()` cancel path emits
+  `agent.iteration.start` and the terminal `message.complete` with no
+  `agent.iteration.end` for the started iteration. `stream()` declares the same
+  choice explicitly (`:354`); this path should carry the same one-sentence note.
+- [`agent-runner.ts:1706`] When the caller supplies `options.runId` (#437), the
+  tier-1 delegate at `:1687` inherits it through the `...options` spread, so a
+  tier-1 cancel now produces *two* `message.complete {cancelled}` events for one
+  `runId` — `run()`'s own at `:1248` and `emitCancelledTerminal()`'s. Harmless
+  (the store's `WHERE … status = 'running'` makes it first-terminal-wins) and
+  the happy 2-tier path has had the same duplication since before this PR, so
+  it is pre-existing shape rather than a regression — noting it only so the
+  duplicate isn't read as new.
+
+**Reviewed by:** reviewer agent · 2026-08-14T20:19:00Z (re-run #2)
+
+<details>
+<summary>Superseded — re-run #1 verdict on <code>5c5dc76</code> (REVISE)</summary>
 
 **Blockers (1):**
 - [`packages/agent-runtime/src/runner/types.ts:175`, `docs/runners.md:99`] The
   rewritten docstring and §2.5 item 7 both assert "the runner also checks it at
   the top of each iteration **and before each tool dispatch** (never silently
   ignored on any `RunOptions` path)". The pre-tool-dispatch guard exists only in
-  `stream()` (`agent-runner.ts:2338`). `run()` has no such guard — its intent
-  loop (`:965`) and parallel dispatch (`:981`) run the whole batch unguarded,
-  and it only re-checks at the next iteration's top (`:746`). The text this
-  replaced was correctly scoped (`stream()` … "checks it at the top of each
-  iteration and before each tool dispatch"; `run()` and `runStructured()` "also
-  check it at the top of each iteration"); the rewrite collapsed the scoping and
-  introduced a new false claim into the two documents whose honesty is this PR's
-  stated purpose. Fails acceptance item "types.ts docstring + runners.md §2.5
-  sentence match shipped behaviour" — docs-only, but that item is the
-  criterion. · _Fix:_ re-scope both sentences, e.g. "…the runner also checks it
-  at the top of each iteration on every path; `stream()` additionally checks
-  before each tool dispatch."
+  `stream()`. `run()` has no such guard — its intent loop and parallel dispatch
+  run the whole batch unguarded, and it only re-checks at the next iteration's
+  top. The text this replaced was correctly scoped; the rewrite collapsed the
+  scoping and introduced a new false claim into the two documents whose honesty
+  is this PR's stated purpose. · _Fix:_ re-scope both sentences per method.
+  **Fixed in `ba9b19c`.**
 
-**Notes (3):**
-- [`packages/agent-runtime/src/runner/agent-runner.ts:2190`] `stream()`'s
-  belt-and-braces catch still uses the name-only check (`e instanceof Error &&
-  e.name === "AbortError"`) that `isAbortRejection` was introduced to replace.
-  The spec's own rationale for the AND — "the name check alone would misclassify
-  a provider's unrelated `AbortError` (e.g. its own internal timeout) as our
-  cancel" — applies identically on the streaming path, where the misclassified
-  failure becomes `agent.message.cancel` + `agent.conversation.end
-  {reason:"cancelled"}` instead of an error. The spec deliberately scoped
-  `stream()` out, so this is not a deviation — but the weaker detector now sits
-  40 lines from the stronger one. Worth a follow-up issue.
-- [`agent-runner-abort-forwarding.test.ts:92,158`] Forwarding is proven through
-  a wall-clock race (`setTimeout(…, 30 | 60)` started *before* the run is
-  awaited), not a deterministic hook. On a loaded runner, test 3's abort can
-  land during tier-1's `run()` delegate instead of tier-2 — the run still
-  rejects `RunCancelledError` (via the tier-1 cancelled check at `:1668`), so
-  the `rejects.toThrow` passes and only `expect(tier2Called).toBe(true)` — the
-  assertion that actually proves tier-2 forwarding — fails. Test 1 has the
-  mirror-image exposure: a >30ms stall before `generateText` is reached routes
-  through the top-of-iteration guard, no `agent.llm.end` is emitted, and
-  `expect(llmEnds).toHaveLength(1)` fails. Firing `controller.abort()` from
-  inside `doGenerate` (after the listener is registered) removes the race
-  entirely.
-- [`packages/agent-runtime/src/runner/agent-runner.ts:803-812`] Accounting on
-  the aborted iteration under-reports the thing the PR's headline is about. The
-  new `agent.llm.end` reports `inputTokens: 0, outputTokens: 0` for a call that
-  may have burned tokens before the abort, and `RunResult.iterations` reuses
-  `cancelledAtIteration` (`:1256`), so a mid-call abort at iteration 0 reports
-  `iterations: 0` even though an iteration started and a provider call was
-  issued (test 1 pins this at `:116`). Both mirror the existing error path, so
-  it is consistent — but the field that used to mean "nothing had happened yet"
-  now also covers "one call was made and interrupted".
+Notes 1-3 and nits 1-2 from that round are carried forward above (updated line
+anchors); the accounting note (`agent.llm.end` reporting `inputTokens: 0` /
+`RunResult.iterations` reusing `cancelledAtIteration`) is dropped as a
+deliberate, spec-consistent mirror of the existing error path — the Quality
+section records the same call.
 
-**Nits (2):**
-- [`agent-runner.ts:1532`, `:1604`, `:1726`] The same
-  `"runStructured: aborted during the provider call (no structured output
-  available)"` literal is written three times. The spec prescribed exactly this
-  shape, so it is faithful — but a two-line `_abortOrRethrow` private would keep
-  the message in one place alongside the tier-1 variant at `:1669`.
-- [`agent-runner.ts:812`] The new `run()` cancel path emits
-  `agent.iteration.start` and then `agent.message.complete
-  {finishReason:"cancelled"}` (`:1236`) with no `agent.iteration.end` for the
-  started iteration. `stream()`'s documented posture (`:343-345`) skips *both*
-  by design; every normal `run()` loop exit emits both. This path is a hybrid of
-  the two — harmless for the collector (`admin/collector.ts:341`) but worth one
-  sentence in the `emitCancellation` doc block so the next reader doesn't read
-  it as an oversight.
-
-**Reviewed by:** reviewer agent · 2026-08-14T20:05:00Z
+</details>
 
 ## Diff Review — Quality
 <!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
 
-**Target:** `git diff 17b7523...5c5dc76` (PR #544, head `5c5dc76`; note the PR base is `origin/main` = `17b7523` — the local `main` ref is stale at `956bb16`, so `main...HEAD` overstates the diff by ~340 files)
+**Target:** `git diff 17b7523...ba9b19c` (PR #544, head `ba9b19c`; base is `origin/main` = `17b7523` — the local `main` ref is stale, so `main...HEAD` overstates the diff)
 **Against:** `.claude/canvases/quality-checks/categories.yaml` (spec-blind)
-**Verdict:** REVISE
+**Verdict:** PASS_WITH_NOTES
+**Run:** re-run after the fix round (`ba9b19c`) — replaces the prior REVISE block from head `5c5dc76` (git history keeps it)
 
-**Blockers (2):**
+**Prior blockers — both resolved:**
 
-- [`packages/agent-runtime/src/runner/agent-runner.ts:145`] `isAbortRejection` only accepts `e.name === "AbortError"`, but a real `fetch` rejects the in-flight request with **the signal's `reason`**, not a synthetic `AbortError`. Two idiomatic cancels are therefore misclassified as provider failures: `AbortSignal.timeout(ms)` (reason is a `DOMException` named `TimeoutError` — verified against the runtime) and `controller.abort(reason)` with any custom reason. Verified by running the real runner against a fixture that rejects with `signal.reason` (what undici does): `AbortSignal.timeout` → `run()` **throws** a raw `TimeoutError` and emits `agent.llm.end{error}` + `agent.error`; `runStructured()` throws a raw `TimeoutError`, not `RunCancelledError`. That contradicts three absolutes this very diff writes: "D1: never throws" (CHANGELOG), "`run()` … returns a `RunResult` with `finishReason: "cancelled"`" and "throws a `RunCancelledError` (never a raw `AbortError`) whether the signal fires before, during, or between its provider calls" (`types.ts:169-187`). It is also self-inconsistent: the same `AbortSignal.timeout` IS honored as a cancel by the top-of-iteration `signal.aborted` check (`:746`), so a timeout between iterations returns `cancelled` while a timeout mid-call throws. The AI SDK's own predicate (`@ai-sdk/provider-utils` `isAbortError`) accepts `AbortError | ResponseAborted | TimeoutError`, and its `handleFetchError` returns abort reasons **unchanged**, so the reason arrives verbatim. · _Fix:_ widen the predicate — `signal?.aborted === true && (e === signal.reason || (e instanceof Error && ABORT_ERROR_NAMES.has(e.name)))`. The `e === signal.reason` leg is exact (fetch guarantees it), covers custom reasons, and is immune to name drift; keep the `signal.aborted` conjunct so an unrelated provider `AbortError` still routes to the error path (that property is well-argued and worth keeping). Add a case per abort flavor to the new suite.
+- **B1 (detector too narrow)** — resolved. `isAbortRejection` (`agent-runner.ts:154`) is now `signal.aborted && (e === signal.reason || ABORT_ERROR_NAMES.has(e.name))` with `ABORT_ERROR_NAMES = {AbortError, TimeoutError, ResponseAborted}` (`:143`), mirroring the SDK's own `isAbortError`. Re-verified by running the suite: `AbortSignal.timeout()` and `controller.abort(customReason)` both now settle as cancels, and the AND-conjunct still routes an uncorrelated provider `AbortError` to the error path (test `:236`). The `signal.aborted` conjunct was worth keeping and was kept.
+- **B2 (cancelled structured run never finalized)** — resolved. `emitCancelledTerminal()` (`:1530`) emits `agent.message.complete {content:"", finishReason:"cancelled"}` before every `RunCancelledError` throw that can occur **after** `agent.message.start`: no-tools catch (`:1565`), capable-path catch (`:1638`), tier-1-cancelled (`:1706`), tier-2 catch (`:1764`). I enumerated every `throw new RunCancelledError` site in `runStructured()` — the only uncovered one is the pre-run guard at `:1456`, which fires before `message.start`, so no row is ever opened and nothing needs finalizing. Correct. Three tests now assert the terminal on the bus, not just the thrown type.
+- The prior note about the doc claiming a pre-tool-dispatch guard on every path is also resolved — `types.ts:174-177` and `docs/runners.md:99` both now scope it ("guards are per-method: `run()` and `stream()` check at the top of each iteration; `stream()` additionally before each tool dispatch"), which matches the code.
 
-- [`packages/agent-runtime/src/runner/agent-runner.ts:1531`] (same at `:1603`, `:1725`) A mid-call abort in `runStructured()` emits **no terminal event at all** — verified: after `agent.message.start`, the bus sees nothing before the `RunCancelledError` propagates. `RunStoreExporter` opens a row on `message.start` and finalizes only on `message.complete` (`run-store.ts:214`) or non-recoverable `agent.error` (`:236`); it has no `message.cancel` handler. So every cancelled `runStructured()` leaves its `runs` row stuck `'running'` until the next open-time sweep. On the capable path this is a strict **regression**: pre-diff the raw abort went through `_gatewayAwareError`, which emitted `agent.error {recoverable:false}` and finalized the row as `'error'`; the diff removes that emission as "spurious" and puts nothing in its place. The immediately-preceding commit in this same CHANGELOG (#495) exists precisely because stuck `'running'` rows are never what an operator wants. The author already applied the correct reasoning in `run()` — see the comment at `:1229-1234`, "a `message.complete` with an honest finishReason is enough for every existing collector/exporter to finalize the run cleanly" — it just wasn't carried to `runStructured()`. · _Fix:_ emit a terminal event before each of the three `throw new RunCancelledError` sites — `agent.message.complete {content: "", finishReason: "cancelled"}`, mirroring `run()` — then throw. The pre-run guard at `:1444` needs nothing (it throws before `message.start`, so no row is opened). Assert the terminal event in the suite, not just the thrown type.
+**Blockers (0):** none.
 
-**Notes (3):**
+**Notes (4):**
 
-- [`packages/agent-runtime/src/runner/types.ts:174-177`, `docs/runners.md:99`] Both rewritten doc blocks now claim the runner "checks it at the top of each iteration **and before each tool dispatch**" as a property of every `RunOptions` path. Only `stream()` has a pre-tool-dispatch guard (`:2338`); `run()` has abort checks at `:746` and `:798` only, so an abort that fires while iteration N's tool batch is executing still runs the remaining batch and stops at the next iteration top. The prior wording was careful to scope the pre-tool claim to `stream()`; the rewrite collapsed that distinction. Given #487 (one commit back) was entirely about deleting false doc claims, worth restoring the scoping.
-- [`packages/agent-runtime/src/runner/agent-runner.ts:145` vs `:2190`] The file now carries two competing definitions of "this rejection is our abort". `isAbortRejection` argues at length that a name-only check "would misclassify a provider's unrelated `AbortError` … as our cancel" — which is exactly what `stream()`'s pre-existing belt-and-braces check at `:2190` still does (name only, no `signal.aborted` conjunct). The new suite pins the AND-semantics for `run()`; `stream()` behaves the opposite way on the identical input. Either migrate `:2190` to the helper or document why the two paths differ.
-- [`packages/agent-runtime/src/runner/agent-runner.ts:799-814`] The new cancel path emits `agent.llm.end` but breaks without an `agent.iteration.end`, so the `agent.iteration.start` at `:752` is left unclosed — the first such case in `run()` (the pre-existing top-of-iteration break at `:746` returns *before* opening the iteration). `RunStoreExporter` pushes a step-metrics entry only on `iteration.end` (`:198`) and `_onMessageComplete` does not flush `acc.currentIteration`, so the honestly-emitted cancelled `llm.end` is folded into an accumulator that is then discarded. `stream()` makes the same choice but declares it explicitly (`:343-345`, "accepted per the human gate's Q2 answer"); the new path should either emit the `iteration.end` or carry the same explicit note.
+- [`packages/agent-runtime/src/runner/agent-runner.ts:2229`] (carried forward, now sharper) `stream()`'s belt-and-braces catch still keys on `e instanceof Error && e.name === "AbortError"` — the exact predicate B1 just widened two functions above it, unshared. Two consequences. (a) The `TimeoutError` / `ResponseAborted` names the fix round added are not recognized there, so an abort-shaped rejection with either name that reaches that catch is rethrown raw out of the generator — contradicting the "`stream()` … does NOT throw (locked D1)" guarantee that `types.ts:178-180`, edited by this diff, states unconditionally. (Narrow in practice: when the signal is already `.aborted` the SDK synthesizes the clean `abort` stream part and never reaches this catch — which is precisely why it's a note, not a blocker.) (b) The correlation policy is now *opposite* in one class: `isAbortRejection` requires `signal.aborted` and the new test at `:236` pins that; `agent-runner-stream.test.ts:848` deliberately pins the reverse for `stream()` ("No `abortSignal` at all — proves the guard is keyed on the error's shape"). Both are defensible, but nothing in the file says they diverge on purpose. · _Suggested:_ widen `:2229` to `ABORT_ERROR_NAMES.has(e.name)` — a one-liner that keeps the pinned shape-only policy intact — and add one sentence to the `isAbortRejection` doc recording why `stream()` doesn't take the `signal.aborted` conjunct.
+- [`packages/agent-runtime/src/runner/__tests__/agent-runner-abort-forwarding.test.ts:61-67`] The name-matching half of the B1 fix has no positive coverage. `hangUntilAbort` always rejects with `signal.reason`, so in all six passing abort tests `e === signal.reason` short-circuits and `ABORT_ERROR_NAMES` is never the deciding branch — including the test named for `AbortSignal.timeout` (its `TimeoutError` arrives via the identity leg, not the name leg). Deleting `TimeoutError` and `ResponseAborted` from the set would leave the suite green. Related: the timeout test (`:203-217`) asserts only `finishReason === "cancelled"` and no `agent.error`, both of which the top-of-iteration guard also satisfies, so it doesn't structurally pin that the mid-call detector ran at all (the first test does pin it, via `llm.end{cancelled}` count). · _Suggested:_ one test that rejects with a *different* `DOMException("…","AbortError")` instance while the caller's signal has fired, plus the `llm.end{cancelled}` assertion on the timeout test.
+- [`packages/agent-runtime/src/runner/types.ts:186-187`] Over-claim in the doc this diff rewrites: `runStructured()` "emits a terminal `agent.message.complete {finishReason:"cancelled"}` … **whether the signal fires before**, during, or between its provider calls." For the "before" case — the pre-run guard at `agent-runner.ts:1456` — no terminal is emitted (correctly: it throws before `message.start`, so no run row exists). The CHANGELOG carries the same phrasing ("and then throws its existing `RunCancelledError` on any abort"). Given #487 one commit back was entirely about deleting doc claims that didn't hold, worth scoping to "any abort after the run starts; an already-fired signal throws before `message.start`, so there is no row to finalize."
+- [`packages/agent-runtime/src/runner/agent-runner.ts:824`] (carried forward, unchanged) The new mid-call cancel `break`s after `agent.iteration.start` (`:763`) without a matching `agent.iteration.end` — the first unbalanced iteration span on `run()`'s cancel path (the pre-existing guard at `:758` breaks *before* opening the iteration). `LangfuseExporter` deletes `_iterationSpans[runId]` only in `_onIterationEnd` (`exporters/langfuse.ts:210`); `_onMessageComplete` doesn't (`:365-370`), so every mid-call cancel leaves an unended span plus a map entry retained for the process lifetime — unbounded in a long-lived server with a stop button. `RunStoreExporter` also drops that iteration's step metric (`exporters/run-store.ts:17-19`). The pre-existing error path leaks the same way, so this isn't novel — but cancel is a routine user action, unlike a provider error. · _Suggested:_ emit `agent.iteration.end {hasMore:false}` before the break, or carry `stream()`'s explicit "accepted, see gate Q2" note (`:343-345`).
 
 **Nits (3):**
 
-- [`packages/agent-runtime/src/runner/__tests__/agent-runner-abort-forwarding.test.ts:92`] `abortSoon(controller, 30)` / `60` races wall-clock against run setup. If the runner hasn't reached the provider call within 30 ms on a loaded CI box, the top-of-iteration guard fires instead and `expect(llmEnds).toHaveLength(1)` fails; in the tier-2 test, if tier-1 hasn't finished by 60 ms, `tier2Called` stays `false` and the assertion fails. Both fail rather than false-pass, but they're avoidable flakes. Deterministic alternative: abort from *inside* `doGenerate` (`doGenerate: (o) => { controller.abort(); return hangUntilAbort(o.abortSignal); }`) — the callback only runs when the call is genuinely in flight, which proves forwarding at least as well.
-- [`packages/agent-runtime/src/runner/agent-runner.ts:1531`, `:1603`, `:1725`] The same five-line normalization block with a byte-identical message string is copy-pasted three times. A one-line `throwIfAbortRejection(e, signal)` helper next to `isAbortRejection` collapses all three and gives the message one home (category: `magic_constants`, string-literal leg).
-- [`packages/agent-runtime/src/runner/agent-runner.ts:806-807`] The cancelled `agent.llm.end` reports `inputTokens: 0, outputTokens: 0`. Usage on an aborted call is *unknown*, not zero — and the prompt tokens were in fact billed, which is mildly at odds with the "stops token burn" framing. `usageDetails` in this same file is documented as "absent ≠ zero — never zero-filled" (`events/types.ts:366-370`); the required-number fields can't express absence, so this matches the existing error path and is defensible — flagging only so the accounting asymmetry is a decision, not an accident (category: `convenient_fallback`).
+- [`packages/agent-runtime/src/runner/agent-runner.ts:1565`, `:1638`, `:1764`] The shared closure covers the emit half of the invariant but not the throw half: the `if (isAbortRejection(…)) { await emitCancelledTerminal(); throw new RunCancelledError("runStructured: aborted during the provider call (no structured output available)") }` block is still hand-duplicated at three sites with a byte-identical message string, plus the tier-1 variant. A fifth throw site added later can forget the terminal again — which is exactly how B2 happened. `const throwCancelled = async (reason: string): Promise<never> => { await emitCancelledTerminal(); throw new RunCancelledError(reason); }` collapses all four and gives the string one home (category: `magic_constants`, string-literal leg).
+- [`…/agent-runner-abort-forwarding.test.ts:172`, `:211`] `abortSoon(controller, 60)` / `AbortSignal.timeout(30)` race wall-clock against run setup. The tier-2 case fails (not false-passes) if tier-1 hasn't finished within 60 ms on a loaded runner — `tier2Called` stays false. Ran the file three times locally, green each time (~215 ms), so this is latent, not active. Deterministic alternative: abort from *inside* the hanging `doGenerate`, which by construction only runs when the call is genuinely in flight.
+- [`packages/agent-runtime/src/runner/agent-runner.ts:815-816`] (carried forward) The cancelled `agent.llm.end` reports `inputTokens: 0, outputTokens: 0`; usage on an aborted call is *unknown*, not zero, and the prompt tokens were in fact billed. Matches the existing error path and the event fields can't express absence — flagged only so the asymmetry with `usageDetails`'s documented "absent ≠ zero" stays a decision rather than an accident (category: `convenient_fallback`).
 
-**Verified and clean:** the "three of five provider calls never received `options.abortSignal`" claim is accurate (call sites `:781`, `:1518`, `:1709` were missing it; `:1596` and `:1962` already had it, and no sixth `generateText`/`streamText` call exists in the runner). The AND-conjunct rationale in the `isAbortRejection` doc is sound and matches the SDK's own `isAbortError(error) && abortSignal.aborted` shape. The `hangUntilAbort` fixture is a genuinely good proving mechanism — a dropped signal fails by timeout rather than by an assertion that could be trivially satisfied. The negative test (`:184`) is the right test to have written.
+**Also verified this round:** all five provider call sites now forward the signal (`:792`, `:1551`, `:1610`, `:1747`, `:1991`) and no sixth `generateText`/`streamText` call exists in the runner, so `docs/runners.md` §2.5 item 7's "forwarded to every provider call" is literally true. `emitCancelledTerminal` reads the accumulators at call time and every accumulator is declared above it — the tier-1 site correctly reports the tokens tier-1 already folded in. The cancelled terminal mirrors the success terminal's shape (`:1807-1819`) field for field. New suite: 7/7 green across three runs; the 125 failures in the full runtime suite are the known local `better-sqlite3` native-module env break, unrelated to this diff.
 
-**Reviewed by:** reviewer agent · 2026-08-14T20:12:00Z
+**Reviewed by:** reviewer agent · 2026-08-14T20:31:00Z
