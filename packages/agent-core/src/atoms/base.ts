@@ -110,13 +110,3 @@ export abstract class AgenticModel<T extends ZodRawShape> {
     return { ...this._data };
   }
 }
-
-/**
- * Base model for protocol data structures.
- * Protocol models are data containers that don't need custom prompts.
- */
-export abstract class ProtocolModel<T extends ZodRawShape> extends AgenticModel<T> {
-  toPrompt(): string {
-    return JSON.stringify(this.toJSON());
-  }
-}

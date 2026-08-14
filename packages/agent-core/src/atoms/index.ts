@@ -1,6 +1,6 @@
 // atoms barrel export
 
-export { AgenticModel, ProtocolModel, type RenderContext } from "./base.js";
+export { AgenticModel, type RenderContext } from "./base.js";
 
 export { Persona, PersonaSchema, type PersonaData } from "./persona.js";
 export { Example, ExampleSchema, type ExampleData } from "./example.js";

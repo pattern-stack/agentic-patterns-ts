@@ -6,7 +6,7 @@ TypeScript library for building composable LLM agents. Agents are built by compo
 
 | Package | Path | Description |
 |---------|------|-------------|
-| `@pattern-stack/agentic-core` | `packages/agent-core/` | Atoms, protocols, molecules, rendering, organisms |
+| `@pattern-stack/agentic-core` | `packages/agent-core/` | Atoms, molecules, rendering, organisms |
 | `@pattern-stack/agentic-runtime` | `packages/agent-runtime/` | Runner, events, gates, transport, multi-agent, exporters, presets |
 | `@pattern-stack/agentic-server` | `packages/agent-server/` | Hono HTTP server — routes, SSE streaming, admin API |
 | `@pattern-stack/agentic-dashboard` | `packages/agent-dashboard/` | React SPA admin dashboard |
@@ -27,7 +27,7 @@ Capability = Toolbox + Manual + Playbook
 | Layer | Package | Location | Purpose |
 |-------|---------|----------|---------|
 | 0 - Atoms | core | `src/atoms/` | Frozen Zod-validated models with `toPrompt()` |
-| 1 - Protocols | core | `src/protocols/` | Vendor-agnostic domain interfaces |
+<!-- Layer 1 (Protocols) was removed in #490 — a project-tracker domain that did not belong in an agent framework. The numbering is deliberately NOT compacted: ADR-0005 and ADR-0009 cite layers by number. -->
 | 2 - Molecules | core | `src/molecules/` | Toolbox, Manual, Capability, ToolSchema |
 | 3 - Rendering | core | `src/rendering/` | PromptRenderer with composable sections |
 | 4 - Organisms | core | `src/organisms/` | RoleBuilder, AgentBuilder |
@@ -47,7 +47,7 @@ Capability = Toolbox + Manual + Playbook
 - **Immutability** — `Object.freeze()` + `Readonly<>` types on atom data
 - **ESM-first** — tsup produces ESM output (ESM-only as of v0.31)
 - **Strict TypeScript** — `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
-- **Async throughout** — all protocol methods return `Promise<T>`
+- **Async throughout** — all protocol methods (`MemoryStore`, `ConversationStore`, …) return `Promise<T>`
 - **Fluent builders** — `.with*()` methods return `this` for chaining
 - **Barrel exports** — public API surfaced through `index.ts` files
 

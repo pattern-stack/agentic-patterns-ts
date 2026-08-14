@@ -1,6 +1,6 @@
 # @pattern-stack/agentic-core
 
-Core primitives for building compositional agents. This package provides the atom-to-organism hierarchy: frozen data models, protocol interfaces, molecules (toolbox/manual/capability), section-based prompt rendering, and builders for roles and agents.
+Core primitives for building compositional agents. This package provides the atom-to-organism hierarchy: frozen data models, molecules (toolbox/manual/capability), section-based prompt rendering, and builders for roles and agents.
 
 ## Installation
 
@@ -46,24 +46,6 @@ console.log(persona.toPrompt());
 ### Base Classes
 
 - `AgenticModel<T>` -- base class for all atoms. Wraps a Zod schema, freezes parsed data, provides `.data` accessor and `.toPrompt()`.
-- `ProtocolModel<T>` -- base for protocol data models with `toPrompt()` support.
-
-### Protocols (`src/protocols/`)
-
-Vendor-agnostic async interfaces for external systems. Each protocol defines Zod schemas for its data types and an interface for CRUD operations.
-
-| Protocol | Operations |
-|----------|-----------|
-| `TaskProtocol` | list, get, create, update, addComment, getComments |
-| `ProjectProtocol` | list, get, create, update, listMembers |
-| `TagProtocol` | list, get, create, update, delete |
-| `UserProtocol` | list, get, getTeams, whoAmI |
-| `SprintProtocol` | list, get, create, update |
-| `CommentProtocol` | list, get, create, update, delete, addReaction |
-| `DocumentProtocol` | list, get, create, update, delete |
-| `EnvironmentProtocol` | list, get, create, update, delete |
-
-Shared enums: `Priority`, `StatusCategory`, `IssueType`, `RelationType`, `WorkPhase`, `ProjectStatus`, `SprintStatus`, `DocType`, `TagGroup`, `UserType`, `UserRole`, etc.
 
 ### Molecules (`src/molecules/`)
 
