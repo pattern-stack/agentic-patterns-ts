@@ -26,6 +26,8 @@ export {
   ReasoningEffortLevelSchema,
   SupportSchema,
   VerificationSchema,
+  adviseReasoningEffort,
+  adviseReasoningEffortFor,
   adviseStructuredRun,
   adviseStructuredRunFor,
   bareModelId,
