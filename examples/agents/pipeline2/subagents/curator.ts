@@ -22,8 +22,8 @@ import {
   Persona,
   Responsibility,
   RoleBuilder,
-} from "@agentic-patterns/core";
-import { AgentStep, FunctionStep, type Node } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-core";
+import { AgentStep, FunctionStep, type Node } from "@pattern-stack/agentic-runtime";
 import type { Tip } from "../deps.js";
 
 const LIVE = process.env.AP_EXAMPLE_LIVE === "1";

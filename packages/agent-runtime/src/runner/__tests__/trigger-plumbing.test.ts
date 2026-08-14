@@ -12,7 +12,7 @@ import { MockLanguageModelV3 } from "ai/test";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
-import type { TriggerSourceData } from "@agentic-patterns/core";
+import type { TriggerSourceData } from "@pattern-stack/agentic-core";
 
 import { AgentEventBus } from "../../events/agent-event-bus.js";
 import type { MessageStartEvent } from "../../events/types.js";

@@ -38,7 +38,7 @@ import {
   Toolbox,
   canonicalMemoryScope,
   defineTool,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { z } from "zod";
 import { capPreview } from "../workflows/state-events.js";
 import type { MemoryStore } from "./store.js";

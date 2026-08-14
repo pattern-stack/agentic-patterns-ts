@@ -1,7 +1,7 @@
 # Artifacts dashboard slice (ADR-0006)
 
 **Date:** 2026-07-26
-**Package:** `@agentic-patterns/dashboard` (`packages/agent-dashboard/`)
+**Package:** `@pattern-stack/agentic-dashboard` (`packages/agent-dashboard/`)
 **Status:** Spec — ready for implementation
 **Source of truth:** `docs/adr/0006-render-artifacts.md` (Accepted, read off
 `docs/adr-render-artifacts` branch — not yet on `main`/this worktree's `docs/`).
@@ -35,7 +35,7 @@ artifacts: [ { id: string, display_type: string, data?: unknown, title?: string,
 ## Dashboard has no core/runtime dependency (verified)
 
 `packages/agent-dashboard/package.json` deps: `@xyflow/react`, `lucide-react`,
-`react`, `react-dom`, `react-router-dom` only — no `@agentic-patterns/core` or
+`react`, `react-dom`, `react-router-dom` only — no `@pattern-stack/agentic-core` or
 `zod`. Confirmed by the existing precedent at `api/types.ts:122-125`
 ("hand-mirrored... the dashboard has no runtime dependency"). This slice
 follows the same pattern: local types + a hand-written structural guard
@@ -311,7 +311,7 @@ per `TokensPage.responsive.test.tsx`).
 
 ## Verification
 
-- `bun run --filter=@agentic-patterns/dashboard typecheck`
-- `bun run --filter=@agentic-patterns/dashboard test` (full 494+ suite must
+- `bun run --filter=@pattern-stack/agentic-dashboard typecheck`
+- `bun run --filter=@pattern-stack/agentic-dashboard test` (full 494+ suite must
   stay green; new tests add to the count)
 - Do **not** run `build`/`lint`/full `check` per the task's process rules.

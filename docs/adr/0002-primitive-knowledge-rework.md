@@ -12,8 +12,8 @@ sidebar:
   (core **0.9.0**, lockstep runtime/server/cli **0.21.0**).
 - **Date:** 2026-07-09
 - **Context owner:** Doug
-- **Scope:** `@agentic-patterns/core` (atoms, molecules, rendering, organisms) +
-  the runner contract in `@agentic-patterns/runtime` (`AgentLike`) + every
+- **Scope:** `@pattern-stack/agentic-core` (atoms, molecules, rendering, organisms) +
+  the runner contract in `@pattern-stack/agentic-runtime` (`AgentLike`) + every
   consumer that constructs atoms (presets, `ap init` scaffold, skills, READMEs).
 
 ## Context

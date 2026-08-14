@@ -30,7 +30,7 @@ import {
   MemorySearchQuerySchema,
   type MemoryStoreCapabilities,
   memoryRecord,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type DatabaseConstructor from "better-sqlite3";
 import type { Database, Statement } from "better-sqlite3";
 import { type MemoryStore, type MemoryWriteInput, MemoryWriteInputSchema } from "./store.js";

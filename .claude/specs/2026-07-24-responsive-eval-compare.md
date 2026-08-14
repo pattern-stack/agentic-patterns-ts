@@ -110,7 +110,7 @@ headings (lines 394/398); the Input/Expected grid has `Input` / `Expected` micro
    369 / 382 / 387 / 392 with `sideBySide(isPhone)`; add the four `data-testid`s.
 5. Leave the stat strip (217–222) and everything else untouched. Do NOT modify
    `DataTable.tsx` here — that's W1-DataTable's PR.
-6. Verify: `bun run --filter=@agentic-patterns/dashboard test`, `typecheck`, `lint`.
+6. Verify: `bun run --filter=@pattern-stack/agentic-dashboard test`, `typecheck`, `lint`.
    Conventions: strict TS (`noUnusedLocals` — don't destructure flags you don't use),
    biome (double quotes, 2-space, 100-col).
 
@@ -141,7 +141,7 @@ spec's stubbing pattern: `vi.stubGlobal("matchMedia", ...)` with
    this via the jsdom fallback but this pins the explicit-stub path.)
 
 Regression gate: full dashboard suite passes
-(`bun run --filter=@agentic-patterns/dashboard test`).
+(`bun run --filter=@pattern-stack/agentic-dashboard test`).
 
 ## Risk — expanded rows inside a horizontally-scrolling table
 

@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AgentEventBus, InMemoryConversationStore } from "@agentic-patterns/runtime";
+import { AgentEventBus, InMemoryConversationStore } from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ConversationEntry, conversationRoutes } from "../routes/conversations.js";

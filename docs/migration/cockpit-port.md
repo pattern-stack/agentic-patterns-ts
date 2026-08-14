@@ -9,7 +9,7 @@ sidebar:
 **Companion ADR:** [`docs/adr/0001-constellation-dashboard.md`](../adr/0001-constellation-dashboard.md)
 
 This is the cold-start guide for porting the **retrieval-agent cockpit** UI into
-`@agentic-patterns/dashboard`. It assumes you have BOTH repos open:
+`@pattern-stack/agentic-dashboard`. It assumes you have BOTH repos open:
 
 - **Source (the cockpit):** `/Users/dug/Projects/retrieval-agent/src/cli/cockpit-ui/`
 - **Target (this repo):** `packages/agent-dashboard/`
@@ -23,7 +23,7 @@ were verified against the live code on 2026-06-25.
 ## 0. The decision (locked)
 
 **Develop locally in this repo; do NOT publish to npm until a milestone.** The
-dashboard is `private` (v0.1.1) and ships *bundled inside* `@agentic-patterns/cli`
+dashboard is `private` (v0.1.1) and ships *bundled inside* `@pattern-stack/agentic-cli`
 (`ap playground` mounts it from `packages/agent-cli/assets/dashboard/`). So
 "upstreaming the UI" is just editing `packages/agent-dashboard` and running
 `bun run dev` — npm is never in the loop for UI work.
@@ -32,16 +32,16 @@ dashboard is `private` (v0.1.1) and ships *bundled inside* `@agentic-patterns/cl
 
 | Package | Role here | npm |
 |---|---|---|
-| `@agentic-patterns/dashboard` (PRIVATE) | the whole UI lift + the SSE adapter | never — bundled into the CLI |
-| `@agentic-patterns/server` (published) | add `/admin/conversations`; enrich `/agents` with capabilities; (later) per-run scope | milestone publish |
-| `@agentic-patterns/runtime` (published) | formalize provider routing in `HybridModelResolver` + `maxIterations` run option | milestone publish |
-| `@agentic-patterns/cli` (published) | release vehicle — its build carries the dashboard | the publish that ships everything |
-| `@agentic-patterns/core` | nothing expected | — |
+| `@pattern-stack/agentic-dashboard` (PRIVATE) | the whole UI lift + the SSE adapter | never — bundled into the CLI |
+| `@pattern-stack/agentic-server` (published) | add `/admin/conversations`; enrich `/agents` with capabilities; (later) per-run scope | milestone publish |
+| `@pattern-stack/agentic-runtime` (published) | formalize provider routing in `HybridModelResolver` + `maxIterations` run option | milestone publish |
+| `@pattern-stack/agentic-cli` (published) | release vehicle — its build carries the dashboard | the publish that ships everything |
+| `@pattern-stack/agentic-core` | nothing expected | — |
 
 Publish trigger: once the **chain graph + chat render correctly against the real
 server** (steps 1–3 below). Then bump+publish runtime/server (if changed) then
 cli. No changesets in this repo → manual per-package version bumps. retrieval-agent
-already consumes `@agentic-patterns/runtime` (`claudeCode` in its `config.ts`), so
+already consumes `@pattern-stack/agentic-runtime` (`claudeCode` in its `config.ts`), so
 the provider-routing work flows back to it on the next runtime bump.
 
 **Tune against real agents as you go.** This repo has `agents/` (calculator, todo,
@@ -65,7 +65,7 @@ All under `retrieval-agent/src/cli/cockpit-ui/`:
 `lib/api.ts` (the cockpit's `/api/*` client + `askStream` SSE parser) is **NOT
 ported** — it's the seam that gets rewritten as the adapter (§3).
 
-> Note: this repo's `@agentic-patterns/dashboard` already has `src/hooks/useChat.ts`
+> Note: this repo's `@pattern-stack/agentic-dashboard` already has `src/hooks/useChat.ts`
 > — that is the *ancestor* of the cockpit's `components/chat/useChat.ts`. The port
 > replaces it with the refined version (streaming tool-calls/thinking inline, the
 > `Part` union, `model.test.ts`). This is literally upstreaming the dashboard's own
@@ -218,9 +218,9 @@ or `ap playground`.
 
 | Seam | Reality (verified) | Resolution |
 |---|---|---|
-| **Conversation history** | `GET /admin/conversations` is referenced by the dashboard but **NOT implemented** in the server | Add it to `@agentic-patterns/server` — project from the in-memory collector (and/or EventStore) into `{id, agent_id, started_at, title, status}[]`. Backs `SessionRail`. |
+| **Conversation history** | `GET /admin/conversations` is referenced by the dashboard but **NOT implemented** in the server | Add it to `@pattern-stack/agentic-server` — project from the in-memory collector (and/or EventStore) into `{id, agent_id, started_at, title, status}[]`. Backs `SessionRail`. |
 | **Capability introspection** | `/agents` returns only `{id,name,description}`; the `agent` is opaque `any` at discovery | Enrich `/agents` (or `/agents/:id`) to introspect the `AgentLike`'s declared `Capability`+`Toolbox` (from `core`). Drives Universe rail + composition graph. Replaces the cockpit's static catalog. |
-| **Provider routing** | `@agentic-patterns/runtime` ALREADY has `HybridModelResolver` (profiles → gateway → pattern: `claude-*`→anthropic, `gpt-*`→openai, `gemini-*`→google) | Formalize the hard list `{anthropic, openai, gemini, bifrost, ollama}`; enable a provider **iff its env is present**; fail at call-time, never block config. Port the bifrost (Basic-auth OpenAI-compat), ollama-native, and claude-code (Max-sub CLI) builders from retrieval-agent `src/runtime/config.ts#buildModel` as provider entries. claude-code is an `anthropic` variant. |
+| **Provider routing** | `@pattern-stack/agentic-runtime` ALREADY has `HybridModelResolver` (profiles → gateway → pattern: `claude-*`→anthropic, `gpt-*`→openai, `gemini-*`→google) | Formalize the hard list `{anthropic, openai, gemini, bifrost, ollama}`; enable a provider **iff its env is present**; fail at call-time, never block config. Port the bifrost (Basic-auth OpenAI-compat), ollama-native, and claude-code (Max-sub CLI) builders from retrieval-agent `src/runtime/config.ts#buildModel` as provider entries. claude-code is an `anthropic` variant. |
 | **Scoped agents** | conversation body is generic `{content}`; no place for arm/deal/as-of/scope | The per-run-scope channel through `/conversations` (ADR open Q). Generic agents unaffected. Defer to after step 3; retrieval's arms need it for step 5. |
 | **Theming** | dashboard = single dark theme via CSS vars (`--bg-canvas`…), no component lib; cockpit = swe-brain blue light/dark/system (`--paper`, `--ink`, `--accent-ink`…) + vendored atoms | Adopt the cockpit's `ui/theme.css` token + derivation layer (it DEFINES the vars the cockpit components reference) + `tokens.ts` + `ui/atoms.tsx` + `ui/vendor/*`. Keep the dashboard's React Router shell. The report notes the dashboard tokens were "designed to unify" with the cockpit's. |
 | **`GraphPanel` height** | React Flow collapses to height 0 without a definite-height parent | Carry the cockpit gotcha: wrap `GraphPanel` in a fixed-height box (the rail uses `height:400`). |

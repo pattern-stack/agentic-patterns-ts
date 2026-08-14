@@ -98,7 +98,7 @@ import type {
   MemoryStore,
   RunnerProtocol,
   Scorer,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import {
   AgentEventBus,
   FunctionStep,
@@ -117,7 +117,7 @@ import {
   loadEvalStore,
   loadMemoryStore,
   runEval,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 

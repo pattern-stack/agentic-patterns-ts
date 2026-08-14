@@ -92,7 +92,7 @@ Re-running `ap init --with-plugin` over an already-initialized project is idempo
 `scripts/verify-hooks.mjs` does the whole dance: scaffold → install → start server → subscribe SSE → spawn `claude -p` → assert `SessionStart` + `UserPromptSubmit` + `SessionEnd` arrive.
 
 ```bash
-bun run --filter=@agentic-patterns/cli build
+bun run --filter=@pattern-stack/agentic-cli build
 node scripts/verify-hooks.mjs              # one-shot, tears down on exit
 node scripts/verify-hooks.mjs --keep       # leaves tmp project + server alive
 ```
@@ -102,7 +102,7 @@ Requires `claude` on PATH and an `ANTHROPIC_API_KEY` in env (any non-empty key �
 ### Manual probe
 
 ```bash
-npx @agentic-patterns/cli@latest init demo --with-plugin --provider=anthropic
+npx @pattern-stack/agentic-cli@latest init demo --with-plugin --provider=anthropic
 cd demo
 cp .env.example .env && $EDITOR .env   # add ANTHROPIC_API_KEY
 bun install

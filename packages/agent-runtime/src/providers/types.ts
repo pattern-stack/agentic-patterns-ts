@@ -76,7 +76,7 @@ export interface ProviderProtocol {
   readonly packageName: string;
   /**
    * Whether `packageName` ships as a real dependency of
-   * `@agentic-patterns/runtime` (#472). `true` means installing the runtime is
+   * `@pattern-stack/agentic-runtime` (#472). `true` means installing the runtime is
    * sufficient to reach this provider — a load failure is then a broken
    * install, not a missing optional package. `false` means the consumer must
    * install `packageName` themselves.
@@ -114,7 +114,7 @@ export class ProviderPackageError extends Error {
       bundled
         ? [
             `provider "${provider}" could not load "${packageName}", which ships as a dependency`,
-            "of @agentic-patterns/runtime — this usually means a broken or partial install.",
+            "of @pattern-stack/agentic-runtime — this usually means a broken or partial install.",
             "Reinstall your dependencies (bun install / npm install / pnpm install).",
           ].join(" ")
         : [

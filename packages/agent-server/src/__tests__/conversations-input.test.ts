@@ -5,8 +5,8 @@
  * (the `conversations.test.ts` idiom) so the wiring is what's under test.
  */
 
-import type { AgentEvent, RunOptions } from "@agentic-patterns/runtime";
-import { AgentEventBus, PendingInputRegistry, createEvent } from "@agentic-patterns/runtime";
+import type { AgentEvent, RunOptions } from "@pattern-stack/agentic-runtime";
+import { AgentEventBus, PendingInputRegistry, createEvent } from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { AgentRegistration } from "../config.js";

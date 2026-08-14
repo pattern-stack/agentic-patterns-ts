@@ -10,7 +10,14 @@
  * § Test plan, items 1-10) one describe block per item.
  */
 
-import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
+import {
+  Agent,
+  Capability,
+  Mission,
+  Persona,
+  RoleBuilder,
+  Toolbox,
+} from "@pattern-stack/agentic-core";
 import {
   AgentEventBus,
   FunctionStep,
@@ -23,8 +30,8 @@ import {
   depKey,
   isPromotedAgent,
   provideDeps,
-} from "@agentic-patterns/runtime";
-import type { AgentEvent, AgentLike, RunOptions, RunResult } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
+import type { AgentEvent, AgentLike, RunOptions, RunResult } from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";

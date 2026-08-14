@@ -24,7 +24,7 @@ import {
   Toolbox,
   scopeItem,
   sessionScope,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createServer } from "../app.js";

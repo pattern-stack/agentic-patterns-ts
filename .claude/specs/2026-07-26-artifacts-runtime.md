@@ -81,7 +81,7 @@ issue).
   terminal result, carried alongside the still-stringified `content`).
 
 Both optional on both events per ADR §3 ("neither is mandatory"). Import
-`RenderArtifact` type-only from `@agentic-patterns/core`.
+`RenderArtifact` type-only from `@pattern-stack/agentic-core`.
 
 Scope note: this spec does NOT add `structuredContent` to `RunResult`
 (`runner/types.ts`). The ADR's own Scope section names `events/types.ts`,

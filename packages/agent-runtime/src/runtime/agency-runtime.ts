@@ -19,7 +19,7 @@ import {
   Persona,
   RoleBuilder,
   TextManual,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { SandboxEventBus } from "../events/sandbox-event-bus.js";
 import type { AgentAddress } from "../events/sandbox-types.js";
 import type { RunnerProtocol } from "../runner/types.js";

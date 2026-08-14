@@ -224,7 +224,7 @@ Only touch the TSX if review prefers inline style over the `.ap-btn` selector
    wrap below. Only if a chip's content itself overflows (long scope values)
    add `minWidth: 0` / ellipsis to that chip — do not restructure the row.
 7. **New test file** `src/__tests__/ChatPage.responsive.test.tsx` (§6).
-8. **Gates.** `bun run --filter=@agentic-patterns/dashboard test` (all existing
+8. **Gates.** `bun run --filter=@pattern-stack/agentic-dashboard test` (all existing
    ChatPage suites must pass **unedited** — see §6 regression note), then
    `typecheck`, `lint`, `build`.
 

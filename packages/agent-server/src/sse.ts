@@ -18,8 +18,8 @@
  * transit.
  */
 
-import type { AgentEvent } from "@agentic-patterns/runtime";
-import { toSSEMapping } from "@agentic-patterns/runtime";
+import type { AgentEvent } from "@pattern-stack/agentic-runtime";
+import { toSSEMapping } from "@pattern-stack/agentic-runtime";
 
 /** SSE message shape for Hono's writeSSE(). */
 export interface SSEMessage {

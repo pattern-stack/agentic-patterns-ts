@@ -6,7 +6,7 @@
  * the shared `createEvalResultRecorder` seam later.
  *
  * Lives in `agent-cli` (not `agent-server`) because it depends on both
- * `@agentic-patterns/server` (the write route) and `@agentic-patterns/runtime`
+ * `@pattern-stack/agentic-server` (the write route) and `@pattern-stack/agentic-runtime`
  * (the CLI command) — `agent-cli` already depends on both.
  */
 
@@ -23,9 +23,9 @@ import {
   type JoinedEvalResultRow,
   MockRunner,
   SSEExporter,
-} from "@agentic-patterns/runtime";
-import { createServer } from "@agentic-patterns/server";
-import type { AgentRegistration } from "@agentic-patterns/server";
+} from "@pattern-stack/agentic-runtime";
+import { createServer } from "@pattern-stack/agentic-server";
+import type { AgentRegistration } from "@pattern-stack/agentic-server";
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runEvalCommand } from "../eval.js";

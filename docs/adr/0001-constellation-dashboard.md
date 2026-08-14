@@ -9,16 +9,16 @@ sidebar:
   [`docs/migration/cockpit-port.md`](../migration/cockpit-port.md).
 - **Date:** 2026-06-24 (accepted 2026-06-25)
 - **Context owner:** Doug
-- **Scope:** `@agentic-patterns/dashboard` (rebuild) + a transport-agnostic graph
-  engine; reuses `@agentic-patterns/cli` (`ap playground` + discovery) and the
-  `@agentic-patterns/server`/`runtime` plumbing — with the small additive changes
+- **Scope:** `@pattern-stack/agentic-dashboard` (rebuild) + a transport-agnostic graph
+  engine; reuses `@pattern-stack/agentic-cli` (`ap playground` + discovery) and the
+  `@pattern-stack/agentic-server`/`runtime` plumbing — with the small additive changes
   noted in the playbook (`/admin/conversations`, `/agents` capability enrichment,
   provider-routing formalization).
 
 > **Build/publish decision (locked 2026-06-25):** develop in `packages/agent-dashboard`
 > **locally** (`bun run dev` / `ap playground`); do NOT publish to npm until the chain
 > graph + chat render against the real server. The dashboard is `private` and ships
-> bundled inside `@agentic-patterns/cli`, so UI work needs no publish. Only
+> bundled inside `@pattern-stack/agentic-cli`, so UI work needs no publish. Only
 > `runtime` (provider routing) + `server` (conversations/capabilities) are
 > publishable libs; ship them, then `cli`, at the milestone. Tune against `agents/*`
 > as the first suite is built. Full rationale + package table in the playbook.
@@ -38,9 +38,9 @@ The dev-kit already has the hard parts of "launch + live-test my agents":
   `InMemoryEventCollector` → `InMemoryAdminService` + `SSEExporter` + optional
   `SQLiteExporter`/`EventStore`), attaches the runner to each discovered agent,
   builds the Hono `createServer`, mounts the dashboard SPA at `/`, opens the browser.
-- **`@agentic-patterns/server`** (Hono): `/agents`, `/conversations` (run + stream),
+- **`@pattern-stack/agentic-server`** (Hono): `/agents`, `/conversations` (run + stream),
   `/admin/*` (stats + `/admin/events/stream` SSE), `/events`, `/health`, `/hooks`.
-- **`@agentic-patterns/dashboard`** (Vite + React 19, atomic structure): pages
+- **`@pattern-stack/agentic-dashboard`** (Vite + React 19, atomic structure): pages
   Agents / Chat / Conversations / Live / Tokens / Tools / ClaudeCode. It consumes
   the server's SSE + admin/conversations endpoints. **It has no agent-graph view,
   and its current UX isn't where we want it.**
@@ -54,7 +54,7 @@ richer dashboard than what ships today — it's just wired to a bespoke Bun serv
 
 ## Decision
 
-1. **Rebuild `@agentic-patterns/dashboard` around the constellation cockpit.** The
+1. **Rebuild `@pattern-stack/agentic-dashboard` around the constellation cockpit.** The
    cockpit's graph + chat/run-viewer + design-system shell become the dashboard's
    core; **absorb the existing dashboard's coverage** (agents, conversations
    history, tokens/tools analytics, live) as views inside the new shell rather than
@@ -72,7 +72,7 @@ richer dashboard than what ships today — it's just wired to a bespoke Bun serv
 4. **The graph ENGINE is transport-agnostic and moves into the framework.** The IR
    (`Constellation`), the per-frame fold (`computeFrame`), the replay hook, and the
    `AgentEvent → TraceStep` fold know nothing about transport. They land in the
-   dashboard (or a shared `@agentic-patterns/react` UI package) behind a thin
+   dashboard (or a shared `@pattern-stack/agentic-react` UI package) behind a thin
    **adapter** that maps the framework's SSE/agent shapes to the engine's inputs.
 5. **Uniform model-provider routing (carried-in requirement).** Treat every
    provider identically — no blocking `required()`, no key-presence ladder. Define
@@ -143,7 +143,7 @@ richer dashboard than what ships today — it's just wired to a bespoke Bun serv
 > **Verified during planning (2026-06-25, see playbook §5–6):** the server streams
 > **named** SSE (`event: <name>\ndata: <snake_case payload>`) with `message.delta`
 > (not `message.chunk`); `GET /admin/conversations` is referenced by the dashboard
-> but **not implemented** (must be added to back the session list); `@agentic-patterns/runtime`
+> but **not implemented** (must be added to back the session list); `@pattern-stack/agentic-runtime`
 > **already** has a `HybridModelResolver` doing prefix-based routing, so provider
 > routing is *formalize-and-extend*, not build-from-scratch; and the dashboard
 > already has a `hooks/useChat.ts` ancestor that the ChatPanel port replaces.
@@ -158,8 +158,8 @@ richer dashboard than what ships today — it's just wired to a bespoke Bun serv
   constellation onto them. (The engine is var-driven, so either works.)
 - **Catalog coupling.** The cockpit's hard-coded `TOOL_CAPABILITY` catalog must be
   replaced by the agent's *declared* composition from the registration.
-- **Packaging.** Engine in `@agentic-patterns/dashboard` vs a new
-  `@agentic-patterns/react` consumable beyond the dashboard. Lean: start in the
+- **Packaging.** Engine in `@pattern-stack/agentic-dashboard` vs a new
+  `@pattern-stack/agentic-react` consumable beyond the dashboard. Lean: start in the
   dashboard; extract when a second consumer appears.
 
 ## Non-goals

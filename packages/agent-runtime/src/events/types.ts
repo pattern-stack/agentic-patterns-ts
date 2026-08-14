@@ -10,7 +10,7 @@ import type {
   MemoryScope,
   RenderArtifact,
   TriggerSourceData,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import type { ClaudeCodeHookEvent } from "./claude-code.js";
 
 /**

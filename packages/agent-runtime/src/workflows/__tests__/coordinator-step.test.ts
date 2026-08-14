@@ -1,4 +1,4 @@
-import { Agent, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
+import { Agent, Mission, Persona, RoleBuilder } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import type { ZodType } from "zod";
 import { z } from "zod";

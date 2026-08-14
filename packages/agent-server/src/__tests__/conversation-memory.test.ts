@@ -22,15 +22,15 @@ import {
   RoleBuilder,
   scopeItem,
   sessionScope,
-} from "@agentic-patterns/core";
-import { AgentEventBus, InMemoryMemoryStore, createEvent } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-core";
+import { AgentEventBus, InMemoryMemoryStore, createEvent } from "@pattern-stack/agentic-runtime";
 import type {
   AgentEvent,
   AgentLike,
   MemoryStore,
   RunOptions,
   RunResult,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createServer } from "../app.js";

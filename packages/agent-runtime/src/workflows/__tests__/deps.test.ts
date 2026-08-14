@@ -1,4 +1,4 @@
-import { Agent, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
+import { Agent, Mission, Persona, RoleBuilder } from "@pattern-stack/agentic-core";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { AgentLike } from "../../runner/agent-runner.js";

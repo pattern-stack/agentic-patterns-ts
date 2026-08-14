@@ -13,7 +13,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ROUTING } from "@agentic-patterns/runtime";
+import { ROUTING } from "@pattern-stack/agentic-runtime";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { attachProvenance, computeProvenance } from "../provenance.js";
 
@@ -132,7 +132,7 @@ describe("computeProvenance — tier attribution per slot", () => {
       name: ROUTING.data.domain,
       index: 2,
       tier: "preset?",
-      sourcePath: "@agentic-patterns/runtime",
+      sourcePath: "@pattern-stack/agentic-runtime",
     });
 
     // 4. the preset const itself → confident "preset"
@@ -140,7 +140,7 @@ describe("computeProvenance — tier attribution per slot", () => {
       name: ROUTING.data.domain,
       index: 3,
       tier: "preset",
-      sourcePath: "@agentic-patterns/runtime",
+      sourcePath: "@pattern-stack/agentic-runtime",
     });
   });
 

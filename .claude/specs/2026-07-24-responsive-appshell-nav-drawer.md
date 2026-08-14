@@ -1,7 +1,7 @@
 # F2 — AppShell viewport-driven nav drawer + mobile app bar
 
 **Date:** 2026-07-24
-**Package:** `@agentic-patterns/dashboard` (`packages/agent-dashboard/`)
+**Package:** `@pattern-stack/agentic-dashboard` (`packages/agent-dashboard/`)
 **Status:** Spec — ready for implementation
 **Size estimate:** ~230 lines of new/changed source + ~150 lines of tests
 
@@ -284,7 +284,7 @@ Append after the `apdash-spin` keyframes (line 61-65):
    lock, `onClose` on every NavLink, no localStorage anywhere).
 7. Append the two `globals.css` blocks (§3).
 8. Write `src/__tests__/AppShell.responsive.test.tsx` (below).
-9. Run `bun run --filter=@agentic-patterns/dashboard test`, `typecheck`,
+9. Run `bun run --filter=@pattern-stack/agentic-dashboard test`, `typecheck`,
    `lint` (biome: double quotes, 2-space, 100-char). Then repo `bun run check`.
 
 ## Test plan — `src/__tests__/AppShell.responsive.test.tsx`

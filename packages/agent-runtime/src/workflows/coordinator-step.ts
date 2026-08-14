@@ -18,7 +18,7 @@
  * there is a single structured-output code path.
  */
 
-import { Agent, Capability, Role } from "@agentic-patterns/core";
+import { Agent, Capability, Role } from "@pattern-stack/agentic-core";
 import type { ZodType } from "zod";
 import { createToolboxExecutor } from "../runner/toolbox-executor.js";
 import type { RunnerProtocol } from "../runner/types.js";

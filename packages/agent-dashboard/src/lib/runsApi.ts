@@ -2,7 +2,7 @@
  * REST client for the read-only run-history endpoints (S5's `/admin/runs*`).
  *
  * Mirrors `lib/evalApi.ts`'s grammar: hand-mirrored row types (`api/types.ts`,
- * the dashboard has no `@agentic-patterns/runtime` dependency), and explicit
+ * the dashboard has no `@pattern-stack/agentic-runtime` dependency), and explicit
  * 503 discrimination via `RunsFetch<T>` so "persistence not configured"
  * renders as a first-class UI state (the picker's honest-degradation note)
  * instead of collapsing into a flat error string. The by-id fetches also

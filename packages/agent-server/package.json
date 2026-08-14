@@ -1,8 +1,8 @@
 {
-  "name": "@agentic-patterns/server",
+  "name": "@pattern-stack/agentic-server",
   "version": "0.40.0",
   "description": "Hono HTTP server for agentic-patterns agents \u2014 routes, SSE streaming, admin API",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "repository": {
     "type": "git",
@@ -38,8 +38,8 @@
     "zod": "^3.25.0 || ^4.1.8"
   },
   "dependencies": {
-    "@agentic-patterns/core": "workspace:^",
-    "@agentic-patterns/runtime": "workspace:^",
+    "@pattern-stack/agentic-core": "workspace:^",
+    "@pattern-stack/agentic-runtime": "workspace:^",
     "hono": "^4.0.0",
     "zod-to-json-schema": "^3.24.0"
   },

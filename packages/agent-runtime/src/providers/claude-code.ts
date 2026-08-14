@@ -1316,8 +1316,8 @@ function deriveFinishReason(args: {
  *
  * @example
  * ```ts
- * import { claudeCode } from "@agentic-patterns/runtime/providers";
- * import { AgentRunner } from "@agentic-patterns/runtime";
+ * import { claudeCode } from "@pattern-stack/agentic-runtime/providers";
+ * import { AgentRunner } from "@pattern-stack/agentic-runtime";
  *
  * const model = claudeCode("sonnet");
  * try {

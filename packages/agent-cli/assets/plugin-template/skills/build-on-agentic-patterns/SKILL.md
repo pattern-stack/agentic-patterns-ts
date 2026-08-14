@@ -1,7 +1,7 @@
 ---
 name: build-on-agentic-patterns
 description: How to build agents and products on the @agentic-patterns framework — register agents the convention way (`ap` discovers any Agent exported from an `agents/<name>/agent.ts`), treat the framework as a compositional algebra (Capability = Toolbox+Manual+Playbook; Role = Persona+Judgments+Capabilities+Responsibilities), declare per-conversation identity via SessionScope (requireScope/readScope in tools, Awareness.fromScope for prompt identity), and compose multiple steps/agents through the typed Node layer (AgentStep/FunctionStep, the sequentialAgent/parallelAgent stage sugar with typed emit + input:'prior', Sequential/Parallel/FanOut/Loop, Scratchpad, agent-as-tool, CoordinatorStep) — not a prompt-assembly library. Use when scaffolding or extending an agent, toolbox, capability, playbook, manual, or role, when wiring a multi-step workflow or a model-driven coordinator over subagents, when an agent "doesn't show up" in `ap playground`, or when a build "isn't working" (tools no-op, prompt edits do nothing, an agent is one giant mission string).
-when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "compose a workflow / pipeline of steps", "make a coordinator that routes to subagents", "agent-as-a-tool", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", "declare a session scope / per-user config", "requireScope threw ScopeUnavailableError", "instantiateDefaults is deprecated, what replaces it", working in a repo that imports @agentic-patterns/core or @agentic-patterns/runtime.
+when_to_use: "build an agent on agentic-patterns", "register / discover an agent", "my agent doesn't show up in the playground / `ap agents`", "point ap at a folder of agents", "add a toolbox / capability / playbook / manual / role", "scaffold a new agent project", "compose a workflow / pipeline of steps", "make a coordinator that routes to subagents", "agent-as-a-tool", "my tools aren't firing", "the model says the tool errored", "where does this prompt text go", "declare a session scope / per-user config", "requireScope threw ScopeUnavailableError", "instantiateDefaults is deprecated, what replaces it", working in a repo that imports @pattern-stack/agentic-core or @pattern-stack/agentic-runtime.
 # --- SDLC metadata (documentation only; not consumed by the Claude Code runtime) ---
 status: active
 ---
@@ -64,8 +64,8 @@ If an agent "doesn't show up": check the file is under the discovery glob, that 
 Who's asking, which tenant, which tier — per-conversation identity is a **declared** scope, not ad-hoc deps threaded by hand. Add one field to the wrapper registration (§0 form #5):
 
 ```ts
-import { sessionScope, scopeItem, type ScopeValue, Awareness } from "@agentic-patterns/core";
-import { requireScope } from "@agentic-patterns/runtime";
+import { sessionScope, scopeItem, type ScopeValue, Awareness } from "@pattern-stack/agentic-core";
+import { requireScope } from "@pattern-stack/agentic-runtime";
 import { z } from "zod";
 
 const supportDeskScope = sessionScope(
@@ -93,7 +93,7 @@ export default { id: "support-desk", name: "Support Desk", agent: buildSupportDe
     return { operator: scope.operator, tier: scope.tier };
   },
   ```
-  `requireScope(ctx)` is the fail-loud default read path. `readScope(ctx)` is the soft twin (returns `undefined` instead of throwing) — use it only for a tool that must genuinely tolerate running scope-less. `readScopeAs<T>(ctx)` is the same soft read with a typed cast; it trusts the server already ran `scope.parse()` and deliberately does **not** re-parse per call. All three (from `@agentic-patterns/runtime`) accept either a tool's `ToolExecutionContext` (`ctx.host.scope`) or a node's `NodeRunContext` (`ctx.scope` — see §7). Default to Mode B; reach for Mode A only when a tool must build something at construction time.
+  `requireScope(ctx)` is the fail-loud default read path. `readScope(ctx)` is the soft twin (returns `undefined` instead of throwing) — use it only for a tool that must genuinely tolerate running scope-less. `readScopeAs<T>(ctx)` is the same soft read with a typed cast; it trusts the server already ran `scope.parse()` and deliberately does **not** re-parse per call. All three (from `@pattern-stack/agentic-runtime`) accept either a tool's `ToolExecutionContext` (`ctx.host.scope`) or a node's `NodeRunContext` (`ctx.scope` — see §7). Default to Mode B; reach for Mode A only when a tool must build something at construction time.
 
 **Prompt identity — `Awareness.fromScope`.** Render the "who am I acting for" line from the scope itself, on ONE shared `Awareness` instance instead of rebuilding the agent:
 
@@ -171,7 +171,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
      );
    }
    ```
-5. **Judgment + Persona** (`roles/`) — decision rules and identity as named exports. **Don't start from zero:** `@agentic-patterns/runtime` ships preset judgments (`RETRIEVAL_STRATEGY`, `EVIDENCE_QUALITY`, `ROUTING`, `QUALITY_REVIEW`, …), responsibilities, and whole roles (`retrievalRole`, `analystRole`, `coordinatorRole`) — clone or compose those before authoring new ones.
+5. **Judgment + Persona** (`roles/`) — decision rules and identity as named exports. **Don't start from zero:** `@pattern-stack/agentic-runtime` ships preset judgments (`RETRIEVAL_STRATEGY`, `EVIDENCE_QUALITY`, `ROUTING`, `QUALITY_REVIEW`, …), responsibilities, and whole roles (`retrievalRole`, `analystRole`, `coordinatorRole`) — clone or compose those before authoring new ones.
 6. **Role** — `new RoleBuilder(name).withPersona(p).withJudgment(j).withCapability(c).withDefaultModel(id).build()`. Requires a persona. Optional knowledge slots: `.withTone(t)` (voice with examples/anti-patterns, renders under `### Tone` and wins over the persona tone string), `.withMethodology(m)` (work protocol + checklist, leads `## Methodology`), `.withRecovery(r)` (failure policy, renders as `### Recovery` under Boundaries).
 7. **Mission** — thin: `new Mission({ objective, successCriteria, /* grounding rendered from a context AgenticModel */ })`. No protocol text.
 8. **Agent** — `new AgentBuilder(role).withMission(m).withModel(id).build()`. Requires a mission. **This built Agent is what your `agents/<name>/agent.ts` exports** (§0).
@@ -213,7 +213,7 @@ Bottom-up. Each step fills one slot; factories take a `deps` bundle so live clie
 
 ## 7. Compose: the typed Node layer (multi-step & multi-agent)
 
-§0–6 build **one** agent. To run several steps or several agents as a typed, composable graph, use the **Node layer** in `@agentic-patterns/runtime` (the "PatternStack"). One contract underneath everything:
+§0–6 build **one** agent. To run several steps or several agents as a typed, composable graph, use the **Node layer** in `@pattern-stack/agentic-runtime` (the "PatternStack"). One contract underneath everything:
 
 > `Node<TIn, TOut>` — `run(input, ctx): Promise<NodeResult<TOut>>`. Typed object in, typed object out, plus a token rollup. **Every leaf AND every composite is a `Node`**, so they nest freely — that single contract is the whole point.
 
@@ -302,7 +302,7 @@ Because it's a `Node`, it composes like any other: a coordinator can be a `Seque
 - Framework layer model + import rules: the framework repo's `CLAUDE.md` and `AGENTS.md`.
 - The dev loop: `ap playground` (server + dashboard with a live agent **graph** + streaming chat), `ap run` (terminal), `ap agents` / `ap tools` (introspection).
 - Building *inside* the framework monorepo itself (vs a consuming app): `bun run dev` boots server `:3456` + dashboard `:5173`; point it at your agent with `DEMO_FILE=examples/my-agent.ts`, copying `packages/agent-server/examples/live-demo.ts` for the full observability wiring (EventBus → collector → SSE exporter).
-- Mixed-model routing (a cheaper model per capability): `HybridModelResolver` + `models.yaml` profiles in `@agentic-patterns/runtime`.
+- Mixed-model routing (a cheaper model per capability): `HybridModelResolver` + `models.yaml` profiles in `@pattern-stack/agentic-runtime`.
 
 ---
 *Lightweight and living. Update in place as the framework's discovery + exposure features evolve; this is the distillation of the proven pattern, not a spec.*

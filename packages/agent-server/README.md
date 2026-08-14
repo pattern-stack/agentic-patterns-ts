@@ -1,14 +1,14 @@
-# @agentic-patterns/server
+# @pattern-stack/agentic-server
 
 Hono HTTP server for agentic-patterns agents. Exposes conversation routes with SSE streaming, admin analytics, and a hook-receiver endpoint that turns Claude Code sessions into first-class events on the runtime event bus.
 
 ## Installation
 
 ```bash
-bun add @agentic-patterns/server @agentic-patterns/runtime @agentic-patterns/core hono @hono/node-server
+bun add @pattern-stack/agentic-server @pattern-stack/agentic-runtime @pattern-stack/agentic-core hono @hono/node-server
 ```
 
-Most consumers don't install this directly — `@agentic-patterns/cli` bundles it. Install standalone when you need a custom server (different framework, custom routes, non-default CORS, reverse proxy, etc.).
+Most consumers don't install this directly — `@pattern-stack/agentic-cli` bundles it. Install standalone when you need a custom server (different framework, custom routes, non-default CORS, reverse proxy, etc.).
 
 ## Quick Start
 
@@ -19,8 +19,8 @@ import {
   InMemoryAdminService,
   InMemoryEventCollector,
   SSEExporter,
-} from "@agentic-patterns/runtime";
-import { createServer } from "@agentic-patterns/server";
+} from "@pattern-stack/agentic-runtime";
+import { createServer } from "@pattern-stack/agentic-server";
 
 const bus = new AgentEventBus();
 const collector = new InMemoryEventCollector();
@@ -87,7 +87,7 @@ export interface SessionScopeLike {
 }
 ```
 
-A `SessionScope` instance (`@agentic-patterns/core`) satisfies this structurally — the server never does `instanceof SessionScope` across the module boundary, so a CLI-discovered agent built against a different `@agentic-patterns/core` install still works.
+A `SessionScope` instance (`@pattern-stack/agentic-core`) satisfies this structurally — the server never does `instanceof SessionScope` across the module boundary, so a CLI-discovered agent built against a different `@pattern-stack/agentic-core` install still works.
 
 ### `POST /conversations`
 
@@ -163,7 +163,7 @@ interface ServerConfig {
   adminService: AdminServiceProtocol;
   eventBus: AgentEventBus;
   sseExporter: SSEExporterLike;
-  store?: ConversationStore;     // optional persistence (@agentic-patterns/runtime)
+  store?: ConversationStore;     // optional persistence (@pattern-stack/agentic-runtime)
   staticDir?: string;             // optional static SPA mount
   cors?: CORSConfig;              // defaults to origin: "*"
 }

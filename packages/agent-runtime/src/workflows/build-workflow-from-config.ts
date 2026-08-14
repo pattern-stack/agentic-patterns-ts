@@ -27,7 +27,7 @@ import {
   WorkflowConfigSchema,
   buildAgentFromConfig,
   mergeAgentConfig,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 
 import { AgentStep } from "./agent-step.js";
 import type { AgentLike, PatternContext, PatternProtocol } from "./base.js";

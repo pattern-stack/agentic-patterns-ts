@@ -33,7 +33,7 @@
  * newly defined here.)
  */
 
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 import type { AgentLike, ToolExecutor } from "./types.js";
 
 /** Minimal shape — matches what Agent.role.capabilities[].toolbox exposes. */

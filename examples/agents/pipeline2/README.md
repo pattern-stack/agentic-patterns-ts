@@ -9,7 +9,7 @@ reproducible teaching material.
 
 ```bash
 bun install                                  # once, from the repo root — links
-                                              # @agentic-patterns/* into examples/agents
+                                              # @pattern-stack/agentic-* into examples/agents
                                               # (examples/agents/package.json makes it
                                               # a workspace member; also sets "type":
                                               # "module" so the .ts imports resolve)

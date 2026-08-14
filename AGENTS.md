@@ -3,7 +3,7 @@
 Practical guide for building and testing agents on top of this monorepo.
 
 > **Active initiative — Dashboard rebuild (constellation cockpit).** We're porting a
-> richer chat/agent-graph UI into `@agentic-patterns/dashboard`. Start here:
+> richer chat/agent-graph UI into `@pattern-stack/agentic-dashboard`. Start here:
 > [`docs/migration/cockpit-port.md`](docs/migration/cockpit-port.md) (cold-start playbook —
 > contracts, source→target map, step checklist) and
 > [`docs/adr/0001-constellation-dashboard.md`](docs/adr/0001-constellation-dashboard.md)
@@ -42,15 +42,15 @@ wiring verbatim.
 
 Three packages, three layers:
 
-1. **`@agentic-patterns/core`** — describe the agent declaratively.
+1. **`@pattern-stack/agentic-core`** — describe the agent declaratively.
    `Role = Persona + Judgment + Capabilities + Responsibilities`.
    `Agent = Role × Background × Awareness × Mission`.
 
-2. **`@agentic-patterns/runtime`** — execute it and emit events.
+2. **`@pattern-stack/agentic-runtime`** — execute it and emit events.
    `AgentEventBus` · `InMemoryEventCollector` · `SSEExporter` ·
    `AgentRunner` (Vercel AI SDK) / `ClaudeCodeAPIRunner` / `MockRunner`.
 
-3. **`@agentic-patterns/server` + `@agentic-patterns/dashboard`** —
+3. **`@pattern-stack/agentic-server` + `@pattern-stack/agentic-dashboard`** —
    interact with it. Hono routes + React admin UI.
 
 See `CLAUDE.md` for the layer hierarchy and import rules.

@@ -13,11 +13,11 @@ You are a builder for the agentic-patterns-ts project — a TypeScript library f
 ### Project Context
 
 bun monorepo with packages:
-- **@agentic-patterns/core** (`packages/agent-core/`) — atoms, protocols, molecules, rendering, organisms
-- **@agentic-patterns/runtime** (`packages/agent-runtime/`) — events, gates, runner, transport, runtime, exporters, presets
-- **@agentic-patterns/server** (`packages/agent-server/`) — Hono routes, SSE, admin API, hook bridge
-- **@agentic-patterns/cli** (`packages/agent-cli/`) — `ap` binary + bundled dashboard
-- **@agentic-patterns/dashboard** (`packages/agent-dashboard/`, private) — React SPA
+- **@pattern-stack/agentic-core** (`packages/agent-core/`) — atoms, protocols, molecules, rendering, organisms
+- **@pattern-stack/agentic-runtime** (`packages/agent-runtime/`) — events, gates, runner, transport, runtime, exporters, presets
+- **@pattern-stack/agentic-server** (`packages/agent-server/`) — Hono routes, SSE, admin API, hook bridge
+- **@pattern-stack/agentic-cli** (`packages/agent-cli/`) — `ap` binary + bundled dashboard
+- **@pattern-stack/agentic-dashboard** (`packages/agent-dashboard/`, private) — React SPA
 
 Runtime depends on core. Server depends on runtime + core. Core never imports runtime.
 

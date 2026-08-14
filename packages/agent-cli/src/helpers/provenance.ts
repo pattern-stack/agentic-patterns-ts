@@ -3,7 +3,7 @@
  * (persona, judgments, responsibilities, capabilities) to WHERE it came from.
  *
  * Tier vocabulary (docs/playground-redesign.md §5):
- *   preset   — matches a @agentic-patterns/runtime preset by reference, or by
+ *   preset   — matches a @pattern-stack/agentic-runtime preset by reference, or by
  *              name + structural content across the dual-package boundary
  *   preset?  — matches a preset's NAME only (content differs) — honest uncertainty,
  *              never silently rendered as `preset`
@@ -39,7 +39,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import * as runtimePresets from "@agentic-patterns/runtime";
+import * as runtimePresets from "@pattern-stack/agentic-runtime";
 import { glob } from "tinyglobby";
 import { ensureTsxRegistered } from "./discover.js";
 
@@ -63,7 +63,7 @@ export interface SlotProvenance {
    */
   index: number;
   tier: ProvenanceTier;
-  /** Module path the slot matched in (library/local), or "@agentic-patterns/runtime" for presets. */
+  /** Module path the slot matched in (library/local), or "@pattern-stack/agentic-runtime" for presets. */
   sourcePath?: string;
 }
 
@@ -95,7 +95,7 @@ export interface DiscoveredAgentLike {
 // Structural shape checks (duck-typed — see header)
 // ---------------------------------------------------------------------------
 
-const PRESET_SOURCE = "@agentic-patterns/runtime";
+const PRESET_SOURCE = "@pattern-stack/agentic-runtime";
 
 function dataOf(x: unknown): Record<string, unknown> | null {
   if (!x || typeof x !== "object") return null;

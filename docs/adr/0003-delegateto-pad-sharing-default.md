@@ -9,7 +9,7 @@ sidebar:
   [#269](https://github.com/pattern-stack/agentic-patterns-ts/issues/269).
 - **Date:** 2026-07-15
 - **Context owner:** Doug
-- **Scope:** `@agentic-patterns/runtime` agent-as-tool delegation (`delegateTo` /
+- **Scope:** `@pattern-stack/agentic-runtime` agent-as-tool delegation (`delegateTo` /
   `NodeToolbox`), runner `ToolExecutionContext` threading, and the scratchpad
   contract documented for consumers.
 

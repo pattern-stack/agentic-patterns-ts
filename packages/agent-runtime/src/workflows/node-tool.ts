@@ -9,7 +9,11 @@
  * conversational handoff/transfer (where the sub-agent takes over the turn) —
  * that is a separate, heavier Conversation-level construct.
  */
-import { type ToolDefinition, type ToolExecutionContext, Toolbox } from "@agentic-patterns/core";
+import {
+  type ToolDefinition,
+  type ToolExecutionContext,
+  Toolbox,
+} from "@pattern-stack/agentic-core";
 import { type ZodType, type ZodTypeAny, z } from "zod";
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentLike } from "../runner/agent-runner.js";

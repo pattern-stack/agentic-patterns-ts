@@ -7,7 +7,7 @@ import {
   RoleBuilder,
   Tone,
   Toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { MockLanguageModelV3 } from "ai/test";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";

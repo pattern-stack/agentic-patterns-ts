@@ -9,8 +9,12 @@
  * runId/traceId threading fix end-to-end through the SSE stream route.
  */
 
-import type { AgentEvent, RunOptions } from "@agentic-patterns/runtime";
-import { AgentEventBus, InMemoryConversationStore, createEvent } from "@agentic-patterns/runtime";
+import type { AgentEvent, RunOptions } from "@pattern-stack/agentic-runtime";
+import {
+  AgentEventBus,
+  InMemoryConversationStore,
+  createEvent,
+} from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { AgentRegistration } from "../config.js";

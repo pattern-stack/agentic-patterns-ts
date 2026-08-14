@@ -1,4 +1,4 @@
-import type { ToolExecutionContext } from "@agentic-patterns/core";
+import type { ToolExecutionContext } from "@pattern-stack/agentic-core";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentEvent, ToolCallEndEvent, ToolCallStartEvent } from "../../events/types.js";
 import { MockRunner } from "../mock-runner.js";

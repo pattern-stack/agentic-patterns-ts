@@ -1,12 +1,19 @@
 /**
  * Verify-only test (issue #97, spec § File-level plan "Verify unchanged") — a
- * `PromotedAgent` (via `asAgent()`, `@agentic-patterns/runtime` workflows)
+ * `PromotedAgent` (via `asAgent()`, `@pattern-stack/agentic-runtime` workflows)
  * genuinely lacks `mission`/`awareness`/`background`. Confirms the
  * introspection routes (`GET /agents`, `GET /agents/:id/composition`) tolerate
  * that absence and render without throwing, rather than rebuilding anything.
  */
 
-import { Agent, Capability, Mission, Persona, RoleBuilder, Toolbox } from "@agentic-patterns/core";
+import {
+  Agent,
+  Capability,
+  Mission,
+  Persona,
+  RoleBuilder,
+  Toolbox,
+} from "@pattern-stack/agentic-core";
 import {
   AgentEventBus,
   AgentStep,
@@ -16,8 +23,13 @@ import {
   RunStoreExporter,
   asAgent,
   deriveToolboxExecutor,
-} from "@agentic-patterns/runtime";
-import type { AgentLike, RunOptions, RunResult, RunnerProtocol } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
+import type {
+  AgentLike,
+  RunOptions,
+  RunResult,
+  RunnerProtocol,
+} from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";

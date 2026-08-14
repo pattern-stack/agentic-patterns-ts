@@ -116,7 +116,7 @@ it absorbs all shrink on narrow widths.
    `EventStream`; make the expanded-`<pre>` left padding phone-conditional and
    add `overflowWrap: "anywhere"`.
 3. Add `src/__tests__/LivePage.responsive.test.tsx` per the test plan.
-4. Gate: `bun run --filter=@agentic-patterns/dashboard test` (full suite —
+4. Gate: `bun run --filter=@pattern-stack/agentic-dashboard test` (full suite —
    existing tests must pass unchanged via the F1 desktop fallback), plus
    `typecheck` and `lint` (biome: double quotes, 2-space indent, 100-col).
 

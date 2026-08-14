@@ -10,7 +10,7 @@ previews.
 ## Install
 
 ```sh
-bun add @agentic-patterns/core @agentic-patterns/runtime zod
+bun add @pattern-stack/agentic-core @pattern-stack/agentic-runtime zod
 ```
 
 ## 1. Your first agent — prose only
@@ -26,7 +26,7 @@ import {
   Mission,
   Persona,
   RoleBuilder,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 
 const role = new RoleBuilder("sous-chef")
   .withPersona(
@@ -67,7 +67,7 @@ to.
 it chose.
 
 ```ts
-import { createRunner } from "@agentic-patterns/runtime";
+import { createRunner } from "@pattern-stack/agentic-runtime";
 
 const { runner, reason } = await createRunner();
 console.log(reason); // e.g. "using anthropic (env ANTHROPIC_API_KEY)"
@@ -87,7 +87,7 @@ and `returns` are Zod schemas, and `execute` arguments arrive already
 validated.
 
 ```ts
-import { capability, defineTool, toolbox } from "@agentic-patterns/core";
+import { capability, defineTool, toolbox } from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 const Temperature = z.object({ degrees: z.number() });
@@ -119,7 +119,7 @@ the runner actually *execute* your tools instead of just describing them to
 the model:
 
 ```ts
-import { createToolboxExecutor } from "@agentic-patterns/runtime";
+import { createToolboxExecutor } from "@pattern-stack/agentic-runtime";
 
 const skilledRole = new RoleBuilder("sous-chef")
   .withPersona(/* …as above… */)
@@ -143,7 +143,7 @@ const result = await runner.run(skilledAgent, "The recipe says 180°C — what's
 real tool dispatch — the standard way to test agents.
 
 ```ts
-import { MockRunner, createToolboxExecutor } from "@agentic-patterns/runtime";
+import { MockRunner, createToolboxExecutor } from "@pattern-stack/agentic-runtime";
 
 const mock = new MockRunner().addResponse("Fahrenheit", {
   content: "180°C is 356°F.",
@@ -164,6 +164,6 @@ console.log(result.response); // "180°C is 356°F."
   in tools.
 - [Memory guide](memory/guide.md) — give an agent cross-session memory: the
   store, the toolbox, and turn-1 recall.
-- Run `ap playground` (from `@agentic-patterns/cli`) to chat with your agents
+- Run `ap playground` (from `@pattern-stack/agentic-cli`) to chat with your agents
   in a browser with live event streaming — any agent exported from an
   `agents/<name>/agent.ts` file is discovered automatically.

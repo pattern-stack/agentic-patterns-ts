@@ -15,8 +15,8 @@ import {
   RoleBuilder,
   defineTool,
   toolbox,
-} from "@agentic-patterns/core";
-import { AgentEventBus, ClaudeCodeRunner, ConsoleExporter } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-core";
+import { AgentEventBus, ClaudeCodeRunner, ConsoleExporter } from "@pattern-stack/agentic-runtime";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------

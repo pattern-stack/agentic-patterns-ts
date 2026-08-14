@@ -14,11 +14,11 @@ You are an architect for the agentic-patterns-ts project — a TypeScript librar
 
 This is a bun monorepo with four published npm packages (plus a private dashboard):
 
-- **@agentic-patterns/core** — Atoms (Persona, Mission, Judgment, etc.), protocols, molecules (Toolbox, Capability), rendering (PromptRenderer), organisms (RoleBuilder, AgentBuilder)
-- **@agentic-patterns/runtime** — Events (EventBus), gates (safety, approval, rate-limit, audit), runner (AgentRunner on Vercel AI SDK), transport, multi-agent runtime, conversation, exporters (Console, Langfuse, OTel), presets
-- **@agentic-patterns/server** — Hono HTTP server, SSE streaming, admin routes, Claude Code hook bridge
-- **@agentic-patterns/cli** — `ap` binary, agent discovery, bundled dashboard SPA
-- `@agentic-patterns/dashboard` (private) — React SPA shipped inside the CLI tarball
+- **@pattern-stack/agentic-core** — Atoms (Persona, Mission, Judgment, etc.), protocols, molecules (Toolbox, Capability), rendering (PromptRenderer), organisms (RoleBuilder, AgentBuilder)
+- **@pattern-stack/agentic-runtime** — Events (EventBus), gates (safety, approval, rate-limit, audit), runner (AgentRunner on Vercel AI SDK), transport, multi-agent runtime, conversation, exporters (Console, Langfuse, OTel), presets
+- **@pattern-stack/agentic-server** — Hono HTTP server, SSE streaming, admin routes, Claude Code hook bridge
+- **@pattern-stack/agentic-cli** — `ap` binary, agent discovery, bundled dashboard SPA
+- `@pattern-stack/agentic-dashboard` (private) — React SPA shipped inside the CLI tarball
 
 Runtime depends on core. Server depends on runtime + core. Core never imports runtime.
 

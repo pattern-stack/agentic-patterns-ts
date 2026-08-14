@@ -14,11 +14,11 @@ sidebar:
   Published: `core@0.13.0`, `runtime`/`server`/`cli@0.28.0`.
 - **Date:** 2026-07-18
 - **Context owner:** Doug
-- **Scope:** `@agentic-patterns/core` (new `molecules/session-scope.ts`;
+- **Scope:** `@pattern-stack/agentic-core` (new `molecules/session-scope.ts`;
   `RenderContext` in `atoms/base.ts`; `Awareness.fromScope` +
-  render-ctx widening), `@agentic-patterns/runtime`
+  render-ctx widening), `@pattern-stack/agentic-runtime`
   (`workflows/scope-host.ts`, the `host.scope` bag, `NodeRunContext.scope`,
-  runner `_renderCtx`), `@agentic-patterns/server` + CLI (server-side
+  runner `_renderCtx`), `@pattern-stack/agentic-server` + CLI (server-side
   validation, echo redaction, wire grammar, `SessionScopeLike` duck type),
   and the dashboard scope form.
 

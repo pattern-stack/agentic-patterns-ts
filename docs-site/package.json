@@ -1,5 +1,5 @@
 {
-  "name": "@agentic-patterns/docs-site",
+  "name": "@pattern-stack/agentic-docs-site",
   "private": true,
   "type": "module",
   "description": "Starlight documentation site — renders docs/ in place (#457/#458)",

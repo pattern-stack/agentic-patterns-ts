@@ -22,7 +22,7 @@ import {
   Toolbox,
   scopeItem,
   sessionScope,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import {
   AgentEventBus,
   MockRunner,
@@ -30,8 +30,8 @@ import {
   RunStoreExporter,
   createEvent,
   readScope,
-} from "@agentic-patterns/runtime";
-import type { AgentEvent, AgentLike, RunOptions, RunResult } from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
+import type { AgentEvent, AgentLike, RunOptions, RunResult } from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";

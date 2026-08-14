@@ -11,11 +11,11 @@ sidebar:
   (run-state persistence tracked as a follow-up). Not yet implemented.
 - **Date:** 2026-07-26
 - **Context owner:** Doug
-- **Scope:** `@agentic-patterns/core` (`molecules/tool-schema.ts` — the
-  `displayType` convention), `@agentic-patterns/runtime`
+- **Scope:** `@pattern-stack/agentic-core` (`molecules/tool-schema.ts` — the
+  `displayType` convention), `@pattern-stack/agentic-runtime`
   (`events/types.ts`, `transport/sse-formatter.ts`, `runner/agent-runner.ts`
-  terminal-tool exit), `@agentic-patterns/server` (wire grammar passthrough),
-  and `@agentic-patterns/dashboard` (chat render + ref expansion).
+  terminal-tool exit), `@pattern-stack/agentic-server` (wire grammar passthrough),
+  and `@pattern-stack/agentic-dashboard` (chat render + ref expansion).
 
 ## Context
 

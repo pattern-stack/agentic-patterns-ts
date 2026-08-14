@@ -4,7 +4,7 @@
  * Ported from Python: library/orchestration/archetypes.py
  */
 
-import { type Capability, Persona, type Role, RoleBuilder } from "@agentic-patterns/core";
+import { type Capability, Persona, type Role, RoleBuilder } from "@pattern-stack/agentic-core";
 import { INTENT_CLASSIFICATION } from "./judgments.js";
 import { INTENT_ROUTING, RESPONSE_SYNTHESIS } from "./responsibilities.js";
 

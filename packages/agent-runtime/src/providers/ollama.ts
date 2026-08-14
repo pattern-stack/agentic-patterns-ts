@@ -31,7 +31,7 @@ export const ollamaProvider: ProviderProtocol = {
   // we use the V2 fork `ollama-ai-provider-v2`. Its `createOllama` / default
   // `ollama` factory signature is unchanged at the `load()` call site.
   packageName: "ollama-ai-provider-v2",
-  // Already a real dependency of @agentic-patterns/runtime (predates #472).
+  // Already a real dependency of @pattern-stack/agentic-runtime (predates #472).
   bundled: true,
   async load(modelId) {
     const mod = await importProvider(this.packageName, this.name, this.bundled);

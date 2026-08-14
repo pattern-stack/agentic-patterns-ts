@@ -90,7 +90,7 @@ export class Awareness extends AgenticModel<typeof AwarenessSchema.shape> {
    * `scope` parameter via inference and is NEVER parsed here; the scope
    * value arriving through `RenderContext.scope` at render time is trusted
    * as already parsed (same "cast, not validation" stance as `readScopeAs`
-   * in `@agentic-patterns/runtime`). Atoms never import molecules, so
+   * in `@pattern-stack/agentic-runtime`). Atoms never import molecules, so
    * `scopeLike` is typed structurally rather than as `SessionScope` itself.
    */
   static fromScope<S extends { parse(input: unknown): unknown }>(

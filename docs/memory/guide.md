@@ -67,7 +67,7 @@ the in-memory store yourself. Memory gets **its own SQLite file** — it is a sy
 telemetry, and must never inherit the event store's retention pruning.
 
 ```typescript
-import { loadMemoryStore } from "@agentic-patterns/runtime";
+import { loadMemoryStore } from "@pattern-stack/agentic-runtime";
 
 // `store` is ALWAYS usable — when `unavailable` it is already the
 // InMemoryMemoryStore fallback; `reason` says why (CLI-banner material).
@@ -104,7 +104,7 @@ function — it is the single most consequential decision you'll make (see
 [recall tuning](#recall-tuning) for the patterns it unlocks).
 
 ```typescript
-import { SessionScope, scopeItem, type ScopeValue } from "@agentic-patterns/core";
+import { SessionScope, scopeItem, type ScopeValue } from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 const supportScope = new SessionScope({
@@ -136,8 +136,8 @@ with `supersedes` when correcting). Use the capability helper unless you want to
 Manual yourself (see [deciding what to remember](#deciding-what-to-remember)).
 
 ```typescript
-import { AgentBuilder, Awareness } from "@agentic-patterns/core";
-import { MemoryToolbox } from "@agentic-patterns/runtime";
+import { AgentBuilder, Awareness } from "@pattern-stack/agentic-core";
+import { MemoryToolbox } from "@pattern-stack/agentic-runtime";
 
 function buildSupportAgent(s: SupportScope) {
   const memory = new MemoryToolbox({ store, scope: memoryScope(s) });
@@ -169,7 +169,7 @@ Render purity is a hard gate: the renderer never fetches. The **host** assembles
 rendering and passes the finished block in. Self-hosting the runner, that looks like:
 
 ```typescript
-import { assembleRecall } from "@agentic-patterns/runtime";
+import { assembleRecall } from "@pattern-stack/agentic-runtime";
 
 const recall = await assembleRecall(store, memoryScope(s), {
   query: firstUserText,     // optional — without it, profile + recency listing only
@@ -282,7 +282,7 @@ give it. The `MemoryToolbox` Manual carries the baseline ("you have memory", the
 protocol); layer your domain's save policy on top:
 
 ```typescript
-import { TextManual } from "@agentic-patterns/core";
+import { TextManual } from "@pattern-stack/agentic-core";
 
 const memoryManual = new TextManual(
   "memory-policy",

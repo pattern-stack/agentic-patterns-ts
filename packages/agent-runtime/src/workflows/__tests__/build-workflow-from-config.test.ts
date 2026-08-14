@@ -9,7 +9,7 @@
  * CapabilityResolver is needed (that path is covered by buildAgentFromConfig).
  */
 
-import type { AgentResolver } from "@agentic-patterns/core";
+import type { AgentResolver } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 
 import { MockRunner } from "../../runner/mock-runner.js";

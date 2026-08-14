@@ -27,13 +27,13 @@
  * exception to this invariant, not a violation of it.
  */
 
+import type { Context, InferToolSetContext } from "@ai-sdk/provider-utils";
 import type {
   RenderArtifact,
   RenderContext,
   ToolExecutionContext,
   ToolSchema,
-} from "@agentic-patterns/core";
-import type { Context, InferToolSetContext } from "@ai-sdk/provider-utils";
+} from "@pattern-stack/agentic-core";
 import {
   type GenericToolApprovalFunction,
   type LanguageModelUsage,

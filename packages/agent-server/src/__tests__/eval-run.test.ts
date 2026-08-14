@@ -32,7 +32,7 @@ import {
   type RunResult,
   type RunnerProtocol,
   asAgent,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

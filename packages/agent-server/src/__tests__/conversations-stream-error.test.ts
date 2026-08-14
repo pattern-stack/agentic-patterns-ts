@@ -10,8 +10,8 @@
  * `conversations.test.ts`'s `makeStreamingRunner`/`mkApp` idioms.
  */
 
-import type { AgentEvent, RunOptions } from "@agentic-patterns/runtime";
-import { AgentEventBus, createEvent } from "@agentic-patterns/runtime";
+import type { AgentEvent, RunOptions } from "@pattern-stack/agentic-runtime";
+import { AgentEventBus, createEvent } from "@pattern-stack/agentic-runtime";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import type { AgentRegistration } from "../config.js";

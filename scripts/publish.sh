@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# scripts/publish.sh — publish @agentic-patterns/* to npm.
+# scripts/publish.sh — publish @pattern-stack/agentic-* to npm.
 #
 # Usage:
 #   bash scripts/publish.sh check       # pre-flight only (default) — no publish
@@ -164,7 +164,7 @@ case "$MODE" in
       (cd "$pkg_dir" && bun publish --tag="$TAG" --access=public) || fail "publish failed for $name@$version"
     done
     echo
-    ok "done — verify at https://www.npmjs.com/~agentic-patterns"
+    ok "done — verify at https://www.npmjs.com/~dugsnodes"
     ;;
   ci)
     echo
@@ -214,7 +214,7 @@ case "$MODE" in
     elif [ "$published" -eq 0 ]; then
       ok "nothing to publish — every version already on npm"
     else
-      ok "published $published package(s) — verify at https://www.npmjs.com/~agentic-patterns"
+      ok "published $published package(s) — verify at https://www.npmjs.com/~dugsnodes"
     fi
     ;;
   *)

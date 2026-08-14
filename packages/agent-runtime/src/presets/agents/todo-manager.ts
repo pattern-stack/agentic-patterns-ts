@@ -20,7 +20,7 @@ import {
   type ToolDefinition,
   Toolbox,
   defineTool,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------

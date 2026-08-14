@@ -4,7 +4,7 @@
  * Ported from Python: library/orchestration/responsibilities.py
  */
 
-import { Responsibility } from "@agentic-patterns/core";
+import { Responsibility } from "@pattern-stack/agentic-core";
 
 export const ORCHESTRATION = new Responsibility({
   key: "orchestration",

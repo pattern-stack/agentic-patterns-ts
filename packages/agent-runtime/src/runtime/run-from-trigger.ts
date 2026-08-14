@@ -27,8 +27,8 @@
  * conversations, and any transport — a trigger fires with no HTTP request.
  */
 
-import { TriggerSourceSchema } from "@agentic-patterns/core";
-import type { TriggerSourceData } from "@agentic-patterns/core";
+import { TriggerSourceSchema } from "@pattern-stack/agentic-core";
+import type { TriggerSourceData } from "@pattern-stack/agentic-core";
 
 import type { AgentEventBus } from "../events/agent-event-bus.js";
 import { deriveToolboxExecutor } from "../runner/toolbox-executor.js";

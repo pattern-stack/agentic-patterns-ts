@@ -148,9 +148,9 @@ Key wiring decisions, spelled out:
 3. **Create `packages/agent-dashboard/src/__tests__/useMediaQuery.test.tsx`**
    per the test plan below.
 4. **Verify no regression**:
-   `bun run --filter=@agentic-patterns/dashboard test` (all existing suites),
-   `bun run --filter=@agentic-patterns/dashboard typecheck`,
-   `bun run --filter=@agentic-patterns/dashboard lint`.
+   `bun run --filter=@pattern-stack/agentic-dashboard test` (all existing suites),
+   `bun run --filter=@pattern-stack/agentic-dashboard typecheck`,
+   `bun run --filter=@pattern-stack/agentic-dashboard lint`.
 
 Conventions: strict TS (`noUncheckedIndexedAccess` — note `cache.get()` returns
 `T | undefined`, handle it), biome formatting (double quotes, 2-space indent,
@@ -213,7 +213,7 @@ Cases:
    `maxWidthQuery("md") === "(max-width: 899px)"`, `maxWidthQuery("lg") === "(max-width: 1199px)"`.
 
 Regression gate: full existing dashboard suite must pass unchanged
-(`bun run --filter=@agentic-patterns/dashboard test`).
+(`bun run --filter=@pattern-stack/agentic-dashboard test`).
 
 ## 5. Contract Published to Downstream Items (F2 / F3 / Wave-1 depend on this — do not drift)
 

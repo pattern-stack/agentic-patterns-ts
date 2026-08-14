@@ -42,7 +42,7 @@ export async function runClaudeSkillCommand(opts: ClaudeSkillOptions): Promise<v
   if (!src?.skillsDir || !fs.existsSync(src.skillsDir)) {
     process.stderr.write(
       `${YELLOW}error${RESET}: bundled skills not found.\n` +
-        `   ${DIM}Install the published CLI (npm i -g @agentic-patterns/cli) or run from the source tree.${RESET}\n`,
+        `   ${DIM}Install the published CLI (npm i -g @pattern-stack/agentic-cli) or run from the source tree.${RESET}\n`,
     );
     process.exit(1);
   }

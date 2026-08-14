@@ -4,7 +4,7 @@
  * memoryCapability wrapper.
  */
 
-import { Capability, type MemoryScope, type MemoryTarget } from "@agentic-patterns/core";
+import { Capability, type MemoryScope, type MemoryTarget } from "@pattern-stack/agentic-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SandboxEventBus } from "../../events/sandbox-event-bus.js";
 import { createAgentAddress } from "../../events/sandbox-types.js";

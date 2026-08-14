@@ -1,11 +1,11 @@
-# @agentic-patterns/runtime
+# @pattern-stack/agentic-runtime
 
 Execution runtime for agentic-patterns agents. Provides the runner loop (Vercel AI SDK), typed event bus, gate chain, workflow compositions and loops, multi-agent transport and runtime, conversation persistence, observability exporters, and pre-built role presets.
 
 ## Installation
 
 ```bash
-bun add @agentic-patterns/runtime @agentic-patterns/core ai zod
+bun add @pattern-stack/agentic-runtime @pattern-stack/agentic-core ai zod
 ```
 
 ## API Overview
@@ -15,7 +15,7 @@ bun add @agentic-patterns/runtime @agentic-patterns/core ai zod
 The `AgentRunner` executes agents using a tool loop on the Vercel AI SDK.
 
 ```typescript
-import { AgentRunner } from "@agentic-patterns/runtime";
+import { AgentRunner } from "@pattern-stack/agentic-runtime";
 
 const runner = new AgentRunner(model, eventBus);
 
@@ -42,7 +42,7 @@ Key types:
 Deterministic runner for testing agents without LLM calls. Pattern-based response routing with tool call simulation.
 
 ```typescript
-import { MockRunner } from "@agentic-patterns/runtime";
+import { MockRunner } from "@pattern-stack/agentic-runtime";
 
 const mock = new MockRunner()
   .addResponse("analyze", { content: "Revenue up 15%", inputTokens: 10, outputTokens: 20 })
@@ -78,7 +78,7 @@ Features:
 Runner backed by the Claude Agent SDK. Delegates to Claude Code's subprocess architecture.
 
 ```typescript
-import { ClaudeCodeRunner } from "@agentic-patterns/runtime";
+import { ClaudeCodeRunner } from "@pattern-stack/agentic-runtime";
 
 const runner = new ClaudeCodeRunner({
   defaults: { model: "sonnet" },
@@ -100,7 +100,7 @@ All events carry trace fields: `traceId`, `runId`, `spanId`, `parentSpanId`, `ti
 `AgentMessageEvent`, `AgentBroadcastEvent`, `AgentJoinEvent`, `AgentLeaveEvent`, `TaskCreateEvent`, `TaskUpdateEvent`, `TaskAssignEvent`, `HealthPingEvent`, `HealthPongEvent`, `NodeLifecycleEvent`
 
 ```typescript
-import { EventBus, AgentEventBus, EventProfile, subscribeProfile } from "@agentic-patterns/runtime";
+import { EventBus, AgentEventBus, EventProfile, subscribeProfile } from "@pattern-stack/agentic-runtime";
 
 const bus = new AgentEventBus();
 
@@ -120,7 +120,7 @@ subscribeProfile(bus, EventProfile.UX, (event) => {
 Gate chain intercepts tool call intents for safety, approval, rate limiting, and auditing.
 
 ```typescript
-import { AgentEventBus, SafetyGate, HumanApprovalGate, AuditGate } from "@agentic-patterns/runtime";
+import { AgentEventBus, SafetyGate, HumanApprovalGate, AuditGate } from "@pattern-stack/agentic-runtime";
 
 const bus = new AgentEventBus();
 
@@ -147,7 +147,7 @@ Everything implements one contract — `Node<TIn, TOut>` (`run(input, ctx)` → 
 Agents AND nodes in sequence over one implicitly shared Scratchpad. Stage knobs: `name` / `output` / `prompt` / `slot` / `onEmit` / `stop` / `reads` / `writes` / `retry` / `input`. Per-stage tool executors derive from each agent's own capabilities.
 
 ```typescript
-import { type Node, FunctionStep, sequentialAgent } from "@agentic-patterns/runtime";
+import { type Node, FunctionStep, sequentialAgent } from "@pattern-stack/agentic-runtime";
 
 // Untyped: Node<unknown, SequentialAgentResult> — { outputs, stopped }
 const pipeline = sequentialAgent([interpretAgent, { agent: judge, output: Verdict }]);
@@ -180,10 +180,10 @@ Full semantics (stop lanes, emission slots, build-time race guards) live in the 
 
 #### Scope host (`src/workflows/scope-host.ts`)
 
-A parsed `SessionScope` value (`@agentic-patterns/core`) rides across a run as a SIBLING key on the host bag — `RunOptions.host.scope` — never inside `host.deps` (a `DepReader`; a plain scope object there would crash the first `ctx.deps.get()`). `buildScopeHost(parsed)` builds the injection-side fragment; merge it with any other host bits at the call site (the server and CLI wire it in right after `scope.parse()`):
+A parsed `SessionScope` value (`@pattern-stack/agentic-core`) rides across a run as a SIBLING key on the host bag — `RunOptions.host.scope` — never inside `host.deps` (a `DepReader`; a plain scope object there would crash the first `ctx.deps.get()`). `buildScopeHost(parsed)` builds the injection-side fragment; merge it with any other host bits at the call site (the server and CLI wire it in right after `scope.parse()`):
 
 ```typescript
-import { buildScopeHost } from "@agentic-patterns/runtime";
+import { buildScopeHost } from "@pattern-stack/agentic-runtime";
 
 const host = { ...otherHostBits, ...buildScopeHost(parsedScope) };
 ```
@@ -195,15 +195,15 @@ Reads go through three accessors that all accept BOTH a tool's `ToolExecutionCon
 - `readScopeAs<T>(ctx)` — typed cast sugar over `readScope`, trusting that the server-side `scope.parse()` already ran; it does NOT re-parse per call
 
 ```typescript
-import { requireScope } from "@agentic-patterns/runtime";
-import type { ScopeValue } from "@agentic-patterns/core";
+import { requireScope } from "@pattern-stack/agentic-runtime";
+import type { ScopeValue } from "@pattern-stack/agentic-core";
 
 const scope = requireScope(ctx) as ScopeValue<typeof myScope>;
 ```
 
 `Conversation` accepts scope the same way — `new Conversation(agent, runner, { store, host: buildScopeHost(parsedScope) })`. The host bag is fixed at construction and forwarded verbatim into every `send()`/`stream()` call for the conversation's lifetime. Scope also survives delegation: a nested `AgentStep` and an agent invoked as a tool (`node-tool.ts`, agent-as-tool) both forward the parent's `host.scope` onto the sub-run's context, so a promoted-node leaf or a delegated sub-agent sees the same bound scope as the top-level run.
 
-`AgentRunner` and `ClaudeCodeRunner` both narrow `RunOptions.host.scope` into the `RenderContext` passed to `agent.renderInitialPrompt()`, so scope-derived prompt text (`Awareness.fromScope`, see `@agentic-patterns/core`'s README) renders on every turn. `ClaudeCodeRunner` is the one asymmetric case, and it's worth being honest about: scope reaches its rendered system prompt but NOT its tool execution — the Claude Agent SDK's MCP tool loop has no context seam to carry `host.scope` through, so CC-native and MCP-bridged tools on that runner stay scope-less until that seam exists.
+`AgentRunner` and `ClaudeCodeRunner` both narrow `RunOptions.host.scope` into the `RenderContext` passed to `agent.renderInitialPrompt()`, so scope-derived prompt text (`Awareness.fromScope`, see `@pattern-stack/agentic-core`'s README) renders on every turn. `ClaudeCodeRunner` is the one asymmetric case, and it's worth being honest about: scope reaches its rendered system prompt but NOT its tool execution — the Claude Agent SDK's MCP tool loop has no context seam to carry `host.scope` through, so CC-native and MCP-bridged tools on that runner stay scope-less until that seam exists.
 
 #### Legacy string-pinned patterns
 
@@ -227,7 +227,7 @@ Helpers: `resolveMessage()`, `makeStepName()`, `executeStep()`
 Chain agents in sequence, threading context through the pipeline.
 
 ```typescript
-import { Sequential } from "@agentic-patterns/runtime";
+import { Sequential } from "@pattern-stack/agentic-runtime";
 
 const pipeline = new Sequential([
   { agent: researcher, messageTemplate: "Research the topic", outputKey: "research" },
@@ -246,7 +246,7 @@ Supports nested patterns (Sequential/Parallel as steps) and `continueOnError`.
 Fan-out agents in parallel with optional concurrency limiting and result consolidation.
 
 ```typescript
-import { Parallel, collectByName, collectContents } from "@agentic-patterns/runtime";
+import { Parallel, collectByName, collectContents } from "@pattern-stack/agentic-runtime";
 
 const fanout = new Parallel(
   [
@@ -279,7 +279,7 @@ Four implementations of `GoalEvaluatorProtocol`, ranked cheapest to most expensi
 All return `[achieved: boolean, reason: string, confident: boolean]`.
 
 ```typescript
-import { EvaluatorChain, SimpleGoalEvaluator, LLMGoalEvaluator } from "@agentic-patterns/runtime";
+import { EvaluatorChain, SimpleGoalEvaluator, LLMGoalEvaluator } from "@pattern-stack/agentic-runtime";
 
 const chain = new EvaluatorChain([
   new SimpleGoalEvaluator({ successPatterns: ["TASK_COMPLETE"] }),
@@ -292,7 +292,7 @@ const chain = new EvaluatorChain([
 Goal-driven iteration: run agent, evaluate progress, repeat.
 
 ```typescript
-import { TaskLoop, SimpleGoalEvaluator } from "@agentic-patterns/runtime";
+import { TaskLoop, SimpleGoalEvaluator } from "@pattern-stack/agentic-runtime";
 
 const loop = new TaskLoop(agent, new SimpleGoalEvaluator({
   successPatterns: ["TASK_COMPLETE"],
@@ -311,7 +311,7 @@ Features: history summarization in prompts, configurable stop phrases, goal eval
 Producer-evaluator refinement: producer generates, evaluator scores + critiques, producer refines.
 
 ```typescript
-import { EvaluatorLoop, RubricEvaluator, CompositeRefinementEvaluator } from "@agentic-patterns/runtime";
+import { EvaluatorLoop, RubricEvaluator, CompositeRefinementEvaluator } from "@pattern-stack/agentic-runtime";
 
 const rubric = new RubricEvaluator([
   { name: "clarity", description: "Clear and concise", weight: 0.4 },
@@ -335,7 +335,7 @@ Evaluator implementations: `LLMRefinementEvaluator`, `RubricEvaluator`, `Composi
 Generic async retry wrapper. Not agent-specific -- wraps any `() => Promise<T>`.
 
 ```typescript
-import { RetryLoop, ExponentialBackoff, JitteredBackoff, FixedBackoff } from "@agentic-patterns/runtime";
+import { RetryLoop, ExponentialBackoff, JitteredBackoff, FixedBackoff } from "@pattern-stack/agentic-runtime";
 
 const retry = new RetryLoop({
   maxAttempts: 5,
@@ -355,7 +355,7 @@ Backoff strategies: `FixedBackoff`, `ExponentialBackoff`, `JitteredBackoff`.
 Multi-turn conversation orchestration with external input/output callbacks.
 
 ```typescript
-import { ConversationLoop } from "@agentic-patterns/runtime";
+import { ConversationLoop } from "@pattern-stack/agentic-runtime";
 
 const loop = new ConversationLoop(agent, {
   maxExchanges: 10,
@@ -376,7 +376,7 @@ Integrates with `ConversationStore` for persistence via `InMemoryConversationSto
 Message transport for multi-agent communication.
 
 ```typescript
-import { InProcessTransport, MessagingToolbox } from "@agentic-patterns/runtime";
+import { InProcessTransport, MessagingToolbox } from "@pattern-stack/agentic-runtime";
 
 const transport = new InProcessTransport();
 transport.subscribe("agency.*.messages", (msg) => { /* ... */ });
@@ -392,8 +392,8 @@ const toolbox = new MessagingToolbox(transport, senderAddress, agency);
 Multi-agent execution runtime.
 
 ```typescript
-import { Agency } from "@agentic-patterns/core";
-import { AgencyRuntime, AgentNode } from "@agentic-patterns/runtime";
+import { Agency } from "@pattern-stack/agentic-core";
+import { AgencyRuntime, AgentNode } from "@pattern-stack/agentic-runtime";
 
 const runtime = new AgencyRuntime(agency, runner, "run-123");
 await runtime.start();
@@ -409,7 +409,7 @@ await runtime.stop();
 Conversation state management with structured persistence.
 
 ```typescript
-import { Conversation, InMemoryConversationStore } from "@agentic-patterns/runtime";
+import { Conversation, InMemoryConversationStore } from "@pattern-stack/agentic-runtime";
 
 // In-memory persistence
 const store = new InMemoryConversationStore();
@@ -436,7 +436,7 @@ Observability exporters that subscribe to EventBus events.
 | `OTelExporter` | OpenTelemetry trace spans |
 
 ```typescript
-import { ConsoleExporter, createConsoleExporter } from "@agentic-patterns/runtime";
+import { ConsoleExporter, createConsoleExporter } from "@pattern-stack/agentic-runtime";
 
 const exporter = createConsoleExporter(bus);
 exporter.start();
@@ -461,7 +461,7 @@ Pre-built roles, judgments, and responsibilities for common agent patterns.
 **Responsibilities:** `ORCHESTRATION`, `QUALITY_GATE`, `INTENT_ROUTING`, `RESPONSE_SYNTHESIS`, `INFORMATION_RETRIEVAL`, `ANALYSIS`
 
 ```typescript
-import { coordinatorRole, ROUTING, ORCHESTRATION } from "@agentic-patterns/runtime";
+import { coordinatorRole, ROUTING, ORCHESTRATION } from "@pattern-stack/agentic-runtime";
 
 const role = coordinatorRole("lead", persona);
 ```

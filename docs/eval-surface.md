@@ -323,7 +323,7 @@ only the case-bank + suite-run + annotation tables — **not** a parallel run st
   E2's additive `eventBus?` field on `EvalRunContext`.
 - **No agent "version" primitive.** Variants are eval-store labels; the `Agent`/`AgentConfig` gains
   nothing (§6).
-- **No new `@agentic-patterns/eval` package.** Store → `agent-runtime/stores`, routes →
+- **No new `@pattern-stack/agentic-eval` package.** Store → `agent-runtime/stores`, routes →
   `agent-server`, tab → `agent-dashboard` — matching every other surface. Split a package out only
   to publish the store standalone.
 - **Judge is not gated on this stack landing** — E6 is decoupled and last.

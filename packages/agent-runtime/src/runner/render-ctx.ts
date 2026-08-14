@@ -15,7 +15,7 @@
  * the import.
  */
 
-import type { RenderContext } from "@agentic-patterns/core";
+import type { RenderContext } from "@pattern-stack/agentic-core";
 import type { RunOptions } from "./types.js";
 
 export function narrowRenderCtx(options?: RunOptions): RenderContext | undefined {

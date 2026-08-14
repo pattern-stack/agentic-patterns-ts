@@ -1,6 +1,6 @@
 // Registration wrapper carrying a session `scope` (#308) — a hand-rolled
 // duck-typed fake mimicking `SessionScope`'s public surface (`.schema`,
-// `.redactKeys`, `.parse`, `.toJsonSchema`). No `@agentic-patterns/core`
+// `.redactKeys`, `.parse`, `.toJsonSchema`). No `@pattern-stack/agentic-core`
 // import: fixtures prove the STRUCTURAL check discovery performs, not a
 // real Zod round-trip (that belongs to core/server tests).
 const mk = () => ({ role: {}, mission: {}, awareness: {}, background: {} });

@@ -24,7 +24,7 @@ import type {
   PendingInputRegistry,
   RunStore,
   StoredMessagePart,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import {
   Conversation,
   DEFAULT_RECALL_BUDGET_CHARS,
@@ -32,7 +32,7 @@ import {
   buildScopeHost,
   createEvent,
   deriveToolboxExecutor,
-} from "@agentic-patterns/runtime";
+} from "@pattern-stack/agentic-runtime";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { AgentRegistration } from "../config.js";
@@ -173,7 +173,7 @@ export function conversationRoutes(
         effectiveContext = reg.scope.parse(effectiveContext ?? {});
       } catch (err) {
         // Duck-typed detection: zod is a `^3.25.0 || ^4.1.8` peer dep and the
-        // throwing zod may be `@agentic-patterns/core`'s copy, not the
+        // throwing zod may be `@pattern-stack/agentic-core`'s copy, not the
         // server's — never `instanceof ZodError` / `.flatten()` (v3-only
         // shape) across that module boundary (decisions.md D3).
         if (err && Array.isArray((err as { issues?: unknown }).issues)) {
@@ -277,7 +277,7 @@ export function conversationRoutes(
     // `host.scope` (#308) — carries the PARSED scope value across every run
     // this conversation makes (`Conversation` forwards `_host` verbatim into
     // every `send()`/`stream()`), so tools can read it via `readScope`/
-    // `requireScope` (`@agentic-patterns/runtime`, `workflows/scope-host.js`).
+    // `requireScope` (`@pattern-stack/agentic-runtime`, `workflows/scope-host.js`).
     // Scope-declaring registrations get `host.scope`; memory-declaring ones
     // get a host bag too (#444 — even scope-less, the bag must exist for the
     // messages route to set `host.recall` on). The bag itself is a fresh

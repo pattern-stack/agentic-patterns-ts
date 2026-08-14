@@ -1,8 +1,8 @@
 {
-  "name": "@agentic-patterns/core",
+  "name": "@pattern-stack/agentic-core",
   "version": "0.18.0",
   "description": "Composable primitives for building LLM agents \u2014 atoms, protocols, molecules, rendering, organisms",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "repository": {
     "type": "git",

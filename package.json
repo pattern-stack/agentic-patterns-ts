@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "agentic-patterns-ts",
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
     "url": "https://github.com/pattern-stack/agentic-patterns-ts.git"
@@ -18,14 +18,14 @@
     "check:model-facing-schemas": "bun run tools/check-model-facing-schemas.ts",
     "check:dist-contract": "bun run tools/check-dist-contract.ts",
     "check:docs-events": "bun run tools/gen-docs-event-reference.ts --check",
-    "docs:dev": "bun run --filter=@agentic-patterns/docs-site dev",
+    "docs:dev": "bun run --filter=@pattern-stack/agentic-docs-site dev",
     "docs:events": "bun run tools/gen-docs-event-reference.ts",
     "smoke:memory": "bun packages/agent-runtime/scripts/smoke-memory-sqlite.ts",
     "check": "bun run build && bun run check:dist-contract && bun run typecheck && bun run lint && bun run test && bun run check:model-facing-schemas && bun run smoke:memory && bun run check:docs-events"
   },
   "devDependencies": {
-    "@agentic-patterns/core": "workspace:^",
-    "@agentic-patterns/runtime": "workspace:^",
+    "@pattern-stack/agentic-core": "workspace:^",
+    "@pattern-stack/agentic-runtime": "workspace:^",
     "@biomejs/biome": "^1.9.0",
     "node-gyp": "^10.2.0",
     "tsx": "^4.21.0",

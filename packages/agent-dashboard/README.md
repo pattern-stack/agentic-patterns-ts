@@ -1,10 +1,10 @@
-# @agentic-patterns/dashboard
+# @pattern-stack/agentic-dashboard
 
-Internal React SPA — admin dashboard for `@agentic-patterns/server`. Published only as part of the `@agentic-patterns/cli` bundle; not available as a standalone npm package.
+Internal React SPA — admin dashboard for `@pattern-stack/agentic-server`. Published only as part of the `@pattern-stack/agentic-cli` bundle; not available as a standalone npm package.
 
 ## Usage
 
-This package is **private**. Consumers don't install it directly. It ships as a built static bundle inside `@agentic-patterns/cli` at `assets/dashboard/`, mounted by `ap playground` at `http://localhost:3456/`.
+This package is **private**. Consumers don't install it directly. It ships as a built static bundle inside `@pattern-stack/agentic-cli` at `assets/dashboard/`, mounted by `ap playground` at `http://localhost:3456/`.
 
 ## Pages
 
@@ -22,8 +22,8 @@ This package is **private**. Consumers don't install it directly. It ships as a 
 From the monorepo root:
 
 ```bash
-bun run --filter=@agentic-patterns/dashboard dev   # Vite dev server
-bun run --filter=@agentic-patterns/dashboard build # produces dist/
+bun run --filter=@pattern-stack/agentic-dashboard dev   # Vite dev server
+bun run --filter=@pattern-stack/agentic-dashboard build # produces dist/
 ```
 
 The Vite dev server proxies API calls to an external NestJS backend on port 3100 (separate branch/service). For end-to-end testing with the Hono server, use `ap playground` — the CLI bundles the built SPA and serves it directly from the Hono app on port 3456, bypassing the proxy.

@@ -1,4 +1,4 @@
-// @agentic-patterns/runtime — eval barrel (spec § Approach step 5)
+// @pattern-stack/agentic-runtime — eval barrel (spec § Approach step 5)
 
 export {
   type EvalCase,

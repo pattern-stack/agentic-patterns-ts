@@ -119,7 +119,7 @@ export type Part =
  * INDEPENDENT of what the producing tool returned to the model (that is the
  * tool author's business, see ADR §1).
  *
- * Mirrors `@agentic-patterns/core`'s `RenderArtifact`/`TableArtifactDataSchema`
+ * Mirrors `@pattern-stack/agentic-core`'s `RenderArtifact`/`TableArtifactDataSchema`
  * structurally, but is hand-defined here rather than imported: the dashboard
  * has no core/runtime dependency (`api/types.ts`'s `ConversationSummary`
  * precedent — "the dashboard has no runtime dependency").

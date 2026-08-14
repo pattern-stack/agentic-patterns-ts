@@ -4,7 +4,7 @@ import {
   defineTool,
   playbook,
   toolbox,
-} from "@agentic-patterns/core";
+} from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createToolboxExecutor } from "../toolbox-executor.js";

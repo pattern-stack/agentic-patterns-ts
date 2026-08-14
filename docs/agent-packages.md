@@ -136,7 +136,7 @@ And the shop window:
 ```ts
 // agents/research/agent.ts — what `ap` discovers and an operator can launch
 
-import { asAgent, retry, Sequential } from "@agentic-patterns/runtime";
+import { asAgent, retry, Sequential } from "@pattern-stack/agentic-runtime";
 import { researcherRole } from "./roles.js";
 import { fetchStep, respondStep } from "./pipeline.js";
 import { curatorStep } from "./subagents/curator.js";   // internal — wired, not exported
@@ -171,7 +171,7 @@ The system is small on purpose — it does three things:
 
 ```ts
 // systemA/system.ts
-import { provideDeps } from "@agentic-patterns/runtime";
+import { provideDeps } from "@pattern-stack/agentic-runtime";
 import * as research from "./agents/research/index.js";
 import * as synthesis from "./agents/synthesis/index.js";
 

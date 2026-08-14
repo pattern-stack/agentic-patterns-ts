@@ -1,8 +1,8 @@
 /**
- * `ap update` — bring the project's `@agentic-patterns/*` dependencies up to the
+ * `ap update` — bring the project's `@pattern-stack/agentic-*` dependencies up to the
  * latest published versions.
  *
- *   ap update            update every behind @agentic-patterns/* dep to latest
+ *   ap update            update every behind @pattern-stack/agentic-* dep to latest
  *   ap update --check    report only (no changes); exit 1 if any are behind
  *
  * Uses the project's own package manager (detected from the lockfile) so it
@@ -53,11 +53,11 @@ export async function runUpdateCommand(opts: UpdateCommandOptions = {}): Promise
     process.exit(2);
   }
 
-  process.stdout.write(`\nChecking ${green("@agentic-patterns/*")} versions…\n\n`);
+  process.stdout.write(`\nChecking ${green("@pattern-stack/agentic-*")} versions…\n\n`);
   const statuses = await resolveDepStatuses(root);
 
   if (statuses.length === 0) {
-    process.stdout.write(dim("  no @agentic-patterns/* dependencies in this project\n\n"));
+    process.stdout.write(dim("  no @pattern-stack/agentic-* dependencies in this project\n\n"));
     return;
   }
 
@@ -94,6 +94,6 @@ export async function runUpdateCommand(opts: UpdateCommandOptions = {}): Promise
     process.exit(res.status ?? 1);
   }
   process.stdout.write(
-    `\n${green("✓")} updated ${behind.map((s) => s.name.replace("@agentic-patterns/", "")).join(", ")} to latest\n\n`,
+    `\n${green("✓")} updated ${behind.map((s) => s.name.replace("@pattern-stack/agentic-", "")).join(", ")} to latest\n\n`,
   );
 }

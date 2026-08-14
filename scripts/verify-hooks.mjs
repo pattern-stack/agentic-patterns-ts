@@ -48,7 +48,7 @@ async function main() {
   const cliPath = args.cli ?? path.join(REPO_ROOT, "packages/agent-cli/dist/cli.js");
   if (!fs.existsSync(cliPath)) {
     fail(
-      `CLI build not found at ${cliPath} — run \`bun run --filter=@agentic-patterns/cli build\` first.`,
+      `CLI build not found at ${cliPath} — run \`bun run --filter=@pattern-stack/agentic-cli build\` first.`,
     );
   }
 

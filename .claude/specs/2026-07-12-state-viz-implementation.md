@@ -64,7 +64,7 @@ construction — formatter and every exporter pass payloads through verbatim.
 
 ## Plan
 
-### WI-1 — Runtime eventing (`@agentic-patterns/runtime`)
+### WI-1 — Runtime eventing (`@pattern-stack/agentic-runtime`)
 
 Ships alone: events exist on the bus; nothing consumes them yet.
 
@@ -106,7 +106,7 @@ event-capture bus asserting drop/absorb/read emission across Retry/Loop/
 FanOut; a `sequential-agents` test asserting step.start/end pairing and the
 innate tag; the untouched no-emit structural test keeps passing.
 
-### WI-2 — Wire + persistence (`@agentic-patterns/runtime` + `@agentic-patterns/server`)
+### WI-2 — Wire + persistence (`@pattern-stack/agentic-runtime` + `@pattern-stack/agentic-server`)
 
 Ships alone: events reach the wire and persist; no UI yet. Depends on WI-1.
 
@@ -134,7 +134,7 @@ Tests: sse-formatter per-event format assertions; a conversation round-trip
 test asserting `state_delta` parts persist and degrade to labeled text on old
 readers (the `stored-parts.ts:106` default-case contract).
 
-### WI-3 — Timeline UI (`@agentic-patterns/dashboard`)
+### WI-3 — Timeline UI (`@pattern-stack/agentic-dashboard`)
 
 Ships alone against WI-1+2; without events it renders nothing (graceful).
 
@@ -167,7 +167,7 @@ Tests: `chat/model.test.ts` cases for each applyParts fold (incl. nesting +
 coalescing); a component test per frame type; `trace-from-events.test.ts`
 addition pinning the curation.
 
-### WI-4 — Scratchpad rail (`@agentic-patterns/dashboard`)
+### WI-4 — Scratchpad rail (`@pattern-stack/agentic-dashboard`)
 
 Ships alone against WI-1+2; with no events it shows the teaching empty state.
 

@@ -8,7 +8,7 @@
  * (incl. unique-prefix), events-ASC, 404s, and the 503 unwired grammar.
  */
 
-import { RunStore } from "@agentic-patterns/runtime";
+import { RunStore } from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

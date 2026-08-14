@@ -212,7 +212,7 @@ instead of spilling past `maxWidth`.
    (§3a). Verify (no code change expected) that both toolbar rows keep
    `flexWrap: "wrap"`.
 5. **Tests** — add the two files per §5.
-6. **Gate** — `bun run --filter=@agentic-patterns/dashboard test`,
+6. **Gate** — `bun run --filter=@pattern-stack/agentic-dashboard test`,
    `… typecheck`, `… lint` (biome: double quotes, 2-space, 100-col). Full
    existing dashboard suite must pass **unchanged** (F1's jsdom-desktop
    fallback is what guarantees this).

@@ -22,7 +22,7 @@
  * and `scope-echo`.
  */
 
-import { AgentBuilder, Mission, Persona, RoleBuilder } from "@agentic-patterns/core";
+import { AgentBuilder, Mission, Persona, RoleBuilder } from "@pattern-stack/agentic-core";
 
 function buildBrokenModelAgent() {
   const role = new RoleBuilder("broken-model")

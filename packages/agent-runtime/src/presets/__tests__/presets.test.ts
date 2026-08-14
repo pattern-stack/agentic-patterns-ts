@@ -1,4 +1,4 @@
-import { AgentBuilder, Judgment, Mission, Role } from "@agentic-patterns/core";
+import { AgentBuilder, Judgment, Mission, Role } from "@pattern-stack/agentic-core";
 import { describe, expect, it } from "vitest";
 import { buildCalculatorAgent } from "../agents/calculator.js";
 import { buildTodoAgent } from "../agents/todo-manager.js";

@@ -110,7 +110,7 @@ export const PROVIDER_PRIORITY: readonly SupportedProvider[] = [
 
 /**
  * Providers whose package ships as a real dependency of
- * `@agentic-patterns/runtime` (#472) — reachable with nothing installed beyond
+ * `@pattern-stack/agentic-runtime` (#472) — reachable with nothing installed beyond
  * the runtime itself. Derived from the registry so it cannot drift from the
  * adapters; the package.json side is asserted by
  * `providers/__tests__/bundled-providers.test.ts`.

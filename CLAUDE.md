@@ -6,10 +6,10 @@ TypeScript library for building composable LLM agents. Agents are built by compo
 
 | Package | Path | Description |
 |---------|------|-------------|
-| `@agentic-patterns/core` | `packages/agent-core/` | Atoms, protocols, molecules, rendering, organisms |
-| `@agentic-patterns/runtime` | `packages/agent-runtime/` | Runner, events, gates, transport, multi-agent, exporters, presets |
-| `@agentic-patterns/server` | `packages/agent-server/` | Hono HTTP server — routes, SSE streaming, admin API |
-| `@agentic-patterns/dashboard` | `packages/agent-dashboard/` | React SPA admin dashboard |
+| `@pattern-stack/agentic-core` | `packages/agent-core/` | Atoms, protocols, molecules, rendering, organisms |
+| `@pattern-stack/agentic-runtime` | `packages/agent-runtime/` | Runner, events, gates, transport, multi-agent, exporters, presets |
+| `@pattern-stack/agentic-server` | `packages/agent-server/` | Hono HTTP server — routes, SSE streaming, admin API |
+| `@pattern-stack/agentic-dashboard` | `packages/agent-dashboard/` | React SPA admin dashboard |
 
 **Runtime depends on core. Server depends on runtime + core. Dashboard is standalone. Core never imports runtime.**
 
@@ -65,8 +65,8 @@ bun run check            # All of the above (build + typecheck + lint + test)
 ### Per-Package Commands
 
 ```bash
-bun run --filter=@agentic-patterns/core test
-bun run --filter=@agentic-patterns/runtime typecheck
+bun run --filter=@pattern-stack/agentic-core test
+bun run --filter=@pattern-stack/agentic-runtime typecheck
 ```
 
 ### Documentation
@@ -90,6 +90,6 @@ bun run --filter=@agentic-patterns/runtime typecheck
 ## Import Rules
 
 - Layers can only import from lower-numbered layers within the same package
-- `@agentic-patterns/runtime` can import from `@agentic-patterns/core`
-- `@agentic-patterns/core` never imports from `@agentic-patterns/runtime`
+- `@pattern-stack/agentic-runtime` can import from `@pattern-stack/agentic-core`
+- `@pattern-stack/agentic-core` never imports from `@pattern-stack/agentic-runtime`
 - No circular dependencies between modules within a layer

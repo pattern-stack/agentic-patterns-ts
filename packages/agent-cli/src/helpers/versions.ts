@@ -1,5 +1,5 @@
 /**
- * Version helpers — discover the project's `@agentic-patterns/*` dependencies,
+ * Version helpers — discover the project's `@pattern-stack/agentic-*` dependencies,
  * read what's installed, fetch what's latest on npm, and drive both the
  * `ap update` command and the passive out-of-date notifier.
  *
@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 
 /** The scope we manage. Any dep under this scope is an update candidate. */
-export const AP_SCOPE = "@agentic-patterns/";
+export const AP_SCOPE = "@pattern-stack/agentic-";
 
 export type PackageManager = "bun" | "pnpm" | "yarn" | "npm";
 
@@ -40,7 +40,7 @@ interface Manifest {
   devDependencies?: Record<string, string>;
 }
 
-/** `@agentic-patterns/*` deps in the project's package.json (deps + devDeps), sorted. */
+/** `@pattern-stack/agentic-*` deps in the project's package.json (deps + devDeps), sorted. */
 export function collectApDeps(root: string): Array<{ name: string; range: string }> {
   const pkgPath = path.join(root, "package.json");
   let manifest: Manifest;
@@ -193,7 +193,7 @@ export function installLatestArgv(pm: PackageManager, specs: string[]): string[]
 // Combined status
 // ---------------------------------------------------------------------------
 
-/** Full picture for every `@agentic-patterns/*` dep: installed vs latest. */
+/** Full picture for every `@pattern-stack/agentic-*` dep: installed vs latest. */
 export async function resolveDepStatuses(root: string): Promise<DepStatus[]> {
   const deps = collectApDeps(root);
   return Promise.all(
@@ -240,7 +240,7 @@ function writeCache(latest: Record<string, string | null>): void {
 }
 
 /**
- * Print a one-line notice per behind `@agentic-patterns/*` dep, if any. Uses a
+ * Print a one-line notice per behind `@pattern-stack/agentic-*` dep, if any. Uses a
  * ~24h on-disk cache of npm `latest` so the common path does ZERO network. When
  * the cache is stale it refreshes (bounded fetch) and rewrites it.
  *
@@ -277,7 +277,7 @@ export async function notifyIfOutdated(root: string): Promise<void> {
 
     const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
     const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
-    process.stderr.write(`\n${yellow("⬆ @agentic-patterns update available")}\n`);
+    process.stderr.write(`\n${yellow("⬆ @pattern-stack/agentic-* update available")}\n`);
     for (const d of behind) {
       process.stderr.write(
         `  ${d.name}  ${dim(String(d.installed))} → ${yellow(String(d.latest))}\n`,

@@ -1,7 +1,7 @@
 # W1-DataTable (WI-5) — DataTable responsive core: column priority + scroll fallback
 
 **Date:** 2026-07-24
-**Package:** `@agentic-patterns/dashboard` (`packages/agent-dashboard/`)
+**Package:** `@pattern-stack/agentic-dashboard` (`packages/agent-dashboard/`)
 **Status:** Spec — ready for implementation
 **Size:** ~40 changed lines in `DataTable.tsx` + one new test file (~90 lines)
 
@@ -136,7 +136,7 @@ from `useBreakpoint()`; the expand-caret `<td>` (~line 141) and empty-state
 5. Update the wrapper div style: keep `overflow: "hidden"`, add
    `overflowX: "auto"` after it and `WebkitOverflowScrolling: "touch"`.
 6. Write `src/__tests__/DataTable.responsive.test.tsx` per the test plan.
-7. Run `bun run --filter=@agentic-patterns/dashboard test` — new suite plus all
+7. Run `bun run --filter=@pattern-stack/agentic-dashboard test` — new suite plus all
    existing DataTable consumers (EvalRunsPage, EvalSetsPage, EvalComparePage,
    EvalRunDetailPage, EvalSetDetailPage tests) must pass unmodified.
 8. `bun run check` (build + typecheck + biome + vitest) before PR; land via PR

@@ -2,7 +2,7 @@
  * REST client for the read-only eval endpoints (#136's four GETs).
  *
  * Mirrors the `lib/eventApi.ts` precedent: hand-mirrored row types (the
- * dashboard has no `@agentic-patterns/runtime` dependency), and explicit 503
+ * dashboard has no `@pattern-stack/agentic-runtime` dependency), and explicit 503
  * discrimination via `EvalFetch<T>` so "persistence not configured" renders
  * as a first-class UI state instead of collapsing into `useAdminData`'s flat
  * error string. Non-503 (and, for the detail fetch, non-404) failures throw

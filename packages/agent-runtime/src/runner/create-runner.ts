@@ -14,7 +14,7 @@
  *   7. throw
  *
  * PACKAGING (#472): `@ai-sdk/anthropic`, `@ai-sdk/openai` and `@ai-sdk/google`
- * ship as real dependencies of `@agentic-patterns/runtime`, so setting any of
+ * ship as real dependencies of `@pattern-stack/agentic-runtime`, so setting any of
  * ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY reaches rung
  * 4 (`AgentRunner`) with nothing else installed. The remaining adapters stay
  * dynamic-import-only and name their package when they can't be loaded.
@@ -359,7 +359,7 @@ export async function createRunner(opts: CreateRunnerOptions = {}): Promise<Runn
       "  • options.runner (a RunnerProtocol instance)",
       "  • options.model (a language model, V2/V3/V4 spec)",
       `  • an env var — ${BUNDLED_PROVIDER_ENV_VARS.join(", ")} — whose provider package`,
-      "    ships with @agentic-patterns/runtime (nothing else to install)",
+      "    ships with @pattern-stack/agentic-runtime (nothing else to install)",
       "  • an env var for a provider whose package you install yourself:",
       "    GROQ_API_KEY, MISTRAL_API_KEY, XAI_API_KEY, DEEPSEEK_API_KEY, OPENROUTER_API_KEY",
       "  • options.provider + (for a non-bundled provider) its package installed",
@@ -436,7 +436,7 @@ function providerLoadFailureError(
 ): string {
   const fix = provider.bundled
     ? [
-        `  Fix: "${provider.packageName}" ships as a dependency of @agentic-patterns/runtime, so it`,
+        `  Fix: "${provider.packageName}" ships as a dependency of @pattern-stack/agentic-runtime, so it`,
         "       should already be present. This usually means a broken, partial, or deduped-away",
         "       install — reinstall dependencies (bun install / npm install / pnpm install).",
       ]
@@ -471,7 +471,7 @@ function claudeCliFallbackReason(): string {
   return [
     "using ClaudeCodeAPIRunner (claude CLI on PATH) — no provider API key found.",
     `WARNING: ${HISTORY_LOSS_WARNING}; event vocabulary is also limited.`,
-    `For AgentRunner set one of: ${BUNDLED_PROVIDER_ENV_VARS.join(", ")} — those provider packages ship with @agentic-patterns/runtime, nothing else to install.`,
+    `For AgentRunner set one of: ${BUNDLED_PROVIDER_ENV_VARS.join(", ")} — those provider packages ship with @pattern-stack/agentic-runtime, nothing else to install.`,
     ...notes,
   ].join(" ");
 }

@@ -18,8 +18,8 @@ All gates must pass before PR:
 
 ```bash
 # Run in a specific package
-bun run --filter=@agentic-patterns/core test
-bun run --filter=@agentic-patterns/runtime typecheck
+bun run --filter=@pattern-stack/agentic-core test
+bun run --filter=@pattern-stack/agentic-runtime typecheck
 ```
 
 ## Testing Requirements

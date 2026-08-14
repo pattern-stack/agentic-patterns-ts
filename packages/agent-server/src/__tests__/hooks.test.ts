@@ -1,4 +1,4 @@
-import { type AgentEvent, AgentEventBus } from "@agentic-patterns/runtime";
+import { type AgentEvent, AgentEventBus } from "@pattern-stack/agentic-runtime";
 import { describe, expect, it } from "vitest";
 import { hookRoutes } from "../routes/hooks.js";
 

@@ -246,8 +246,8 @@ matching the Wave-1 precedent of unconditional CSS fixes (`RunBarHud`'s
    §3d. No hook import needed in this file.
 5. **Tests** — add `__tests__/AgentLensPage.responsive.test.tsx` per §5.
 6. **Gate** (per task instructions — do NOT run build/lint/full check):
-   `bun run --filter=@agentic-patterns/dashboard typecheck` and
-   `bun run --filter=@agentic-patterns/dashboard test -- AgentLens`.
+   `bun run --filter=@pattern-stack/agentic-dashboard typecheck` and
+   `bun run --filter=@pattern-stack/agentic-dashboard test -- AgentLens`.
 
 Conventions: strict TS (`noUnusedLocals`/`noUnusedParameters` — don't
 destructure `isPhone`/`isNarrow` where unused), biome (double quotes,
@@ -334,7 +334,7 @@ page-level suite focused):
    These two are unconditional — no viewport stub needed, run under the
    default (no `matchMedia` stub / desktop-fallback) jsdom setup.
 
-Regression gate: `bun run --filter=@agentic-patterns/dashboard test -- AgentLens`
+Regression gate: `bun run --filter=@pattern-stack/agentic-dashboard test -- AgentLens`
 plus the existing `AgentLensPage`/`AgentEvalsCard` behavior (no prior dedicated
 suite existed for either — confirmed via repo search before writing this spec)
 so there is no legacy suite to keep green beyond the broader dashboard run

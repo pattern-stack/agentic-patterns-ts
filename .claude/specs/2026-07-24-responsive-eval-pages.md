@@ -202,7 +202,7 @@ function SplitBucketRow({ bucket }: { bucket: SplitAggregate }) {
 5. Apply `SplitAggregatesPanel.tsx` (change 6) and `RunLaunchForm.tsx` +
    `RunLauncher.tsx` (change 7).
 6. Extend the two test files per the test plan below.
-7. `bun run --filter=@agentic-patterns/dashboard typecheck && bun run lint && bun run --filter=@agentic-patterns/dashboard test`
+7. `bun run --filter=@pattern-stack/agentic-dashboard typecheck && bun run lint && bun run --filter=@pattern-stack/agentic-dashboard test`
    (or full `bun run check`).
 
 ## Test plan

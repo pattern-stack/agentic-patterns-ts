@@ -13,7 +13,7 @@
  * flattens live frames (`{ type: name, ...snake_case payload }`). The
  * PERSISTED twin below is the same capture's raw camelCase `AgentEvent`
  * bodies — the exact objects `GET /admin/runs/:id/events` rows carry in
- * `data`. Repro (package: @agentic-patterns/runtime):
+ * `data`. Repro (package: @pattern-stack/agentic-runtime):
  *
  *   const bus = new AgentEventBus();
  *   bus.subscribeAll((e) => events.push(e));

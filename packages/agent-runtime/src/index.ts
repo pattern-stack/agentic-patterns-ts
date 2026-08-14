@@ -1,4 +1,4 @@
-// @agentic-patterns/runtime — barrel export
+// @pattern-stack/agentic-runtime — barrel export
 
 // Explicit disambiguation: eval/types.ts and storage/eval-store.ts both declare
 // `EvalSplit` (identical structural twins, #132 zero-coupling by design — see

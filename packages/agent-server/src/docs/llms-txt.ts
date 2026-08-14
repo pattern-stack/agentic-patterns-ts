@@ -10,7 +10,7 @@ import type { OpenApiInfo } from "./openapi.js";
 import { type HonoLike, introspectRoutes, resolveRouteDoc } from "./openapi.js";
 
 export function buildLlmsTxt(app: HonoLike, info: OpenApiInfo = {}): string {
-  const title = info.title ?? "@agentic-patterns/server";
+  const title = info.title ?? "@pattern-stack/agentic-server";
   const summary =
     info.description ??
     "REST surface of the agentic-patterns playground server. Auto-derived from live routes + Zod schemas.";

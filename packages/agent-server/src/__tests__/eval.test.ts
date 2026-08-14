@@ -9,8 +9,8 @@
  * tests (the `app.test.ts:143` `makeConfig` idiom).
  */
 
-import { AgentEventBus, EvalStore } from "@agentic-patterns/runtime";
-import type { EvalRunRow, JoinedEvalResultRow } from "@agentic-patterns/runtime";
+import { AgentEventBus, EvalStore } from "@pattern-stack/agentic-runtime";
+import type { EvalRunRow, JoinedEvalResultRow } from "@pattern-stack/agentic-runtime";
 import Database from "better-sqlite3";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
