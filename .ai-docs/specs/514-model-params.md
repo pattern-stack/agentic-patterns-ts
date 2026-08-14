@@ -207,3 +207,18 @@ Spec-blind pass. Verified independently: all five provider call sites carry `...
 - [`packages/agent-runtime/src/runner/types.ts:145-157`] `presencePenalty` and `frequencyPenalty` are the only `CallSettings` scalars omitted from the passthrough (`ai/dist/index.d.ts:551-566` sits them between `topK` and `stopSequences`, all of which are included) with no stated reason. Either include them or say why in the `ModelParams` doc comment, so the next reader doesn't have to diff the two lists to find out whether it was deliberate.
 
 **Reviewed by:** reviewer agent · 2026-08-14T21:14:00Z
+
+---
+
+## Live Validate
+<!-- written by: validator · gate 3 -->
+
+**Branch:** `hr/runner-4-model-params` @ `81e9d87`
+**Profile:** `strict`
+**Result:** ✅ all active gates passed (2 known-environment test failures, unrelated to this diff)
+**Gates:** build=PASS · dist-contract=PASS · typecheck=PASS · lint=PASS · tests=PASS* · model-facing-schemas=PASS · smoke:memory=PASS · docs-events=PASS
+**Acceptance:** 6/6 mechanically verifiable items met — new suite `agent-runner-model-params.test.ts` 9/9 green; `capabilities.test.ts` 43 (3 new advisory legs, incl. the distinct once-slots); baselines unchanged and green (`agent-runner.test.ts` 97, stream 27, event-bus 3, abort-forwarding 8 — none of those four files is touched by the diff); barrels export `ModelParams` + `adviseReasoningEffort` + `adviseReasoningEffortFor`, all three confirmed on the built `dist/index.d.ts` export list; `MODEL_CAPABILITIES` rows unchanged (`capabilities.ts`'s only hunks are the two new advisory functions).
+**\*** `claude-code-runner.test.ts` 2 failures are container-only (`--dangerously-skip-permissions cannot be used with root`), pre-existing, pass in CI. Full run: 1865 passed / 2 failed / 2 skipped / 6 todo.
+**Note:** the `test` gate's non-zero exit short-circuited `check`, so `check:model-facing-schemas`, `smoke:memory` and `check:docs-events` were run individually — all three exit 0.
+**Posted to:** PR #545
+**Validated by:** validator agent · 2026-08-14T21:20:00Z
