@@ -309,7 +309,7 @@ export class NodeBackedRunner implements RunnerProtocol {
     options?: RunOptions,
   ): AsyncGenerator<AgentEvent> {
     const traceId = options?.traceId ?? generateId();
-    const runId = generateId();
+    const runId = options?.runId ?? generateId();
 
     // The bus this run's lifecycle is made VISIBLE on for persistence/admin
     // purposes (RunStoreExporter, SQLiteExporter, the admin Live Run relay):

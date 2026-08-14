@@ -714,3 +714,72 @@ describe("NodeBackedRunner — options.host.scope -> NodeRunContext.scope (#308)
     expect(readScope(captured[0])).toEqual(parsedScope);
   });
 });
+
+// ---------------------------------------------------------------------------
+// stream() honors a host-seeded runId (#497)
+// ---------------------------------------------------------------------------
+
+describe("NodeBackedRunner.stream() — options.runId (#497)", () => {
+  /** A trivial node that echoes its input — enough to drive a stream. */
+  function makeEchoNode(): Node<string, string> {
+    return {
+      name: "echo",
+      async run(input: string) {
+        return { output: input, succeeded: true, totalInputTokens: 0, totalOutputTokens: 0 };
+      },
+    };
+  }
+
+  /** Drain a stream, returning every yielded event. */
+  async function drain(gen: AsyncGenerator<AgentEvent>): Promise<AgentEvent[]> {
+    const out: AgentEvent[] = [];
+    for await (const e of gen) out.push(e);
+    return out;
+  }
+
+  it("stamps a host-seeded runId on every yielded event", async () => {
+    const promoted = asAgent(makeEchoNode(), { role: { name: "Echo" } });
+    const runner = new NodeBackedRunner(new MockRunner());
+
+    const events = await drain(runner.stream(promoted, "hi", { runId: "host-seeded" }));
+
+    expect(events.length).toBeGreaterThan(0);
+    // Every event on the streaming path carries the host's id — not just the
+    // start event. This is the whole point: a pre-seeded job/audit id has to
+    // survive to the `runs` row and to `agent.error`.
+    for (const e of events) expect(e.runId).toBe("host-seeded");
+    expect(events.some((e) => e.type === "agent.message.start")).toBe(true);
+  });
+
+  it("publishes the host-seeded runId on the external bus", async () => {
+    const promoted = asAgent(makeEchoNode(), { role: { name: "Echo" } });
+    const bus = new AgentEventBus();
+    const seen: AgentEvent[] = [];
+    bus.subscribeAll((e) => void seen.push(e as AgentEvent));
+
+    await drain(
+      new NodeBackedRunner(new MockRunner()).stream(promoted, "hi", {
+        runId: "host-seeded",
+        eventBus: bus,
+      }),
+    );
+
+    expect(seen.length).toBeGreaterThan(0);
+    for (const e of seen) expect(e.runId).toBe("host-seeded");
+  });
+
+  it("still mints a runId when the caller omits one — byte-identical to before", async () => {
+    const promoted = asAgent(makeEchoNode(), { role: { name: "Echo" } });
+    const runner = new NodeBackedRunner(new MockRunner());
+
+    const a = await drain(runner.stream(promoted, "hi"));
+    const b = await drain(runner.stream(promoted, "hi"));
+
+    const idA = a[0]?.runId;
+    const idB = b[0]?.runId;
+    expect(idA).toBeTruthy();
+    expect(idB).toBeTruthy();
+    expect(idA).not.toBe(idB); // freshly minted per run
+    for (const e of a) expect(e.runId).toBe(idA);
+  });
+});
