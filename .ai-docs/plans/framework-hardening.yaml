@@ -1,0 +1,1631 @@
+# Framework hardening — drawdown to a public re-release (epic #482)
+# Rev 2 — revised 2026-08-14 against two critic reports (coverage; sizing+dependencies).
+#   What changed: +docs-8 (README fence-compilation CI gate — DoD #1 had no owner and docs-6
+#   disclaimed it; also sweeps the 9 unowned root-README fences); +docs-9 (terminal
+#   Known-limitations sweep + the epic's positioning sentence — DoD #6 had contributors but no
+#   closer); server-5 split into server-5a (additive SSE ids/ring/replay route) and server-5b
+#   (the abortOnDisconnect default flip — the only part anyone would revert under pressure, now
+#   independently revertable); storage-10 split into storage-10a (forward tag/release automation)
+#   and storage-10b (backfill + changelog archaeology); missing edges added (check-chain/ci.yml
+#   track storage-8→[docs-6,storage-10a] and storage-9→[storage-8]; Known-limitations writers
+#   storage-1/runner-5/storage-7 → docs-1; gates.md riders gates-2/gates-4 → docs-4; playground.ts
+#   track completed with server-7→gates-4 and server-4→server-7; core-2→core-1; runner-2→docs-5;
+#   gates-5→gates-6 with the langfuse v4 target decided IN-PLAN); spurious edges dropped (core-3's
+#   docs-3/docs-4, server-4's server-6b/server-2, gates-4's docs-1 — all disjoint hunks, now
+#   rebase notes); runner-1 now names its sticky-bus BEHAVIOUR change (CHANGELOG entry + a test
+#   pinning the new semantics) and no longer mandates the 79-site wide diff; gates-1's
+#   ConsoleExporter default moves to STDERR (stdout wire-format corruption hazard for MCP/piped
+#   processes); gates-5 marked BREAKING (peerDep retarget + injected-interface reshape); server-2
+#   strips #481's 0.41.0 lockstep bump (publish fires on merge — a wave-1 merge must not ship the
+#   pre-T0-docs tree to npm); runner-6's header corrected (it CO-CLOSES the T2 passthrough item —
+#   per-step effort tiering is that item's stated blocker, not scope creep); server-6a moved to
+#   wave 1 (was mis-waved with depends_on []).
+# Critic findings NOT taken as given (reasons on record, not silently ignored):
+#   - core-1 / ProtocolModel deprecation minor: REJECTED — core is pre-1.0 and this is a T0
+#     credibility item; a deprecation cycle delays the re-release the epic exists for. Instead
+#     ProtocolModel's removal gets its own named CHANGELOG line + vendor-the-class migration note,
+#     and the out-of-repo-extension risk is stated in the issue body.
+#   - docs-4 → gates-3 edge: took the critic's OTHER offered option — docs-4 documents land-time
+#     truth (no forward reference to unshipped behaviour), and gates-2/3/4 carry conditional
+#     riders that update the page when they land. Keeps a T0 item in wave 1.
+#   - server-4 in wave 3 (coverage critic): landed at wave 4, not 3 — the server-6b/server-2 edges
+#     are dropped as asked, but the playground.ts file track (server-7 → server-4) that the sizing
+#     critic verified real is honored. Wave 4 still clears the DoD-sequencing concern (no longer
+#     behind the tenancy + SSE L-chain).
+# Rev 3 — Gate 0 rulings MADE 2026-08-14 (all four resolved; plan revised, not yet approved):
+#   1. RESOLVED for the plan — `analystRole` stays on the barrel. Verified: it is a parameterised
+#      factory in the layer-13 preset library, wiring EVIDENCE_QUALITY + ANALYSIS. The epic line
+#      conflating it with `buildTodoAgent` was wrong and is amended on #482. NEW docs-10 makes the
+#      preset layer legible (generated prompt reference) instead of deleting it.
+#   2. STANDS for storage-9, but no longer the whole answer — the human wants to DEPLOY on Postgres
+#      with SQLite as the zero-config minimum. NEW storage-12..15 port the EventStore chain behind a
+#      dialect seam. Note the chain is INHERITANCE: SQLiteConversationStore ← EvalStore ← RunStore ←
+#      EventStore (~2,250 lines, 44 prepared statements), so no store in it can be ported alone.
+#   3. OVERRIDDEN — server-1 now FLIPS the CORS default to loopback rather than documenting `"*"`.
+#      With no auth, `"*"` lets any page a user visits drive the server. `"*"` stays available
+#      explicitly; `"*"` + `credentials: true` hard-errors.
+#   4. APPLIED — both factually wrong epic lines are amended on #482 with a dated note: the
+#      docs-link checker IS wired (docs-site build chain — docs-6), and `sweepRunning()` is NOT dead
+#      (`playground.ts:604` — storage-5; the real gap is that the SERVER has no boot sweep).
+# Gate 0: NOT yet approved — auto_approve stays false; several issues touch security-relevant
+#   code (auth seam, tenancy, hooks ingest) and the human has not signed off on this plan.
+# Spec of record: epic #482, whose gap list was verified against the tree by six independent
+#   audits (competitive positioning, adversarial review, cold DX build, durability/persistence,
+#   exporters/cost, evals/prompt-versioning) run against 0.40.0 / core 0.18.0.
+# Re-release gate (epic Definition of Done): all T0 items closed; every README/docs sample
+#   compiles against the shipped API VERIFIED IN CI (owner: docs-8); release hygiene restored
+#   (tags + releases + changelog — storage-10a/10b); README "Known limitations" created by docs-1
+#   and CLOSED by docs-9 (terminal sweep + positioning sentence).
+# Program epic: #482 (leaves nest under #482, NOT a new epic).
+# Ordering: issues below are listed in wave order (6 waves) — the file reads top-to-bottom as
+#   an execution sequence. Serialized file tracks:
+#   agent-runner.ts (runner-1→2→4→5, then storage-6);
+#   routes/conversations.ts (server-2→5a→5b→6b, server-4 last);
+#   playground.ts (storage-5→gates-4→server-7→server-4);
+#   event-store.ts migration ladder (server-6a v6 → server-3 v7 → storage-2 v8) — NOTE: the
+#   `PRAGMA user_version` ladder is ONE global integer; if server-6a slips, v7/v8 slip with it
+#   for reasons unrelated to their content — stated here so the coupling is a known cost;
+#   check-chain/ci.yml (docs-6 → storage-8 → storage-9; storage-10a edits the publish job only).
+# Lockfile: storage-11, docs-7, gates-5, gates-6, storage-9 and PR #481 all regenerate bun.lock
+#   under --frozen-lockfile CI — REBASE, don't merge, when landing across any two of these.
+
+plan:
+  slug: framework-hardening
+  summary: "Epic #482 drawdown: T0 credibility fixes (docs truth, core surface, release hygiene), T1 correctness (runner bus/abort, exporters, gates bounds), T2 production capability (auth, tenancy, durability, cost, timeouts), T3 differentiation (OTel parentage, eval CI gate, curated surface, Postgres), plus the two DoD closers (README fence CI gate, terminal Known-limitations pass)."
+  milestone: null
+  auto_approve: false            # Gate 0 not approved; security-relevant surface — Gate 1 stays human
+  existing_epic: "482"           # leaves roll up under the existing hardening epic — do not create a new epic
+  epic_title: "Framework hardening · Epic — close the audit gaps blocking a public re-release"
+  epic_body: |
+    (existing epic #482 — see issue for the verified gap list; this plan syncs its leaves)
+
+issues:
+  # ── Wave 1 — all landable now in parallel ──────────────────────────────────
+
+  - key: "485"
+    key_original: docs-1
+    title: "docs: rewrite the root README workflow examples against the shipped Node API"
+    depends_on: []
+    labels: [documentation, audit, workflows]
+    description: |
+      **Size M · branch `docs/482-readme-workflow-examples` · packages: none (docs) · closes T0 "README documents deleted classes" · spec: `.ai-docs/patternstack/DESIGN.md` §6.6+§6.7, docs-management SKILL truth gate 3**
+
+      `README.md:191-341` — the entire Workflows section documents a deleted API: `TaskLoop`,
+      `EvaluatorLoop`, `ConversationLoop`, `RubricEvaluator`, `RetryLoop`, `SimpleGoalEvaluator`,
+      `EvaluatorChain`, `ExponentialBackoff`, `collectByName`, `collectContents` — zero hits across
+      `packages/*/src`. Also fold in the adjacent legacy `Sequential`/`Parallel` fences (:237-268).
+
+      **Pinned decisions:** the classes were deleted ON PURPOSE (DESIGN.md:261) — port the EXAMPLE,
+      never the class. `TaskLoop`+evaluators → `Loop` with a typed `until(output, iteration)`
+      predicate (do NOT reintroduce a goal-evaluator concept). `EvaluatorLoop`/`RubricEvaluator` →
+      `Loop` with `body = Sequential.start(produce).then(evaluate).build()` and structured
+      `{content, score, feedback, issues[]}` state — reuse DESIGN.md §6.7's `polish` shape verbatim.
+      `RetryLoop` → `Retry`/`retry()` (`workflows/retry.ts`; note in prose: never re-throws, returns
+      the last failed `NodeResult`). `ConversationLoop` → `Conversation` + `ConversationStore`.
+      Legacy `Sequential` → `Sequential.start(node).then(node).build()`; legacy `Parallel` →
+      `new Parallel([{name, node}], {consolidate, maxConcurrency})` (`consolidatedOutput` is gone).
+      Every surviving identifier must be exported from the runtime barrel — check, don't assume.
+      ALSO: create the README **"Known limitations"** section (epic DoD #6) — storage-1, storage-7
+      and runner-5 each add a line to it later (they now depend on this issue); docs-9 owns the
+      TERMINAL sweep at the end of the plan. This issue's scope is :191-341 (+:173-189 is docs-3's);
+      the remaining root-README fences (:40, :78, :90, :105, :125, :143, :156, :346, :365) are
+      swept and gated by docs-8's fence-compilation harness — do not touch them here.
+
+      **Acceptance:** `bun run check` green; every fence proven by an executable twin run against
+      the built packages before commit; `grep -E 'TaskLoop|EvaluatorLoop|ConversationLoop|RubricEvaluator|RetryLoop|GoalEvaluator|collectByName|collectContents|messageTemplate|outputKey|consolidatedOutput' README.md`
+      returns nothing; "Known limitations" section exists; Loop example is the canonical one docs-2 reuses.
+
+  - key: "486"
+    key_original: docs-4
+    title: "docs: gate subsystem guide — the differentiator with zero documentation"
+    depends_on: []
+    labels: [documentation, audit, runtime]
+    description: |
+      **Size M · branch `docs/482-gates-guide` · packages: none (docs) · closes T0 "Gate subsystem has zero documentation" · spec: docs-management SKILL**
+
+      No gates page exists anywhere under `docs/`. The only prose is
+      `packages/agent-runtime/README.md:118-136` and every fence in it is wrong
+      (`new SafetyGate(["rm"])` vs real `{blockedTools?, blockedPatterns?, blockMessage?}`
+      `gates/safety.ts:17-21`; same for `HumanApprovalGate` `approval.ts:35-39` and `AuditGate`
+      `audit.ts:44`) — fix that README block here (docs-2 owns :208-373 only).
+
+      Ship `docs/gates.md`, verified against source: the `AgentEventBus.addGate/evaluateIntent`
+      seam (`events/agent-event-bus.ts:25-51,85`); category ordering SAFETY(0)→RATE_LIMIT(1)→
+      APPROVAL(2)→AUDIT(3) (`gates/base.ts:15-28`); the `GateAllow`/`GateBlock`/`GateModify` result
+      algebra + `HarnessDecision` arm (`base.ts:35-47`); authoring via `BaseGate`; the four shipped
+      gates with their REAL options-object constructors; observability via `agent.gate.decision`
+      with `settledBy` and the `trail` (`events/types.ts:163-215`).
+
+      **Pinned decisions:** sidebar → Guides group (`docs-site/astro.config.mjs:77-79`, slug
+      `"gates"`). Open with the honest wiring note: NO gate is wired by default (only non-test
+      `addGate()` site is `playground.ts:102` under `AP_APPROVAL_TOOLS`). State the known limits
+      AS THEY STAND AT LAND TIME — no forward references to unshipped behaviour (this page's whole
+      purpose is docs truth): SafetyGate name-only matching, RateLimitGate single bucket, AuditGate
+      unbounded array — whichever of gates-2/3/4 have already landed are described as shipped;
+      whichever haven't carry a rider on THEIR issues to update this page (conditional on it
+      existing). Frontmatter contract: title + description, no body h1.
+
+      **Acceptance:** `bun run check` green incl. docs-site build + link gate; every fence proven by
+      an executable twin; runtime README:118-136 gate examples compile against the real constructors;
+      not-wired-by-default caveat above the fold; no statement on the page is false at merge time;
+      sidebar entry renders.
+
+  - key: "487"
+    key_original: docs-5
+    title: "docs: retire the internal eval-surface roadmap and correct runners.md's stale gap list"
+    depends_on: []
+    labels: [documentation, audit]
+    description: |
+      **Size S · branch `docs/482-retire-planning-docs` · packages: none (docs) · closes T0 "Retire internal planning docs from the public tree"**
+
+      1. `docs/eval-surface.md` (368 lines) — internal roadmap claiming the eval engine is wired
+      "to no store, no CLI, no server route, and no UI" (:45) — false on all four; cites laptop
+      paths at :55/:331/:335. 2. `docs/runners.md:94` §2.5 — items 1 and 7 claim structured output
+      and `abortSignal` are missing; both shipped (`AgentRunner.runStructured()`, `RunOptions.abortSignal`).
+
+      **Pinned decisions:** `git mv docs/eval-surface.md .ai-docs/design/eval-surface.md` — move,
+      don't delete; drop the `"eval-surface"` slug from the Design notes array in
+      `docs-site/astro.config.mjs:94`. Do NOT delete `docs/runners.md` (Guides sidebar +
+      `runner/create-runner.ts:29` cites it); correct §2.5 in place with the honest caveat:
+      `abortSignal` exists but `run()` never forwards it to `generateText` (`agent-runner.ts:715-727`)
+      — runner-2 fixes the behaviour and amends this sentence in its own PR (runner-2 now depends
+      on this issue so the sentence exists to amend). Leave items 2-6 (re-verified accurate).
+      `docs/playground-redesign.md` etc. are deliberately out of scope.
+
+      **Acceptance:** `bun run check` green incl. link gate; `docs/eval-surface.md` moved and
+      delisted; `grep -rn '~/retrieval-agent' docs/` empty; runners.md §2.5 contains no claim
+      contradicted by `packages/agent-runtime/src`.
+
+  - key: "488"
+    key_original: docs-6
+    title: "ci: standalone check:docs-links script + an explicit CI step for the link gate"
+    depends_on: []
+    labels: [documentation, audit]
+    description: |
+      **Size S · branch `ci/482-docs-link-gate` · packages: none (repo config) · closes T0 "Wire tools/check-docs-links.ts into package.json scripts + ci.yml"**
+
+      Correction to the epic's premise, verified: the checker is NOT unwired —
+      `docs-site/package.json` chains it into `astro build`, which rides the CI Build step. The real
+      gaps: (1) no root-level script (`check:dist-contract` et al. all have one) — add
+      `"check:docs-links": "bun run tools/check-docs-links.ts"` and append to the `check` chain;
+      (2) no legible CI step — add a named step after Build in the house style of the neighbouring
+      gate steps; (3) the epic's causation is wrong — the checker sees built HTML only, never
+      READMEs; the missing gate for the stale samples is fence compilation, owned in this plan by
+      **docs-8** (coordinating with #457 slice 3 for docs/ guides). Record that in the CI step
+      comment.
+
+      **Pinned decisions:** keep the existing docs-site build chain untouched; the root script is
+      additive. The tool exits 1 with `dist/ not found` before a build (`check-docs-links.ts:22-25`)
+      — order the chain and CI step AFTER `bun run build` and say so in the comment. Update the
+      docs-management SKILL Commands block. First in the check-chain/ci.yml track — storage-8
+      appends to the same `"check"` line and depends on this issue.
+
+      **Acceptance:** `bun run check` green; `bun run check:docs-links` passes standalone after a
+      build and exits 1 with a clear message before one; named CI step in the check job; SKILL
+      Commands block lists it.
+
+  - key: "489"
+    key_original: docs-7
+    title: "examples: typecheck examples/agents and fix the curator's silently-dropped success criteria"
+    depends_on: []
+    labels: [documentation, audit, bug]
+    description: |
+      **Size S · branch `fix/482-examples-typecheck` · packages: examples-agents · closes T0 "Add typecheck to examples/agents/package.json"**
+
+      `examples/agents/package.json` has no `scripts` block and no tsconfig exists under
+      `examples/`. Probe already run: with a tsconfig extending `tsconfig.base.json` (`noEmit`,
+      `composite: false`, `include: ["**/*.ts"]`), `tsc` reports exactly two errors, both the same
+      live bug: `pipeline2/subagents/curator.ts:60` and `toolsmith/agent.ts:239` pass
+      `success_criteria:` where the schema is `successCriteria` — Zod strips the key, so both
+      missions render with NO success criteria, silently (`scripts/migrate-to-camelcase.ts:31`
+      shows the missed migration).
+
+      **Pinned decisions:** scope `include` to the workspace member only — do NOT reach up to
+      `../*.ts` (`examples/live-demo.ts` + `server-demo.ts` add 14 further errors; separate call,
+      flagged as follow-on). Override `composite`/`declaration` off, `noEmit: true`. `typecheck`
+      needs a prior build (already the order in `check` and CI). Two-character fix only; do not
+      restructure the examples.
+
+      **Acceptance:** `bun run check` green; `bun run --filter=@agentic-patterns/examples-agents typecheck`
+      passes; reverting either rename makes it fail (prove the gate bites); the curator's rendered
+      mission contains its three success criteria.
+
+  - key: "490"
+    key_original: core-1
+    title: "core: delete the project-tracker protocol layer from the public surface"
+    depends_on: []
+    labels: [core, documentation]
+    description: |
+      **Size M · branch `harden/core-1-drop-tracker-protocols` · packages: core · closes T0 "Remove the project-tracker domain from core" · BREAKING**
+
+      `packages/agent-core/src/protocols/` is a Linear/Jira-shaped tracker ported from the Python
+      original and wired into nothing — 48 of core's 178 root value exports (`SprintSchema`,
+      `TaskSchema`, `ReactionSchema`, `TeamSchema`, `WorkPhase`, …). Blast radius verified: inside
+      core only `src/index.ts:4` imports it; zero downstream hits across runtime/server/dashboard/
+      cli/examples.
+
+      **Pinned decisions:** delete the WHOLE `src/protocols/` tree (the epic line names `sprint.ts`,
+      but Task/Reaction live in `task.ts`/`comment.ts` — half a removal reads worse than none), plus
+      the three `protocols/__tests__/` files (988 lines). `ProtocolModel` (`atoms/base.ts:118`) goes
+      too — BUT it deserves its own callout, not a footnote: it is an exported abstract base class
+      (re-exported `atoms/index.ts:3`, documented `agent-core/README.md:49`) that exists to be
+      extended, and "nothing extends it" is verified in-repo only, unverifiable out-of-repo. Give
+      its removal a dedicated CHANGELOG line with a vendor-the-class migration note (copy the ~30
+      lines into user code); the generically-named removals (`Task`, `Priority`, `Team`, `Document`,
+      `User`, …) are individually named in the same entry since a downstream `import type` is
+      plausible. No deprecation cycle — core is pre-1.0 and this is a T0 credibility item (ruling
+      recorded in the plan header). No version bump in this PR (repo convention: separate release
+      PR via `just bump-core`); record under `## Unreleased` → **Breaking changes** (new heading).
+      Correct the four doc surfaces: `packages/agent-core/README.md` §Protocols, `CLAUDE.md` layer
+      table, `docs/index.md:25`. core-2 depends on this (both edit `atoms/base.ts`; its drift guard
+      enumerates the class set this shrinks).
+
+      **Acceptance:** `bun run check` green end to end; `src/protocols/` gone and no barrel
+      re-export; regression test asserts the core root namespace no longer exports `SprintSchema`/
+      `TaskSchema`/`ReactionSchema`/`ProtocolModel`; the four doc surfaces corrected; CHANGELOG
+      Breaking-changes entry names every removed export with the migration note and a dedicated
+      `ProtocolModel` line; no version bump.
+
+  - key: "491"
+    key_original: gates-1
+    title: "runtime: exporters must not take the agent loop down — fail-safe dispatch + real ConsoleExporter default"
+    depends_on: []
+    labels: [runtime, bug]
+    description: |
+      **Size S · branch `gates/1-exporter-failsafe` · packages: runtime · closes T0 "ConsoleExporter defaults to a no-op logger" + T1 "BaseExporter.handleEvent dispatches with no try/catch"**
+
+      1. `exporters/base.ts:58-77` awaits `handler.call(this, event)` bare — a throw inside any
+      `_on*` handler propagates out of `EventBus.publish` into the agent loop.
+      `HttpEventExporter` already gets this right (`http.ts:29,49,87-88`); make it the rule.
+      2. `exporters/console.ts:50-57,75` — `new ConsoleExporter()` installs `noopLogger()` and
+      prints nothing.
+
+      **Pinned decisions:** try/catch in `base.ts` only (one dispatch site, every exporter inherits);
+      failures route to a settable `onExporterError?: (err, event) => void` property (not a
+      constructor arg — `BaseExporter` has no options today); default handler logs `console.error`
+      with exporter name + event type and never rethrows. ConsoleExporter default logger binds to
+      **STDERR** (`console.error` / `process.stderr.write`), NOT stdout: a process that speaks a
+      protocol over stdout (an MCP stdio server, `ap` piping JSON) with a bare
+      `new ConsoleExporter()` must not have its wire format corrupted by a default — state that
+      hazard in the docblock; `{logger: console}` remains the explicit stdout opt-in and
+      `noopLogger` stays exported as the explicit silence opt-out. Do NOT touch the README fences —
+      docs-3 owns those (and documents the stderr default).
+
+      **Acceptance:** `bun run check` green; a throwing `_on*` handler leaves `bus.publish()`
+      resolved and the sibling exporter still called; `new ConsoleExporter()` writes to an injected
+      stderr-bound double and NOTHING reaches stdout by default; CHANGELOG flags the default-logger
+      behaviour change including the stderr choice.
+
+  - key: "492"
+    key_original: gates-3
+    title: "runtime: stateful gates go production-shaped — keyed RateLimitGate buckets + bounded AuditGate"
+    depends_on: []
+    labels: [runtime, bug]
+    description: |
+      **Size M · branch `gates/3-stateful-gates` · packages: runtime · closes T1 "AuditGate accumulates unbounded arrays" + T2 "RateLimitGate is a single in-process bucket"**
+
+      1. `gates/rate-limit.ts:13-46` — one `_tokens`/`_lastUpdate` pair per instance; every tenant/
+      run/agent shares it. Add `keyBy?: (event: ToolCallIntent) => string` over a `Map<string, Bucket>`.
+      2. `gates/audit.ts:33,40` — `entries` and `decisions` grow forever on a long-lived server.
+
+      **Pinned decisions:** `keyBy` default = constant `"global"` (today's behaviour exactly); keyed
+      buckets get idle eviction (`maxKeys` default 10k) — keying without eviction just moves the
+      leak; declare (do NOT implement) an async `RateLimitBucketStore` seam; state the N-replica
+      multiplication caveat in the docblock. AuditGate: `maxEntries` (default 1000) as FIFO drops
+      mutating the arrays IN PLACE (preserve array identity — both are readonly bindings held by
+      consumers), optional `sink?: (entry) => void` invoked before the drop, `droppedCount` counter
+      so loss is observable. Real per-tenant keying needs a trustworthy tenant id (server-6b) — this
+      ships the seam, not the trust. Rider: if `docs/gates.md` exists at land time (docs-4), update
+      its AuditGate/RateLimit limitation lines to the bounded/keyed behaviour; if not, docs-4
+      (landing later) documents the shipped behaviour itself — either order stays truthful.
+
+      **Acceptance:** `bun run check` green; per-key isolation, shared-key exhaustion, refill,
+      bucket eviction at `maxKeys`, audit FIFO cap with stable identity, sink invocation and
+      `droppedCount` all tested; CHANGELOG notes the new 1000-entry default cap; gates.md rider
+      applied when applicable.
+
+  - key: "493"
+    key_original: storage-10a
+    title: "release: tag + GitHub release become part of the publish job — forward automation"
+    depends_on: []
+    labels: [release, documentation]
+    description: |
+      **Size S · branch `hard/release-hygiene-forward` · packages: none (release tooling) · forward half of T0 "Release hygiene" (backfill is storage-10b; item recorded here)**
+
+      Verified: 0 git tags, 0 GitHub releases. `scripts/publish.sh` publishes and never tags (its
+      `--tag` is the npm dist-tag, `publish.sh:8/38/164/205`). Split from the backfill (storage-10b)
+      so the automation — the part with a clean CI-verifiable acceptance — lands wave 1 and every
+      release from here forward is tagged.
+
+      **Pinned decisions:** after a successful publish, create the git tag + GitHub release
+      idempotently (skip when the tag exists); two tag namespaces because versions float
+      independently — `v<lockstep>` for runtime/server/cli, `core-v<version>` for core; release
+      notes from the matching CHANGELOG section, stub when absent (never invented). Document the
+      tag scheme; add a `just` recipe. `contents: write` scoped to the publish job only, commented
+      in the workflow. Edits the publish job ONLY — the check job belongs to the docs-6 → storage-8
+      → storage-9 track.
+
+      **Acceptance:** `bun run check` green; publish job creates tag + release on a
+      version-changing merge, no-op on re-run; tag scheme documented; just recipe present.
+
+  - key: "494"
+    key_original: storage-11
+    title: "runtime: bound @anthropic-ai/sdk below the next major (currently \">=0.93.0\", unbounded)"
+    depends_on: []
+    labels: [runtime, bug]
+    description: |
+      **Size S · branch `hard/pin-anthropic-sdk` · packages: runtime · closes T1 "Unbounded dependency"**
+
+      `packages/agent-runtime/package.json:67` declares `"@anthropic-ai/sdk": ">=0.93.0"` as a
+      runtime DEPENDENCY — any future major installs automatically into every consumer. Lock resolves
+      `0.116.0` (`bun.lock:215`); the string was copied from claude-agent-sdk's PEER range, a
+      different contract. In-repo usage is one type-level reference (`providers/claude-code.ts:664`).
+
+      **Pinned decisions:** bound as `">=0.93.0 <1.0.0"` — NOT `^0.116.0` (pre-1.0 caret pins the
+      minor and would conflict with the claude-agent-sdk peer range). Regenerate `bun.lock` in the
+      same PR (CI runs `--frozen-lockfile`; see the header's rebase-don't-merge note). Audit the
+      sibling ranges and NOTE (don't silently change) anything else unbounded.
+
+      **Acceptance:** `bun run check` green; `bun install --frozen-lockfile` succeeds from a clean
+      checkout; lock still resolves current 0.116.x; one-line CHANGELOG entry under Unreleased.
+
+  - key: "495"
+    key_original: storage-5
+    title: "runtime+server: run the orphan sweep at store open — sweepRunning is wired only in the CLI playground"
+    depends_on: []
+    labels: [runtime, bug]
+    description: |
+      **Size S · branch `hard/sweep-running-boot-hook` · packages: runtime, server, cli · closes T1 "RunStore.sweepRunning() is dead code"**
+
+      Correction to the epic, verified: `sweepRunning()` is NOT dead — `playground.ts:604` calls it.
+      The narrower true bug: it has exactly ONE call site, so the server and every `load*` consumer
+      (`storage/load.ts:216/257/303`) leave rows stuck `'running'` forever after a crash, while three
+      comments (`exporters/run-store.ts:27`, `workflows/as-agent.ts:414`,
+      `coding-agent-runner.ts:198`) promise "the next boot's sweepRunning()".
+
+      **Pinned decisions:** move the sweep into the `load*` helpers — the one seam every consumer
+      goes through; return the swept count on the load result so the playground banner keeps
+      printing; drop the now-duplicate call at `playground.ts:604`. Opt-out (`sweepOnOpen?: boolean`,
+      default true), not opt-in. A directly-constructed `new RunStore(...)` still sweeps nothing
+      (constructor stays side-effect-free); update all three stale comments to name the real seam.
+      storage-4 later reuses this seam for the conversation-side sweep. First in the playground.ts
+      track (gates-4 → server-7 → server-4 follow).
+
+      **Acceptance:** `bun run check` green; a db with a `'running'` row reopened through
+      `loadRunStore` comes back errored with `swept: 1`; `sweepOnOpen: false` leaves it untouched;
+      playground banner behaviour unchanged; the three comments corrected.
+
+  - key: "496"
+    key_original: runner-1
+    title: "runtime: per-call event bus in AgentRunner — stop mutating this._eventBus mid-run"
+    depends_on: []
+    labels: [runtime, bug]
+    description: |
+      **Size M · branch `hr/runner-1-per-call-event-bus` · packages: runtime · closes T1 "AgentRunner mutates its own event bus mid-call" (`agent-runner.ts:632, 1398, 1734`)**
+
+      `run()`, `runStructured()` and `stream()` each do `if (options?.eventBus) this._eventBus =
+      options.eventBus;`. With a singleton runner (NestJS default scope; `createRunner()`), two
+      concurrent calls with different buses interleave — and because `emitIntent()` (:319) routes
+      gate evaluation through the same bus, a gate registered for tenant A can adjudicate tenant B's
+      tool calls. Live in-repo: `NodeBackedRunner.stream()` mints a fresh relay bus per run.
+
+      **This IS a behaviour change — say so.** Today `run({eventBus: X})` rebinds the runner
+      PERMANENTLY: every later `run`/`stream`/`runStructured` that omits `eventBus` keeps publishing
+      to X. After this PR the bus resolves per call, so call 2 without a bus falls back to the
+      constructor bus / global singleton — a consumer relying on the sticky rebind silently changes
+      destination. That population is the trade we are choosing; make it visible, not silent.
+
+      **Pinned decisions:** resolve once per public call — `const bus = options?.eventBus ??
+      this._eventBus ?? getAgentEventBus();`. Implementation is the implementer's choice between
+      (a) threading the bus as an explicit parameter through the shared helpers (`emit` :300,
+      `emitIntent` :319, `emitCancellation` :336, `buildToolCtx` :381 incl. the Channel-B closures
+      at :424/:441, `_gatewayAwareError` :482, `_maybeEmitRedaction` :565, `convertExecutableTools`
+      :1266, the `createGateToolApproval` call :1490 — ~72 mechanical one-line changes) or
+      (b) resolving into a small per-run context / local emit closures (~10 touch points) — same
+      correctness, same acceptance either way; do NOT lock into the wide diff. Cannot be split
+      per-loop since all three loops share the helpers. No `AsyncLocalStorage`, no per-call clone,
+      no public TYPE change. Also fix the sibling: `coding-agent-runner.ts:349-350` mutates its
+      `protected _eventBus` identically — add a `protected busFor(options)`, keep the exported
+      accessor (removing it breaks out-of-repo subclasses). Keep the lazy `getAgentEventBus()`
+      fallback without memoizing onto the field. Root of the serialized agent-runner.ts track —
+      runner-2/4/5 and storage-6 rebase on this.
+
+      **Acceptance:** `bun run check` green; concurrent-run isolation test (two buses, one runner,
+      MockLanguageModelV3 with a slow first response) asserts each bus receives only its own run's
+      events by runId; gate-isolation test asserts a bus-A gate never evaluates a bus-B tool intent;
+      a test DELIBERATELY pinning the new semantics: call 1 with bus X, call 2 with no bus →
+      call 2's events go to the constructor/global bus, not X; `this._eventBus` never assigned
+      outside the constructor in either file; existing host-propagation and as-agent relay tests
+      unchanged; CHANGELOG Unreleased → **Behaviour changes** entry naming the sticky-bus removal.
+
+  - key: "497"
+    key_original: runner-3
+    title: "runtime: NodeBackedRunner.stream() honors options.runId"
+    depends_on: []
+    labels: [runtime, workflows, bug]
+    description: |
+      **Size S · branch `hr/runner-3-nodebacked-runid` · packages: runtime · closes T1 "NodeBackedRunner.stream() ignores options.runId" (`workflows/as-agent.ts:311`)**
+
+      `stream()` mints `const runId = generateId();` unconditionally while its own `run()` at :240
+      honors `options?.runId` and the `RunOptions.runId` docstring (`runner/types.ts:151-159`)
+      claims it does. A host that pre-seeds its job/audit id loses correlation on the streaming path
+      only — the minted id is stamped on `agent.message.start` (:325), the `agent.error` publish
+      (:414), and the `runs` row via `RunStoreExporter`.
+
+      **Pinned decisions:** `const runId = options?.runId ?? generateId();` — one line, matching
+      `run()`. Mint-only-when-absent, no new option, byte-identical when `runId` is omitted.
+      `traceId` handling is already correct — leave it.
+
+      **Acceptance:** `bun run check` green; `stream({runId: "host-seeded"})` yields
+      `agent.message.start` (and every relayed downstream event) carrying that runId and publishes
+      it on the external bus; omitting `runId` still mints one.
+
+  - key: "498"
+    key_original: server-1
+    title: "server: optional verify(req) auth seam mounted before every route + token-gated hooks ingest"
+    depends_on: []
+    labels: [server, audit]
+    description: |
+      **Size M · branch `srv/s1-verify-hook` · packages: server · closes T2 "Auth" — the follow-up ADR-0004 §Alternatives names by hand (`0004:129-131`)**
+
+      `createServer` mounts every route unguarded (`app.ts:31-72`): `/admin/*`, `/conversations/*`,
+      `/events`, `/hooks/*`, `/eval/*`. Sharpest edge: `POST /hooks/:eventType`
+      (`routes/hooks.ts:30-72`) publishes caller-controlled JSON onto the shared bus and derives
+      canonical tool events from it — an unauthenticated caller can forge the audit trail. `POST
+      /events` already gates on `AP_INGEST_TOKEN` (`routes/events.ts:22-26`); hooks never got it.
+
+      **Pinned decisions:** one optional seam + a written stance, NOT a bundled login/JWT scheme.
+      New `middleware/auth.ts` with `verifyMiddleware(verify, opts)`;
+      `ServerConfig.verify?: (c) => Promise<Principal | undefined>` is the single trust boundary,
+      mounted `app.use("*", …)` after cors and BEFORE every `app.route(...)`; principal parked on
+      Hono `Variables` (`c.set("principal", …)`) — the slot server-6b reads. No `verify` configured
+      ⇒ byte-identical to today. Exempt paths default `["/health"]`. Hooks token: `AP_HOOKS_TOKEN`
+      verbatim after the events precedent, enforced only when configured (`hooks/emit.mjs` is copied
+      into user projects and will not retroactively update); un-tokened path logs ONE startup warning
+      naming the forgery risk. **CORS default FLIPS** (Gate 0 ruling 3 — plan's "document it" position
+      OVERRIDDEN): `middleware/cors.ts:16` currently defaults `origin: config?.origin ?? "*"`. With
+      no auth that means any page a user visits can drive this server and read the responses; the
+      docstring's "callers should pin origin for production" is the same wrong-default shape as the
+      empty gate chain. New default is the loopback set (`http://localhost:*`, `http://127.0.0.1:*`)
+      for the dashboard-dev case it was written for; `"*"` remains available but only when set
+      EXPLICITLY, and `origin: "*"` together with `credentials: true` hard-errors at construction
+      (invalid per the CORS spec and currently silently accepted).
+
+      **Acceptance:** `bun run check` green; with no `verify` every existing server test passes
+      unchanged; with a rejecting `verify`, 401 on `/admin/dashboard`, `POST /conversations`,
+      `POST /events`, `POST /hooks/SessionStart` and 200 on `/health`; handlers read
+      `c.get("principal")`; with `AP_HOOKS_TOKEN` set, hooks 401 without the header and no event
+      reaches the bus on the 401 path; new `docs/server-auth.md` per the docs-management SKILL, with
+      ADR-0004's deferral note amended to point at it.
+
+  - key: "499"
+    key_original: server-2
+    title: "server: land conversation resume from the store (#480) — rebase PR #481, re-verify, document the resume contract"
+    depends_on: []
+    labels: [server, runtime]
+    description: |
+      **Size M (budget L review) · branch `fix/480-conversation-continuity` (PR #481, already open) · packages: server, runtime · closes T2 "Conversation resume — #480"**
+
+      `app.ts:28` holds conversations in a process-local `Map` with route-minted ids while the store
+      mints a second durable id — the two id spaces were never reconciled, so no conversation can be
+      continued after a restart or from the list view. `Conversation` already accepts
+      `history?: Exchange[]` (`conversation.ts:100-114`) and nothing ever passes it.
+
+      **This is a rebase, not an implementation.** PR #481 (OPEN + MERGEABLE) already ships: one
+      conversation identity, a persisted `binding` stamp, `exchangesFromMessages()`, a
+      `resumeConversation`/`performResume` pair with in-flight dedupe, and the create pipeline
+      extracted so resume runs the identical path. Do NOT re-implement. Remaining work: rebase onto
+      current `main` (reconcile with PR #483's scope rename if it lands first), re-run checks,
+      verify with tests that resume re-arms the turn-1 recall latch and demands a caller-supplied
+      scope, document the resume contract in the docs page the branch touches.
+
+      **Pinned decisions:** **STRIP the lockstep version bump from #481 during the rebase** — the
+      PR carries runtime/server/cli 0.40.0 → 0.41.0, and publish fires on merge when versions
+      changed; a wave-1 merge would push 0.41.0 to npm with the pre-T0-docs README (`TaskLoop`,
+      the non-compiling ConsoleExporter example) — precisely what the epic exists to stop. Repo
+      convention holds anyway: version bumps land in a separate release PR at the drawdown's end.
+      Scope/secrets are NEVER persisted to make resume seamless — the resuming request re-supplies
+      them. A pre-binding-stamp row is un-resumable with a named 4xx, never a silent empty thread.
+      Root of the serialized conversations.ts track — server-5a/5b/6b land after this, server-4
+      last; storage-2/3/4 also land AFTER this. Keep the PR body's correction of #480's stated
+      mechanism in the merge commit.
+
+      **Acceptance:** `bun run check` green on a branch rebased onto current main; NO package.json
+      version changes in the merged diff; `POST /conversations/:id/messages` against a durable id
+      succeeds and appends to the same row; a two-turn thread survives a simulated restart (fresh
+      `createServer` over the same store) and turn 3 sees turns 1-2; concurrent resumes of one id
+      produce one `Conversation`; pre-stamp row returns the named 4xx; PR #481 merged, #480 closed
+      by it.
+
+  - key: "500"
+    key_original: server-6a
+    title: "runtime: nullable tenant_id on runs/events/conversations + tenant-filtered reads"
+    depends_on: []
+    labels: [runtime]
+    description: |
+      **Size M · branch `srv/s6a-tenant-column` · packages: runtime · storage half of T2 "Tenancy" (item recorded on server-6b) · takes migration-ladder v6**
+
+      No store has a tenant dimension: `RunRow` (`storage/run-store.ts:66-80`), the `events` table
+      (`event-store.ts:69`) and `conversations` (:228-254) all lack it. The only tenant appearance
+      is inside the unindexed free-form `runs.metadata` JSON blob. `RunStore.listRuns` has no tenant
+      predicate; `GET /admin/runs` can only return everything.
+
+      **Pinned decisions:** nullable `tenant_id TEXT` on `events`, `runs`, `conversations` as the
+      next additive rung (v6) on the `PRAGMA user_version` ladder (`event-store.ts:267`, follow the
+      v2-v5 precedent + an index per table). Widen `RunMeta`/`RunRow`, `PersistedEvent`,
+      `StoredConversation` and the `listRuns`/`recent`/`listConversations` filters with optional
+      `tenantId`. Nullable and optional — omitted ⇒ NULL column, unfiltered reads, byte-identical.
+      Exact-match on a single string (no scope-subset matching — MemoryStore's machinery answers a
+      different question). Nothing here derives or enforces a tenant — that is server-6b.
+      Ladder serialization: this takes v6; server-3 takes v7; storage-2 takes v8 — and the ladder
+      is one global integer, so a slip here slips both (header note).
+
+      **Acceptance:** `bun run check` green; migration-ladder test in the house style (hand-build a
+      v-prior DB with rows, reopen, assert survival + NULL column); `listRuns({tenantId})` filters
+      and omitting returns all; same for `recent()`/`listConversations()`; every existing store test
+      unchanged; `docs/store-family.md` notes the opt-in semantics.
+
+  # ── Wave 2 — unblocked by wave-1 landings ──────────────────────────────────
+
+  - key: "501"
+    key_original: docs-2
+    title: "docs(runtime): delete the legacy pattern layer from the runtime README, incl. two classes that never existed"
+    depends_on: ["485"]
+    labels: [documentation, audit, runtime, workflows]
+    description: |
+      **Size M · branch `docs/482-runtime-readme-workflows` · packages: runtime (docs only) · closes T0 "Runtime README documents classes that never existed"**
+
+      `packages/agent-runtime/README.md:208-373` — the whole "Legacy string-pinned patterns" block.
+      `LLMRefinementEvaluator` and `CompositeRefinementEvaluator` (:331) exist nowhere in this repo
+      and never did — pure fabrication. The rest documents deliberately deleted API: the Base Types
+      (:212-223), legacy `Sequential`/`Parallel` (:225-267), the four-row Goal Evaluators table
+      (:268-289), `TaskLoop`/`EvaluatorLoop`/`RetryLoop`/`ConversationLoop` (:290-373).
+
+      **Pinned decisions:** DELETE, don't port — there is no legacy layer left; remove :208-373
+      outright. Replace with a short typed-composite reference complementing the accurate "Typed
+      Node compositions" section at :141: one subsection each for `Loop`, `Accumulate`, `Retry`,
+      `FanOut`. Reuse the `Loop` refinement example authored in docs-1 VERBATIM — do not write a
+      second one. `ConversationLoop`'s replacement (`Conversation`, documented at :407-427) is
+      cross-linked, not duplicated. Every identifier must be exported from the runtime barrel.
+
+      **Acceptance:** `bun run check` green; fences proven by an executable twin;
+      `grep -E 'LLMRefinementEvaluator|CompositeRefinementEvaluator|TaskLoop|EvaluatorLoop|ConversationLoop|RetryLoop|RubricEvaluator|GoalEvaluator|StepResult|executeStep|resolveMessage' packages/agent-runtime/README.md`
+      returns nothing; Loop example byte-identical to docs-1's.
+
+  - key: "502"
+    key_original: docs-3
+    title: "docs: fix the ConsoleExporter examples in both READMEs and list the four missing exporters"
+    depends_on: ["491"]
+    labels: [documentation, audit, runtime]
+    description: |
+      **Size S · branch `docs/482-exporter-docs` · packages: none (docs) · closes T0 "ConsoleExporter example doesn't compile" + T0 "exporter table omits the four exporters people actually want"**
+
+      1. `README.md:177-188` and `packages/agent-runtime/README.md:437-446` show
+      `new ConsoleExporter(bus)` + `.start()`/`.stop()`. Real API: options-object constructor
+      (`exporters/console.ts:72`) + `attach(bus)`/`detach(bus)` (`base.ts:42,47`); the runtime
+      README's `createConsoleExporter(bus)` is wrong the same way.
+      2. `packages/agent-runtime/README.md:432-436` lists 3 of 7 shipped exporters — add rows for
+      `SSEExporter`, `HttpEventExporter`, `SQLiteExporter`, `RunStoreExporter` (output medium + the
+      one-line reason to pick each).
+
+      **Pinned decisions:** since gates-1 lands first (dependency), document the bare
+      `new ConsoleExporter()` form against the new STDERR-bound default — note the stdout opt-in
+      (`{logger: console}`) in one line, not the old `{logger}` workaround. Keep the table honest
+      about the Langfuse exporter's state (gates-5 fixes the client interface — no adoption
+      language until then). Do not touch the workflow sections (docs-1/docs-2 own those).
+
+      **Acceptance:** `bun run check` green; both exporter fences proven by an executable twin
+      against built dist; table rows == `exporters/index.ts` value exports (7);
+      `grep -n 'ConsoleExporter(bus)\|exporter.start()\|exporter.stop()' README.md packages/agent-runtime/README.md`
+      returns nothing.
+
+  - key: "503"
+    key_original: core-2
+    title: "core: fix replace()/merge() on composite models and cover every AgenticModel subclass"
+    depends_on: ["490"]
+    labels: [core, bug, testing]
+    description: |
+      **Size M (budget L review) · branch `harden/core-2-composite-replace-merge` · packages: core · closes T1 "agent.replace()/role.replace() throw at runtime while typechecking clean"**
+
+      `AgenticModel.replace` (`atoms/base.ts:63-67`) reconstructs via `new Ctor({...this._data,
+      ...updates})`, but `Role` (`organisms/role.ts:76-107`) and `Agent` (`organisms/agent.ts:68-87`)
+      constructors take INSTANCES and call `.data` on them — so `replace()`/`merge()` throw ZodError
+      (reproduced: `role.replace({name})` → "persona expected object, received undefined").
+      Second defect, same sweep: `Agency.merge()` throws its one-coordinator validation
+      (`atoms/agency.ts:99-106`); `Roster` has the identical latent shape (`roster.ts:60-69`).
+      Depends on core-1: both edit `atoms/base.ts`, and the drift-guard class census below must be
+      taken AFTER core-1's deletion shrinks the set.
+
+      **Pinned decisions:** follow the `Awareness.replace` precedent (`atoms/awareness.ts:185-197`)
+      — override in `Role`/`Agent`, resolve `this.constructor`, rebuild from retained instance
+      fields, rehydrate only keys present in `updates`. Keep the override signature base-compatible
+      (`Partial<RoleData>`). Override `merge` component-wise on the composites so instances never
+      round-trip through plain data; any rebuild must pass `Role.capabilities` by reference (schema
+      is `z.array(z.unknown())`). Decide `Agency`/`Roster` merge explicitly — validator-aware or
+      documented-and-tested throw; silent status quo is not an option.
+
+      **Acceptance:** `bun run check` green; `role.replace`/`agent.replace`/`role.merge`/`agent.merge`
+      return correct instances; table-driven suite over every concrete `AgenticModel` subclass
+      remaining after core-1 (21 at last count — recount post-deletion; the drift guard makes the
+      number self-maintaining) asserting constructor identity, frozen schema-valid `.data`,
+      instance-carried fields surviving, source unmutated — for BOTH `replace()` and `merge()`;
+      drift guard fails when a new `extends AgenticModel` class lacks a fixture; `Agency`/`Roster`
+      merge asserted either way; CHANGELOG Unreleased → Bug Fixes entry.
+
+  - key: "504"
+    key_original: runner-2
+    title: "runtime: forward abortSignal to every provider call — cancel must stop token burn, not just the loop"
+    depends_on: ["496", "487"]
+    labels: [runtime, bug]
+    description: |
+      **Size S · branch `hr/runner-2-abort-forwarding` · packages: runtime · closes T1 "run() never forwards abortSignal to generateText" (`agent-runner.ts:715-727`)**
+
+      Three of five provider calls never receive `options.abortSignal`: `run()`'s `generateText`
+      (:759, guarded only by the top-of-iteration check), `runStructured()`'s no-tools path (:1463),
+      and its tier-2 fallback (:1633). Already correct (do not regress): the capable path (:1529)
+      and `stream()`'s `streamText` (:1871).
+
+      **Pinned decisions:** add `abortSignal: options?.abortSignal` to the three calls, then
+      normalize the abort rejection: `run()` emits `agent.llm.end {finishReason: "cancelled"}`,
+      skips `agent.error`, and reuses the shared cancelled return path via `cancelledAtIteration`
+      (locked D1 non-throw contract); `runStructured()` rethrows as the existing
+      `RunCancelledError`, never a raw AbortError. Detect via `options.abortSignal?.aborted` +
+      isAbortError-style name check — no string-matching provider messages. Rewrite the
+      `RunOptions.abortSignal` docstring (`runner/types.ts:171-201`), which currently documents the
+      non-forwarding as deliberate. ALSO amend the runners.md §2.5 sentence docs-5 wrote ("exists
+      but never forwarded") — this PR falsifies it (hence the docs-5 dependency). No new
+      `RunOptions` field; no cancel-event changes to `run()`.
+
+      **Acceptance:** `bun run check` green; a MockLanguageModelV3 that resolves only when its
+      received signal fires proves the signal reaches all three call sites; aborting mid-call in
+      `run()` returns `finishReason: "cancelled"` with no `agent.error`; `runStructured()` throws
+      `RunCancelledError`; existing `stream()` cancellation tests (#341) unchanged; docstring +
+      runners.md sentence match shipped behaviour.
+
+  - key: "505"
+    key_original: gates-2
+    title: "runtime: SafetyGate argument-aware rules — predicates over tool input, not just tool names"
+    depends_on: ["486"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size M · branch `gates/2-safety-arg-predicates` · packages: runtime · closes T2 "SafetyGate inspects tool names only" (`gates/safety.ts:33-45`)**
+
+      The gate reads only `toolName`; `ToolCallIntent.arguments` (`events/types.ts:152-157`) is
+      never inspected, so `bash({command: "rm -rf /"})` and `bash({command: "ls"})` are
+      indistinguishable. AI SDK 6 ships `needsApproval` as a predicate over tool input — match that
+      shape: `rules?: SafetyRule[]` where `SafetyRule = { tool?: string | RegExp; when: (input,
+      intent) => boolean | Promise<boolean>; reason?: string }`, evaluated after the name checks.
+
+      **Pinned decisions:** no rules ⇒ byte-identical behaviour. `tool` omitted = applies to every
+      tool. A throwing predicate fails CLOSED (block, reason names the rule) — the deliberate
+      opposite of gates-1's exporter fail-open rule; state that in the docblock so nobody
+      "harmonises" them. Async predicates allowed; raw arguments record, no Zod coupling. Export
+      `SafetyRule` from the gates barrel. New per-gate test file `gates/__tests__/safety.test.ts`
+      (gates-3 owns the shared gates.test.ts). Rider: one-line `docs/gates.md` limitations update
+      (page exists — docs-4 is now a dependency, so the rider is always satisfiable).
+
+      **Acceptance:** `bun run check` green; tests for name-only back-compat, arg-match block,
+      non-matching-tool passthrough, async predicate, throwing predicate ⇒ block, and reason
+      propagation into `agent.tool.rejected`/`agent.gate.decision`; gates.md name-only limitation
+      line updated.
+
+  - key: "506"
+    key_original: gates-4
+    title: "server+runtime: wire a default gate chain — no more shipped-but-unwired governance"
+    depends_on: ["492", "495", "486"]
+    labels: [runtime, server, enhancement]
+    description: |
+      **Size M · branch `gates/4-default-chain` · packages: runtime, server, cli · closes T2 "No gate is wired by default"**
+
+      Verified: the only non-test `addGate()` call site is `playground.ts:102`, gated on
+      `AP_APPROVAL_TOOLS`. `createServer()` never touches the gate chain; `ServerConfig` has no
+      gates slot; `README.md:403` lists layer-6 gates as delivered.
+
+      **Pinned decisions:** ship `gates/default-chain.ts` exporting `defaultGateChain(options?)` →
+      ordered `Gate[]` (AuditGate always; Safety/RateLimit/approval only when configured), and
+      `ServerConfig.gates?: readonly Gate[]` applied to `config.eventBus` BEFORE routes mount.
+      Default-on = AuditGate ONLY (never blocks; safe now that gates-3 bounded it — that dependency
+      is hard: unbounded-by-default would convert a docs gap into a memory leak on every server).
+      `createServer` adds gates idempotently. Repoint the playground's `AP_APPROVAL_TOOLS` branch at
+      the preset — one wiring path. README edit is the minimum truth fix (one line at :403 + the
+      `config.gates` snippet); the :403 hunk is disjoint from docs-1's :191-341 rewrite — REBASE
+      over it if landed, no ordering edge needed. Rider: one-line `docs/gates.md` wiring-note
+      update (page exists — docs-4 is a dependency). Second in the playground.ts track
+      (storage-5 → this → server-7 → server-4).
+
+      **Acceptance:** `bun run check` green; server test asserts a gate passed via `config.gates`
+      is on the bus and evaluates a tool intent; default chain never blocks;
+      `defaultGateChain` unit-tested for SAFETY→RATE_LIMIT→APPROVAL→AUDIT order; playground honors
+      `AP_APPROVAL_TOOLS` with unchanged behaviour; README no longer implies gates run unwired;
+      gates.md wiring note updated.
+
+  - key: "507"
+    key_original: gates-6
+    title: "runtime: OTel span parentage — real span trees from the injected tracer, proved by an in-memory SpanExporter"
+    depends_on: ["491"]
+    labels: [runtime, enhancement, testing]
+    description: |
+      **Size L (endorsed, do not split) · branch `gates/6-otel-span-parentage` · packages: runtime · closes T3 "OTel span parentage" — flagged highest-leverage in the epic**
+
+      Every span in `exporters/otel.ts` is created with bare `tracer.startSpan(name)` (:84, :94,
+      :113, :167, :246) — no `SpanOptions`, no `context.with(trace.setSpan(...))`, so iterations
+      don't nest under `agent.run`, tool/LLM spans are orphans, and subagent runs are disconnected
+      soup. The parentage is already in hand: every event carries `traceId`/`spanId`/`parentSpanId`
+      (`events/types.ts:38-41`) and the exporter keeps a `spanId -> OTelSpan` map (:71) it throws away.
+
+      **Pinned decisions:** build the tree explicitly from `event.parentSpanId` + the map — do NOT
+      rely on `context.active()` (async event handlers, no ambient context). Extend the injected
+      surface: optional `api: { trace, context }` alongside `tracer`; children created as
+      `tracer.startSpan(name, options, api.trace.setSpan(api.context.active(), parentSpan))`; widen
+      `OTelTracer.startSpan` to the 3-arg signature; absent `api` ⇒ today's flat behaviour
+      unchanged. Unmapped parent (other process) ⇒ stay flat, keep `agent.parent_span_id` attribute
+      — never fabricate a remote `SpanContext` (non-hex generateId ids, same root cause as gates-5).
+      Map hygiene: delete on the run's terminal event + bounded idle sweep. Error events (:192-205)
+      attach to the mapped parent; `agent.gate.decision` (:246) parents under the run. Testing is
+      the point: add `@opentelemetry/api` + `@opentelemetry/sdk-trace-base` devDependencies and
+      drive a real `BasicTracerProvider` + `InMemorySpanExporter`, asserting the finished-span TREE.
+      The langfuse target decision is now PINNED in-plan: JS v4 (`@langfuse/tracing`, OTel-backed)
+      — gates-5 depends on this issue and reuses its OTel context plumbing.
+
+      **Acceptance:** `bun run check` green; real in-memory SpanExporter shows a single traceId and
+      correct parent links for run > iteration > gen_ai.chat, run > iteration > tool.X, subagent
+      agent.run nested under its invoking tool span, and unmapped-parent degrading to flat; no-api
+      path byte-identical; span map empty after run completion; existing mock-based OTel tests pass.
+
+  - key: "508"
+    key_original: server-5a
+    title: "server: SSE id: frames + a bounded replay ring + GET /conversations/:id/stream reattach"
+    depends_on: ["499"]
+    labels: [server]
+    description: |
+      **Size M · branch `srv/s5a-sse-replay` · packages: server · replay half of T2 "SSE replay" (item recorded here; the disconnect-behaviour half is server-5b)**
+
+      No frame ids: `agentEventToSSE` returns `{event, data}` only (`src/sse.ts:24-40`) — native
+      `EventSource` reconnection replays nothing. Split from the abortOnDisconnect flip (server-5b)
+      on the critic's finding: everything here is ADDITIVE AND INERT — landing it alone gives an
+      `EventSource` that reconnects and receives the missed tail, with today's disconnect semantics
+      untouched — while the default flip is the one piece anyone would revert under production
+      pressure, so it must be revertable without reverting replay.
+
+      **Pinned decisions:** widen `SSEMessage` with `id`; mint a per-conversation monotonic sequence
+      (`<turnRunId>:<n>`) on every frame; bounded drop-oldest replay ring on `ConversationEntry`;
+      new `GET /conversations/:id/stream` attaching to the live turn and replaying the buffered tail
+      on `Last-Event-ID`. Replay buffer is in-memory per-process; durable replay is explicitly out
+      of scope, stated in the docblock and docs page (docs-9 carries it into README Known
+      limitations). Frame ids are additive. Disconnect behaviour is NOT touched here — `onCancel`
+      (`routes/conversations.ts:648-655`) stays exactly #341's semantics until server-5b. Second in
+      the conversations.ts track (after server-2's 1082-line rewrite). Own CHANGELOG line.
+
+      **Acceptance:** `bun run check` green; every frame carries a monotonically increasing id;
+      reconnect with `Last-Event-ID` receives missed frames, no duplicates, then live frames;
+      disconnect/cancel behaviour byte-identical to today (`conversations-cancel.test.ts`
+      unchanged); new `docs/server-sse.md` per the docs-management SKILL; CHANGELOG entry.
+
+  - key: "509"
+    key_original: storage-8
+    title: "ci: gate the deterministic eval families on every PR — and fix the two portability cases that are red today"
+    depends_on: ["488", "493"]
+    labels: [testing]
+    description: |
+      **Size M · branch `hard/eval-gate-ci` · packages: none (evals + CI) · closes T3 "Gate the eval harness in CI"**
+
+      The harness is red on main today, verified: `bun x tsx evals/memory-behavior/run.mts --dry`
+      exits 1 — `memory-portability` errors on `port-stemming-prefer` and `port-substring-am`
+      ("both legs empty"). Root cause: those cases query the corpus's NEGATIVE axes (word boundary,
+      substring — `conformance.ts:71-84`), so a mutual miss is the CORRECT portable answer, but the
+      both-empty guard (`run.mts:730-740`) turns correct agreement into an ERROR. The README's 7/7
+      PASS run log (:259) is stale.
+
+      **Pinned decisions:** teach the parity scorer a declared mutual-miss expectation
+      (`expected: { parity: true, mutualMiss: true }`) so a negative axis is asserted deliberately;
+      keep the vacuous-agreement guard for every other case; do NOT loosen a tier to go green (the
+      README's own obligation). Then gate: root script `"eval:memory": "tsx
+      evals/memory-behavior/run.mts --dry"`, a ci.yml step in the check job after Build, and the
+      same script in the root `check`. Only DETERMINISTIC families gate PRs — live families need
+      credentials that fork PRs cannot have; keep them behind `workflow_dispatch` at most.
+      `just eval-memory` stays the human entry point. If the fix belongs in the shared
+      `MEMORY_MATCH_CORPUS` rather than the scorer, split that runtime change out. Confirm hermetic
+      run under a fresh CI HOME. The docs-6/storage-10a dependencies are the check-chain/ci.yml
+      track: docs-6 edits the SAME `"check"` line (guaranteed textual conflict) and storage-10a the
+      publish job; storage-9 lands its ci.yml edit after this one.
+
+      **Acceptance:** `bun run check` green; `bun run eval:memory` exits 0 on a clean tree; the step
+      runs in ci.yml and in the root `check`; the two cases assert mutual-miss explicitly with the
+      family kept at tier hard; README family section + run log corrected; no leftover temp dbs.
+
+  - key: "510"
+    key_original: storage-10b
+    title: "release: backfill git tags, GitHub releases and the changelog for already-published versions"
+    depends_on: ["493"]
+    labels: [release, documentation]
+    description: |
+      **Size S · branch `hard/release-hygiene-backfill` · packages: none (release tooling) · backfill half of T0 "Release hygiene" (item recorded on storage-10a)**
+
+      63 of 71 published runtime versions have no changelog entry and none are tagged. Split from
+      the forward automation (storage-10a) because the two halves have different acceptance
+      characters: automation is CI-verifiable in the PR; the backfill's retro tag push is a
+      maintainer repo-op on a protected branch that the PR can only SHIP THE SCRIPT for.
+
+      **Pinned decisions:** retro-tag at the bump commit (`git log -S` on the version line) using
+      storage-10a's documented tag scheme; releases only for recent minors with real changelog
+      sections; explicit cutoff, no fabricated notes for 63 versions — older versions get an
+      explicit "no changelog recorded" marker. Script is idempotent and dry-runnable; the PR lands
+      the script + the CHANGELOG archaeology + a documented run procedure; the actual tag push is
+      executed by the maintainer post-merge (state that in the PR body — the acceptance below is
+      about the artifacts, not the repo-op).
+
+      **Acceptance:** `bun run check` green; backfill script idempotent and dry-runnable (dry run
+      output committed as evidence); every released version has a CHANGELOG entry or an explicit
+      "no changelog recorded" marker; maintainer run procedure documented.
+
+  - key: "511"
+    key_original: storage-1
+    title: "docs(adr): durable execution — turn journal, step-level persistence, interrupted-turn recovery"
+    depends_on: ["485"]
+    labels: [documentation]
+    description: |
+      **Size S · branch `dur/1-adr-durable-execution` · packages: none (docs) · anchors T2 "Durable execution" (leaves: storage-2/3/4)**
+
+      Durable execution is a sub-epic, not one issue. Today `Conversation` persists only after the
+      turn completes (`conversation.ts:196` send, `:352` stream) and `Exchange.toolCalls` is a
+      hardcoded `[]` on BOTH paths (`:180`, `:337`) — a crash mid-turn loses the user's message, the
+      partial answer, and every tool call. This issue writes the ADR only — no code. Take the next
+      free ADR number (0010 is taken). Depends on docs-1 because D4's README line goes into the
+      "Known limitations" section docs-1 creates — the section must exist to write into.
+
+      **Pinned decisions to make (decided in the ADR, not left open):** D1 journal granularity —
+      request persisted BEFORE the runner runs; response flushed at step boundaries with tool result
+      as the trigger (VoltAgent's `flushOnToolResult` is the bar); chunks coalesced. D2 write shape —
+      recommend append-into-open-message (a message-per-step model breaks #480's request→response
+      pairing in `exchangesFromMessages`). D3 recovery — restored parts are HISTORY, never
+      re-executed; no automatic continuation in v1. D4 out of scope — workflow/step checkpointing
+      for layer-10 patterns; add the README Known-limitations line (docs-9 owns the terminal sweep).
+      D5 default posture — pin one (recommend on-by-default when a store is wired, with opt-out).
+      D6 boundary with #480's `rehydrate.ts`, which currently DROPS unpaired requests.
+      Follow the docs-management SKILL frontmatter contract + sidebar placement.
+
+      **Acceptance:** `bun run check` green; ADR merged with D1-D6 decided; `docs/store-family.md`
+      notes the durability posture per store; README Known-limitations line added; link check +
+      drift checks pass.
+
+  - key: "512"
+    key_original: server-3
+    title: "runtime: PendingInputStore — pending approvals survive a process restart"
+    depends_on: ["500"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `srv/s3-pending-input-store` · packages: runtime · closes T2 "Durable pending-input registry" (delivery half is server-4) · takes migration-ladder v7 (after server-6a's v6)**
+
+      `PendingInputRegistry` is a plain `Map` of unsettled promises
+      (`interaction/pending-input-registry.ts:44-49`); its own docblock (:13) states "holds no
+      durable session state." Every human-in-the-loop round-trip routes through it; a restart drops
+      every pending approval with no row, no audit event, and an indistinguishable 404 for the
+      answering client.
+
+      **Pinned decisions:** new `interaction/pending-input-store.ts` — `PendingInputStore` protocol
+      (`put`/`resolve`/`get`/`list`/`sweepOrphans`, all async) with `InMemoryPendingInputStore`
+      beside it plus a SQLite backend on the shared `EventStore` file (v7 rung, additive, same WAL
+      pragmas). Registry gains an optional `store`: `create()` writes the row BEFORE returning the
+      promise (preserving the synchronous-registration guarantee); `resolve()` records and clears;
+      `denyAll()` records the reason; `sweepOrphans()` marks prior-process rows `orphaned` at boot.
+      A Promise cannot survive a restart — durability means the RECORD survives and the orphan is
+      visible and auditable, NOT that the blocked run resumes (that is durable execution); say so in
+      the docblock (docs-9 carries the distinction into README Known limitations). Fail closed:
+      orphaned = terminal-denied, matching `TIMED_OUT_DENY`. No store configured ⇒ byte-identical.
+      Registry method signatures stay source-compatible.
+
+      **Acceptance:** `bun run check` green; both backends round-trip put/resolve/list; a row
+      written then a FRESH registry over the same store lists it orphaned and a later resolve
+      reports terminal-denied; existing registry tests (duplicate-correlationId chaining, timeout
+      DENY, denyAll) pass with no store AND each backend; migration-ladder test in the house style;
+      `docs/store-family.md` gains the PendingInputStore row.
+
+  # ── Wave 3 ─────────────────────────────────────────────────────────────────
+
+  - key: "513"
+    key_original: docs-8
+    title: "ci: README fence-compilation gate — every README code sample typechecks against the built packages, in CI"
+    depends_on: ["485", "501", "502", "486"]
+    labels: [documentation, audit, testing]
+    description: |
+      **Size M · branch `ci/482-readme-fence-gate` · packages: none (repo tooling) · closes epic DoD #1 "every README sample compiles, verified in CI" — the gate the plan previously did not own**
+
+      Added on the coverage critic's finding: docs-1/2/3/4 prove their fences by one-time manual
+      executable twins — no artifact, no regression protection; the next API rename re-breaks the
+      READMEs silently, which is exactly the failure mode the epic opened with. And no issue sweeps
+      the whole README even once: root `README.md` has 18 `typescript` fences, of which docs-1 owns
+      :191-341 and docs-3 owns :173-189 — the fences at :40, :78, :90, :105, :125, :143, :156,
+      :346, :365 (spot-checked currently-correct, but UNVERIFIED) plus the package READMEs
+      (core: 8 fences, runtime: 21, server/cli/dashboard) are owned by nobody. `check` is the
+      required status on `main`, so the check chain is the only mechanism that makes "verified in
+      CI" true.
+
+      **Pinned decisions:** extract every `typescript` fence from the root README + all five
+      package READMEs into generated twin files and typecheck them against the BUILT packages
+      (workspace `dist/`, not source paths — the samples must work as a consumer sees them). New
+      root script `"check:readme-samples"` in the house style of `check:dist-contract`, appended to
+      the root `check` chain AFTER `build`, plus a named ci.yml step. Per-fence opt-out via an HTML
+      comment marker (`<!-- fence: no-compile -->`) for deliberately illustrative fragments —
+      opt-out is VISIBLE in the diff, never a heuristic skip. Coordinate with open epic #457
+      slice 3 ("Compiled code samples" for docs/ guides): pull its tooling forward if it exists by
+      then, otherwise build here and offer the harness to #457 — one harness, two fence sources; do
+      not block on #457. Update docs-6's CI step comment (which currently points the fence-gap at
+      #457 alone) to name this gate. Depends on docs-1/2/3/4 so the gate lands green — landing it
+      before the rewrites would gate on known-broken fences.
+
+      **Acceptance:** `bun run check` green; `bun run check:readme-samples` passes standalone after
+      a build; deliberately breaking one identifier in any covered fence fails it (prove the gate
+      bites); all root + package README fences either compile or carry the visible marker; named
+      ci.yml step in the check job; docs-6's step comment updated.
+
+  - key: "514"
+    key_original: runner-4
+    title: "runtime: model-parameter passthrough — reasoningEffort / temperature / maxOutputTokens / providerOptions per run"
+    depends_on: ["496", "504"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size M · branch `hr/runner-4-model-params` · packages: runtime · closes T2 "No reasoningEffort / providerOptions / temperature / maxTokens passthrough" (jointly with runner-6, which delivers the item's stated per-step close condition)**
+
+      No generation control reaches the provider — all five provider calls pass only
+      `{model, instructions, messages, tools?, output?, headers}` (run :759; runStructured :1463/
+      :1509/:1633; stream :1861). `ReasoningEffortCapabilitySchema` (`providers/capabilities.ts:141`)
+      is exported and read by nothing. Verified against the installed SDK: `LanguageModelCallOptions`
+      already carries `maxOutputTokens`/`temperature`/`topP`/`topK`/`seed`/`stopSequences` and a
+      first-class `reasoning` setting matching `ReasoningEffortLevelSchema` — reasoning effort is a
+      top-level call setting, not a per-provider hand-roll.
+
+      **Pinned decisions:** one nested `RunOptions.modelParams?: { temperature?, maxOutputTokens?,
+      topP?, topK?, seed?, stopSequences?, reasoningEffort?, providerOptions? }` bag — not five flat
+      fields. Private `_resolveCallParams(options)` mirroring the `_callHeaders` precedent
+      (:257/:274): returns `undefined` when nothing set so the no-config path passes NO new keys and
+      every existing mock assertion is byte-identical; spread into all five sites, computed once per
+      run. `reasoningEffort` maps to SDK `reasoning`; `providerOptions` passes through verbatim.
+      Add `adviseReasoningEffort(modelId, level)` beside `adviseStructuredRun`
+      (`capabilities.ts:530`) — warn-once, advisory only, never blocks. Per-run only (no runner-level
+      defaults). Do NOT seed reasoning rows into `MODEL_CAPABILITIES` (honesty refines require
+      evidence we don't have). Epic's `maxTokens` is spelled `maxOutputTokens` (ai@7). Third in the
+      agent-runner.ts track.
+
+      **Acceptance:** `bun run check` green; `modelParams` reaches all five call sites (captured via
+      MockLanguageModelV3); omitting it produces a call object with no new keys (exact shape
+      asserted); `reasoningEffort: "high"` arrives as `reasoning: "high"`; `adviseReasoningEffort`
+      warns once and never throws or alters the call; no `MODEL_CAPABILITIES` rows change.
+
+  - key: "515"
+    key_original: gates-5
+    title: "runtime: Langfuse exporter targets the real Langfuse JS v4 client — kill the Python-SDK transliteration"
+    depends_on: ["491", "507"]
+    labels: [runtime, bug]
+    description: |
+      **Size M · branch `gates/5-langfuse-real-client` · packages: runtime · closes T1 "Langfuse exporter cannot accept a real Langfuse JS client" · BREAKING**
+
+      The injected `LangfuseClient` (`exporters/langfuse.ts:96-114`) is a transliteration of the
+      PYTHON SDK (`startSpan`, `as_type`, snake_case `trace_context`/`usage_details`) while
+      `package.json:40,45` declares `langfuse@^3` (the JS SDK, a different surface); the file header
+      names `@langfuse/langfuse`, which does not exist. Three live bugs beyond the shape mismatch:
+      `_traceInputSet`/`_iterUserMessage` never populated (trace never gets an `input`); `_toHexId`
+      just strips dashes so non-hex `generateId` runIds produce invalid trace_ids; `flush()` is sync
+      while the JS SDK's is async — exit after `flush()` drops the batch.
+
+      **Pinned decisions:** target is DECIDED in-plan (jointly with gates-6, whose OTel context
+      plumbing v4 reuses — hence the dependency): langfuse JS v4 (`@langfuse/tracing`), declared
+      exactly in peerDeps + header; fall back to v3 `langfuse` ONLY if v4 proves infeasible during
+      implementation, recorded in the PR body. This is BREAKING either way: the peerDep retarget
+      unmeets anyone on `langfuse@3`, and the injected-interface reshape breaks any out-of-repo
+      adapter written against today's shape — CHANGELOG Breaking-changes entry + migration note,
+      same treatment as core-1/core-3. The interface must be structurally satisfiable by the real
+      client. Populate the trace input from `MessageStartEvent` (delete dead fields if nothing
+      usable). Derive `trace_id` as a deterministic 32-hex digest of `runId` (span_id 16-hex). Make
+      `flush()` async-aware. Test fixture typed against the real SDK's published types
+      (devDependency, typecheck-enforced) so the mock cannot drift again. Depends on gates-1: this
+      makes real network calls reachable from event handlers. If the retarget exceeds ~500 lines,
+      split (a) id/dead-field/flush correctness from (b) client retarget, remapping the epic item to (b).
+
+      **Acceptance:** `bun run check` green; a fixture typed as the real SDK's client compiles when
+      passed to the constructor; peer + header name the same real package; valid 32/16-hex ids from
+      an ai-style `generateId`; trace input asserted present; flush no longer drops batches; no dead
+      private fields remain; CHANGELOG Breaking-changes entry.
+
+  - key: "516"
+    key_original: server-5b
+    title: "server: disconnect no longer destroys the run — abortOnDisconnect defaults off"
+    depends_on: ["508"]
+    labels: [server]
+    description: |
+      **Size S · branch `srv/s5b-disconnect-detach` · packages: server · disconnect half of T2 "SSE replay" (item recorded on server-5a) — a deliberate reversal of #341's disconnect decision**
+
+      Disconnect kills the work: `onCancel` (`routes/conversations.ts:648-655`) is wired to both
+      `stream.onAbort` and the cancel route — a closed tab aborts the turn AND auto-denies every
+      pending approval (deliberate per #341; this issue CHANGES that decision, on purpose, in
+      isolation — split from server-5a so this flip is revertable under production pressure without
+      losing SSE replay).
+
+      **Pinned decisions:** `ServerConfig.conversations?.abortOnDisconnect` default FALSE —
+      disconnect detaches the writer, run keeps going (reattach via server-5a's
+      `GET /conversations/:id/stream`), `POST …/cancel` is the only abort trigger; `true` preserves
+      today's #341 behaviour verbatim (the migration path, not a maybe). Pending inputs are NOT
+      denied on plain disconnect (still denied on explicit cancel; still time out). Call out the
+      behavioural change loudly in the PR body + its own CHANGELOG **Behaviour changes** entry —
+      a turn now outlives its client by default: token burn with nobody watching. Third in the
+      conversations.ts track.
+
+      **Acceptance:** `bun run check` green; mid-turn disconnect leaves the run to completion and
+      does NOT deny a pending approval (still answerable after reconnect via the stream route);
+      `POST …/cancel` still aborts and denies with `conversations-cancel.test.ts` unchanged;
+      `abortOnDisconnect: true` reproduces today exactly; CHANGELOG Behaviour-changes entry.
+
+  - key: "517"
+    key_original: server-7
+    title: "runtime: store-backed AdminService — dashboard stats survive a restart"
+    depends_on: ["500", "506"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `srv/s7-admin-store` · packages: runtime · stats half of T2 "Tenancy" ("admin stats are an in-memory ring buffer, lost on restart"; item recorded on server-6b)**
+
+      The only `AdminServiceProtocol` implementation is `InMemoryAdminService` (`admin/service.ts:
+      46-52`) delegating to `InMemoryEventCollector`'s ring buffer (`admin/collector.ts:44`), which
+      `ap playground` wires (`playground.ts:85-88`) — so `/admin/dashboard`/`agents`/`tools`/`tokens`
+      report only what this process observed since boot, while the same events sit durably in SQLite.
+
+      **Pinned decisions:** new `admin/store-backed-service.ts` — `StoreBackedAdminService
+      implements AdminServiceProtocol`, reading an injected `EventStore`/`RunStore` with SQL
+      aggregates (never O(all events) row loads into JS). Protocol and response schemas unchanged —
+      a second implementation, not a redesign; `InMemoryAdminService` stays the zero-config default.
+      `ap playground` selects it when persistence is enabled, soft-degrading per the `storage/load.ts`
+      template. Optional `tenantId` filter so server-6b can scope admin stats (if 6a slips, ship
+      without and add in 6b). Third in the playground.ts track — the gates-4 dependency is that
+      track (both edit the playground bootstrap: gates-4 at :102, this at :85-88; same function,
+      real conflict). Note: `BaseExporter` fail-safe (gates-1) mitigates but does not fix the
+      collector-throw path — the store-backed service sidesteps the collector entirely.
+
+      **Acceptance:** `bun run check` green; `StoreBackedAdminService` returns the same shapes as
+      `InMemoryAdminService` for an identical event sequence (drive both, compare); stats from a
+      store populated by a PREVIOUS instance are non-empty after a fresh service is constructed over
+      the same file; playground with persistence off still gets the in-memory service;
+      `docs/store-family.md` notes both implementations.
+
+  - key: "518"
+    key_original: core-3
+    title: "core+runtime: curated public surface — demo agents behind a /demo subpath, Start-here export map"
+    depends_on: ["490", "501"]
+    labels: [core, runtime, documentation, enhancement]
+    description: |
+      **Size M · branch `harden/core-3-curated-surface` · packages: core, runtime · closes T3 "Discoverability" · BREAKING**
+
+      Export counts verified by importing the built namespaces: core 178 + runtime 299 = 477,
+      matching the epic. Both packages expose a single `.` entry that stars every layer. The demo
+      agents live at `presets/index.ts:25-28` (`buildCalculatorAgent`/`CalculatorToolbox`,
+      `buildTodoAgent`/`TodoToolbox`, `buildWritingCoachAgent`), starred into the root barrel.
+
+      **Pinned decisions:** new `@agentic-patterns/runtime/demo` subpath — the three demo builders +
+      two toolboxes move there and leave the root barrel (tsup multi-entry + exports map + `files`
+      coverage). `buildCompanionAgent` STAYS (shipped surface — playground registration + memory
+      eval subject). The composition presets stay too (`analystRole` et al. are production
+      composition material — not the same category as `buildTodoAgent` despite the epic naming them
+      together). **Gate 0 ruling 1: RESOLVED in the plan's favour** — verified at
+      `runtime/src/presets/analyst.ts:30`, a parameterised factory in the documented layer-13 preset
+      library (CLAUDE.md), wiring the shared `EVIDENCE_QUALITY` judgment + `ANALYSIS` responsibility.
+      The epic line conflating it with `buildTodoAgent` was wrong and is amended on #482. Legibility
+      for the preset layer is now owned by docs-10, not by deletion.
+      Curation for the remaining ~470 exports is docs-level here: a "Start here" table of
+      ~20 exports at the TOP of each package README (layered subpaths are an explicit follow-on —
+      docs-9 records that in Known limitations). Repoint verified consumers:
+      `tools/check-model-facing-schemas.ts:36-40`; `agents/{calculator,todo,writing-coach}/agent.mjs`
+      (path-import `dist/` — TypeScript cannot catch a miss, so BOOT the playground, don't just
+      typecheck); `presets.test.ts`. Packaging gates: add the subpath to
+      `test/post-publish/run-tarball-smoke.ts` and `tools/check-dist-contract.ts`. Depends on
+      core-1 (Start-here table must not advertise deleted protocol exports) and docs-2 (the
+      runtime-README section the table sits above is rewritten there); docs-3/docs-4's hunks are
+      DISJOINT from the file top — rebase over them if landed, no ordering edge. Land with
+      core-1/core-2 before the next `just bump-core` release PR — one core minor covers all
+      breaking changes.
+
+      **Acceptance:** `bun run check` green incl. `check:model-facing-schemas`; root-namespace test
+      asserts the five demo exports gone and `buildCompanionAgent`/`analystRole` still present;
+      tarball smoke resolves and imports `/demo` from the packed tarball; playground verified
+      RUNNING with the updated agent.mjs paths; both READMEs open with the Start-here table;
+      CHANGELOG Unreleased → Breaking changes for the three relocated exports; no version bump.
+
+  - key: "519"
+    key_original: storage-9
+    title: "runtime: PostgresMemoryStore — the second durable backend, proven by the exported conformance kit"
+    depends_on: ["509"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size L (endorsed, do not split) · branch `hard/pg-memory-store` · packages: runtime · closes T3 "Postgres store implementations" · spec: ADR-0007 D11, ADR-0009 D13**
+
+      SQLite is the only durable backend; the exported conformance kit (`memory/conformance.ts`,
+      602 lines) was written as the SQLite↔Postgres portability contract and has never had a second
+      backend to prove it. A CRUD-first split cannot pass its own kit (Tier 1 exercises search).
+
+      **Pinned decisions:** scope is `MemoryStore` ONLY — EventStore/RunStore/EvalStore/
+      ConversationStore are OUT OF SCOPE HERE (shared better-sqlite3 ladder, no conformance kit).
+      **Gate 0 ruling 2: narrowing STANDS for this issue, but the chain is no longer abandoned** —
+      the human wants to DEPLOY on Postgres with SQLite as the zero-config minimum, so the
+      `EventStore` chain port is tracked as its own sequenced track (storage-12 → 13 → 14 → 15).
+      This issue stays first because MemoryStore is the only store with a protocol AND a conformance
+      kit, so it is the only one where "swap the backend" is expressible today — it proves the kit
+      before the chain work leans on that pattern. docs-9 records the interim state. Search must
+      NOT use `to_tsvector('english', …)` — Porter stemming and `plainto_tsquery` AND-semantics
+      both break Tier 2's identical-match-SETS contract (corpus axes 0 and 3/4). Persist the shared
+      `tokenize()` output into a `text[]` column with a GIN index, match by array overlap (OR
+      semantics), rank by matched-token count then recency — parity is structural, not coincidental.
+      Driver injection mirrors `SqliteMemoryStore`: `pg` as OPTIONAL peer dep, pool injected via
+      constructor, `loadMemoryStore()` soft-degrade. Own migration ladder (a `schema_version`
+      table), never the events ladder. Capabilities `{search: "keyword"}`. CI: conformance runs
+      only when `AP_TEST_PG_URL` is set, skips-with-reason otherwise; add a Postgres service to the
+      check job (if flaky, land the store env-gated and add the service in a follow-up). The
+      storage-8 dependency is the check-chain/ci.yml track — this ci.yml edit lands after
+      storage-8's. The Tier 2 non-Latin diacritic `it.todo` (:457) stays a todo.
+
+      **Acceptance:** `bun run check` green both with and without `AP_TEST_PG_URL`;
+      `PostgresMemoryStore` passes conformance Tier 1 + Tier 2 against live Postgres; identical
+      match sets to both existing backends over `MEMORY_MATCH_CORPUS`; ladder test in the house
+      style; `loadMemoryStore()` selection + degrade tested; `docs/store-family.md` and
+      `docs/memory/guide.md` updated.
+
+  - key: "520"
+    key_original: storage-2
+    title: "runtime: ConversationStore step-level write surface — open/append/finalize, tool parts, message status"
+    depends_on: ["511", "499", "512"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `dur/2-store-incremental-writes` · packages: runtime · leaf 1 of T2 "Durable execution" (item recorded on storage-1) · takes migration-ladder v8 (after server-3's v7)**
+
+      `ConversationStore` (`conversation/store.ts:78`) can only write a whole message atomically
+      (`addMessage`) — no open/append/finalize, which is why persistence can only happen after the
+      turn. Storage layer only; no `Conversation` behaviour change yet, so the PR reviews in
+      isolation.
+
+      **Pinned decisions (per the ADR):** `status` on `StoredMessage`
+      (`streaming`|`complete`|`interrupted`, default `complete` so every existing row and
+      third-party implementation reads back unchanged); `appendMessageParts(messageId, parts)` +
+      `finalizeMessage(messageId, {status, inputTokens, outputTokens})` (or the ADR's exact
+      spelling); `tool_call`/`tool_result` as first-class part types. Implement in
+      `InMemoryConversationStore` and `SQLiteConversationStore`; SQLite schema on the EventStore
+      ladder (v8). Additions ADDITIVE and structurally optional — a pre-existing third-party store
+      must still compile and work at turn-level granularity (the #480 warn-on-ignore posture).
+      `position` ordinals carry over. Tool arguments verbatim; tool RESULTS byte-capped with MARKED
+      truncation (house rule). Shared describe-factory over both implementations (the
+      ConversationStore analogue of `memory/conformance.ts`). Land after server-2 (PR #481 edits
+      these exact files).
+
+      **Acceptance:** `bun run check` green; migration-ladder test in the house style; both
+      implementations exercised by one shared test body; existing turn-level writes byte-identical;
+      `docs/store-family.md` row updated.
+
+  # ── Wave 4 ─────────────────────────────────────────────────────────────────
+
+  - key: "521"
+    key_original: runner-5
+    title: "runtime+core: RunOptions.timeout — deadlines on model calls, tool calls, and the whole run"
+    depends_on: ["504", "514", "485"]
+    labels: [runtime, core, enhancement]
+    description: |
+      **Size M (upper — split model-side/tool-side if diff nears 500 lines) · branch `hr/runner-5-timeouts` · packages: runtime, core · closes T2 "No timeouts on model or tool calls" (`workflows/node-tool.ts:151` documents the absence)**
+
+      Nothing bounds wall-clock time; `maxIterations` bounds count, not duration. Verified: ai@7
+      ships `TimeoutConfiguration` (`totalMs`/`stepMs`/`firstChunkMs`/`chunkMs`/`toolMs`) and
+      `generateText`/`streamText` accept it — but its `toolMs` never applies to our hand-rolled
+      execute-less tool dispatch (gate-chain invariant, `agent-runner.ts:606`; dispatch at :963,
+      :1323, :2315).
+
+      **Pinned decisions:** `RunOptions.timeout?: { modelMs?, toolMs?, runMs? }`. `modelMs` → SDK
+      `timeout: {totalMs}` on the four generateText calls; map `stepMs`/`firstChunkMs` for
+      streamText — native, no hand-rolled races. `toolMs` → `withToolTimeout(promise, ms, toolName)`
+      around the three dispatch sites; on expiry produce the SAME structured tool-error the existing
+      path feeds back to the model (loop continues), emit `agent.tool.end` with the error, never a
+      thrown escape; the timed-out promise is ABANDONED, not killed — document beside `ctx.signal`.
+      `runMs` → deadline at the top of each iteration beside the abort guard, reusing runner-2's
+      cancelled return path; `finishReason: "timeout"` (`RunResult.finishReason` is `string`), maps
+      to `reason: "cancelled"` on `agent.conversation.end` — no new event vocabulary. Core: additive
+      `readonly signal?: AbortSignal` on `ToolExecutionContext` (`molecules/toolbox.ts:35`),
+      populated in `buildToolCtx` — core declares the slot, host wires the meaning (the
+      emit/host/publishArtifact precedent; core version floats). Timeouts implemented as derived
+      abort signals composed with `options.abortSignal` via `AbortSignal.any` (why this lands after
+      runner-2). Absent `timeout` = today's unbounded behaviour; add the README Known-limitations
+      line (section exists — docs-1 is a dependency; docs-9 owns the terminal sweep). Per-subagent
+      forwarding is runner-6's, not here.
+
+      **Acceptance:** `bun run check` green; `modelMs` reaches every provider call as an SDK
+      `timeout`; a never-resolving toolExecutor under `toolMs` yields a structured tool-error, an
+      `agent.tool.end` with the error, and a completing run; `runMs` expiry ends with
+      `finishReason: "timeout"` + `conversation.end {reason: "cancelled"}`; `ctx.signal` aborted for
+      the timed-out tool and documented cooperative-only; omitting `timeout` leaves every call
+      object byte-identical; README Known-limitations line added.
+
+  - key: "522"
+    key_original: storage-6
+    title: "runtime: model price table as data + costUsd on every AgentRunner run"
+    depends_on: ["514"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size M · branch `cost/1-price-table` · packages: runtime, dashboard · anchors T2 "Cost" (leaf: storage-7)**
+
+      No price table exists anywhere; every `costUsd` site is pass-through from the Claude Code
+      harness only. The consumers are ALL built — `MessageCompleteEvent.costUsd`
+      (`events/types.ts:112`), `RunResult.costUsd`, the SSE `cost_usd` field, OTel
+      `gen_ai.usage.cost`, Langfuse `cost_details`, the dashboard's `formatCost` — the only missing
+      piece is a number on the `AgentRunner` path.
+
+      **Pinned decisions:** the table is DATA in the `providers/capabilities.ts` shape (Zod schema +
+      frozen rows + provenance): new `providers/pricing.ts` with `{provider, match, inputPer1M,
+      outputPer1M, cacheReadPer1M?, cacheWritePer1M?, currency, verifiedBy, lastVerified, source}`
+      and a pure `estimateCost(modelId, usage)`. Honesty invariant: unknown model ⇒ `undefined`,
+      never a guess; every row carries a source URL + lastVerified date from published pricing
+      pages. Cache-aware math over `TokenUsageDetails` (`events/types.ts:63-71`); ABSENT MEANS
+      UNREPORTED, NEVER ZERO — fall back to the flat input rate. Harness-reported cost ALWAYS wins;
+      computed values are LABELLED via `costSource: "harness" | "estimated"` on
+      `MessageCompleteEvent` (four coordinated sse-formatter guards + manifest regen + dashboard
+      union, the #420 precedent) — an estimate presented as a measurement is exactly what this epic
+      removes; if the wire-label change runs long, split it into a trailing PR but withhold
+      estimated costs from the wire until the label lands. Gateway runs price by
+      `LLMCallEndEvent.gateway.servedModel` when present; lookup precedence: exact id, then longest
+      prefix within the provider. Compute once per run at finalization (:794-806), not per
+      iteration — hunk verified disjoint from runner-5's guard hunks; rebase on runner-4.
+
+      **Acceptance:** `bun run check` green incl. the dashboard SSE drift test and
+      `check:docs-events`; unit tests for lookup precedence, cache-aware math, unknown-model
+      undefined, harness-wins, gateway servedModel pricing; module-load self-validation that every
+      row parses; events reference regenerated via `bun run docs:events`.
+
+  - key: "523"
+    key_original: server-6b
+    title: "server: tenant comes from the verified principal, never from the request body"
+    depends_on: ["498", "500", "516"]
+    labels: [server, audit]
+    description: |
+      **Size M · branch `srv/s6b-tenant-enforcement` · packages: server · closes T2 "Tenancy" (with server-6a + server-7 as its storage/stats halves)**
+
+      `POST /conversations` reads `body.scope`, validates it against the registration's
+      `SessionScope` schema, and binds it verbatim (`routes/conversations.ts:99-192`) — the schema
+      proves the value is well-shaped, never that the caller is ENTITLED to it; a caller can assert
+      `{organizationId: "someone-else"}` and run as that org. Every `/admin` read is global
+      (`routes/runs.ts:26-44`).
+
+      **Pinned decisions:** `ServerConfig.tenancy?: { tenantOf(principal); deriveScope?(principal,
+      callerScope) }`. When configured: the derived scope wins for any key the embedder claims —
+      caller-supplied server-asserted keys are a named 403, never a silent overwrite (ADR-0004 §5's
+      exact rejected failure); tenant stamped onto run/event/conversation rows via server-6a's
+      column; `GET /admin/runs`, `GET /admin/events/recent`, `GET /admin/conversations`,
+      `GET /conversations` filter by `tenantOf(principal)`. No `tenancy` configured ⇒ byte-identical.
+      Tenant derives from the principal ONLY — no header or body field can set it. Scope stays fixed
+      at conversation creation (ADR-0004 Decision 2 untouched). Resume re-derives the tenant and
+      403s on disagreement with the persisted binding. Does NOT touch MemoryStore scope partitioning
+      (author-declared, bound at instantiate per ADR-0007 D3). Fourth in the conversations.ts track
+      (after server-5b). Rider: if server-4 has landed, extend tenant filtering to
+      `GET /admin/pending-input` (server-4 carries the mirror-image rider — whichever lands second
+      adds the one-line filter).
+
+      **Acceptance:** `bun run check` green; with tenancy configured, asserting another tenant's
+      scope key gets 403 and no conversation is created; principal A's rows absent from every admin
+      read made as principal B and present for A; cross-tenant resume 403s; with tenancy unset, the
+      full existing suite passes unchanged; `docs/server-auth.md` gains the tenancy section.
+
+  - key: "524"
+    key_original: server-4
+    title: "server+cli: wire the durable pending-input store and surface orphaned approvals"
+    depends_on: ["512", "498", "517"]
+    labels: [server]
+    description: |
+      **Size S · branch `srv/s4-pending-input-routes` · packages: server, cli · delivery half of T2 "Durable pending-input registry" (item recorded on server-3) — DoD #3 gating**
+
+      server-3 makes the registry capable of durability; nothing yet USES it. `ap playground`
+      constructs a bare `new PendingInputRegistry()` (`playground.ts:99`), and the only route
+      touching pending state — `POST /conversations/:id/input` (`routes/conversations.ts:~856`) —
+      returns a flat 404 for every miss, so "already answered", "never existed" and "restart dropped
+      it" are one indistinguishable response. Dependency graph deliberately SHALLOW (critic
+      finding): needs server-3 (the store), server-1 (the verify seam its `/admin` route mounts
+      behind), and server-7 (last in the playground.ts file track); it does NOT wait on the
+      tenancy/SSE chains — its conversations.ts hunk (~:856) is disjoint from server-5/6b's, rebase
+      handles it.
+
+      **Pinned decisions:** CLI: construct the registry with the SQLite `PendingInputStore` on the
+      same persistence path as the event/run stores, gated by `AP_PERSISTENCE`, `sweepOrphans()`
+      once at boot. Server: `GET /admin/pending-input` (live + orphaned, behind the `notConfigured`
+      503 grammar, behind server-1's verify seam like every `/admin` route); `POST …/input`
+      distinguishes 404 (unknown) from 410 (orphaned by restart — terminal-denied, with reason). The
+      server takes no new required config — it reads through the registry it is handed
+      (`config.ts:253`). Rider: if server-6b has landed, add its `tenantId` filter to
+      `GET /admin/pending-input`; otherwise server-6b's rider adds it. Last in both the
+      conversations.ts and playground.ts tracks.
+
+      **Acceptance:** `bun run check` green; with a store, an unanswered request written by one
+      instance is listed orphaned by a fresh instance and answering it returns 410 with a reason;
+      without a store, `GET /admin/pending-input` 503s in the existing grammar and `POST …/input`
+      behaves byte-identically (404/501 paths unchanged); the existing approval round-trip test
+      passes untouched.
+
+  - key: "525"
+    key_original: storage-3
+    title: "runtime: step-level turn persistence — request row up front, flush on tool result, real toolCalls"
+    depends_on: ["520"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `dur/3-step-level-persistence` · packages: runtime · leaf 2 of T2 "Durable execution" (item recorded on storage-1) — the PR that clears the VoltAgent bar**
+
+      Rewire `Conversation` onto the storage-2 surface: persist the `request` message BEFORE the
+      runner is invoked (today `send()` persists at `conversation.ts:196` and `stream()` at :352,
+      both after the turn); open the response with `status: "streaming"`; flush on every
+      `agent.tool.end` in the stream loop (:305-352) — the `flushOnToolResult` trigger — appending
+      `tool_call`/`tool_result` parts; coalesce chunks, flush text on the same boundary, never per
+      chunk; finalize with usage + `status: "complete"`. Also close the tool-call hole:
+      `Exchange.toolCalls` is a hardcoded `[]` on both paths (:180, :337) — populate from observed
+      `agent.tool.start`/`agent.tool.end` events so `_toMessageHistory()` (:441) rebuilds a faithful
+      history.
+
+      **Pinned decisions:** `send()` has no event stream — it gets request-then-response two-phase
+      persistence and CANNOT flush per step; state that in the docblock, don't imply parity. The D5
+      rule at :355 (errored zero-output turn not recorded) must survive: with the request row
+      already written, that turn is FINALIZED as `interrupted`, never a dangling unpaired request.
+      Default per ADR D5; the opt-out path produces byte-identical writes to today. Write
+      amplification (a 10-tool turn: 2 → ~12 writes) bounded by coalescing.
+
+      **Acceptance:** `bun run check` green; a mid-stream teardown test (runner throws after a tool
+      result) asserts the store holds the request, the tool parts, the partial text and
+      `status: "interrupted"`; a clean turn in opt-out mode persists byte-identically;
+      `Exchange.toolCalls` asserted non-empty for a tool-using turn on both paths where applicable;
+      CHANGELOG entry.
+
+  # ── Wave 5 ─────────────────────────────────────────────────────────────────
+
+  - key: "526"
+    key_original: runner-6
+    title: "runtime: forward per-step model params + timeout through the workflow seam (AgentStep / delegateTo / Sequential)"
+    depends_on: ["514", "521"]
+    labels: [runtime, workflows, enhancement]
+    description: |
+      **Size S · branch `hr/runner-6-step-seam-run-controls` · packages: runtime · completion half of T2 "model-param passthrough" (item recorded on runner-4) — the epic item's stated blocker is "per-step effort tiering in the consuming product", which runner-4's run-level bag alone cannot deliver; this seam is the item's actual close condition, not scope creep**
+
+      runner-4/5 add `RunOptions.modelParams` and `RunOptions.timeout`, but the workflow layer
+      builds `RunOptions` itself: `AgentStepSpec` (`agent-step.ts:45-84`) forwards only
+      `model`/`runner`/`maxIterations`; `SubagentSpec.runOptions` (`node-tool.ts:151-158`) carries
+      the standing "per-subagent timeout is NOT forwardable today" comment;
+      `sequential-agents.ts:674` spreads `maxIterations` only. The product's stated need —
+      a coordinator assigning `high` to one subagent and `minimal` to another — requires the seam.
+
+      **Pinned decisions:** add optional `modelParams` + `timeout` to `AgentStepSpec` and
+      `SubagentSpec.runOptions`; forward at the three build sites with the existing
+      conditional-spread style; delete the stale `node-tool.ts:151` note and the
+      `sequential-agents.ts:46/117` knob-list prose. Step-spec value wins over the caller's
+      run-level value (same precedence as the `model` override); last writer wins, no deep-merge —
+      stated in the docstring. Extend the build-time knob-rejection list
+      (`sequential-agents.ts:477`) so the new knobs are rejected on non-AgentStep nodes rather than
+      silently ignored. Deliberately split from runner-4/5 so those stay runner-local.
+
+      **Acceptance:** `bun run check` green; a `delegateTo` subagent declared with
+      `runOptions: {modelParams: {reasoningEffort: "minimal"}}` observed calling the model with that
+      setting while its coordinator uses another; a step-level `timeout` reaches the inner runner's
+      `RunOptions`; specs without the new fields produce byte-identical `RunOptions`; the knob guard
+      rejects the new knobs on non-agent nodes.
+
+  - key: "527"
+    key_original: storage-4
+    title: "runtime: interrupted-turn recovery — rehydrate partial turns with their tool results, never re-execute"
+    depends_on: ["525", "499", "495"]
+    labels: [runtime]
+    description: |
+      **Size M · branch `dur/4-interrupted-turn-recovery` · packages: runtime · leaf 3 of T2 "Durable execution" (item recorded on storage-1) — the read half**
+
+      `exchangesFromMessages` (`conversation/rehydrate.ts`, landing with #480/server-2) deliberately
+      DROPS a `request` with no following `response` — exactly the crash-mid-turn record — and
+      rebuilds `toolCalls: []` because tool parts were never stored. After storage-2/3 both premises
+      are false. Teach it: request + `interrupted` response rebuilds as an Exchange whose assistant
+      text is the partial text with an explicit marker (preserving user/assistant alternation);
+      persisted tool parts rebuild into `Exchange.toolCalls` and `_toMessageHistory()` so the
+      resumed prompt shows the model the tool ALREADY RAN; a boot-time sweep flips rows still
+      `streaming` to `interrupted` — the ConversationStore mirror of `sweepRunning()`, wired at
+      storage-5's `load*` seam, not a second one.
+
+      **Pinned decisions:** recovery NEVER re-executes a committed tool call — restored parts are
+      history, not a replay queue. No automatic continuation in v1: the host gets a conversation
+      whose last turn is visibly incomplete and decides. `state_delta` frames keep their exclusion
+      from replayed prompt text. Hard external dependency: `rehydrate.ts` does not exist on main
+      until server-2 lands.
+
+      **Acceptance:** `bun run check` green; a crash→resume test (write via storage-3, kill
+      mid-stream, rebuild through `exchangesFromMessages`, assert the tool result is in the rebuilt
+      history and NOT re-dispatched next turn); alternation asserted (never two consecutive user
+      turns); boot-sweep test for streaming→interrupted; the ADR's recovery section updated to what
+      shipped.
+
+  - key: "528"
+    key_original: storage-7
+    title: "runtime: run budgets that actually halt — RunOptions.budget and a top-of-iteration spend seam"
+    depends_on: ["522", "521", "525", "485"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size M · branch `cost/2-budget-halt` · packages: runtime · budgets half of T2 "Cost" (item recorded on storage-6)**
+
+      Today the only run-terminating limit is `maxIterations`. A new seam IS required, confirmed by
+      reading both existing paths: the gate chain is driven from TOOL intents only (no gate can stop
+      token spend) and exporters are non-blocking by design. The one place the runner already stops
+      cleanly mid-run is the top-of-iteration abort guard (`agent-runner.ts:715-727` run,
+      :1815-1830 stream, :1385 runStructured) — the budget check belongs beside it.
+
+      **Pinned decisions:** `RunOptions.budget?: { maxUsd?, maxTokens? }`, checked pre-iteration
+      against the run's accumulators (USD via storage-6's `estimateCost`). Termination mirrors
+      `maxIterations`, not an exception: `finishReason: "budget_exceeded"` (FinishReason is
+      `string` — no union or wire-vocabulary change), partial content preserved. Enforcement is
+      PRE-CALL only — overshoot of at most one model call; state it in the docstring and the README
+      Known-limitations line (section exists — docs-1 is a dependency; docs-9 owns the terminal
+      sweep). `maxUsd` against an unpriced model CANNOT be enforced: throw at run start, never run
+      silently uncapped. `maxTokens` always enforceable. Per-run only — cross-run/per-tenant caps
+      need a store and belong with tenancy; say so, don't fake it. Thread through
+      `Conversation.send()`/`stream()` options (lands after storage-3's rewiring of the same file);
+      server wiring out of scope. The `stream()` exit must reuse the existing post-loop return
+      (locked D1 from #341), never a second half-emitted terminal shape.
+
+      **Acceptance:** `bun run check` green; a token budget halts before the next model call on all
+      three paths with `finishReason: "budget_exceeded"` and partial content intact; `maxUsd`
+      against an unpriced model throws at run start; no budget = byte-identical behaviour;
+      `Conversation` passthrough covered; README Known-limitations line added.
+
+  # ── Wave 6 ─────────────────────────────────────────────────────────────────
+
+  - key: "529"
+    key_original: docs-9
+    title: "docs: re-release README pass — terminal Known-limitations sweep + the positioning claim"
+    depends_on: ["527", "528", "524", "523", "513", "518", "519"]
+    labels: [documentation, audit]
+    description: |
+      **Size S · branch `docs/482-rerelease-readme-pass` · packages: none (docs) · closes epic DoD #6 "every remaining gap stated plainly in the README under a Known limitations heading" — the terminal owner the plan previously lacked**
+
+      Added on the coverage critic's finding: docs-1 creates the section and three issues append
+      one line each, but nothing owned the closing pass — and several limitations THIS PLAN creates
+      are recorded only in docblocks or docs pages, never in the README. This is the last issue in
+      the plan by design; it depends on the terminal leaves of every track.
+
+      **Pinned decisions:** consolidate into one honest, ordered "Known limitations" section, at
+      minimum: durable execution excludes workflow/step checkpointing (storage-1 D4); runs are
+      unbounded without `RunOptions.timeout` (runner-5); budget enforcement is pre-call only, ≤1
+      call overshoot (storage-7); SSE replay ring is in-memory per-process — durable replay does
+      not ship (server-5a); rate limiting is per-process — N replicas multiply the limit,
+      `RateLimitBucketStore` is a declared, unimplemented seam (gates-3); pending-input durability
+      means the RECORD survives a restart, the blocked run does not resume (server-3); layered
+      entry-point subpaths are a follow-on — one barrel + Start-here table today (core-3); Postgres
+      backs MemoryStore only at this point in the sequence — the `EventStore` chain port
+      (storage-12..15) is planned, not shipped, and its status must be stated as of land time
+      (storage-9). CORS no longer needs a limitation line — server-1 flips the default to loopback;
+      DELETE this bullet if server-1 has landed, per the cross-check rule below. Add the epic's REQUIRED
+      positioning sentence verbatim in spirit: *"ahead on composition, governance, and evals; young
+      and unvalidated"* — not a superlative. Cross-check every line against the shipped tree (some
+      may have been fixed by land time — a limitation that no longer exists gets deleted, not
+      hedged). Mirror the section into `packages/agent-runtime/README.md` only if the root section
+      is not linkable from npm; prefer one section + links. This is prose only — no code.
+
+      **Acceptance:** `bun run check` green (docs-8's fence gate + link gate included); every
+      listed limitation verifiably true against the tree at merge time; positioning sentence
+      present; no remaining epic gap is unstated; DoD #6 checked off on epic #482.
+
+  # ── Added at Gate 0 rev 3 ──────────────────────────────────────────────────
+  # docs-10 lands with the wave-2 docs track. storage-12..15 are a sequenced T3
+  # track (the Postgres deployment path) — they run AFTER storage-9 proves the
+  # swap-the-backend pattern against the conformance kit.
+
+  - key: "530"
+    key_original: docs-10
+    title: "docs: generated preset prompt reference — show what a preset actually injects"
+    depends_on: ["486"]
+    labels: [documentation, runtime]
+    description: |
+      **Size S · branch `docs/10-preset-reference` · packages: runtime, docs-site · closes Gate 0 ruling 1's follow-on (preset legibility) · wave 2**
+
+      `analystRole()` returns a frozen `Role`; nothing at the import site says it injects seven lines
+      of prose plus a whole Boundaries section inherited from `EVIDENCE_QUALITY`. Rendered live
+      against the built package, `analystRole({domain:"deal risk"})` emits constraints the caller
+      never sees — "Score 0 for dimensions with no evidence, not 'unknown'", "Distinguish between
+      'not mentioned' (gap) and 'mentioned negatively' (risk)" — and two escalate-when triggers.
+      That invisibility, not the preset's size, is why a preset reads as "too simple to import".
+
+      **Pinned decisions:** generated page, same contract as `docs/reference/events.md` — a
+      generator under `tools/` renders every preset via `Agent.renderSections()`, writes
+      `docs/reference/presets.md`, and a `check:docs-presets` step fails the build on drift. Render
+      the `[role]` / `[instance]` attribution `renderSections()` already returns — that attribution
+      is the differentiator no competitor ships, and this is the first page that makes it visible.
+      Cover the four roles (`coordinatorRole`, `orchestratorRole`, `analystRole`, `retrievalRole`)
+      and name the judgment + responsibility constants each one wires. Demo agents are excluded
+      (they move to `/demo` in core-3). Prose is generated, never hand-authored — a preset whose
+      prompt changes updates the page or fails CI.
+
+      **Acceptance:** `bun run check` green incl. the new drift step; `docs/reference/presets.md`
+      generated, sidebar-placed per the docs-management skill, and byte-identical on a second run;
+      editing a preset's persona without regenerating FAILS the check; page renders the role/instance
+      tags; frontmatter contract satisfied.
+
+  - key: "531"
+    key_original: storage-12
+    title: "runtime: SQL dialect seam under the EventStore chain — widen storage/load.ts to a driver contract"
+    depends_on: ["519"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size L (justified — this is the seam, splitting it ships half a contract) · branch `pg/12-dialect-seam` · packages: runtime · leaf 1 of the Postgres deployment track · wave 5**
+
+      The durable stores are ONE inheritance chain — `SQLiteConversationStore extends EvalStore
+      extends RunStore extends EventStore` (`storage/{event,run,eval,conversation}-store.ts`,
+      ~2,250 lines, 44 prepared statements) — so "conversations on Postgres" cannot be picked off
+      alone. `storage/load.ts` already chooses `bun:sqlite` vs `better-sqlite3` behind a named-param
+      adapter shim; that shim is the seam to widen, not a new abstraction to invent.
+
+      **Pinned decisions:** no ORM, no query builder — a narrow `SqlDriver` contract
+      (prepare/run/all/get/transaction/close) plus a `Dialect` for the handful of constructs that
+      actually differ (placeholder style, upsert, `RETURNING`, autoincrement, JSON column type,
+      `PRAGMA user_version` vs a `schema_version` table). SQLite stays the default and the zero-config
+      path — the human's stated minimum. This issue is REFACTOR ONLY: no Postgres implementation, no
+      behaviour change, every existing store test green against the seam. Prepared statements bound
+      in constructors are the main obstacle — decide and document whether they become lazily-prepared
+      per-dialect or dialect-templated at construction.
+
+      **Acceptance:** `bun run check` green; every existing storage/exporter/eval test passes
+      unchanged against the seam; no new dependency; `docs/store-family.md` documents the driver
+      contract and states that SQLite remains the default.
+
+  - key: "532"
+    key_original: storage-13
+    title: "runtime: PostgresEventStore + PostgresRunStore behind the dialect seam"
+    depends_on: ["531"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size L (justified — RunStore extends EventStore; separating them ships an unusable half) · branch `pg/13-event-run` · packages: runtime · leaf 2 · wave 5**
+
+      Ports the base of the chain: `EventStore` (562 lines, 9 statements — append-only event log,
+      retention/`maxRows` pruning, WAL) and `RunStore` (475 lines, 10 statements — one row per run,
+      first-terminal-wins, `sweepRunning`). Together these are the audit trail and every admin stat.
+
+      **Pinned decisions:** `pg` stays an OPTIONAL peer dep with soft-degrade, mirroring
+      `storage-9`'s `PostgresMemoryStore`. The migration ladder becomes a `schema_version` table on
+      the Postgres side — the SQLite `PRAGMA user_version` ladder is untouched, and the two must
+      reach the same schema version for the same content (assert it in a test). Retention pruning
+      must not table-scan: index it. `sweepRunning` gains the server boot call the epic's corrected
+      item asks for.
+
+      **Acceptance:** `bun run check` green with and without `AP_TEST_PG_URL`; a shared store test
+      suite runs green against BOTH backends; ladder-parity test; retention/pruning verified on
+      Postgres; admin stats identical across backends for the same event sequence.
+
+  - key: "533"
+    key_original: storage-14
+    title: "runtime: PostgresEvalStore + PostgresConversationStore — the rest of the chain"
+    depends_on: ["532"]
+    labels: [runtime, enhancement]
+    description: |
+      **Size L (justified — the two remaining chain links) · branch `pg/14-eval-conversation` · packages: runtime · leaf 3 · wave 6**
+
+      Ports the top of the chain: `EvalStore` (837 lines, 15 statements — sets/cases/runs/results,
+      splits, `compareEvalRuns`, `caseResultHistory`, `splitAggregates`) and
+      `SQLiteConversationStore` (376 lines, 10 statements), renamed to reflect that it is now one
+      backend among two. With this leaf, a deployment can run conversations, runs, events, evals and
+      memory on Postgres — which is the actual goal of the track.
+
+      **Pinned decisions:** `compareEvalRuns`'s per-case aligned union is the query most likely to
+      diverge between dialects — pin it with a fixture asserting identical bucket counts on both
+      backends. Coordinate with storage-2's step-level write surface: if storage-2 has landed, the
+      open/append/finalize path ports here too.
+
+      **Acceptance:** `bun run check` green both configurations; shared suite green on both backends;
+      `compareEvalRuns` bucket-parity fixture; conversation resume (server-2) verified against
+      Postgres end to end.
+
+  - key: "534"
+    key_original: storage-15
+    title: "ci: dual-backend gate — docker-compose Postgres running the full store suite on every PR"
+    depends_on: ["533"]
+    labels: [runtime, documentation]
+    description: |
+      **Size M · branch `pg/15-dual-backend-ci` · packages: runtime, docs-site · leaf 4, closes the Postgres deployment track · wave 6**
+
+      Without a gate the second backend rots — the Langfuse exporter is the cautionary case in this
+      very plan: real mapping logic, never once run against the real SDK, broken for months.
+
+      **Pinned decisions:** a Postgres service in the `check` job (or a sibling job if `check`'s
+      wall-clock becomes the constraint — say which, do not leave it implicit), plus a
+      `docker-compose.yml` giving the same thing locally so a contributor can reproduce the gate
+      without CI. `AP_TEST_PG_URL` skip-with-reason stays for contributors without Docker, but CI
+      must NOT be allowed to skip — a green check with silently-skipped Postgres tests is worse than
+      no gate. Ship the deployment guide here: SQLite is the default and the zero-config path,
+      Postgres is the deployment path, this is how you point at one.
+
+      **Acceptance:** `bun run check` green; CI demonstrably FAILS if a Postgres store regresses
+      (prove it with a deliberately broken commit in the PR description); local docker-compose path
+      documented and verified; `docs/store-family.md` + a deployment page updated; docs-9's Postgres
+      Known-limitations bullet updated or removed to match what actually shipped.
