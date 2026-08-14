@@ -597,8 +597,23 @@ export function adviseStructuredRunFor(
  * level deeper: `${bare}:reasoningEffort:${"unverified" | "level"}`.
  */
 export function adviseReasoningEffort(modelId: string, level: ReasoningEffortLevel): void {
+  adviseReasoningEffortFor(modelId, getModelCapabilities(modelId), level);
+}
+
+/**
+ * The decision logic behind {@link adviseReasoningEffort}, decoupled from the
+ * live `getModelCapabilities` lookup — same split as
+ * {@link adviseStructuredRunFor}, and for the same reason: with no verified
+ * reasoning rows in `MODEL_CAPABILITIES` the unsupported-level branch is
+ * unreachable against real data, so tests exercise it by injecting a
+ * synthetic entry.
+ */
+export function adviseReasoningEffortFor(
+  modelId: string,
+  entry: ModelCapabilities | undefined,
+  level: ReasoningEffortLevel,
+): void {
   const bare = bareModelId(modelId);
-  const entry = getModelCapabilities(modelId);
   const capability = entry?.reasoningEffort;
 
   if (entry === undefined || capability === undefined || capability.support === "unknown") {

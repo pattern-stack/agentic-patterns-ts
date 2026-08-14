@@ -25,6 +25,7 @@ import {
   MODEL_CAPABILITIES,
   ModelCapabilitiesSchema,
   ReasoningEffortCapabilitySchema,
+  adviseReasoningEffortFor,
   adviseStructuredRun,
   adviseStructuredRunFor,
   bareModelId,
@@ -449,5 +450,59 @@ describe("adviseStructuredRun", () => {
       adviseStructuredRun("totally-unmapped-model-390-c", true);
     });
     expect(calls).toHaveLength(2);
+  });
+
+  // #514 Gate 2.5 note: the unsupported-level branch is unreachable against
+  // real data (every shipped row is UNVERIFIED_REASONING), so — same split as
+  // adviseStructuredRunFor — it is exercised via an injected synthetic entry.
+  describe("adviseReasoningEffortFor (#514)", () => {
+    function syntheticReasoningEntry(levels: string[]): ModelCapabilities {
+      return ModelCapabilitiesSchema.parse({
+        provider: "openai",
+        match: "synthetic-reasoner",
+        structuredOutput: { support: "unknown", verifiedBy: "unverified" },
+        strictSchemaMode: { support: "unknown", verifiedBy: "unverified" },
+        toolsWithStructuredOutput: { support: "unknown", verifiedBy: "unverified" },
+        inputExamples: { support: "unknown", verifiedBy: "unverified" },
+        reasoningEffort: {
+          support: "yes",
+          levels,
+          verifiedBy: "docs",
+          lastVerified: "2026-01-01",
+        },
+      });
+    }
+
+    it("warns once for an unsupported level against a verified synthetic entry", () => {
+      const entry = syntheticReasoningEntry(["low", "high"]);
+      const calls = captureWarnings(() => {
+        adviseReasoningEffortFor("synthetic-reasoner-v1", entry, "medium");
+        adviseReasoningEffortFor("synthetic-reasoner-v1", entry, "medium");
+      });
+      expect(calls).toHaveLength(1);
+      expect(String(calls[0]?.[0])).toContain('no verified support for reasoningEffort "medium"');
+      expect(String(calls[0]?.[0])).toContain("low, high");
+    });
+
+    it("a verified level in the entry's set warns nothing", () => {
+      const entry = syntheticReasoningEntry(["low", "high"]);
+      const calls = captureWarnings(() => {
+        adviseReasoningEffortFor("synthetic-reasoner-v1", entry, "high");
+      });
+      expect(calls).toHaveLength(0);
+    });
+
+    it("the two conditions occupy DISTINCT once-slots for the same model", () => {
+      // First an unverified-support warning (no entry), then an
+      // unsupported-level warning against a synthetic entry — the first must
+      // not swallow the second.
+      const calls = captureWarnings(() => {
+        adviseReasoningEffortFor("synthetic-reasoner-v1", undefined, "high");
+        adviseReasoningEffortFor("synthetic-reasoner-v1", syntheticReasoningEntry(["low"]), "high");
+      });
+      expect(calls).toHaveLength(2);
+      expect(String(calls[0]?.[0])).toContain("unverified");
+      expect(String(calls[1]?.[0])).toContain('no verified support for reasoningEffort "high"');
+    });
   });
 });
