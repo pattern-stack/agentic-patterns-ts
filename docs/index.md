@@ -22,7 +22,7 @@ Role  = Persona + Judgments + Capabilities + Responsibilities
 Capability = Toolbox + Manual + Playbook
 ```
 
-Everything composes upward through layers — atoms → protocols → molecules →
+Everything composes upward through layers — atoms → molecules →
 rendering → organisms in `@pattern-stack/agentic-core`, then events → gates →
 runner → transport → runtime → workflows → conversation → exporters →
 presets in `@pattern-stack/agentic-runtime`. Core never imports runtime.
