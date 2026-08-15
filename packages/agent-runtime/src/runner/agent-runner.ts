@@ -27,7 +27,7 @@
  * exception to this invariant, not a violation of it.
  */
 
-import type { Context, InferToolSetContext } from "@ai-sdk/provider-utils";
+import type { Context, InferToolSetContext, ProviderOptions } from "@ai-sdk/provider-utils";
 import type {
   RenderArtifact,
   RenderContext,
@@ -69,6 +69,8 @@ import {
   violationSummaryMessage,
 } from "../providers/bifrost.js";
 import {
+  type ReasoningEffortLevel,
+  adviseReasoningEffort,
   adviseStructuredRun,
   bareModelId,
   getModelCapabilities,
@@ -217,6 +219,28 @@ export interface RunHeadersContext {
   modelProvider: string;
 }
 
+// ---------------------------------------------------------------------------
+// Per-call generation-control params (#514)
+// ---------------------------------------------------------------------------
+
+/**
+ * The subset of `CallSettings`/call-options keys `_resolveCallParams` may
+ * produce, spread directly into `generateText`/`streamText` — a resolved
+ * projection of {@link ModelParams} (`reasoningEffort` renamed to
+ * `reasoning`, everything else name-preserving). Every member optional: only
+ * the keys the caller actually set via `RunOptions.modelParams` appear.
+ */
+interface CallParams {
+  temperature?: number;
+  maxOutputTokens?: number;
+  topP?: number;
+  topK?: number;
+  seed?: number;
+  stopSequences?: string[];
+  reasoning?: ReasoningEffortLevel;
+  providerOptions?: ProviderOptions;
+}
+
 /** Constructor options for {@link AgentRunner}. */
 export interface AgentRunnerOptions {
   /**
@@ -315,6 +339,41 @@ export class AgentRunner implements RunnerProtocol {
       },
       options,
     );
+  }
+
+  /**
+   * Computed per-call generation-control params for this run (#514),
+   * mirroring {@link _resolveCallHeaders}: returns `undefined` when
+   * `options?.modelParams` is absent, else an object built with per-key
+   * conditional spreads (the event-payload idiom) so only keys the caller
+   * actually set appear — `reasoningEffort` renamed to `reasoning` (the
+   * SDK's top-level call setting), everything else name-preserving,
+   * `providerOptions` passed through verbatim. Spread `undefined` adds no
+   * keys, so the no-config call object is byte-identical to pre-#514
+   * behavior at the `generateText`/`streamText` argument level.
+   *
+   * Called once per public call, right next to `_resolveCallHeaders` — `run()`,
+   * `runStructured()`, and `stream()` each compute this once and reuse it
+   * across their own iteration/tier loops. When `reasoningEffort` is set,
+   * this also fires the {@link adviseReasoningEffort} advisory (once per
+   * (model x condition), never blocking or altering the call).
+   */
+  private _resolveCallParams(modelName: string, options?: RunOptions): CallParams | undefined {
+    const params = options?.modelParams;
+    if (!params) return undefined;
+    if (params.reasoningEffort !== undefined) {
+      adviseReasoningEffort(modelName, params.reasoningEffort);
+    }
+    return {
+      ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
+      ...(params.maxOutputTokens !== undefined ? { maxOutputTokens: params.maxOutputTokens } : {}),
+      ...(params.topP !== undefined ? { topP: params.topP } : {}),
+      ...(params.topK !== undefined ? { topK: params.topK } : {}),
+      ...(params.seed !== undefined ? { seed: params.seed } : {}),
+      ...(params.stopSequences !== undefined ? { stopSequences: params.stopSequences } : {}),
+      ...(params.reasoningEffort !== undefined ? { reasoning: params.reasoningEffort } : {}),
+      ...(params.providerOptions !== undefined ? { providerOptions: params.providerOptions } : {}),
+    };
   }
 
   /**
@@ -682,6 +741,9 @@ export class AgentRunner implements RunnerProtocol {
     // #406: computed once per run (context is stable within a run), reused
     // across iterations below.
     const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
+    // #514: computed once per run, reused across iterations below (parity
+    // with callHeaders).
+    const callParams = this._resolveCallParams(modelName, options);
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -799,6 +861,7 @@ export class AgentRunner implements RunnerProtocol {
           // top-of-iteration check above.
           abortSignal: options?.abortSignal,
           headers: callHeaders,
+          ...callParams,
         });
       } catch (e: unknown) {
         const llmDuration = Date.now() - llmStartTime;
@@ -1474,6 +1537,9 @@ export class AgentRunner implements RunnerProtocol {
     // #406: computed once per run, reused across the single-call / capable /
     // 2-tier paths below.
     const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
+    // #514: computed once per run (parity with callHeaders); also fires the
+    // reasoningEffort advisory (once per run — see _resolveCallParams doc).
+    const callParams = this._resolveCallParams(modelName, options);
     const agentTools = agent.getTools() as ToolSchema[];
     const hasTools = agentTools.length > 0;
     // Advisory-only (#390): warns once per (model x capability) when the map
@@ -1556,6 +1622,7 @@ export class AgentRunner implements RunnerProtocol {
           // #504: forwarded — an abort interrupts the in-flight call.
           abortSignal: options?.abortSignal,
           headers: callHeaders,
+          ...callParams,
         });
       } catch (e: unknown) {
         // #504: a deliberate cancel surfaces as RunCancelledError (see the
@@ -1629,6 +1696,7 @@ export class AgentRunner implements RunnerProtocol {
           // timeouts, tool-execution abort merge) now see it too.
           abortSignal: options?.abortSignal,
           headers: callHeaders,
+          ...callParams,
         });
       } catch (e: unknown) {
         // #504: parity with the no-tools path — this call already forwarded
@@ -1757,6 +1825,7 @@ export class AgentRunner implements RunnerProtocol {
             // #504: forwarded — an abort interrupts the in-flight call.
             abortSignal: options?.abortSignal,
             headers: callHeaders,
+            ...callParams,
           });
         } catch (e: unknown) {
           // #504: same normalization as the paths above.
@@ -1875,6 +1944,8 @@ export class AgentRunner implements RunnerProtocol {
     // #406: computed once per run (parity with run()/runStructured()), reused
     // across iterations below.
     const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
+    // #514: computed once per run (parity with callHeaders).
+    const callParams = this._resolveCallParams(modelName, options);
     // AgentLike.getTools() returns unknown[] at the protocol boundary; cast
     // per the run()/runStructured() precedent — #117 needs `.name` for
     // agentConfig.tools (parity with the other two paths).
@@ -2000,6 +2071,7 @@ export class AgentRunner implements RunnerProtocol {
         // land in the same cancel-and-return block.
         abortSignal: options?.abortSignal,
         headers: callHeaders,
+        ...callParams,
       });
 
       let iterText = "";

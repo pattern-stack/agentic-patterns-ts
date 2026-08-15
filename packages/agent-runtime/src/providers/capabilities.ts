@@ -573,6 +573,71 @@ export function adviseStructuredRunFor(
   }
 }
 
+// ---------------------------------------------------------------------------
+// adviseReasoningEffort — the once-per-(model x condition) advisory (#514)
+// ---------------------------------------------------------------------------
+
+/**
+ * Called by `AgentRunner._resolveCallParams` whenever a run sets
+ * `RunOptions.modelParams.reasoningEffort`. Warns — once per (model x
+ * condition) — when the capability table has no verified reasoning support
+ * for the model, or the requested level isn't among the ones it verified.
+ * NEVER throws and NEVER alters the call: this is advisory only, mirroring
+ * {@link adviseStructuredRun}'s posture. `MODEL_CAPABILITIES` gets no new
+ * rows from this PR, so every model is `UNVERIFIED_REASONING` today — the
+ * unverified-support branch fires once per model until real capability rows
+ * land.
+ *
+ * Keyed by `(model x condition)`, NOT `(model x "reasoningEffort")` — the
+ * unverified-support condition and the unsupported-level condition are
+ * distinct and must not share one advisory slot, or a model's first warning
+ * (say, for unverified support) would silently swallow a LATER run's
+ * unsupported-level warning for the same model. Mirrors
+ * {@link adviseStructuredRunFor}'s `${bare}:${capabilityName}` shape, one
+ * level deeper: `${bare}:reasoningEffort:${"unverified" | "level"}`.
+ */
+export function adviseReasoningEffort(modelId: string, level: ReasoningEffortLevel): void {
+  adviseReasoningEffortFor(modelId, getModelCapabilities(modelId), level);
+}
+
+/**
+ * The decision logic behind {@link adviseReasoningEffort}, decoupled from the
+ * live `getModelCapabilities` lookup — same split as
+ * {@link adviseStructuredRunFor}, and for the same reason: with no verified
+ * reasoning rows in `MODEL_CAPABILITIES` the unsupported-level branch is
+ * unreachable against real data, so tests exercise it by injecting a
+ * synthetic entry.
+ */
+export function adviseReasoningEffortFor(
+  modelId: string,
+  entry: ModelCapabilities | undefined,
+  level: ReasoningEffortLevel,
+): void {
+  const bare = bareModelId(modelId);
+  const capability = entry?.reasoningEffort;
+
+  if (entry === undefined || capability === undefined || capability.support === "unknown") {
+    const key = `${bare}:reasoningEffort:unverified`;
+    if (advisedKeys.has(key)) return;
+    advisedKeys.add(key);
+    console.warn(
+      `[agentic-patterns] reasoningEffort is unverified for model "${modelId}"; requested "${level}" is sent as-is. Extend MODEL_CAPABILITIES (providers/capabilities.ts) once verified.`,
+    );
+    return;
+  }
+
+  if (!capability.levels.includes(level)) {
+    const key = `${bare}:reasoningEffort:level`;
+    if (advisedKeys.has(key)) return;
+    advisedKeys.add(key);
+    const verified = capability.lastVerified ? `, ${capability.lastVerified}` : "";
+    console.warn(
+      `[agentic-patterns] model "${modelId}" has no verified support for reasoningEffort "${level}" ` +
+        `(verified levels: ${capability.levels.join(", ") || "none"}; ${capability.verifiedBy}${verified}); sent as-is.`,
+    );
+  }
+}
+
 /**
  * Test-only: clear the once-per-key advisory memory. `adviseStructuredRun`'s
  * `Set` is module-level and persists across every `it()` in a test file (the

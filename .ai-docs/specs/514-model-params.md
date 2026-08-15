@@ -1,0 +1,224 @@
+# Implementation strategy — issue #514: `runtime: model-parameter passthrough`
+
+**Size M · one PR from `hr/runner-4-model-params`, STACKED on `hr/runner-2-abort-forwarding` (#504) · packages: runtime · plan-key `framework-hardening/runner-4`**
+
+Third in the serialized agent-runner.ts track. Depends on #496 (merged) and #504 (PR #544, in review — this branch stacks on it).
+
+## Current state (verified, post-#504 anchors)
+
+- The five provider calls pass only `{model, instructions, messages, tools?, output?, abortSignal?, headers}`: `run()` `generateText` (`agent-runner.ts:781`), `runStructured()` no-tools (`:1518`), capable (`:1576`), tier-2 (`:1709`), `stream()` `streamText` (`:1952`). No generation control reaches any of them.
+- **SDK verification (installed `ai@7.0.58` / `@ai-sdk/provider@4.0.7`):** `CallSettings` already carries `maxOutputTokens` / `temperature` / `topP` / `topK` / `seed` / `stopSequences` (+ `presencePenalty`/`frequencyPenalty`, not in scope) and a first-class `reasoning?: LanguageModelV4CallOptions['reasoning']` whose value union is `'provider-default' | 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'` — a superset of `ReasoningEffortLevelSchema`'s six levels (`providers/capabilities.ts:70-77`). Call-level `providerOptions` passes through to the provider verbatim. Reasoning effort is a top-level call setting, not a per-provider hand-roll — the issue's claim holds.
+- `ReasoningEffortCapabilitySchema` (`capabilities.ts:141`) is exported and read by nothing; `UNVERIFIED_REASONING` (`:166`) is the every-model default. Advisory machinery precedent: `adviseStructuredRun` (`:530`) → `adviseStructuredRunFor` (`:539`), once-per-key memory + `resetAdvisoryWarningsForTests` (`:586`).
+- The no-new-keys precedent: `_callHeaders` (`agent-runner.ts:273`) / `_resolveCallHeaders` (`:290`) return `undefined` when unconfigured so the no-config path passes NO `headers` key and mock assertions stay byte-identical; computed once per run and reused across iterations.
+
+## Approach
+
+### 1. `RunOptions.modelParams` (runner/types.ts)
+
+One nested bag, per the pinned decision — not five flat fields:
+
+```ts
+export interface ModelParams {
+  temperature?: number;
+  maxOutputTokens?: number;   // epic said "maxTokens"; ai@7 spells it maxOutputTokens
+  topP?: number;
+  topK?: number;
+  seed?: number;
+  stopSequences?: string[];
+  /** Mapped to the SDK's top-level `reasoning` call setting. */
+  reasoningEffort?: ReasoningEffortLevel;
+  /** Passed through verbatim as call-level `providerOptions`. */
+  providerOptions?: ProviderOptions;
+}
+```
+
+`ReasoningEffortLevel` imports from `providers/capabilities.js` (same package, already an agent-runner import source). `ProviderOptions` imports from **`@ai-sdk/provider-utils`** (already a direct dep, `^5.0.0` → 5.0.25, compile-verified) — `ai@7.0.58` declares the type but does NOT re-export it, and the untyped-record fallback fails typecheck against `JSONValue` (Spec Review blocker 1). Per-run only: no runner-level defaults on `AgentRunnerOptions`.
+
+Docstring posture (Spec Review note): `modelParams` is honored by **`AgentRunner`'s five provider calls only** — harness-backed runners (`CodingAgentRunner` subclasses) and `MockRunner` ignore it today, and the docstring must SAY so (the adjacent `abortSignal` doc promises cross-runner behavior; this field must not imply the same). Workflow-seam forwarding is runner-6's close condition, not this PR's.
+
+### 2. `_resolveCallParams(options)` (agent-runner.ts)
+
+Private, mirroring `_callHeaders`: returns `undefined` when `options?.modelParams` is absent, else an object built with per-key conditional spreads (the event-payload idiom) so only keys the caller actually set appear — `reasoningEffort` renamed to `reasoning`, everything else name-preserving, `providerOptions` verbatim. Computed **once per public call**, right next to `callHeaders` (`:673`, `:1465`, `:1838`), then spread into all five sites as `...callParams` — spreading `undefined` adds no keys, so the no-config call object is byte-identical (exact-shape asserted in tests, mirroring #406's headers posture).
+
+Inside `_resolveCallParams`, when `reasoningEffort` is set: call `adviseReasoningEffort(modelId, level)` — one seam covers all three public methods, once per run. (This needs the resolved `modelName`, so `_resolveCallParams(modelName, options)` — same shape as `_resolveCallHeaders` taking resolved inputs.)
+
+### 3. `adviseReasoningEffort` (providers/capabilities.ts)
+
+Beside `adviseStructuredRun`, same once-per-key memory keyed per `(model × condition)` — e.g. `${bareModelId}:reasoningEffort:unverified` vs `…:level` (unverified-support and unsupported-level are distinct conditions and must not share one slot; matches Tests item 4) — same test reset hook: warns when the capability table has no verified reasoning support for the model (`support !== "yes"`) or the requested level isn't in its `levels`. Advisory only — never throws, never alters or blocks the call. **No rows added to `MODEL_CAPABILITIES`** (pinned: honesty refines require evidence we don't have; every model stays `UNVERIFIED_REASONING`, which simply means the advisory fires once for any model until real capability rows exist).
+
+### 4. Docs
+
+- `docs/runners.md` §2.5 **item 2** (`:94`) claims `AgentRunner` "never forwards" `providerOptions` and calls the passthrough "future" — this PR falsifies it; rewrite as shipped (`RunOptions.modelParams.providerOptions` + `reasoningEffort`). The **"Net:"** line (`:101`) is stale on BOTH halves (Spec Review): `providerOptions` ships here, and "`reasoning` events" were never missing — `run()` emits `agent.reasoning` at `:886` and `stream()` at `:2042/:2077/:2090/:2238`. Correct item 3 (same stale reasoning-events claim) and the Net line together.
+- CHANGELOG Unreleased → Features entry.
+- Note (out of scope, per the issue header): the epic item's per-step close condition lands with runner-6 (workflow-seam forwarding), not here.
+
+## Tests (`agent-runner-model-params.test.ts`)
+
+1. **Reaches all five call sites** — capture the mock's received call options per path (run / runStructured no-tools / capable / tier-2 / stream): `temperature`, `maxOutputTokens`, `stopSequences`, `providerOptions` arrive. (Tier-1 is a free win: the 2-tier delegate spreads `{...options}` into `run()` at `:1687`, so `modelParams` forwards with no extra plumbing.)
+2. **No-config value-level shape** — without `modelParams`, the captured call options carry `undefined` for every new member (`temperature`/`topP`/`topK`/`seed`/`stopSequences`/`maxOutputTokens`/`reasoning`/`providerOptions`). **Value-level, not key-absence** (Spec Review blocker 2): the SDK materializes every `CallSettings` member as an own property valued `undefined` at `doGenerate` regardless of config, and the #406 headers test was itself weakened to value-level for exactly this reason (`agent-runner.test.ts:2652-2671`). The spread-`undefined` design in §2 still holds at the `generateText` argument level — it just isn't observable at the mock.
+3. **`reasoningEffort: "high"` arrives as `reasoning: "high"`** — asserted on the captured options. Hedge resolved by execution (Spec Review): ai@7's `asLanguageModelV4` shim is a transparent Proxy overriding only `specificationVersion`; `reasoning` and `providerOptions` reach a `MockLanguageModelV3`'s `doGenerate` verbatim. Keep V3 mocks throughout.
+4. **Advisory** — `vi.spyOn(console, "warn")`: two runs with `reasoningEffort` on the same unverified model → exactly one warning; never throws; the call object is unaffected by the advisory. Uses `resetAdvisoryWarningsForTests`. Key the once-memory by `(model × condition)` — unverified-support and unsupported-level are distinct conditions and must not share one slot.
+5. Existing suites unchanged (`agent-runner.test.ts` 97, stream 27, event-bus 3, abort-forwarding **8** — post-Gate-2.5 count).
+
+## Acceptance (from the issue, restated)
+
+- [ ] `bun run check` green
+- [ ] `modelParams` reaches all five call sites (captured via mock)
+- [ ] Omitting it leaves every new member `undefined` at the provider call (value-level assertion — the SDK materializes all `CallSettings` keys, so key-absence is unsatisfiable; amended per Spec Review blocker 2)
+- [ ] `reasoningEffort: "high"` arrives as `reasoning: "high"`
+- [ ] `adviseReasoningEffort` warns once, never throws, never alters the call
+- [ ] No `MODEL_CAPABILITIES` rows change
+
+## Design Addendum (post Spec Review, re-run 1)
+
+Blocker fixes: `ProviderOptions` now imports from `@ai-sdk/provider-utils` (not `ai`, which doesn't re-export it; the untyped fallback failed typecheck) — §1. The no-config acceptance/test moved from key-absence to value-level `undefined` (the SDK materializes every `CallSettings` member; #406's headers test made the same move) — Tests §2 + acceptance item 3.
+
+Notes folded in: V3-mock hedge resolved by the reviewer's execution (shim forwards `reasoning` verbatim; V4 mock contingency dropped); `modelParams` docstring must state it is AgentRunner-only today (harness runners ignore it); advisory once-memory keyed per condition, not per field; runners.md Net line + item 3 corrected on the stale reasoning-events half; abort-forwarding baseline is 8 tests; tier-1 forwarding noted as free via the `{...options}` spread.
+
+## Spec Review
+<!-- written by: reviewer · gate 1.5 · /sdlc:critique · lens=mixed -->
+
+**Target:** `.ai-docs/specs/514-model-params.md` @ working tree (post-Design-Addendum, uncommitted; base `30cbb5b`)
+**Against:** cited code in the tree (`hr/runner-4-model-params`, stacked on `hr/runner-2-abort-forwarding`)
+**Verdict:** PASS_WITH_NOTES · **re-run 1** (supersedes the REVISE below)
+
+Both blockers are fixed, and both fixes were re-verified by execution rather than accepted on assertion.
+
+- **Blocker 1 (`ProviderOptions` import) — RESOLVED.** `@ai-sdk/provider-utils` is a direct dependency of `agent-runtime` (`package.json:65`, `^5.0.0` → resolves 5.0.25) and does export `ProviderOptions` (`dist/index.d.ts:154`, `type ProviderOptions = SharedV4ProviderOptions`). Compile-probed in-package under the real `tsconfig.json`: the spec's exact `ModelParams` shape plus a conditional-spread `callParams` object spread into `generateText({ model, messages, ...callParams })` typechecks with **zero errors**. The negative still holds — switching the import to `"ai"` reproduces `error TS2459: Module '"ai"' declares 'ProviderOptions' locally, but it is not exported.` The fix is correct as written.
+- **Blocker 2 (no-config assertion) — RESOLVED.** Probed against `MockLanguageModelV3` with a bare `generateText({ model, messages })`: all eight new members (`temperature`/`topP`/`topK`/`seed`/`stopSequences`/`maxOutputTokens`/`reasoning`/`providerOptions`) are own-properties valued **`undefined`** — `reasoning` is NOT defaulted to `'provider-default'`, which was the live risk in the amended criterion. The value-level acceptance is satisfiable exactly as restated.
+
+The dropped V3-mock hedge (Tests item 3) also re-verified: `reasoning: "high"`, `providerOptions: {acme:{flag:true}}` and all six scalars arrive verbatim at a `MockLanguageModelV3`'s `doGenerate`. Dropping the V4 contingency is safe. Notes 2/3/5 folded in correctly; baseline counts now exact (`agent-runner.test.ts` 97, stream 27, event-bus 3, abort-forwarding 8 — confirmed by `vitest run`, 135 total). One note survives: the fix for old-note 4 landed in the Tests section but not in the design section it contradicts.
+
+**Blockers (0):** none.
+
+**Notes (1):**
+
+- [`§ 3 (adviseReasoningEffort), line 47` vs `§ Tests item 4, line 60`] **The advisory-keying fix is half-applied — the two sections now contradict each other.** Tests item 4 and the Design Addendum both say key the once-memory by `(model × condition)` because "unverified-support and unsupported-level are distinct conditions and must not share one slot." But §3 still specifies "same once-per-`(model × "reasoningEffort")` memory" — the per-*field* keying, which is exactly the collapsed-slot behavior the note asked to fix. An implementer building from §3 writes the wrong key; one building from Tests item 4 writes a key that §3's `adviseStructuredRunFor` precedent (`capabilities.ts:551`, `${bare}:${capabilityName}`) does not model. Not gate-blocking — the addendum and the test both state the intended direction unambiguously, so the tiebreak is available — but §3 should be amended in the same pass to say the key is `(model × condition)`, e.g. `${bare}:reasoningEffort:${"unverified" | "level"}`.
+
+**Nits (4):** (carried forward — nits 1-3 were not addressed in re-run 1 and are re-verified as still stale)
+
+- [`§ Current state, lines 9 + 12`; `§ 2, line 41`] Line anchors still drifted (all **sites** re-verified correct, so these mislead but don't misdirect): call sites `781→792`, `1518→1551`, `1576→1610`, `1709→1747`, `1952→1991`; `_callHeaders` `273→284`, `_resolveCallHeaders` `290→301`; resolution points `673→684`, `1465→1476`, `1838→1877`. Anchors confirmed still exact: `capabilities.ts` 70-77 / 141 / 166 / 530 / 539 / 586, `agent-runner.ts:1687` (tier-1 delegate), `agent.reasoning` at `:886` / `:2042` / `:2077` / `:2090` / `:2238`, and `docs/runners.md` 94 / 95 / 101.
+- [`§ Tests item 2, line 58`] The #406 precedent is characterized slightly wrong. That test was weakened away from key-absence to a **no-leak** assertion (`expect(keys.some(k => k.startsWith("x-bf-") || k === "x-request-id")).toBe(false)`), not to a value-level `undefined` assertion — `headers` is one member ai@7 *always* populates, via `withUserAgentSuffix`. The load-bearing point (key-absence is unachievable; a prior Gate 1.5 review already forced this move) is right, and `modelParams`' members genuinely are value-`undefined`, so the amended assertion is stronger than #406's. Just don't cite it as the same assertion. Also the path is `src/runner/__tests__/agent-runner.test.ts`, and the `it()` opens at `:2652` (range `2652-2671` is exact).
+- [`§ 2, lines 41-43`] "one seam … once per run" is still imprecise on the 2-tier path: tier-1 delegates through `this.run(...)` (`:1687`), so `_resolveCallParams` runs twice and `adviseReasoningEffort` is invoked twice — the module-level `advisedKeys` Set is what makes it *observably* once. The free-tier-1-forwarding upside was folded into Tests item 1; this half wasn't.
+- [`§ 4 (Docs), docs/runners.md:101`] While rewriting the Net line for both stale halves, note its trailing clause is stale too — "it just needs to pick the right `LanguageModelV1`" carries the same dead V1 reference the spec already flags in item 2.
+
+**Reviewed by:** reviewer agent · 2026-08-14T20:46:43Z (re-run 1)
+
+<details>
+<summary><strong>Superseded</strong> — run 0 verdict (REVISE, 2 blockers) · retained for audit</summary>
+
+**Target:** `.ai-docs/specs/514-model-params.md` @ `30cbb5b`
+**Against:** cited code in the tree (`hr/runner-4-model-params`, stacked on `hr/runner-2-abort-forwarding`)
+**Verdict:** REVISE
+
+The design is sound — the nested bag, the `_callHeaders`-mirroring resolver, the once-per-run seam, and the no-new-rows advisory posture all check out against the tree. Two blockers, both in claims that were asserted rather than executed: one SDK export that does not exist, and one test/acceptance assertion that cannot pass.
+
+**Blockers (2):**
+
+- [`§ 1 (Approach), lines 31 + 35`] **`ProviderOptions` is NOT exported from `ai@7.0.58`.** The spec asserts "`ProviderOptions` is `ai`'s own exported type … it is in 7.0.58". It is not. `ai`'s `dist/index.d.ts` *imports* it from `@ai-sdk/provider-utils` (line 6) and never re-exports it; the only `Provider*` tokens on any export line are `Provider`, `ProviderMetadata`, `ProviderReference`, `ProviderRegistryProvider`. Verified by compile: `import type { ProviderOptions } from "ai"` → `error TS2459: Module '"ai"' declares 'ProviderOptions' locally, but it is not exported.` The stated fallback is also wrong: `Record<string, Record<string, unknown>>` is **not** assignable to the SDK's `ProviderOptions` (`error TS2322: … 'unknown' is not assignable to type 'JSONValue'`), so it would fail typecheck the moment it is spread into `generateText`. · _Fix:_ `import type { ProviderOptions } from "@ai-sdk/provider-utils"` — already a direct dependency of `agent-runtime` (`^5.0.0`, resolves 5.0.25), and verified to compile. If an `ai`-only import is preferred, `ProviderMetadata` from `ai` is structurally identical and accepts a `ProviderOptions` value (verified). Do not use the `Record<..., unknown>` fallback.
+
+- [`§ Tests item 2 + § Acceptance line 65`] **"Exact absence of the new keys" is unachievable, and it misreads the #406 precedent.** The SDK materializes every `CallSettings` member as an own-property of the options object handed to `doGenerate`, valued `undefined`, regardless of configuration. Probed against `MockLanguageModelV3` with a bare `generateText({ model, messages })`: captured keys are `["abortSignal","frequencyPenalty","headers","maxOutputTokens","presencePenalty","prompt","providerOptions","reasoning","responseFormat","seed","stopSequences","temperature","toolChoice","tools","topK","topP"]`, with `Object.hasOwn(captured, "temperature" | "reasoning" | "providerOptions" | "stopSequences") === true`. So "the captured call options contain none of the new keys" fails on every path. The cited "#406 precedent" is in fact the opposite posture — `agent-runner.test.ts:2652-2671` carries the comment *"MockLanguageModelV3's doGenerate never literally sees `undefined` — the regression guard is that no Bifrost correlation/guardrail key leaked in, not that the field is strictly absent (Gate 1.5 review note)"*, i.e. a prior Gate 1.5 review already forced exactly this weakening for `headers`. · _Fix:_ restate test 2 and the acceptance criterion as **value**-level: with no `modelParams`, every new member of the captured options is `undefined` (and no unrequested value leaks in). The §2 design rationale ("spreading `undefined` adds no keys, so the no-config call object is byte-identical") is correct at the `generateText` **argument** level — keep it as rationale, but stop claiming it is observable at the mock.
+
+**Notes (5):**
+
+- [`§ Tests item 3`] The hedge resolves — **no shim problem, drop the contingency.** `asLanguageModelV4` (`ai/dist/index.js:811`) is a transparent `Proxy` that overrides only `specificationVersion`; it does not touch call options. Probed end-to-end: `generateText({ …, reasoning: "high", providerOptions: { acme: { flag: true } }, temperature: 0.3, maxOutputTokens: 55, topP: 0.9, topK: 7, seed: 42, stopSequences: ["STOP"] })` against a `MockLanguageModelV3` yields `doGenerate` options with `reasoning === "high"` and `providerOptions === {"acme":{"flag":true}}` verbatim, all six scalars intact. Assert on the V3 mock; `MockLanguageModelV4` (also exported from `ai/test`) is unnecessary, and the repo's 172 existing V3 usages stay uniform.
+- [`§ 4 (Docs), docs/runners.md:101`] The **Net line is stale on both halves**, not just the `providerOptions` half. It says "the main missing bits are `reasoning` events and a `providerOptions` passthrough" — but `stream()` already emits `agent.reasoning` (`agent-runner.ts:2042`, `:2077`, `:2090`, `:2238`) and `run()` does too (`:886`). The spec's "verify while there and correct only if wrong" resolves to **wrong**; scope the fix to remove both bits. §2.5 **item 3** ("`AgentRunner.stream()`'s switch statement drops them on the floor") is stale for the same reason and sits three lines away — worth correcting in the same pass. Item 2's "accepts only the raw `LanguageModelV1`" is also a stale version reference.
+- [`runner/types.ts:140`] `RunOptions` is the **shared** protocol options type — `claude-code-runner.ts`, `harness/coding-agent-runner.ts`, `mock-runner.ts`, and the workflow layer all consume it. `modelParams` will be silently ignored on every non-`AgentRunner` path. The `abortSignal` doc in the very same interface (`:177`) explicitly commits that it "is never silently ignored on any `RunOptions` path", so this codebase treats that as a stated contract. The spec should take an explicit posture (a TSDoc sentence scoping `modelParams` to `AgentRunner` is probably enough).
+- [`§ 3 (adviseReasoningEffort)`] The once-per-`(model × "reasoningEffort")` key collapses **two** distinct warning conditions (no verified support; requested level not in `levels`) into one slot, so after any first warning for a model, a later run with a *different* unsupported level is silent. Consistent with the `adviseStructuredRunFor` precedent (`capabilities.ts:539-575`, keyed `${bare}:${capabilityName}`), but the spec asserts both conditions without saying they share a slot. State the intent, or key on level.
+- [`§ Tests item 5`] Stale baseline: `agent-runner-abort-forwarding.test.ts` is **8** tests, not 5 (the two post-spec fix commits `ba9b19c` / `13a5af8` added legs). The other three counts verified exact: `agent-runner.test.ts` 97, stream 27, event-bus 3.
+
+**Nits (3):**
+
+- [`§ Current state, line 9 + line 12`] Line anchors drifted (all **sites** verified correct): call sites `781→792`, `1518→1551`, `1576→1610`, `1709→1747`, `1952→1991`; `_callHeaders` `273→284`, `_resolveCallHeaders` `290→301`; resolution points `673→684`, `1465→1476`, `1838→1877`. Anchors that are still exact: `capabilities.ts` 70-77 / 141 / 166 / 530 / 539 / 586, and `docs/runners.md` 94 / 101.
+- [`§ Current state, line 9`] "pass only `{model, instructions, messages, tools?, output?, abortSignal?, headers}`" — the capable path also passes `stopWhen` (`:1614`) and `toolApproval` (`:1617`). The load-bearing claim ("no generation control reaches any of them") is correct.
+- [`§ 2, line 41`] "one seam … once per run" is imprecise on the 2-tier path: tier-1 delegates through `this.run(agent, message, { ...options, … })` (`:1687`), so `_resolveCallParams` runs twice and `adviseReasoningEffort` is called twice — the module-level `advisedKeys` Set makes it observably once. Worth noting the upside explicitly: that same options spread means **tier-1 already forwards `modelParams` for free**, so the "five sites" framing holds without extra plumbing.
+
+**Reviewed by:** reviewer agent · 2026-08-14T20:41:00Z
+
+</details>
+
+## Diff Review — Adherence
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=adherence -->
+
+**Target:** `git diff hr/runner-2-abort-forwarding...HEAD` @ `53c80a3` (stacked on #504 @ `500ba75`; the two spec commits `30cbb5b`/`e66b72b` are in-diff by design)
+**Against:** `.ai-docs/specs/514-model-params.md` (Approach §1-4 + Tests + Acceptance + Design Addendum + Spec Review binding notes)
+**Verdict:** PASS_WITH_NOTES
+
+Every acceptance criterion is met and independently verified, not taken on assertion:
+
+- **Five call sites.** `grep` for provider calls in `agent-runner.ts` returns exactly five (`:854`, `:1617`, `:1677`, `:1815` `generateText`; `:2062` `streamText`) and all five carry `...callParams` (`:864`, `:1625`, `:1699`, `:1828`, `:2074`). `_resolveCallParams` is computed once per public call next to `callHeaders` (`:746`, `:1542`, `:1948`), exactly as §2 specifies.
+- **Both Spec Review blockers honored.** `ProviderOptions` imports from `@ai-sdk/provider-utils` in both `types.ts` and `agent-runner.ts`; the no-config test is value-level (`toBeUndefined()` on all eight members), not key-absence.
+- **Capable-path test really hits the capable branch** — `gemini-3.5-flash` carries `toolsWithStructuredOutput.support: "yes"` (`capabilities.ts:388-392`), so `modelSupportsToolsWithStructuredOutput(modelName)` selects `:1677`, not the 2-tier fallback. The tier-2 test additionally self-guards via `tier2Called`.
+- **Advisory keyed per condition** (`${bare}:reasoningEffort:unverified` vs `:level`) — the surviving Spec Review note is fixed in code, and the spec's `support !== "yes"` coverage holds: `support: "no"` is schema-forced to `levels: []`, so it falls into the level branch and still warns.
+- **No `MODEL_CAPABILITIES` rows changed**; `capabilities.ts`'s only hunk is the new function.
+- **Baseline counts exact, as Tests item 5 requires:** `agent-runner.test.ts` 97, stream 27, event-bus 3, abort-forwarding 8 — all passing; new file 9 passing. Package build + `typecheck` + `biome check` all green. The only red in `bun run --filter=@pattern-stack/agentic-runtime test` is the two known-local `claude-code-runner.test.ts` integration failures (and the `better-sqlite3` native-binding failures under the default Node, which pass under `/opt/node22`) — pre-existing, unrelated to this diff.
+- **Docs §2.5** item 2 rewritten as shipped, item 3's stale "drops them on the floor" corrected, and the Net line fixed on both halves plus its trailing V1 clause — all four Spec Review requirements. CHANGELOG Unreleased → Features entry present. `RunOptions.modelParams` docstring states the AgentRunner-only posture explicitly and contrasts it with `abortSignal`, per §1.
+
+**Blockers (0):** none.
+
+**Notes (2):**
+
+- [`packages/agent-runtime/src/providers/capabilities.ts:614` (level branch); `.../runner/__tests__/agent-runner-model-params.test.ts:257`] **The condition-keying fix is implemented but unprovable — the unsupported-level branch has zero coverage and no seam to reach it.** Because this PR (correctly) adds no `MODEL_CAPABILITIES` rows, every model resolves to `UNVERIFIED_REASONING`, so `capability.support === "unknown"` always short-circuits and `!capability.levels.includes(level)` is dead code today. Unlike the precedent it cites, `adviseReasoningEffort` is NOT decoupled from the live `getModelCapabilities` lookup — `adviseStructuredRunFor` exists exactly so the logic "can be exercised against a synthetic `ModelCapabilities` entry in tests" (`capabilities.ts:536-539`). The result: Tests item 4's binding clause ("unverified-support and unsupported-level are distinct conditions and must not share one slot") is asserted by no test, so a future regression that collapses the two keys back into one slot ships silently. The enumerated assertions of Tests item 4 (warns once, never throws, call unaffected) ARE implemented and pass. Cheapest fix mirroring the precedent: export an `adviseReasoningEffortFor(modelId, entry, level)` and add one test that a `support:"yes", levels:["low"]` synthetic entry warns on `"high"` *after* an unverified warning already fired for the same bare model.
+- [`packages/agent-runtime/src/runner/index.ts:13-21`] **`ModelParams` is not barrel-exported, so the feature's own option type is not nameable by consumers.** `runner/index.ts` re-exports `RunOptions` from `./types.js` but not `ModelParams`; verified downstream in the built artifact — `dist/index.d.ts` declares `interface ModelParams` at `:3331` and references it at `:3496`, but it appears in no `export` list (3 total occurrences, none an export). A consumer can still pass an object literal (structural typing), but cannot write `import type { ModelParams } from "@pattern-stack/agentic-runtime"` to build a typed helper or a config bag — they'd need `NonNullable<RunOptions["modelParams"]>`. CLAUDE.md's stated convention is "public API surfaced through `index.ts` files", and the sibling `ReasoningEffortLevel` (which callers need to type `reasoningEffort`) IS exported (`providers/index.ts:38`). Same omission, lower stakes, for `adviseReasoningEffort`: `providers/index.ts:29-30` exports `adviseStructuredRun` AND `adviseStructuredRunFor`, but the new advisory is absent from that list.
+
+**Nits (4):**
+
+- [`docs/runners.md:95`] Of the five new line anchors in the rewritten item 3, `agent-runner.ts:958` is wrong: `run()`'s `agent.reasoning` `createEvent` is at `:949` (inside the `emit` at `:948-955`); `:958` is the unrelated `// #407: which provider actually served this call` comment. The four stream anchors (`:2123`/`:2158`/`:2171`/`:2319`) each land on the `await emit(...)` line of the correct reasoning block, so they mislead by ~9 lines but still point at real reasoning emission. All five are exactly `createEvent + 9`, suggesting one stale snapshot rather than five independent slips.
+- [`packages/agent-runtime/src/runner/types.ts:307`] The new docstring's "UNLIKE `abortSignal` (`:209` above)" is a same-file line anchor — the kind Spec Review nit 1 spent two rounds correcting. `:209` lands mid-sentence inside the `abortSignal` doc block (`~:197-234`); the field itself is `:235`. A `{@link RunOptions.abortSignal}` reference (the file's own TSDoc idiom elsewhere) would not rot on the next edit.
+- [`packages/agent-runtime/src/runner/agent-runner.ts:355`, `:1541`] "Called once per public call" / "once per run" is imprecise on `runStructured()`'s 2-tier path — tier-1 delegates through `this.run(agent, message, {...options, …})` (`:1755`), so `_resolveCallParams` runs twice and `adviseReasoningEffort` is invoked twice for one `runStructured()` call; only the module-level `advisedKeys` Set makes it observably once. This is carried forward verbatim from unaddressed Spec Review nit 3 — the imprecision moved from the spec into a shipped code comment.
+- [`docs/runners.md:94`] "accepts a resolved `LanguageModelV2`/`LanguageModelV3`" — while correcting one stale version reference it introduces a narrower one: `ResolvedLanguageModel = LanguageModelV2 | LanguageModelV3 | LanguageModelV4` (`providers/types.ts:22`), and the constructor also takes a `ModelResolver` (`agent-runner.ts:291-295`). "a resolved model (or a `ModelResolver`)" would age better than any enumeration.
+
+**Reviewed by:** reviewer agent · 2026-08-14T21:05:00Z
+
+---
+
+## Diff Review — Quality
+<!-- written by: reviewer · gate 2.5 · /sdlc:review · lens=quality -->
+
+**Target:** `git diff hr/runner-2-abort-forwarding...HEAD` (base `500ba75`, head `53c80a3`)
+**Against:** quality canvas (`canvases/quality-checks/categories.yaml`, plugin default — no project overlay)
+**Verdict:** PASS_WITH_NOTES
+
+Spec-blind pass. Verified independently: all five provider call sites carry `...callParams` (`agent-runner.ts:854`, `:1617`, `:1677`, `:1815`, `:2062`), `...callParams` is last at every site with no key collision, tier-1 of the 2-tier path inherits `modelParams` via the `{...options}` spread at `:1755`, `reasoning` is a real top-level `CallSettings` member in the installed `ai@7.0.58` (`ai/dist/index.d.ts:584` → `@ai-sdk/provider/dist/index.d.ts:2262`), and `@ai-sdk/provider-utils` is a declared dependency so `ProviderOptions` in the public `.d.ts` is not a transitive leak. `bun run --filter=@pattern-stack/agentic-runtime test` → 1862 pass / 2 known-environment failures; `typecheck` → clean. No canvas-category violations found: no convenient fallbacks (the advisory never swallows or substitutes), no convention workarounds (the passthrough uses the SDK's own public call settings), no repeated magic constants.
+
+**Blockers (0):**
+- None.
+
+**Notes (5):**
+
+- [`packages/agent-runtime/src/runner/agent-runner.ts:367-376`] **The passthrough is declared three times and nothing forces the three to agree.** The same eight knobs are spelled out in `ModelParams` (`runner/types.ts:145-157`), again in `CallParams` (`agent-runner.ts:227-242`), and a third time as per-key conditional spreads here — plus twice more in the test (`fullParams` and `expectFullParamsArrived`). Every field is optional on all three, so adding a ninth knob and forgetting the spread line silently drops it: typecheck passes, no existing test fails, and the param simply never reaches the provider. _Fix:_ build the object by rename-and-rest instead of key-by-key — `const { reasoningEffort, ...rest } = params; return { ...rest, ...(reasoningEffort !== undefined ? { reasoning: reasoningEffort } : {}) };`. That is exhaustive by construction (rest carries only keys the caller actually set, preserving the documented "no unset keys" property), keeps the `if (!params) return undefined` early return that the "byte-identical no-config call object" rationale depends on, and lets `CallParams` be derived (`Omit<ModelParams, "reasoningEffort"> & { reasoning?: ReasoningEffortLevel }`) rather than retyped.
+
+- [`packages/agent-runtime/src/providers/capabilities.ts:614-624`] **The unsupported-level branch of `adviseReasoningEffort` is unreachable and untestable as shipped.** Every `MODEL_CAPABILITIES` row is `UNVERIFIED_REASONING` (`support: "unknown"`), so the first branch at `:604` always returns and control never reaches `:614`. It is also unreachable *from a test*, because — unlike its sibling — the function takes no injectable entry: `adviseStructuredRunFor` was deliberately split out for exactly this reason ("decoupled from the live `MODEL_CAPABILITIES` lookup so it can be exercised against a synthetic `ModelCapabilities` entry in tests", `capabilities.ts:534-537`, exercised at `providers/__tests__/capabilities.test.ts:437`). The new advisory departs from that established convention, so its message formatting — including the `lastVerified` / `verifiedBy` interpolation and the `|| "none"` empty-levels path — ships with zero coverage. `providers/__tests__/capabilities.test.ts` has no `adviseReasoningEffort` case at all; the only coverage is the unverified branch, in the runner test file. _Fix:_ add `adviseReasoningEffortFor(modelId, entry, level)` mirroring `adviseStructuredRunFor`, make `adviseReasoningEffort` the thin live-lookup wrapper, and cover both branches against a synthetic `support: "yes", levels: ["low","high"]` entry in `capabilities.test.ts`.
+
+- [`docs/runners.md:24-25`] **Five hand-written source-line anchors into `agent-runner.ts`, one already wrong, none gated.** `:958` is cited for `run()` emitting `agent.reasoning`; that line is `const iterGatewayAttribution = attributionFromProviderMetadata(result.providerMetadata);` (the unrelated #407 gateway-attribution block). The actual emit is `:947-955`, with `createEvent("agent.reasoning", …)` at `:949`. The four `stream()` anchors (`:2123`/`:2158`/`:2171`/`:2319`) do land on `await emit(...)` lines of real reasoning blocks, so they are defensible today — but the repo's docs truth gates cover link-checking and generated-page drift, not line anchors, so all five rot silently on the next edit to a 2,700-line file. The paragraph's own stated purpose is to correct a stale claim "rather than left to mislead." _Fix:_ cite the method and event name (`stream()`'s `fullStream` `reasoning` handling; `run()`'s `result.reasoningText` block) rather than line numbers, or drop the anchors entirely.
+
+- [`packages/agent-runtime/src/runner/types.ts:154`] **`ModelParams.reasoningEffort` reuses the support-claim vocabulary for a request-side field, so the one request-only value is the one callers can't send.** `ReasoningEffortLevel` is documented at `capabilities.ts:62-69` as the SDK vocabulary *minus* `"provider-default"`, explicitly because "that spelling is a *request* value ('do whatever the model defaults to'), not something a model can be said to 'support'." `ModelParams` is precisely the request side. The SDK accepts it (`@ai-sdk/provider/dist/index.d.ts:2262`) and documents it as distinct from omission ("Use `'provider-default'` to use the provider's default reasoning level"), so a caller wanting to explicitly reset to the provider default — e.g. to override a gateway- or profile-level setting — has no way to express it. _Fix:_ keep the support enum as-is and add a request-side alias for the field: `type ReasoningEffortRequest = ReasoningEffortLevel | "provider-default"`.
+
+- [`packages/agent-runtime/src/runner/agent-runner.ts:363-366`] **The advisory `console.warn` is a hidden side effect inside a `_resolve*` method.** `_resolveCallParams` fires `adviseReasoningEffort`, while its named sibling `_resolveCallHeaders` is pure and the file's own convention is to call advisories explicitly at the call site (`adviseStructuredRun` is invoked directly in `runStructured()`). As a result `run()` (`:743`) and `stream()` (`:1947`) acquire warning behavior with no visible call, and the coupling is what makes the "once per run" comments at `:355`/`:1541` inaccurate on the 2-tier path — tier-1's `this.run(...)` re-enters the resolver, so the advisory is attempted twice per `runStructured()` and is observably once only because `advisedKeys` is module-level. _Fix:_ hoist the `adviseReasoningEffort` call to the three public methods alongside the existing `adviseStructuredRun` call, leaving `_resolveCallParams` pure.
+
+**Nits (4):**
+
+- [`packages/agent-runtime/src/providers/capabilities.ts:615`] The level-branch key `${bare}:reasoningEffort:level` omits the level itself, so on a model with verified `levels: ["low","high"]` a warning about `"xhigh"` permanently suppresses a later, different warning about `"medium"`. This is the same swallowing the function's own doc comment (`:591-597`) argues against one level up; `${bare}:reasoningEffort:level:${level}` closes it.
+
+- [`packages/agent-runtime/src/runner/types.ts:145-157`] `ModelParams` members are mutable — `stopSequences?: string[]`, and no `readonly` anywhere — against CLAUDE.md's `Readonly<>` convention and the neighbouring `RunOptions.requestHeaders: Readonly<Record<string, string | undefined>>` (`:299`). `callParams` holds the caller's array by reference and is reused across every iteration and tier of a run, so a caller mutating it mid-run changes later provider calls within the same run.
+
+- [`CHANGELOG.md:9`] Test-fixture internals leak into the user-facing entry: "the SDK still materializes every `CallSettings` member as an own property valued `undefined` **at the mock**." Mock behavior is not a user-visible contract; the parenthetical belongs in the test file's header comment, where it already is.
+
+- [`packages/agent-runtime/src/runner/types.ts:145-157`] `presencePenalty` and `frequencyPenalty` are the only `CallSettings` scalars omitted from the passthrough (`ai/dist/index.d.ts:551-566` sits them between `topK` and `stopSequences`, all of which are included) with no stated reason. Either include them or say why in the `ModelParams` doc comment, so the next reader doesn't have to diff the two lists to find out whether it was deliberate.
+
+**Reviewed by:** reviewer agent · 2026-08-14T21:14:00Z
+
+---
+
+## Live Validate
+<!-- written by: validator · gate 3 -->
+
+**Branch:** `hr/runner-4-model-params` @ `81e9d87`
+**Profile:** `strict`
+**Result:** ✅ all active gates passed (2 known-environment test failures, unrelated to this diff)
+**Gates:** build=PASS · dist-contract=PASS · typecheck=PASS · lint=PASS · tests=PASS* · model-facing-schemas=PASS · smoke:memory=PASS · docs-events=PASS
+**Acceptance:** 6/6 mechanically verifiable items met — new suite `agent-runner-model-params.test.ts` 9/9 green; `capabilities.test.ts` 43 (3 new advisory legs, incl. the distinct once-slots); baselines unchanged and green (`agent-runner.test.ts` 97, stream 27, event-bus 3, abort-forwarding 8 — none of those four files is touched by the diff); barrels export `ModelParams` + `adviseReasoningEffort` + `adviseReasoningEffortFor`, all three confirmed on the built `dist/index.d.ts` export list; `MODEL_CAPABILITIES` rows unchanged (`capabilities.ts`'s only hunks are the two new advisory functions).
+**\*** `claude-code-runner.test.ts` 2 failures are container-only (`--dangerously-skip-permissions cannot be used with root`), pre-existing, pass in CI. Full run: 1865 passed / 2 failed / 2 skipped / 6 todo.
+**Note:** the `test` gate's non-zero exit short-circuited `check`, so `check:model-facing-schemas`, `smoke:memory` and `check:docs-events` were run individually — all three exit 0.
+**Posted to:** PR #545
+**Validated by:** validator agent · 2026-08-14T21:20:00Z
