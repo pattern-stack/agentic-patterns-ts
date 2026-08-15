@@ -63,6 +63,18 @@ export interface ToolExecutionContext {
    * cheaply skip building an artifact it isn't allowed to publish.
    */
   readonly publishArtifact?: (artifact: RenderArtifact) => void;
+  /**
+   * Cooperative cancellation channel for this dispatch (#521). Same
+   * philosophy as `emit`/`host`: core declares the slot, the host wires the
+   * meaning — the runner never kills a tool, it only signals. Present only
+   * when the host's timeout config actually bounds this dispatch (the
+   * runtime's `AgentRunner` sets it when `RunOptions.timeout.toolMs` is
+   * configured); absent otherwise, so a tool can cheaply check `ctx.signal`
+   * without an existence dance. A tool that ignores it keeps running to
+   * completion — the timed-out promise is abandoned, never killed — so
+   * observing this is opt-in, not a guarantee of interruption.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /**

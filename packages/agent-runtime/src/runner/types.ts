@@ -157,6 +157,61 @@ export interface ModelParams {
 }
 
 // ---------------------------------------------------------------------------
+// RunTimeouts (#521)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-run wall-clock budgets (#521), forwarded to `AgentRunner` only (same
+ * posture as {@link ModelParams}). Absent = today's unbounded behaviour.
+ * Every field is a cooperative caveat, not a hard kill — see each field's
+ * doc and the package README's Known-limitations section.
+ */
+export interface RunTimeouts {
+  /**
+   * Per-model-call budget, mapped to the SDK's native `timeout: { stepMs }`
+   * (no hand-rolled race — delivery is signal-based, merged into the
+   * provider call's own abort signal). On 4 of `AgentRunner`'s 5 provider
+   * calls this is a true per-model-call bound. On `runStructured()`'s
+   * CAPABLE path (tools + a model verified for single-call structured
+   * output) it bounds the SDK **step** instead — one model call PLUS every
+   * SDK-run tool execution it triggered in that step — because `ai@7` has
+   * no model-call-only knob and the SDK's step timer covers both. On that
+   * one path `toolMs > modelMs` is silently capped by the step timer;
+   * `toolMs` should be set `<=` this value there (guidance, not a
+   * sufficiency guarantee — the step budget is shared with the model call
+   * too). Only binds providers that honor `abortSignal` — a provider call
+   * that ignores its signal hangs regardless of this budget.
+   */
+  modelMs?: number;
+  /**
+   * Per-tool-dispatch budget — a hand-rolled race (`withToolTimeout`)
+   * around each of `AgentRunner`'s three dispatch sites, since the SDK's
+   * own `timeout.toolMs` only ever covers the one SDK-run tool path
+   * (`runStructured()`'s capable path) and this needs one uniform expiry
+   * surface everywhere. On expiry the dispatch REJECTS with a structured
+   * error — fed back to the model like any other tool failure, the run's
+   * loop continues — never a thrown escape. The losing promise is
+   * ABANDONED, never killed; `ToolExecutionContext.signal` (core, additive)
+   * is the cooperative cancellation channel a tool may opt into observing.
+   */
+  toolMs?: number;
+  /**
+   * Whole-run wall-clock budget. Checked at each method's per-iteration
+   * boundary guards and composed into the effective abort signal forwarded
+   * to every provider call (see `abortSignal`'s doc below) — a blocked tool
+   * dispatch is NOT interrupted by `runMs` alone (only `toolMs` wires
+   * `ctx.signal`); the deadline is honored at the next boundary instead.
+   * On expiry, `run()` returns `finishReason: "timeout"` (discriminated by
+   * signal identity from an explicit caller cancel, never by comparing
+   * clocks — caller-cancel wins when both fire); `stream()` still maps to
+   * `agent.conversation.end {reason:"cancelled"}` (no new event
+   * vocabulary); `runStructured()` throws `RunCancelledError` after
+   * finalizing a terminal `message.complete`, same as any other abort.
+   */
+  runMs?: number;
+}
+
+// ---------------------------------------------------------------------------
 // RunOptions
 // ---------------------------------------------------------------------------
 
@@ -201,19 +256,34 @@ export interface RunOptions {
    * until it returns. The cheap cooperative guards are per-method: `run()`
    * and `stream()` check it at the top of each iteration; `stream()`
    * additionally checks before each tool dispatch. It is never silently
-   * ignored on any `RunOptions` path. On abort: `stream()` emits
-   * `agent.message.cancel` + `agent.conversation.end {reason:"cancelled"}`
-   * and returns — it does NOT throw (locked D1); `run()` closes the
-   * interrupted call with `agent.llm.end {finishReason:"cancelled"}` — no
-   * `agent.error` — and returns a `RunResult` with `finishReason:
-   * "cancelled"`; `runStructured()` cannot fabricate a schema-valid `object`
-   * on abort, so it throws a `RunCancelledError` (never a raw `AbortError`)
-   * whether the signal fires before, during, or between its provider calls —
-   * and when the abort lands during or between calls (i.e. after
-   * `message.start` opened the run), it first emits a terminal
-   * `agent.message.complete {finishReason:"cancelled"}` so run-store
-   * exporters still finalize the row. A pre-start abort throws before any
-   * event; there is no run to finalize.
+   * ignored on any `RunOptions` path.
+   *
+   * SINCE #521: when `timeout.runMs` is also set, the signal each provider
+   * call and guard actually observes is an EFFECTIVE signal — this
+   * `abortSignal` composed with a derived `AbortSignal.timeout(runMs)` via
+   * `AbortSignal.any` — never this field alone. The finishReason the
+   * effective signal's expiry produces is DISCRIMINATED by signal identity
+   * (an explicit cancel via this field always wins over a `runMs` deadline
+   * when both have fired): on `run()`, `finishReason: "cancelled"` for an
+   * explicit abort, `finishReason: "timeout"` for a `runMs` deadline — both
+   * routes below that used to read unconditionally as "cancelled" now read
+   * as whichever the discrimination picked. `stream()`'s mapping is
+   * UNCHANGED by `runMs` — it still always maps to `agent.conversation.end
+   * {reason:"cancelled"}` (no new event vocabulary there).
+   *
+   * On abort: `stream()` emits `agent.message.cancel` +
+   * `agent.conversation.end {reason:"cancelled"}` and returns — it does NOT
+   * throw (locked D1); `run()` closes the interrupted call with
+   * `agent.llm.end {finishReason:"cancelled"}` — no `agent.error` — and
+   * returns a `RunResult` with `finishReason: "cancelled"` (or `"timeout"`
+   * per the discrimination above); `runStructured()` cannot fabricate a
+   * schema-valid `object` on abort, so it throws a `RunCancelledError`
+   * (never a raw `AbortError`) whether the signal fires before, during, or
+   * between its provider calls — and when the abort lands during or between
+   * calls (i.e. after `message.start` opened the run), it first emits a
+   * terminal `agent.message.complete {finishReason:"cancelled"}` so
+   * run-store exporters still finalize the row. A pre-start abort throws
+   * before any event; there is no run to finalize.
    *
    * `CodingAgentRunner`-based runners (`ClaudeCodeRunner` /
    * `ClaudeCodeAPIRunner`, #368) honor it too, with a shape suited to owning a
@@ -313,6 +383,20 @@ export interface RunOptions {
    * wired to) is a follow-up, not shipped here.
    */
   modelParams?: ModelParams;
+  /**
+   * Per-run wall-clock budgets (#521) — `modelMs`, `toolMs`, `runMs`. See
+   * {@link RunTimeouts} for the full per-field semantics (native SDK
+   * delivery for `modelMs`, the hand-rolled `withToolTimeout` race for
+   * `toolMs`, the composed effective abort signal for `runMs`).
+   *
+   * UNLIKE `abortSignal` (above), this is honored by **`AgentRunner` only**
+   * today — same posture as `modelParams`: harness-backed runners
+   * (`CodingAgentRunner` subclasses) and `MockRunner` ignore it. Absent =
+   * today's unbounded behaviour, byte-identical at every provider call (the
+   * SDK consumes `timeout` before `doGenerate`, so its presence/absence is
+   * not observable at the mock either way).
+   */
+  timeout?: RunTimeouts;
 }
 
 // ---------------------------------------------------------------------------

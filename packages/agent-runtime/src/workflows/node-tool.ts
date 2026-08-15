@@ -152,8 +152,8 @@ export interface SubagentSpec {
    * {@link AgentStepSpec}: `model` (per-step model override via
    * `applyStepModel`), `maxIterations` (forwarded into `RunOptions`), and
    * `runner` (per-node runner override, `spec.runner ?? ctx.runner`).
-   * (Per-subagent timeout is NOT forwardable today — no `RunOptions.timeout`
-   * plumbing exists; see the PR follow-up note.)
+   * (Per-subagent timeout is NOT forwardable today — `RunOptions.timeout`
+   * exists since #521 but is not forwarded here; see the PR follow-up note.)
    */
   readonly runOptions?: {
     readonly model?: string;

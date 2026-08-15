@@ -476,3 +476,30 @@ you compose the agent (`AgentBuilder.withModel(id)` / your own
 model from the ENVIRONMENT at run time is the supported mechanism; pinning one in
 a declaration is not. An agent that declares no model on a resolver-backed runner
 fails loud rather than defaulting to a vendor.
+
+## Known limitations
+
+**`RunOptions.timeout` (#521) — `AgentRunner` only, cooperative, never a hard kill:**
+
+- **Unbounded by default.** Without `timeout`, `run()`/`stream()`/`runStructured()`
+  behave exactly as before — no per-call, per-tool, or per-run budget. `CodingAgentRunner`
+  subclasses and `MockRunner` ignore `RunOptions.timeout` entirely (same posture as
+  `modelParams`).
+- **`modelMs`/`runMs` only interrupt providers that honor `abortSignal`.** Delivery is
+  signal-based (the SDK merges `timeout` into the provider call's own abort signal, and
+  `runMs` composes into the same effective signal every provider call receives) — a
+  provider call that ignores its signal hangs regardless of either budget.
+- **On `runStructured()`'s capable path (tools + a model verified for single-call
+  structured output), `modelMs` bounds a whole SDK *step* — one model call PLUS every
+  SDK-run tool execution it triggered — not the model call alone**, because `ai@7` has no
+  model-call-only knob. `toolMs > modelMs` is silently capped by that same step timer on
+  this one path; keep `toolMs <= modelMs` there as guidance, not a sufficiency guarantee.
+- **Expiry abandons, never kills, an in-flight promise.** A `toolMs` dispatch that times
+  out lets the losing tool-executor promise keep running in the background; `runMs`
+  alone does not interrupt a blocked tool either — only the next iteration/dispatch
+  boundary observes the deadline.
+- **`ToolExecutionContext.signal` is cooperative-only**, and present ONLY when `toolMs`
+  is set for the run — a tool must opt into observing it (`ctx.signal?.aborted`); the
+  runner never forcibly cancels a tool. A `runMs`-only run that blocks in a
+  never-returning tool exceeds its budget without bound (the deadline is honored at the
+  next boundary, not mid-dispatch).

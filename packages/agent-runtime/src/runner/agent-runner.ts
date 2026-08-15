@@ -160,6 +160,59 @@ function isAbortRejection(e: unknown, signal: AbortSignal | undefined): boolean 
 }
 
 // ---------------------------------------------------------------------------
+// withToolTimeout (#521)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by {@link withToolTimeout} on expiry — a NAMED error so call sites
+ * and tests can distinguish a timeout from a genuine tool failure. Every one
+ * of `AgentRunner`'s three dispatch sites already `catch`es a rejection into
+ * a structured `{error: message}` tool result (+ `errorMsg` for the
+ * `agent.tool.end` event and the terminal-tool-exit keying), so a rejecting
+ * timeout composes at zero call-site change.
+ */
+class ToolTimeoutError extends Error {
+  readonly toolName: string;
+  readonly ms: number;
+
+  constructor(toolName: string, ms: number) {
+    super(`Tool '${toolName}' timed out after ${ms}ms`);
+    this.name = "ToolTimeoutError";
+    this.toolName = toolName;
+    this.ms = ms;
+  }
+}
+
+/**
+ * Race `p` against `ms` milliseconds. Expiry REJECTS with
+ * {@link ToolTimeoutError} — never resolves (a resolve-shaped expiry would
+ * make `stream()`'s terminal-tool exit, keyed on `errorMsg === undefined`,
+ * treat a timed-out TERMINAL tool's timeout message as the run's clean final
+ * response — see #521's Spec Review B5). The LOSING promise is ABANDONED,
+ * never killed — `p` keeps running to completion or rejection in the
+ * background; `ToolExecutionContext.signal` is the only cooperative
+ * cancellation channel a tool can opt into. The timer is cleared on either
+ * settle path, so a fast `p` leaves no open handle.
+ */
+function withToolTimeout<T>(p: Promise<T>, ms: number, toolName: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new ToolTimeoutError(toolName, ms));
+    }, ms);
+    p.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Structured-output capability table (DESIGN §9.4 / §9.5)
 // ---------------------------------------------------------------------------
 
@@ -376,6 +429,108 @@ export class AgentRunner implements RunnerProtocol {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // RunOptions.timeout resolution (#521)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Per-run SDK `timeout` config for `RunTimeouts.modelMs` — uniform
+   * `{ stepMs: modelMs }` on all five provider calls (never `{totalMs}`,
+   * which would meter the whole multi-step loop on `runStructured()`'s
+   * capable path instead of resetting per step; Spec Review B3, probed).
+   * Computed once per run, reused across iterations/tiers below (parity
+   * with `_resolveCallParams`/`_resolveCallHeaders`). `undefined` when
+   * `timeout.modelMs` is absent, so no `timeout` key reaches the call —
+   * though this is not independently observable at the mock either way: the
+   * SDK consumes `timeout` into the merged abort signal before `doGenerate`
+   * ever sees its options (Spec Review B6).
+   */
+  private _resolveModelTimeout(options?: RunOptions): { stepMs: number } | undefined {
+    const modelMs = options?.timeout?.modelMs;
+    return modelMs !== undefined ? { stepMs: modelMs } : undefined;
+  }
+
+  /**
+   * The per-run effective abort signal (#521): `options.abortSignal`
+   * composed with a derived `AbortSignal.timeout(runMs)` when
+   * `RunOptions.timeout.runMs` is set. This is the ONE signal forwarded to
+   * every provider call and checked by every cooperative guard — all
+   * existing #504 machinery (`isAbortRejection`, the boundary guards)
+   * applies to it unchanged. `runSignal` is kept as its own reference
+   * purely so reason discrimination (see `_cancelReason`) can test identity
+   * rather than comparing clocks. `deadlineAt` exists ONLY for
+   * `runStructured()`'s tier-1 remaining-budget arithmetic — never for
+   * discrimination (a `deadlineAt <= Date.now()` check misreports a
+   * measured ~2.5% of expiries; Spec Review, probed).
+   *
+   * Absent `runMs` → `effectiveSignal === options?.abortSignal` byte-
+   * identical to pre-#521 behavior, `runSignal`/`deadlineAt` both
+   * `undefined`.
+   */
+  private _resolveEffectiveSignal(options?: RunOptions): {
+    effectiveSignal: AbortSignal | undefined;
+    runSignal: AbortSignal | undefined;
+    deadlineAt: number | undefined;
+  } {
+    const runMs = options?.timeout?.runMs;
+    if (runMs === undefined) {
+      return { effectiveSignal: options?.abortSignal, runSignal: undefined, deadlineAt: undefined };
+    }
+    const runSignal = AbortSignal.timeout(runMs);
+    const callerSignal = options?.abortSignal;
+    const effectiveSignal = callerSignal ? AbortSignal.any([callerSignal, runSignal]) : runSignal;
+    return { effectiveSignal, runSignal, deadlineAt: Date.now() + runMs };
+  }
+
+  /**
+   * §4's reason discrimination, BY SIGNAL IDENTITY, never by clock: an
+   * explicit caller cancel always wins when both the caller's signal and
+   * the derived `runSignal` have fired. Only meaningful once the effective
+   * signal is known to have fired (i.e. inside a guard/catch that already
+   * checked `effectiveSignal?.aborted` or `isAbortRejection`) — callers
+   * don't need to re-check that here.
+   */
+  private _cancelReason(
+    options: RunOptions | undefined,
+    runSignal: AbortSignal | undefined,
+  ): "cancelled" | "timeout" {
+    if (options?.abortSignal?.aborted) return "cancelled";
+    if (runSignal?.aborted) return "timeout";
+    return "cancelled";
+  }
+
+  /**
+   * `RunCancelledError`'s message, reason-discriminated (§4: "message text
+   * gains a timeout variant"). `when` names the site (kept close to the
+   * pre-#521 wording at each throw site).
+   */
+  private _cancelledRunMessage(reason: "cancelled" | "timeout", when: string): string {
+    return reason === "timeout"
+      ? `runStructured: timed out ${when} (RunOptions.timeout.runMs elapsed)`
+      : `runStructured: aborted ${when} (abortSignal fired)`;
+  }
+
+  /**
+   * §5: the per-dispatch tool signal — `AbortSignal.timeout(toolMs)`
+   * composed with the run's effective signal, so a timed-out (or
+   * run-aborted) dispatch observes `ctx.signal.aborted === true`. Freshly
+   * minted PER DISPATCH (each tool call gets its own `toolMs` budget, not a
+   * shared per-run timer) — callers must call this at each dispatch site,
+   * not hoist it. `undefined` when `toolMs` is unset: DELIBERATE — under
+   * `runMs` alone a blocked tool is not interrupted (the deadline is
+   * honored at the next boundary instead); wiring the run signal into
+   * `ctx.signal` without `toolMs` would expand the acceptance surface and
+   * is deferred (Spec Review note 4, re-run 0).
+   */
+  private _toolDispatchSignal(
+    toolMs: number | undefined,
+    effectiveSignal: AbortSignal | undefined,
+  ): AbortSignal | undefined {
+    if (toolMs === undefined) return undefined;
+    const toolSignal = AbortSignal.timeout(toolMs);
+    return effectiveSignal ? AbortSignal.any([effectiveSignal, toolSignal]) : toolSignal;
+  }
+
   /**
    * Resolve the event bus for ONE public call (#496): the per-call override,
    * then the constructor bus, then the global singleton — lazily, never
@@ -475,6 +630,14 @@ export class AgentRunner implements RunnerProtocol {
      * artifact it isn't allowed to publish.
      */
     onArtifact?: (artifact: RenderArtifact) => void;
+    /**
+     * §5 (#521): the per-dispatch cooperative cancellation channel — see
+     * `_toolDispatchSignal`. Forwarded onto `ToolExecutionContext.signal`
+     * only when present (own-property check, not a key valued `undefined`)
+     * so `Object.hasOwn(ctx, "signal")` is `false` whenever `toolMs` is
+     * unset for this run.
+     */
+    signal?: AbortSignal;
   }): ToolExecutionContext {
     return {
       runId: a.runId,
@@ -482,6 +645,7 @@ export class AgentRunner implements RunnerProtocol {
       parentToolCallId: a.parentToolCallId,
       host: a.host, // #124 — the single copy site
       ...(a.onArtifact ? { publishArtifact: a.onArtifact } : {}),
+      ...(a.signal ? { signal: a.signal } : {}),
       // Channel B (secondary): a non-agent tool's only progress-reporting path.
       // Fire-and-forget — never let a tool author await bus/gate plumbing, and
       // never let a publish failure (sync OR async) surface into the tool's
@@ -744,6 +908,14 @@ export class AgentRunner implements RunnerProtocol {
     // #514: computed once per run, reused across iterations below (parity
     // with callHeaders).
     const callParams = this._resolveCallParams(modelName, options);
+    // #521: computed once per run, reused across iterations below (parity
+    // with callParams/callHeaders).
+    const modelTimeout = this._resolveModelTimeout(options);
+    // #521: `options.abortSignal` composed with a derived `runMs` deadline —
+    // see `_resolveEffectiveSignal`'s doc. `runSignal` feeds the reason
+    // discrimination at the shared cancelled return below; absent `runMs`
+    // makes `effectiveSignal` byte-identical to `options?.abortSignal`.
+    const { effectiveSignal, runSignal } = this._resolveEffectiveSignal(options);
     const agentTools = agent.getTools() as ToolSchema[];
     const tools = this.convertTools(agent, toolExecutor);
     const hasTools = agentTools.length > 0;
@@ -803,6 +975,11 @@ export class AgentRunner implements RunnerProtocol {
     // abortSignal at its top, before this run() bothered to describe it any
     // further below.
     let cancelledAtIteration: number | undefined;
+    // #521: which reason the cancellation above discriminates to — set
+    // alongside `cancelledAtIteration` at every guard/catch site that can
+    // trigger it; defaulted to "cancelled" (the pre-#521 constant) so a run
+    // with no `runMs` is byte-identical. See `_cancelReason`'s doc.
+    let cancelledReason: "cancelled" | "timeout" = "cancelled";
     // #407: the most recently observed gateway attribution (last LLM call
     // that reported one) — threaded onto every `RunResult` return below.
     let lastGatewayAttribution: GatewayAttribution | undefined;
@@ -815,9 +992,12 @@ export class AgentRunner implements RunnerProtocol {
       // signal that fires between iterations stops the loop before a
       // redundant `agent.llm.start`, without interrupting an in-flight
       // `generateText` call. Falls through to the shared post-loop return
-      // below (finishReason: "cancelled") — never throws.
-      if (options?.abortSignal?.aborted) {
+      // below (finishReason: discriminated reason, #521) — never throws.
+      // #521: checks the EFFECTIVE signal (caller's `abortSignal` composed
+      // with a derived `runMs` deadline) — see `_resolveEffectiveSignal`.
+      if (effectiveSignal?.aborted) {
         cancelledAtIteration = iteration;
+        cancelledReason = this._cancelReason(options, runSignal);
         break;
       }
 
@@ -856,20 +1036,29 @@ export class AgentRunner implements RunnerProtocol {
           instructions,
           messages,
           tools: hasTools ? tools : undefined,
-          // #504: forwarded so an abort actually interrupts the in-flight
-          // provider call (stops token burn) instead of waiting for the
-          // top-of-iteration check above.
-          abortSignal: options?.abortSignal,
+          // #504/#521: forwarded so an abort (explicit OR a runMs-derived
+          // deadline) actually interrupts the in-flight provider call (stops
+          // token burn) instead of waiting for the top-of-iteration check
+          // above.
+          abortSignal: effectiveSignal,
           headers: callHeaders,
           ...callParams,
+          // #521: native SDK timeout — `{stepMs}` uniformly (§2); absent
+          // when `timeout.modelMs` is unset, so no `timeout` key reaches the
+          // call.
+          ...(modelTimeout ? { timeout: modelTimeout } : {}),
         });
       } catch (e: unknown) {
         const llmDuration = Date.now() - llmStartTime;
-        // #504: our own forwarded signal aborted the call mid-flight — a
-        // cancel, not a failure. Close the LLM span honestly and fall into
-        // the shared cancelled return below (D1 posture: run() never throws
-        // on abort). No `agent.error`, no gateway classification.
-        if (isAbortRejection(e, options?.abortSignal)) {
+        // #504/#521: our own forwarded (possibly composed) signal aborted the
+        // call mid-flight — a cancel, not a failure. Close the LLM span
+        // honestly and fall into the shared cancelled return below (D1
+        // posture: run() never throws on abort). No `agent.error`, no
+        // gateway classification. `agent.llm.end.finishReason` stays the
+        // literal "cancelled" here (§4: pinned, no new event vocabulary) —
+        // only the RunResult/terminal message.complete carry the
+        // discriminated reason, below.
+        if (isAbortRejection(e, effectiveSignal)) {
           await emit(
             createEvent("agent.llm.end", {
               traceId: effectiveTraceId,
@@ -885,6 +1074,7 @@ export class AgentRunner implements RunnerProtocol {
             }),
           );
           cancelledAtIteration = iteration;
+          cancelledReason = this._cancelReason(options, runSignal);
           break;
         }
         await emit(
@@ -1084,7 +1274,11 @@ export class AgentRunner implements RunnerProtocol {
 
           try {
             if (toolExecutor) {
-              toolResult = await toolExecutor.execute(
+              // #521 §5: freshly minted PER DISPATCH — each tool call gets
+              // its own `toolMs` budget, never a shared per-run timer.
+              const toolMs = options?.timeout?.toolMs;
+              const dispatchSignal = this._toolDispatchSignal(toolMs, effectiveSignal);
+              const execPromise = toolExecutor.execute(
                 tc.toolName,
                 tc.input as Record<string, unknown>,
                 this.buildToolCtx({
@@ -1097,8 +1291,17 @@ export class AgentRunner implements RunnerProtocol {
                   onArtifact: options?.publishArtifacts
                     ? (a) => publishedArtifacts.push(a)
                     : undefined,
+                  signal: dispatchSignal,
                 }),
               );
+              // #521 §3: hand-rolled race, REJECTS on expiry (never
+              // resolves) so the existing catch below produces the
+              // structured `{error}` + `errorMsg` shape at zero further
+              // change.
+              toolResult =
+                toolMs !== undefined
+                  ? await withToolTimeout(execPromise, toolMs, tc.toolName)
+                  : await execPromise;
             } else {
               toolResult = { error: "No tool executor configured" };
               errorMsg = "No tool executor configured";
@@ -1306,6 +1509,11 @@ export class AgentRunner implements RunnerProtocol {
     // conversationId — that pairing is Conversation.stream's / stream()'s
     // concern) — a `message.complete` with an honest finishReason is enough
     // for every existing collector/exporter to finalize the run cleanly.
+    // #521 §4: BOTH the terminal `message.complete.finishReason` and the
+    // returned `RunResult.finishReason` carry `cancelledReason` — "cancelled"
+    // (explicit abort, or no `runMs`) or "timeout" (`runMs` deadline, caller
+    // didn't also fire) — so `RunStoreExporter`'s persisted row and the
+    // caller's return value always agree.
     if (cancelledAtIteration !== undefined) {
       await emit(
         createEvent("agent.message.complete", {
@@ -1317,7 +1525,7 @@ export class AgentRunner implements RunnerProtocol {
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
           model: modelName,
-          finishReason: "cancelled",
+          finishReason: cancelledReason,
           ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         }),
       );
@@ -1328,7 +1536,7 @@ export class AgentRunner implements RunnerProtocol {
         outputTokens: totalOutputTokens,
         toolCallsCount: totalToolCalls,
         iterations: cancelledAtIteration,
-        finishReason: "cancelled",
+        finishReason: cancelledReason,
         ...(totalUsageDetails ? { usageDetails: totalUsageDetails } : {}),
         ...(lastGatewayAttribution ? { gateway: lastGatewayAttribution } : {}),
       };
@@ -1399,6 +1607,17 @@ export class AgentRunner implements RunnerProtocol {
       parentSpanId: string;
       host?: unknown;
       publishArtifacts?: boolean;
+      /**
+       * #521 §5: per-tool-dispatch budget for THIS run — threaded through so
+       * the in-closure `execute` below (the one dispatch site the SDK itself
+       * invokes) composes `ctx.signal` + `withToolTimeout` identically to
+       * `run()`/`stream()`'s hand-rolled dispatch sites.
+       */
+      toolMs?: number;
+      /** #521 §4/§5: this run's effective abort signal — composed with a
+       * fresh per-dispatch `AbortSignal.timeout(toolMs)` via
+       * `_toolDispatchSignal` below. */
+      effectiveSignal?: AbortSignal;
     },
   ): ToolSet {
     const agentTools = agent.getTools() as ToolSchema[];
@@ -1446,7 +1665,10 @@ export class AgentRunner implements RunnerProtocol {
           const publishedArtifacts: RenderArtifact[] = [];
           try {
             if (toolExecutor) {
-              toolResult = await toolExecutor.execute(
+              // #521 §5: freshly minted PER DISPATCH, same as the other two
+              // sites.
+              const dispatchSignal = this._toolDispatchSignal(ctx.toolMs, ctx.effectiveSignal);
+              const execPromise = toolExecutor.execute(
                 toolName,
                 args,
                 this.buildToolCtx({
@@ -1457,8 +1679,17 @@ export class AgentRunner implements RunnerProtocol {
                   parentSpanId: tcSpanId,
                   host: ctx.host,
                   onArtifact: ctx.publishArtifacts ? (a) => publishedArtifacts.push(a) : undefined,
+                  signal: dispatchSignal,
                 }),
               );
+              // #521 §3: one consistent hand-rolled expiry surface across all
+              // three dispatch sites — deliberately NOT the SDK's native
+              // `timeout.toolMs` here (that would only cover this one path,
+              // with SDK-owned rejection semantics — divergence for no gain).
+              toolResult =
+                ctx.toolMs !== undefined
+                  ? await withToolTimeout(execPromise, ctx.toolMs, toolName)
+                  : await execPromise;
             } else {
               toolResult = { error: "No tool executor configured" };
               errorMsg = "No tool executor configured";
@@ -1507,6 +1738,14 @@ export class AgentRunner implements RunnerProtocol {
     // the error to a once-per-schema warning.
     guardOpenObjectSchemas(schema, options?.allowOpenObjectSchemas);
 
+    // #521: computed once per call, reused across the single-call / capable /
+    // 2-tier paths below (parity with `callParams`/`callHeaders`, resolved
+    // further down). `effectiveSignal` is what every guard/provider-call
+    // below observes; `runSignal`/`deadlineAt` feed reason discrimination and
+    // the tier-1 remaining-budget arithmetic respectively.
+    const modelTimeout = this._resolveModelTimeout(options);
+    const { effectiveSignal, runSignal, deadlineAt } = this._resolveEffectiveSignal(options);
+
     // Cheap cooperative-abort guard (#341 amendment): checked before any LLM
     // call — abortSignal must never be silently ignored on any RunOptions
     // path. runStructured() has no iteration loop of its own outside the
@@ -1514,11 +1753,12 @@ export class AgentRunner implements RunnerProtocol {
     // itself come back cancelled); this is the "top of iteration" check for
     // everything before that delegate. Unlike run()/stream(), there is no
     // schema-valid `object` to fabricate on abort, so this throws rather
-    // than returning (see RunCancelledError's doc comment).
-    if (options?.abortSignal?.aborted) {
-      throw new RunCancelledError(
-        "runStructured: aborted before the run started (abortSignal already fired)",
-      );
+    // than returning (see RunCancelledError's doc comment). #521: checks the
+    // effective signal so an already-elapsed `runMs` (e.g. `runMs: 0`) is
+    // caught here too.
+    if (effectiveSignal?.aborted) {
+      const reason = this._cancelReason(options, runSignal);
+      throw new RunCancelledError(this._cancelledRunMessage(reason, "before the run started"));
     }
 
     // #496: resolved once for THIS call, closed over below — never rebinds
@@ -1619,19 +1859,30 @@ export class AgentRunner implements RunnerProtocol {
           instructions,
           messages,
           output: Output.object({ schema }),
-          // #504: forwarded — an abort interrupts the in-flight call.
-          abortSignal: options?.abortSignal,
+          // #504/#521: forwarded — an abort (explicit or runMs-derived)
+          // interrupts the in-flight call.
+          abortSignal: effectiveSignal,
           headers: callHeaders,
           ...callParams,
+          // #521: native SDK `{stepMs}` timeout — true per-call bound here
+          // (no tools on this path). Absent when `modelMs` is unset.
+          ...(modelTimeout ? { timeout: modelTimeout } : {}),
         });
       } catch (e: unknown) {
-        // #504: a deliberate cancel surfaces as RunCancelledError (see the
-        // class doc — there is no schema-valid object to fabricate), never a
-        // raw AbortError, and emits no `agent.error`.
-        if (isAbortRejection(e, options?.abortSignal)) {
+        // #504/#521: a deliberate cancel (or runMs deadline) surfaces as
+        // RunCancelledError (see the class doc — there is no schema-valid
+        // object to fabricate), never a raw AbortError, and emits no
+        // `agent.error`. A bare `modelMs` expiry with the effective signal
+        // still unfired is NOT this branch (§2) — it falls through to the
+        // gateway-aware error path below, unchanged.
+        if (isAbortRejection(e, effectiveSignal)) {
           await emitCancelledTerminal();
+          const reason = this._cancelReason(options, runSignal);
           throw new RunCancelledError(
-            "runStructured: aborted during the provider call (no structured output available)",
+            this._cancelledRunMessage(
+              reason,
+              "during the provider call (no structured output available)",
+            ),
           );
         }
         const { error } = await this._gatewayAwareError(e, {
@@ -1658,10 +1909,11 @@ export class AgentRunner implements RunnerProtocol {
         traceId: effectiveTraceId,
         runId,
         parentSpanId: rootSpanId,
-        // #389 fix-round: forwarded so the bridge can fail-closed (deny)
-        // promptly on abort instead of hanging on a pending gate evaluation
-        // (see tool-approval-bridge.ts's "FAIL-CLOSED POSTURE" note).
-        abortSignal: options?.abortSignal,
+        // #389/#521 fix-round: forwarded so the bridge can fail-closed
+        // (deny) promptly on abort — including a `runMs` deadline — instead
+        // of hanging on a pending gate evaluation (see
+        // tool-approval-bridge.ts's "FAIL-CLOSED POSTURE" note).
+        abortSignal: effectiveSignal,
         pendingInputRegistry: options?.pendingInputRegistry,
       });
       const tools = this.convertExecutableTools(agent, toolExecutor, bridge.overlay, {
@@ -1671,6 +1923,12 @@ export class AgentRunner implements RunnerProtocol {
         parentSpanId: rootSpanId,
         host: options?.host,
         publishArtifacts: options?.publishArtifacts,
+        // #521 §5: threaded through so this path's in-closure dispatch
+        // (convertExecutableTools' `execute`, the ONE tool-dispatch site the
+        // SDK itself invokes) composes `ctx.signal` + `withToolTimeout`
+        // identically to the other two sites.
+        toolMs: options?.timeout?.toolMs,
+        effectiveSignal,
       });
       let result: Awaited<ReturnType<typeof generateText>>;
       try {
@@ -1691,21 +1949,34 @@ export class AgentRunner implements RunnerProtocol {
             Context
           >,
           output: Output.object({ schema }),
-          // #389 fix-round: the capable path previously omitted this (contrast
-          // stream()'s forward below) — the SDK's own abort checks (model-call
-          // timeouts, tool-execution abort merge) now see it too.
-          abortSignal: options?.abortSignal,
+          // #389/#521 fix-round: the capable path previously omitted this
+          // (contrast stream()'s forward below) — the SDK's own abort checks
+          // (model-call timeouts, tool-execution abort merge) now see it,
+          // composed with any `runMs` deadline too.
+          abortSignal: effectiveSignal,
           headers: callHeaders,
           ...callParams,
+          // #521 §2: native SDK `{stepMs}` timeout. CAVEAT (documented,
+          // Spec Review B1): on THIS path a "step" = one model call PLUS the
+          // SDK-run tool executions it triggered, so here `modelMs` bounds
+          // model-call-plus-tools per step, not the model call alone — see
+          // `RunTimeouts.modelMs`'s doc. `toolMs > modelMs` is silently
+          // capped by this same step timer on this one path.
+          ...(modelTimeout ? { timeout: modelTimeout } : {}),
         });
       } catch (e: unknown) {
-        // #504: parity with the no-tools path — this call already forwarded
-        // the signal (#389), but its abort used to escape as a raw AbortError
-        // plus a spurious `agent.error`. Normalized to RunCancelledError.
-        if (isAbortRejection(e, options?.abortSignal)) {
+        // #504/#521: parity with the no-tools path — this call already
+        // forwarded the signal (#389), but its abort used to escape as a raw
+        // AbortError plus a spurious `agent.error`. Normalized to
+        // RunCancelledError.
+        if (isAbortRejection(e, effectiveSignal)) {
           await emitCancelledTerminal();
+          const reason = this._cancelReason(options, runSignal);
           throw new RunCancelledError(
-            "runStructured: aborted during the provider call (no structured output available)",
+            this._cancelledRunMessage(
+              reason,
+              "during the provider call (no structured output available)",
+            ),
           );
         }
         const { error } = await this._gatewayAwareError(e, {
@@ -1752,10 +2023,22 @@ export class AgentRunner implements RunnerProtocol {
       // Output.object finish over that text.
       // Thread the runStructured root's trace + span so tier-1's events nest
       // under it instead of forming a fresh, disjoint trace.
+      // #521 §4: the delegate must NOT re-derive a fresh full `runMs` — that
+      // would let the wall clock reach (time already spent before tier-1) +
+      // `runMs`. When THIS call has a deadline in scope (`deadlineAt` set),
+      // override `timeout.runMs` with the REMAINING budget computed once
+      // here (`max(1, deadlineAt - Date.now())` — the one permissible
+      // `Date.now()` use in this area: budget arithmetic, never reason
+      // discrimination). `run()` then derives its OWN fresh
+      // `AbortSignal.timeout(remaining)` from that — expiring at the correct
+      // absolute time — and can return `finishReason: "timeout"` on it.
       const tier1 = await this.run(agent, message, {
         ...options,
         traceId: effectiveTraceId,
         parentSpanId: rootSpanId,
+        ...(deadlineAt !== undefined
+          ? { timeout: { ...options?.timeout, runMs: Math.max(1, deadlineAt - Date.now()) } }
+          : {}),
       });
       totalInputTokens += tier1.inputTokens;
       totalOutputTokens += tier1.outputTokens;
@@ -1763,17 +2046,33 @@ export class AgentRunner implements RunnerProtocol {
       toolCallsCount = tier1.toolCallsCount;
       iterations = tier1.iterations;
 
-      // #341 amendment: tier1 delegates to run(), which honors abortSignal
-      // itself (top-of-iteration guard) and comes back with finishReason
-      // "cancelled" rather than throwing. runStructured() has no schema-valid
-      // object to hand back in that case — surface it as a RunCancelledError
-      // instead of feeding an empty/partial tier1.response into tier 2.
-      if (tier1.finishReason === "cancelled") {
+      // #341 amendment: tier1 delegates to run(), which honors the effective
+      // signal itself (top-of-iteration guard) and comes back with
+      // `finishReason: "cancelled"` OR (#521) `"timeout"` rather than
+      // throwing. runStructured() has no schema-valid object to hand back in
+      // either case — surface it as a RunCancelledError instead of feeding
+      // an empty/partial tier1.response into tier 2. Widened from an
+      // exact-match `"cancelled"` check (Spec Review B2, re-run 1): a
+      // `"timeout"` tier1 result also has `response: ""`, and left
+      // unhandled it would fall through into the empty-tier-1 guard below
+      // and throw a bare, misleading `Error` pointing at `maxIterations`
+      // instead of `RunCancelledError` — skipping `emitCancelledTerminal()`,
+      // the exact finalization gap #504 closed.
+      if (tier1.finishReason === "cancelled" || tier1.finishReason === "timeout") {
         // #504 (Gate 2.5): same finalization requirement as the catch sites —
         // without a terminal event this runId's row stays 'running' forever.
+        // Emitted with the literal "cancelled" (unchanged — Spec Review
+        // note, harmless: `run-store.ts` is first-terminal-wins, so when a
+        // shared `runId` is passed tier1's own discriminated terminal
+        // — already emitted inside the `run()` delegate above, carrying
+        // "timeout" when that's what happened — wins over this one).
         await emitCancelledTerminal();
+        const reason = tier1.finishReason === "timeout" ? "timeout" : "cancelled";
         throw new RunCancelledError(
-          "runStructured: aborted during its tier-1 tool loop (no structured output available)",
+          this._cancelledRunMessage(
+            reason,
+            "during its tier-1 tool loop (no structured output available)",
+          ),
         );
       }
 
@@ -1822,17 +2121,28 @@ export class AgentRunner implements RunnerProtocol {
               },
             ],
             output: Output.object({ schema }),
-            // #504: forwarded — an abort interrupts the in-flight call.
-            abortSignal: options?.abortSignal,
+            // #504/#521: forwarded — an abort (explicit or runMs-derived)
+            // interrupts the in-flight call. `effectiveSignal` is THIS
+            // call's own (its `runMs` deadline was set once at entry, so it
+            // fires at the correct absolute time regardless of how long
+            // tier-1 already ran).
+            abortSignal: effectiveSignal,
             headers: callHeaders,
             ...callParams,
+            // #521: native SDK `{stepMs}` timeout — true per-call bound here
+            // (no tools on this tier-2 finish).
+            ...(modelTimeout ? { timeout: modelTimeout } : {}),
           });
         } catch (e: unknown) {
-          // #504: same normalization as the paths above.
-          if (isAbortRejection(e, options?.abortSignal)) {
+          // #504/#521: same normalization as the paths above.
+          if (isAbortRejection(e, effectiveSignal)) {
             await emitCancelledTerminal();
+            const reason = this._cancelReason(options, runSignal);
             throw new RunCancelledError(
-              "runStructured: aborted during the provider call (no structured output available)",
+              this._cancelledRunMessage(
+                reason,
+                "during the provider call (no structured output available)",
+              ),
             );
           }
           const { error } = await this._gatewayAwareError(e, {
@@ -1946,6 +2256,13 @@ export class AgentRunner implements RunnerProtocol {
     const callHeaders = this._resolveCallHeaders(agent, model, runId, effectiveTraceId, options);
     // #514: computed once per run (parity with callHeaders).
     const callParams = this._resolveCallParams(modelName, options);
+    // #521: computed once per run (parity with run()/runStructured()),
+    // reused across iterations below. `stream()`'s cancel mapping is
+    // UNCHANGED by `runMs` (§4: always `conversation.end
+    // {reason:"cancelled"}`, no new vocabulary) — `runSignal` is unused
+    // here, kept only for call-site symmetry with the other two methods.
+    const modelTimeout = this._resolveModelTimeout(options);
+    const { effectiveSignal } = this._resolveEffectiveSignal(options);
     // AgentLike.getTools() returns unknown[] at the protocol boundary; cast
     // per the run()/runStructured() precedent — #117 needs `.name` for
     // agentConfig.tools (parity with the other two paths).
@@ -2018,7 +2335,10 @@ export class AgentRunner implements RunnerProtocol {
       // were being appended to `messages` below, or while the previous
       // iteration's tool loop was draining). Runner owns cancel emission —
       // locked D1 — so bus/exporters/collector see it on every transport.
-      if (options?.abortSignal?.aborted) {
+      // #521: checks the effective signal (caller's `abortSignal` composed
+      // with a derived `runMs` deadline); the mapping stays "cancelled"
+      // either way (§4 — no new event vocabulary on this method).
+      if (effectiveSignal?.aborted) {
         yield* this.emitCancellation({
           bus,
           traceId: effectiveTraceId,
@@ -2064,14 +2384,20 @@ export class AgentRunner implements RunnerProtocol {
         instructions,
         messages,
         tools: hasTools ? tools : undefined,
-        // #341: forwarded cooperatively to the provider call. ai@7 either
-        // emits a `type: "abort"` stream part (handled below) or, for
+        // #341/#521: forwarded cooperatively to the provider call. ai@7
+        // either emits a `type: "abort"` stream part (handled below) or, for
         // providers that don't support that, rejects the in-flight call with
         // an `AbortError` (caught around the drain loop below) — both routes
-        // land in the same cancel-and-return block.
-        abortSignal: options?.abortSignal,
+        // land in the same cancel-and-return block. `effectiveSignal`
+        // composes a `runMs` deadline in too.
+        abortSignal: effectiveSignal,
         headers: callHeaders,
         ...callParams,
+        // #521: native SDK `{stepMs}` timeout. Expiry here surfaces as the
+        // SDK's `abort` stream part (§2, corrected per Spec Review B2) — NOT
+        // the `generateText` error path — and lands on the existing cancel
+        // route below unchanged.
+        ...(modelTimeout ? { timeout: modelTimeout } : {}),
       });
 
       let iterText = "";
@@ -2445,8 +2771,9 @@ export class AgentRunner implements RunnerProtocol {
         // per-call iteration, before even signaling intent for it — never
         // dispatch (or claim intent to dispatch) a tool for an
         // already-cancelled turn. Any calls already dispatched earlier in
-        // this batch have already run; this only stops the NEXT one.
-        if (options?.abortSignal?.aborted) {
+        // this batch have already run; this only stops the NEXT one. #521:
+        // effective signal, same mapping as the top-of-iteration guard.
+        if (effectiveSignal?.aborted) {
           yield* this.emitCancellation({
             bus,
             traceId: effectiveTraceId,
@@ -2518,7 +2845,10 @@ export class AgentRunner implements RunnerProtocol {
 
         try {
           if (toolExecutor) {
-            toolResult = await toolExecutor.execute(
+            // #521 §5: freshly minted PER DISPATCH — same as run()'s site.
+            const toolMs = options?.timeout?.toolMs;
+            const dispatchSignal = this._toolDispatchSignal(toolMs, effectiveSignal);
+            const execPromise = toolExecutor.execute(
               tc.toolName,
               tc.args,
               this.buildToolCtx({
@@ -2531,8 +2861,17 @@ export class AgentRunner implements RunnerProtocol {
                 onArtifact: options?.publishArtifacts
                   ? (a) => publishedArtifacts.push(a)
                   : undefined,
+                signal: dispatchSignal,
               }),
             );
+            // #521 §3: rejects on expiry — the existing catch below produces
+            // the structured `{error}` + `errorMsg` shape, which is
+            // load-bearing here: the terminal-tool exit below keys on
+            // `errorMsg === undefined`.
+            toolResult =
+              toolMs !== undefined
+                ? await withToolTimeout(execPromise, toolMs, tc.toolName)
+                : await execPromise;
           } else {
             toolResult = { error: "No tool executor configured" };
             errorMsg = "No tool executor configured";

@@ -15,6 +15,7 @@ export type {
   StructuredRunResult,
   RunOptions,
   ModelParams,
+  RunTimeouts,
   RunnerProtocol,
   ToolExecutor,
   CanonicalMessage,
