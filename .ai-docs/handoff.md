@@ -1,144 +1,43 @@
-# Handoff — 2026-08-10 (overnight session)
+# Handoff — 2026-08-15
 
-> ## 🔊 READ THIS FIRST — Doug is driving. Speak, don't type.
->
-> He was driving through this entire session and **cannot read the screen**. Anything you only write is invisible to him. If that is still true when you pick this up:
->
-> 1. **Speak immediately** — `~/Projects/dealbrain/scripts/tts "…"` (or the plugin copy, sdlc 0.2.25: `driving-mode`). Confirm you are up by *speaking*, not printing.
-> 2. **One message at a time.** The script serializes playback now; three messages once played simultaneously and he understood none of them. Never remove that mutex.
-> 3. **Announce, then wait.** For anything longer than a couple of sentences: speak a short "I have X ready, say when you're ready", then **stop**. He listens to music while driving and will miss an unannounced report.
-> 4. Summaries: ≤75 words, 2–3 sentences, lead with the takeaway, no code / paths / URLs / markdown, "Heads up:" for errors, phrase decisions as spoken questions.
-> 5. He dictates back and misspeaks when tired — **clarify semantically**, and say when you think he misspoke.
-> 6. He exits with "tts off" / "I'm parked".
->
-> Full detail in the `driving-mode` skill and in memory (`feedback_driving-mode`).
-
-**Branch:** `main` (clean). Everything in agentic-patterns is merged; **the provider fix is NOT published**.
-**Last action:** Merged #474 (bundled AI-SDK providers) — `main` green. Before that: released core 0.18.0 / lockstep 0.39.0, shipped three sdlc-plugin versions, and proved the ambient morning-brief loop end to end including a reply that the agent actually remembers.
-
-**Next action — in order:**
-1. **Cut a release** (`just bump-both`). #474 is on `main` but npm is still core 0.18.0 / runtime 0.39.0, so **no consumer can get the provider fix yet**. Everything downstream waits on this.
-2. ~~Decide gateway vs direct key~~ — **DONE.** Local gateway is wired and verified (see below). The only blocker is that **Gemini is out of AI Studio credits**; `gpt-4o-mini` and `claude-haiku-4-5` both work today, one uncommented line away in `.env.local`.
-3. **Merge the two swe-brain branches** (below) — both green, both unmerged.
-4. **Point the morning brief at real data.** It currently reports, correctly, that the workspace is empty. That proves the machinery, not the value.
-
+**Branch:** `hr/runner-5-timeouts` (worktree `.claude/worktrees/bridge-cse_01X2fKnXgxYKjFCoRXRkT6nk`)
+**Last action:** Implemented #521 `RunOptions.timeout` (`feba398`, pushed) — runtime + core, 13 new tests, `bun run check` green. Spec was Gate-1.5-cleared over three critique rounds (`bc06774`).
+**Next action:** Gate 2.5 paired diff review on #521 — spawn `sdlc:reviewer` (lens=adherence, against `.ai-docs/specs/521-timeouts.md`), then `sdlc:reviewer` (lens=quality, against quality-canvas), SEQUENTIAL, diff base `hr/runner-4-model-params...HEAD`. Then `sdlc:validator` (posts to the PR), then `gh stack sync && gh stack submit --auto`, `gh pr edit` for title/body. Then start #522 (storage-6, last of the track) from spec-authoring.
 **Obstacles:**
-- **`bump.sh` re-resolves `bun.lock` and will trip `sdk-contract.test.ts`** whenever `@anthropic-ai/claude-agent-sdk` has moved (hit this session: 0.3.225 → 0.3.226). The test is working as designed. Fix: review the lock diff, then re-pin `packages/agent-runtime/src/runner/__fixtures__/claude-agent-sdk-contract.json` — **only** if the platform-package *set* and `peerDependencies` are unchanged. If either moved, that is real upstream repackaging. Already filed as **#379**.
-- **`gh` CLI cannot resolve `api.github.com` on this machine.** `dig` resolves it; `curl`/`gh` return "could not resolve host" (`github.com` itself is fine — it is a stale negative cache for that one hostname). Fix is a DNS flush (needs sudo). Workaround used all session: `curl --resolve api.github.com:443:$(dig +short api.github.com | head -1)` with `$(gh auth token)`.
-- **`agent_runs.final_answer` is empty** — and the cause is now known: **nothing in swe-brain ever writes it**. `RunFinalizePatch` omits it and no writer exists. That reframes sdlc-patterns#363 as an app-side gap, not a claude-CLI quirk.
+- PRs #544 (#504) and #545 (#514) are gate-complete + CI-green but wait on Doug's Gate-2 merge (bottom-up: #544 first). Not blocking #521/#522 work — the stack absorbs it.
+- None technical; env gotchas below are all pre-verified.
 
----
+## Notes — the operating brief for the next agent
 
-## Shipped
+**Operator instruction of record (Doug, in chat):** run the *proper* SDLC loop per issue; orchestrate the whole serialized runner track; stack PRs with the `gh stack` CLI; he checks in periodically after natural bodies of work; keep THIS doc updated continuously. Gate 1 is recorded as `gate:auto` + `state:strategy-approved` per that instruction — cite it in the tracker comment each time (see #514/#521 comments for the template).
 
-| What | Where | State |
-|---|---|---|
-| core 0.18.0 / runtime+server+cli 0.39.0 | #468 | **published**, dist-tags verified |
-| Walkthrough §A4 corrected (two false claims) | #467 | merged |
-| Bundled AI-SDK providers + loud failure | #474 | **merged, unpublished** |
-| sdlc plugin **0.2.23** — `mcpServers` hoisted out of `components` | claudecode-patterns#114 | released |
-| sdlc plugin **0.2.24** — `guided-tour` | claudecode-patterns#115 | released |
-| sdlc plugin **0.2.25** — `driving-mode` | claudecode-patterns | released |
-
-## Filed
-
-- **#470** — `TRIGGER_KINDS` has no member for an internal domain event. **Decision recorded: add `event`, with a subkind.** Open design question inside: does the subkind reuse `label` (zero schema change, renders correctly today) or get an explicit field? Reuse `label` unless hosts need to *route* on it.
-- **#472** — provider packaging. **Closed by #474**, decision recorded (anthropic/openai/google).
-- **#473** — `RunResult` must carry the model actually used. Doug's requirement: *"every single run should be able to store the model that it ran with"*, and a fallback must be **resolved and written**, never dropped.
-- Design principle + adoption correction on **#438**; measured evidence on **#456**.
-
----
-
-## The four bugs — three of them silent
-
-1. **The framework never shipped its provider packages.** `@ai-sdk/anthropic` was a **devDependency** — so workspace tests passed while every published consumer got nothing. *The tests were lying by construction.* Consequence: any consumer fell through to `ClaudeCodeAPIRunner`, **the one runner that never reads `options.messageHistory`**, so every multi-turn conversation silently lost all context. Fixed in #474: all three are real deps, a present credential now **stops the ladder** with a fix-naming error rather than degrading, and a packaging-contract test fails if a provider is ever demoted again. Also found: **a provider env var set to empty string is falsy**, so detection skips it exactly as if unset.
-2. **`components` wrapper in the plugin manifest** — not a valid field, so the three browser MCP servers had never registered in any project. Invisible because `skills/`, `agents/`, `commands/` have *default directory scans*; `mcpServers` has no default location, so it alone was fatal. `claude plugin validate` catches it outright and is now wired into that repo's CI.
-3. **Ambient runs created no conversation** — one literal `null` for `conversationId` in `runTriggered`. 292 runs invisible. Fixed on branch.
-4. **Per-run `seq` collisions** — `agent_run_events.seq` restarts at 1 per run, so a multi-run thread had many rows keyed `1`; React dropped/duplicated them. 198 console errors → 0. Latent before; replying to an ambient thread makes it routine.
-
----
-
-## The ambient demo — works, unmerged
-
-**Branch `feat/ambient-morning-brief`, draft PR sdlc-patterns#365, three commits.** Verified live, not just typechecked: shadow DB, real dispatcher, real CAS claim.
-
-- A scheduled run creates `Morning brief — <date>` with both turns (user seq 0, assistant seq 1) and a non-null `conversation_id`.
-- The console composer is **enabled** on it; a reply threads into the same conversation (seq 2, 3) and starts a second run carrying the same `conversation_id`.
-- **The agent remembers.** Passphrase `ZEBRA-7741-MARLIN` recalled two turns later; brief recalled as `emails=0, meetings=0`; input tokens grew monotonically 563 → 854. (Two *negative* probes — asking the model about its own transcript — were answered wrongly by `gpt-5.4-nano`; its self-report is not trustworthy either way, so the conclusion rests on the passphrase and the token arithmetic.)
-- **Reversibility proven live:** stripped the flag, re-fired, `conversation_id` back to NULL, byte-identical. No migration, no framework change; the on/off switch is a directive step param — a **database row**.
-
-⚠️ **Never enable the thread flag on `demo-minutely`.** The console seeds from the first page only — 50 messages, `created_at desc`, across ALL conversations. At one run/minute that window blows in ~25 minutes and the brief vanishes from the UI while still in Postgres. 9am cadence is safe.
-
-**Second swe-brain branch:** `deps/ap-core-0.18-runtime-0.39` — the core 0.18/runtime 0.39 adoption. 617 → 620 tests pass, green, pushed, **no PR** (the agent's `gh auth` reported an invalid token).
-
----
-
-## How model selection actually works (this cost a cycle — read it)
-
-- `runTriggered` calls `createRunner()` with **no arguments**, so the model comes from **`process.env.AGENT_MODEL`**. An agent's `model_override` **never reaches runner selection**; `AgentRunner` pins the model *"regardless of what the agent declares."* The DB pin only labels the persisted rows and the console chip.
-- Therefore, whenever `AGENT_MODEL` disagrees with the agent's pin, **the row names a model that was never called.** That is the audit-honesty defect behind #473.
-- **With a gateway configured this inverts.** `AP_GATEWAY_BASE_URL` triggers rung 2.5 — the resolver — which resolves *each agent's declared model per run*. So declared == used, and #473 largely dissolves on that path. But `AGENT_MODEL` stops being the lever entirely (open issue **#243**, override-vs-gateway precedence), and **an agent with no declared model fails loud** under a gateway.
-
-## ✅ The gateway decision — RESOLVED and wired (end of session)
-
-Doug pulled the credentials, authorised reading his local Bifrost, and then said: **switch to the local gateway, and use `gemini-3.5-flash-lite` instead of Claude.** Done. State:
-
-- **`.env.local` now points at the local box** — `AP_GATEWAY_BASE_URL=http://10.88.111.51:8080/v1`, basic auth `admin`, `AP_GATEWAY_VIRTUAL_KEY` = the **`pii-wrapper`** VK, `AP_GATEWAY_MODEL_PREFIX=auto` (the gateway returns `provider/model` ids). `AGENT_TIER=haiku` was **commented out** — it is superseded once a model is pinned, and having both is a quiet trap. The previous config is backed up as `.env.local.bak-<epoch>`.
-- **The VK came from the governance API, not the UI**: `GET /api/governance/virtual-keys` with basic auth returns them, each with a `value` (`sk-bf-…`). Three exist: `pii-wrapper` (anthropic + gemini + openai, **7 pinned models**), `claude-code-dev` (no provider configs), `deal brain-local-dev` (all three, `*`).
-- **The local gateway DOES carry Claude**, unlike the AWS-hosted one. Through `pii-wrapper` the catalog is exactly: `anthropic/claude-haiku-4-5-20251001`, `gemini/gemini-3.5-flash`, `gemini/gemini-3.5-flash-lite`, `gemini/gemini-flash-latest`, `openai/gpt-4.1-mini`, `openai/gpt-4o-mini`, `openai/o4-mini`.
-
-⚠️ **Gemini is blocked upstream — this is the one thing standing between you and a working run.**
-
+**The stack (gh stack #546):**
 ```
-gemini/gemini-3.5-flash-lite  → 429 RESOURCE_EXHAUSTED
-    "Your prepayment credits are depleted. Please go to AI Studio … to manage billing."
-gemini/gemini-3.5-flash       → 429 same
-openai/gpt-4o-mini            → 200 "OK"
-anthropic/claude-haiku-4-5…   → 200 "OK"
+main (17b7523 = #496 merged via PR #543)
+ └─ hr/runner-2-abort-forwarding  #504 → PR #544  ✅ gates+CI — merge first
+     └─ hr/runner-4-model-params  #514 → PR #545  ✅ gates+CI
+         └─ hr/runner-5-timeouts  #521 → feba398  ⏳ Gate 2.5 next; no PR yet
+             └─ #522 storage-6 (model price table + costUsd) — not started; branch name in issue header
 ```
 
-The 429 comes **from Google, not Bifrost** — an AI Studio billing state, not a config error. The other two prove the gateway, the basic auth, the VK and the PII path all work end to end.
+**Loop recipe (proven 3×; repeat for #521-remainder and #522):**
+1. Spec at `.ai-docs/specs/<n>-<slug>.md`, committed on the issue's stacked branch. Author in-session (context is hot); verify every line anchor + SDK claim by grep/probe first — the critics WILL catch asserted-not-executed claims.
+2. Gate 1.5: `sdlc:reviewer` lens=mixed, `skip_tracker_post: true`, appends `## Spec Review` to the spec. REVISE → fix spec in place + `## Design Addendum` → re-run (rerun: true, fold prior verdict into a superseded details block). Iterate to PASS.
+3. Gate 1: labels + tracker comment (template in #521's issue comments).
+4. Implement: `sdlc:implementer` subagent, existing branch, no PR, push when green. Brief it with the env block below verbatim.
+5. Gate 2.5: two `sdlc:reviewer`s SEQUENTIAL (adherence vs spec, then quality vs quality-canvas — never give quality the spec). Diff base = the STACK PARENT, not main. Fix actionable notes, commit, re-run only if a blocker.
+6. Gate 3: `sdlc:validator` → posts report to the PR; it commits a spec phase-log locally — push it after.
+7. `gh stack sync && gh stack submit --auto`, then `gh pr edit <n>` for real title/body. CI: `gh pr checks <n> --watch` (background; exits early with "no checks reported" if the workflow hasn't attached — re-run).
 
-`AGENT_MODEL` was left at `gemini-3.5-flash-lite` because that was Doug's explicit instruction, with both verified-working alternatives written directly beneath it as commented lines. **Either top up AI Studio credits, or uncomment one line.** Nothing else needs changing.
+**Environment (all pre-verified; brief every subagent with this verbatim):**
+- `export PATH=/opt/node22/bin:$PATH` before ANY check — default Node 20 breaks the docs-site build AND better-sqlite3 (native module rebuilt for Node 22 ABI this session; it now FAILS under Node 20).
+- Exactly two tests in `packages/agent-runtime/src/__tests__/claude-code-runner.test.ts` always fail locally (no live LLM, root + `--dangerously-skip-permissions`); they pass in CI. Any OTHER failure is real.
+- `bun run check`'s exit code is always 1 here (the `&&` chain short-circuits at test); the three sub-gates after `test` must be run individually to be verified.
+- Local `main` is STALE (checked out in the primary worktree, can't update) — always base diffs on `origin/main` or the stack parent.
+- Baseline runner-suite counts after #521: `agent-runner.test.ts` 97 · stream 27 · event-bus 3 · abort-forwarding 8 · model-params 9 · timeouts 13. Reviewers/validators check these exactly.
 
-**Consequence worth carrying forward:** swe-brain now has a viable Claude path (`claude-haiku-4-5-20251001` via the local gateway) that the AWS gateway could never provide — so "gateway vs direct key" is answered in favour of the gateway, provided the agent names a model in that 7-model set. Note `workspace-analyst` still declares `claude-sonnet-5`, which is **not** in it.
+**Program state:** this is epic #482 (framework hardening), plan-keys `framework-hardening/runner-N` + `storage-6`. After #522, the serialized agent-runner.ts track is done; remaining epic issues (see `gh issue list`) are parallelizable and NOT covered by the standing instruction — check with Doug before starting them.
 
-## Historical: how that decision looked before it was resolved
+**Review-surfaced follow-ups (documented in spec phase sections, none blocking, candidates for new issues):** `stream()`'s name-only AbortError catch diverges from `isAbortRejection` both directions; Langfuse `_iterationSpans` retention on cancelled runs; wall-clock timing margins in abort/timeout tests (25–150ms — CI flake risk); the 3× knob declaration in agent-runner (ModelParams/CallParams/spread) isn't compiler-forced; `reasoningEffort` can't express `provider-default`; capable-path `toolMs ≤ modelMs` is guidance, not sufficiency (step budget shared with the model call).
 
-Doug's preference is the gateway, *"provided that gateway also runs through agentic patterns"* and that model choice stays defined the same way. Status:
-
-- **Clean:** one env var routes every agent through it, no code change.
-- **Presidio has a designed seam already:** `AP_GATEWAY_GUARDRAIL_IDS` → Bifrost `x-bf-guardrail-ids`, and **#407** covers typed guardrail violations + redaction events.
-- ❌ **The blocker:** the gateway configured in `.env.local` (`https://bifrost-development.findtempo.co/v1`) carries **188 models — 130 openai, 58 gemini, ZERO anthropic**. swe-brain's `workspace-analyst` declares `claude-sonnet-5`, and under a gateway the *declared* model is used. **So pointing swe-brain at that gateway fails on the first run.**
-- **There are two gateways, and they are genuinely different machines.** The credentials in `.env.local` point at `https://bifrost-development.findtempo.co/v1`, which resolves to `bifrost-alb-…us-east-1.elb.amazonaws.com` — an **AWS-hosted** deployment. Doug's own box is `http://10.88.111.51:8080` (Tailscale, ~44ms), and **Bifrost + Presidio both live there**. So the gateway the repo is configured against is *not* the one with Presidio on it. Untangle that before wiring swe-brain to either.
-- **The local box is a *governed* Bifrost instance and needs a virtual key.** Basic auth (`admin` / password in 1Password → OAuthPass) succeeds, and the request then fails at the Bifrost layer:
-  ```
-  GET http://10.88.111.51:8080/v1/models
-  401 {"type":"virtual_key_required",
-       "error":{"message":"virtual key is required. Provide a virtual key via the x-bf-vk header."}}
-  ```
-  **Nothing needs building** — `createRunner` already supports this via `AP_GATEWAY_VIRTUAL_KEY` → `x-bf-vk`, and its own doc comment says *"governed instances 401 without it."* It just needs a VK minted in the Bifrost UI. **So the local catalog is still unread, and whether it carries Claude is still unknown — but for a precise, fixable reason.**
-  - Base URL for that box is **`/v1`** (`/api/v1` returns the UI's HTML — the SPA catches unknown routes, so a wrong base URL fails confusingly rather than 404ing).
-  - ⚠️ An earlier draft of this handoff said the API was at `/api/v1`. That was probed against `10.88.111.**52**`, the wrong host. Corrected.
-- **Cheapest unblock:** point the agent at a Gemini or OpenAI id the gateway actually has.
-
-## Two open decisions
-
-1. **Gateway vs direct key for swe-brain** — see above.
-2. **Model requirement.** Doug: *"every single run should be able to store the model that it ran with"* — a fallback is fine, but it must be resolved and written. `agent_runs.model` is nullable while `agent_conversations.model` is `NOT NULL`, so an agent with no model pinned anywhere now **fails outright** once thread-mode is on. Framework half is #473; the app half needs a call.
-
----
-
-## Notes
-
-**`driving-mode` (plugin 0.2.25).** Doug drives for hours and cannot read the screen. Two rules learned live: **one voice message at a time** (three overlapped and he understood none — the script now holds a playback mutex; do not "simplify" it away), and **announce then wait** before any long report. Key resolution is `OPENAI_API_KEY` → `TTS_KEY_FILE` → `~/.config/claude-tts/key`; a symlink from there to `~/.config/dealbrain-tts/key` was added so the shipped skill finds his existing key instead of silently falling back to the macOS voice.
-
-**`guided-tour` (plugin 0.2.24).** One tour file, two modes: `narrate` drives the real browser over raw CDP (Playwright's `connectOverCDP` **hangs on Arc**; raw CDP is fine), `--verify` asserts and writes `report.json`. Tours live in the consuming project at `.claude/tours/`. Uncommitted tours exist for swe-brain (`ambient-loop.mjs`, with a deliberate red check on the run surface) and agentic-patterns (`playground-inventory.mjs`).
-
-**The dashboard already has the surfaces.** A 12-route inventory tour passed: Dashboard, Agents (6 agents, readiness badges), Roles, Capabilities, Tools, Run (constellation + full trace: setup → iterations → finish, per-step timings, tool calls, tokens), Graph, Live, Conversations, Eval, Tokens, Claude Code. **They are empty, not missing** — nothing had run into them. Two agent roots disagree: `agents/` (calculator, companion, todo, writing-coach — what `ap run` reads) vs `examples/agents/` (what `ap playground examples` reads). The memory-wired `companion` lives in the former.
-
-**Still running / left behind:** swe-brain api :3100, worker, vite :8338; playground backend :3456 + dashboard :5173. `demo-minutely` is **disabled**. Untracked, pre-existing: `docs-site/`, `.ai-docs/patternstack/next-session-prompt.md`, `.ai-docs/research/memory-recall-retrieval-quality.md`.
-
-## Where the program stands
-
-M1 Phase 1 and M2 are done and published. What exists is a **working vertical slice** of ambient — and as of tonight it also *speaks and remembers*: a schedule wakes an agent, it writes a brief into a thread, and a reply hours later reaches the same agent with the brief in context. What it still cannot do is **reach you where you are** (no channel — M4 #439, deliberately deferred) and **run unattended without asking** (the autonomy story: #328 permission bridge, #329 approval components, #443 blast radius, #456 chunk 4 — all specified, all unbuilt). M3 AgencyHost (#438) is unblocked and one of its six checkboxes shipped this session. Memory Phase B (#434) remains the next *framework* arc and now ships as 0.19 / 0.40, not 0.18 / 0.39.
+**If resuming cold:** `/prime` loads this file. Then `gh stack view` from any `hr/runner-*` branch, and read the relevant `.ai-docs/specs/*.md` — each carries its full Spec Review / Diff Review / Live Validate history.
