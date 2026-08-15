@@ -169,17 +169,25 @@ export interface RunOptions {
   /** Optional parent span ID linking to orchestrator. */
   parentSpanId?: string;
   /**
-   * Abort the run cooperatively (#341). `AgentRunner.stream()` forwards it to
-   * the provider call (`streamText({ abortSignal })`) and checks it at the top
-   * of each iteration and before each tool dispatch; on abort the runner
-   * emits `agent.message.cancel` + `agent.conversation.end
-   * {reason:"cancelled"}` and returns — it does NOT throw (locked D1).
-   * `AgentRunner.run()` and `runStructured()` also check it at the top of each
-   * iteration (cheap cooperative guard — never silently ignored on any
-   * `RunOptions` path) but do not forward it into the underlying
-   * `generateText` call: `run()` returns a `RunResult` with
-   * `finishReason: "cancelled"`; `runStructured()` cannot fabricate a
-   * schema-valid `object` on abort, so it throws a `RunCancelledError` instead.
+   * Abort the run cooperatively (#341, #504). Every `AgentRunner` provider
+   * call forwards it (`generateText`/`streamText({ abortSignal })`), so a
+   * cancel interrupts an in-flight model call instead of burning tokens
+   * until it returns. The cheap cooperative guards are per-method: `run()`
+   * and `stream()` check it at the top of each iteration; `stream()`
+   * additionally checks before each tool dispatch. It is never silently
+   * ignored on any `RunOptions` path. On abort: `stream()` emits
+   * `agent.message.cancel` + `agent.conversation.end {reason:"cancelled"}`
+   * and returns — it does NOT throw (locked D1); `run()` closes the
+   * interrupted call with `agent.llm.end {finishReason:"cancelled"}` — no
+   * `agent.error` — and returns a `RunResult` with `finishReason:
+   * "cancelled"`; `runStructured()` cannot fabricate a schema-valid `object`
+   * on abort, so it throws a `RunCancelledError` (never a raw `AbortError`)
+   * whether the signal fires before, during, or between its provider calls —
+   * and when the abort lands during or between calls (i.e. after
+   * `message.start` opened the run), it first emits a terminal
+   * `agent.message.complete {finishReason:"cancelled"}` so run-store
+   * exporters still finalize the row. A pre-start abort throws before any
+   * event; there is no run to finalize.
    *
    * `CodingAgentRunner`-based runners (`ClaudeCodeRunner` /
    * `ClaudeCodeAPIRunner`, #368) honor it too, with a shape suited to owning a
