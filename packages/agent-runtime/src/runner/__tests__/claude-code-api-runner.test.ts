@@ -205,6 +205,13 @@ describe("runStructured plumbing (#547)", () => {
     expect(opts.allowedTools ?? []).not.toContain("StructuredOutput");
   });
 
+  it("ClaudeCodeRunner (nativeTools: 'all', no tools key) with outputSchema sets outputFormat and still emits no tools key", () => {
+    const opts = ccProbe().publicBuildOptions(makeAgent(), OUTPUT_SCHEMA);
+    expect(opts.outputFormat).toEqual({ type: "json_schema", schema: OUTPUT_SCHEMA });
+    expect("tools" in opts).toBe(false);
+    expect(opts.allowedTools ?? []).not.toContain("StructuredOutput");
+  });
+
   it("extraDisallowedTools: ['StructuredOutput'] is left in disallowedTools (not stripped)", () => {
     const opts = apiProbe({ extraDisallowedTools: ["StructuredOutput"] }).publicBuildOptions(
       makeAgent(),

@@ -10,7 +10,10 @@
  *    Agent SDK `query()` as a HarnessSession and translates SDK messages to
  *    normalized events (relocated {@link CCHarnessTranslator});
  *  - `_buildOptions()` — the SDK Options (system prompt, model map, isolated
- *    config env, native-tool axis) plus the PreToolUse/PostToolUse gate hooks;
+ *    config env, native-tool axis, and — on `runStructured()` — the SDK's native
+ *    `outputFormat: { type: "json_schema" }`, #547) plus the PreToolUse/PostToolUse
+ *    gate hooks (which let the CLI's `StructuredOutput` carrier tool through
+ *    ungated on structured runs — see {@link CC_STRUCTURED_OUTPUT_TOOL});
  *  - per-run correlation id injected via the session's `options.env` (NO
  *    `process.env` mutation — the old `setCorrelationEnv` race is gone).
  *
@@ -160,6 +163,14 @@ export interface ClaudeCodeRunnerOptions {
  * stream into the AgentEvent stream so gates, exporters, and UX work
  * transparently. Gate enforcement is handled via PreToolUse hooks — a blocked
  * ToolCallIntent returns `permissionDecision: 'deny'` so the tool never runs.
+ *
+ * `runStructured()` (#547) is inherited from the base and driven by the SDK's
+ * native `outputFormat: { type: "json_schema" }`: the base converts the Zod
+ * schema to JSON Schema and hands it down as `HarnessRunRequest.structured`;
+ * `_buildOptions` sets `outputFormat`; the CLI ends the turn on its
+ * `StructuredOutput` carrier (bypassed by the hooks, never gated) and the result's
+ * `structured_output` flows back through the terminal event. See
+ * `docs/runners.md` §3.5.
  */
 export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
   protected readonly _defaults: Partial<SDKOptions>;

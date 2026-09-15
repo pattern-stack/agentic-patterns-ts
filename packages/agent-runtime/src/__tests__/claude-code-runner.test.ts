@@ -114,6 +114,30 @@ function buildMathAgent() {
   return new AgentBuilder(role).withMission(mission).build();
 }
 
+/**
+ * A TOOL-LESS agent for the structured-output smoke (#547, spec §12): no
+ * Capability, so `_buildOptions` wires no MCP servers and `allowedTools` stays
+ * empty — the only tool the CLI can end the turn on is its own force-appended
+ * `StructuredOutput` carrier.
+ */
+function buildToolLessAgent() {
+  const persona = new Persona({
+    identity: "A concise arithmetic assistant",
+    tone: "precise",
+    priorities: ["accuracy"],
+    principles: ["answer directly"],
+  });
+  const role = new RoleBuilder("arithmetic-assistant")
+    .withPersona(persona)
+    .withDefaultModel("sonnet")
+    .build();
+  const mission = new Mission({
+    objective: "Answer arithmetic questions",
+    successCriteria: ["Correct answers"],
+  });
+  return new AgentBuilder(role).withMission(mission).build();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -201,14 +225,17 @@ describe.skipIf(shouldSkip)("ClaudeCodeRunner integration", () => {
   it(
     "runStructured on ClaudeCodeAPIRunner (tools: []) — proves the CLI's force-include of the StructuredOutput carrier end to end (#547)",
     async () => {
-      const agent = buildMathAgent();
+      const agent = buildToolLessAgent();
+      expect(agent.getTools()).toHaveLength(0);
       const eventBus = new AgentEventBus();
       const events: AgentEvent[] = [];
       eventBus.subscribeAll((e) => events.push(e as AgentEvent));
 
-      // API runner preset: tools: [] — no agent-defined tools either, so if
-      // the SDK's tool list resolution hid the carrier there would be
-      // nothing on the wire to produce structured_output at all.
+      // API runner preset: tools: [] — and a tool-less agent, so no MCP
+      // servers are wired either. If the SDK's tool-list resolution hid the
+      // carrier there would be nothing on the wire to produce
+      // structured_output at all; a structured result here proves the CLI
+      // force-appends the carrier after `tools` resolution.
       // `disableSandbox` keeps host config mode (like its sibling tests
       // above) — this test isn't exercising OAuth isolation, and it would
       // otherwise fail on a missing token instead of exercising the carrier.

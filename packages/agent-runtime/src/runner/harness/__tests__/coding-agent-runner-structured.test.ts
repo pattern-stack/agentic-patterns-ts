@@ -105,6 +105,7 @@ class FakeAdapter implements HarnessAdapter<AgentLike> {
   readonly name = "fake-harness";
   readonly decisionVocabulary: DecisionVocabulary = {};
   startCalls = 0;
+  probeCalls = 0;
   lastRequest: HarnessRunRequest<AgentLike> | undefined;
 
   constructor(
@@ -113,6 +114,7 @@ class FakeAdapter implements HarnessAdapter<AgentLike> {
   ) {}
 
   async probe(): Promise<HarnessProbeResult> {
+    this.probeCalls++;
     return this.probeResult;
   }
 
@@ -254,7 +256,9 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
       /failed schema validation/,
     );
 
-    expect(events.filter((e) => e.type === "agent.error")).toHaveLength(1);
+    const errors = events.filter((e) => e.type === "agent.error");
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as { recoverable?: boolean }).recoverable).toBe(false);
     expect(events.some((e) => e.type === "agent.message.complete")).toBe(false);
   });
 
@@ -284,8 +288,12 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
     expect((caught as StructuredOutputUnavailableError).finishReason).toBe("stop");
 
     expect(events.filter((e) => e.type === "agent.error")).toHaveLength(1);
-    const errorEvent = events.find((e) => e.type === "agent.error") as { errorType?: string };
+    const errorEvent = events.find((e) => e.type === "agent.error") as {
+      errorType?: string;
+      recoverable?: boolean;
+    };
     expect(errorEvent.errorType).toBe("StructuredOutputUnavailableError");
+    expect(errorEvent.recoverable).toBe(false);
   });
 
   it("6. finishReason max-structured-output-retries carries the retry hint; error_during_execution has no hint", async () => {
@@ -388,10 +396,16 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
     const complete = events.find((e) => e.type === "agent.message.complete") as {
       finishReason?: string;
       content?: string;
+      inputTokens?: number;
+      outputTokens?: number;
     };
     expect(complete).toBeDefined();
     expect(complete.finishReason).toBe("cancelled");
     expect(complete.content).toBe("partial");
+    // Run-level tokens come only from the `terminal` event, which a hung
+    // harness never delivered — so the honest accrued value is 0, not absent.
+    expect(complete.inputTokens).toBe(0);
+    expect(complete.outputTokens).toBe(0);
   });
 
   it("9. adapter whose probe lacks features.structuredOutput rejects with HarnessStartError schema-incompatible, before any event, adapter.start never called", async () => {
@@ -434,6 +448,7 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
     const runner = new FakeRunner(adapter, new AgentEventBus());
 
     await expect(drainStructured(runner, openSchema)).rejects.toThrow(OpenObjectSchemaError);
+    expect(adapter.probeCalls).toBe(0);
     expect(adapter.startCalls).toBe(0);
 
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
