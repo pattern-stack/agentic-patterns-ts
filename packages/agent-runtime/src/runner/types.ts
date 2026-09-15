@@ -232,10 +232,13 @@ export interface RunOptions {
    * emits conversation events on any path; `Conversation.stream()` derives
    * `reason: "cancelled"` independently from `options.signal.aborted`).
    *
-   * `runStructured()` on this family (#547) mirrors `AgentRunner`: a
-   * pre-start abort throws `RunCancelledError` with no events; a mid-run
-   * abort tears the session down, emits `agent.message.complete
-   * {finishReason:"cancelled"}` with whatever accrued, then throws
+   * `runStructured()` on this family (#547) mirrors `AgentRunner`: a signal
+   * already fired at entry throws `RunCancelledError` with no events; a
+   * signal that fires after `agent.message.start` but before the subprocess
+   * launches (during the probe) finalizes the open run with
+   * `agent.message.complete {finishReason:"cancelled"}` and then throws; a
+   * mid-run abort tears the session down, emits the same cancelled
+   * `message.complete` with whatever accrued, then throws
    * `RunCancelledError`.
    */
   abortSignal?: AbortSignal;

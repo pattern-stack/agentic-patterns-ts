@@ -1,5 +1,5 @@
 /**
- * Shared runStructured() error classes (#547).
+ * Shared runStructured() error classes and the finish-reason constant they key on (#547).
  *
  * `RunCancelledError` moved here verbatim from `agent-runner.ts` so the
  * harness-agnostic `CodingAgentRunner` base can throw the same class

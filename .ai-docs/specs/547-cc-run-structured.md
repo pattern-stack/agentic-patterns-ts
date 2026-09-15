@@ -63,7 +63,7 @@ sequenceDiagram
 
 ### 1. `runner/errors.ts` (create) — shared error classes
 
-- Move `RunCancelledError` verbatim from `agent-runner.ts:119-137`. In `agent-runner.ts`: `import { RunCancelledError } from "./errors.js";` **and** `export { RunCancelledError } from "./errors.js";` (the name is thrown at five sites — the import binds it locally, the export keeps the public path). Add `export { RunCancelledError, StructuredOutputUnavailableError } from "./errors.js";` to `runner/index.ts` (additive — neither is exported today).
+- Move `RunCancelledError` verbatim from `agent-runner.ts:119-137`. In `agent-runner.ts`: `import { RunCancelledError } from "./errors.js";` **and** `export { RunCancelledError } from "./errors.js";` (the name is thrown at five sites — the import binds it locally, the export keeps the public path). Add `export { RunCancelledError, StructuredOutputUnavailableError, FINISH_REASON_STRUCTURED_OUTPUT_RETRIES } from "./errors.js";` to `runner/index.ts` (additive — none is exported today). `FINISH_REASON_STRUCTURED_OUTPUT_RETRIES = "max-structured-output-retries"` lives in `errors.ts` and is the single spelling the CC translator and the hint table key on (rev 4).
 - New `StructuredOutputUnavailableError extends Error` — thrown by the harness path when the run finished with no `structured_output` payload. Exact shape (implement verbatim):
 
 ```ts
@@ -114,7 +114,7 @@ readonly structuredOutput?: boolean;
 
 ### 6. `claude-code-runner.ts` `_buildOptions` (modify, `:225-289`)
 
-Export `export const CC_STRUCTURED_OUTPUT_TOOL = "StructuredOutput";` with a doc comment stating it is the CLI 2.1.x built-in carrier name pinned by binary evidence (§ Current state), exercised by the live smoke, and the one place to change if the CLI renames it.
+Export `export const CC_STRUCTURED_OUTPUT_TOOL = "StructuredOutput";` (re-exported from `runner/index.ts`, rev 4) with a doc comment stating it is the CLI 2.1.x built-in carrier name pinned by binary evidence (§ Current state), exercised by the live smoke, and the one place to change if the CLI renames it.
 
 1. Amend the existing hooks line at `:243` to `hooks: this._makeHooks(context.runId, context.traceId, context.parentSpanId, { structured: context.outputSchema !== undefined }),` — the ONLY call site; see §7a. (A separate 4th-arg call added later in the function would leave `:243` failing TS2554, and repairing `:243` with `{ structured: false }` would silently reintroduce Blocker 1.)
 2. After the `includePartialMessages` block: `if (context.outputSchema) sdkOpts.outputFormat = { type: "json_schema", schema: context.outputSchema };` — per-run wins over any `_defaults.outputFormat` (defaults are spread first, `:237`).
@@ -148,14 +148,10 @@ async runStructured<T>(agent: TAgent, message: string, schema: ZodType<T>, optio
     throw new RunCancelledError("runStructured: aborted before the harness started (no structured output available)");
   }
   const { session, translator } = prep;
-  const cancelledRef = { value: false };
-  try {
-    for await (const hEvent of this._drainSession(session, options, cancelledRef))
-      for (const apEvent of translator.translate(hEvent)) await bus.publish(apEvent);
-  } catch (err) { await this._emitError(bus, err, traceId, runId, parentSpanId); throw err; }
-  finally { await session.close(); }
-  if (cancelledRef.value) {        // parity with AgentRunner's emitCancelledTerminal (:1596) then throw
-    await bus.publish(this._completeEvent(startEvent, { ...translator.finalize(), finishReason: "cancelled" }, model));
+  // rev 4: the drain/translate/publish/error/close block is shared with run() as `_drainToBus()` (returns true on abort); stream() keeps its own loop because it yields.
+  const cancelled = await this._drainToBus(session, translator, options, { bus, traceId, runId, parentSpanId });
+  if (cancelled) {                 // parity with AgentRunner's emitCancelledTerminal (:1596) then throw; `_emitCancelledRun` merges the accrued accounting, its RunResult is discarded
+    await this._emitCancelledRun(bus, startEvent, model, translator);
     throw new RunCancelledError("runStructured: aborted while the harness was running (no structured output available)");
   }
   const acc = translator.finalize();
@@ -216,7 +212,8 @@ Add ONE case to the existing `describe.skipIf(shouldSkip)` block (`:120`): a too
 
 ### Modify
 - `packages/agent-runtime/src/runner/agent-runner.ts` (import + re-export `RunCancelledError`; delete the local class)
-- `packages/agent-runtime/src/runner/index.ts` (export the two error classes)
+- `packages/agent-runtime/src/runner/index.ts` (export the two error classes, `FINISH_REASON_STRUCTURED_OUTPUT_RETRIES`, `CC_STRUCTURED_OUTPUT_TOOL`)
+- `packages/agent-runtime/src/runner/harness/index.ts` (export type `HarnessStartErrorCode`, rev 4)
 - `packages/agent-runtime/src/runner/harness/types.ts`
 - `packages/agent-runtime/src/runner/harness/harness-event-translator.ts`
 - `packages/agent-runtime/src/runner/harness/coding-agent-runner.ts`
@@ -275,6 +272,7 @@ All CI-path tests are fixture/contract tests — no subprocess, no network, no k
 5. success terminal with no `structuredOutput` → rejects with `StructuredOutputUnavailableError` (`instanceof`), `finishReason === "stop"`; one `agent.error`.
 6. terminal `finishReason:"max-structured-output-retries"` (no payload) → `StructuredOutputUnavailableError.finishReason === "max-structured-output-retries"`, `name === "StructuredOutputUnavailableError"`, message contains the retry hint; the emitted `agent.error.errorType === "StructuredOutputUnavailableError"`; terminal `finishReason:"error"` (the `error_during_execution` mapping) → `finishReason === "error"`, no hint.
 7. pre-fired `abortSignal` → rejects with `RunCancelledError` (`instanceof` + `name`), **zero** events published, `adapter.start` never called.
+7b. (rev 4) signal fired from inside `probe()` — i.e. after `message.start`, before launch → events are exactly `[message.start, message.complete{cancelled, content:""}]`, `adapter.start` never called, rejects `RunCancelledError`.
 8. mid-run abort (after the fake reaches its hang) → `session.close()` called, `message.complete {finishReason:"cancelled"}` published with the accrued content/tokens, rejects with `RunCancelledError`.
 9. adapter whose probe lacks `features.structuredOutput` → rejects with `HarnessStartError` code `"capability-missing"` **before** any event; `adapter.start` never called.
 10. `z.record(z.string())` schema → rejects with `OpenObjectSchemaError` before probe; with `allowOpenObjectSchemas:true` proceeds (spy on `console.warn`, restore).
