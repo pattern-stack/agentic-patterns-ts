@@ -14,27 +14,36 @@
  */
 
 import type { Options as SDKOptions } from "@anthropic-ai/claude-agent-sdk";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { AgentEventBus } from "../../events/agent-event-bus.js";
 import { ClaudeCodeAPIRunner, type ClaudeCodeAPIRunnerOptions } from "../claude-code-api-runner.js";
 import { ClaudeCodeRunner, type ClaudeCodeRunnerOptions } from "../claude-code-runner.js";
 import type { AgentLikeForBridge } from "../sdk-bridge.js";
 
 // Subclasses that expose the protected _buildOptions for inspection.
 class APIRunnerProbe extends ClaudeCodeAPIRunner {
-  publicBuildOptions(agent: AgentLikeForBridge): SDKOptions {
+  publicBuildOptions(
+    agent: AgentLikeForBridge,
+    outputSchema?: Record<string, unknown>,
+  ): SDKOptions {
     return this._buildOptions(agent, undefined, {
       runId: "r",
       traceId: "t",
+      ...(outputSchema ? { outputSchema } : {}),
     });
   }
 }
 
 class CCRunnerProbe extends ClaudeCodeRunner {
-  publicBuildOptions(agent: AgentLikeForBridge): SDKOptions {
+  publicBuildOptions(
+    agent: AgentLikeForBridge,
+    outputSchema?: Record<string, unknown>,
+  ): SDKOptions {
     return this._buildOptions(agent, undefined, {
       runId: "r",
       traceId: "t",
+      ...(outputSchema ? { outputSchema } : {}),
     });
   }
 }
@@ -162,5 +171,112 @@ describe("ClaudeCodeAPIRunner", () => {
     const opts = apiProbe().publicBuildOptions(makeAgent());
     expect(opts.hooks?.PreToolUse).toBeDefined();
     expect(opts.hooks?.PostToolUse).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runStructured plumbing (#547)
+// ---------------------------------------------------------------------------
+
+const OUTPUT_SCHEMA = { type: "object", properties: { answer: { type: "number" } } };
+
+describe("runStructured plumbing (#547)", () => {
+  it("_buildOptions with outputSchema sets outputFormat; without, outputFormat is absent", () => {
+    const withSchema = apiProbe().publicBuildOptions(makeAgent(), OUTPUT_SCHEMA);
+    expect(withSchema.outputFormat).toEqual({ type: "json_schema", schema: OUTPUT_SCHEMA });
+
+    const withoutSchema = apiProbe().publicBuildOptions(makeAgent());
+    expect("outputFormat" in withoutSchema).toBe(false);
+  });
+
+  it("per-run outputSchema overrides any _defaults.outputFormat", () => {
+    const runner = apiProbe({
+      defaults: { outputFormat: { type: "json_schema", schema: { type: "string" } } },
+    } as ClaudeCodeAPIRunnerOptions);
+    const opts = runner.publicBuildOptions(makeAgent(), OUTPUT_SCHEMA);
+    expect(opts.outputFormat).toEqual({ type: "json_schema", schema: OUTPUT_SCHEMA });
+  });
+
+  it("API runner (tools: []) with outputSchema still has tools exactly [] — the CLI force-includes the carrier, we must not paper over that", () => {
+    const opts = apiProbe().publicBuildOptions(makeAgent(), OUTPUT_SCHEMA) as SDKOptions & {
+      tools?: unknown;
+    };
+    expect(opts.tools).toEqual([]);
+    expect(opts.allowedTools ?? []).not.toContain("StructuredOutput");
+  });
+
+  it("extraDisallowedTools: ['StructuredOutput'] is left in disallowedTools (not stripped)", () => {
+    const opts = apiProbe({ extraDisallowedTools: ["StructuredOutput"] }).publicBuildOptions(
+      makeAgent(),
+      OUTPUT_SCHEMA,
+    );
+    expect(opts.disallowedTools).toEqual(["StructuredOutput"]);
+  });
+
+  describe("hook bypass for the StructuredOutput carrier", () => {
+    async function callHook(
+      opts: SDKOptions,
+      hookName: "PreToolUse" | "PostToolUse",
+      toolName: string,
+    ) {
+      const hooks = opts.hooks?.[hookName]?.[0]?.hooks;
+      const hook = hooks?.[0];
+      if (!hook) throw new Error(`no ${hookName} hook wired`);
+      return hook({ tool_name: toolName, tool_input: {} } as Parameters<typeof hook>[0], "tc_1", {
+        signal: new AbortController().signal,
+      });
+    }
+
+    it("PreToolUse on a structured build returns {} for the carrier — no gate consulted, no agent.tool.* emitted", async () => {
+      const bus = new AgentEventBus();
+      const events: string[] = [];
+      bus.subscribeAll((e) => events.push((e as { type: string }).type));
+      const evalSpy = vi.spyOn(bus, "evaluateIntent");
+
+      const runner = apiProbe({ eventBus: bus });
+      const opts = runner.publicBuildOptions(makeAgent(), OUTPUT_SCHEMA);
+
+      const result = await callHook(opts, "PreToolUse", "StructuredOutput");
+      expect(result).toEqual({});
+      expect(evalSpy).not.toHaveBeenCalled();
+      expect(events.some((t) => t.startsWith("agent.tool."))).toBe(false);
+    });
+
+    it("PreToolUse on a NON-structured build still gates the same tool name — proves the bypass is scoped", async () => {
+      const bus = new AgentEventBus();
+      const events: string[] = [];
+      bus.subscribeAll((e) => events.push((e as { type: string }).type));
+
+      const runner = apiProbe({ eventBus: bus });
+      const opts = runner.publicBuildOptions(makeAgent()); // no outputSchema
+
+      await callHook(opts, "PreToolUse", "StructuredOutput");
+      expect(events).toContain("agent.tool.start");
+    });
+
+    it("PostToolUse on a structured build returns {} for the carrier — no agent.tool.end", async () => {
+      const bus = new AgentEventBus();
+      const events: string[] = [];
+      bus.subscribeAll((e) => events.push((e as { type: string }).type));
+
+      const runner = apiProbe({ eventBus: bus });
+      const opts = runner.publicBuildOptions(makeAgent(), OUTPUT_SCHEMA);
+
+      const result = await callHook(opts, "PostToolUse", "StructuredOutput");
+      expect(result).toEqual({});
+      expect(events.some((t) => t === "agent.tool.end")).toBe(false);
+    });
+
+    it("a different tool name on a structured build still goes through the gate", async () => {
+      const bus = new AgentEventBus();
+      const events: string[] = [];
+      bus.subscribeAll((e) => events.push((e as { type: string }).type));
+
+      const runner = apiProbe({ eventBus: bus });
+      const opts = runner.publicBuildOptions(makeAgent(), OUTPUT_SCHEMA);
+
+      await callHook(opts, "PreToolUse", "SomeOtherTool");
+      expect(events).toContain("agent.tool.start");
+    });
   });
 });

@@ -25,6 +25,7 @@ import { z } from "zod";
 
 import { AgentEventBus } from "../events/agent-event-bus.js";
 import type { AgentEvent } from "../events/types.js";
+import { ClaudeCodeAPIRunner } from "../runner/claude-code-api-runner.js";
 import { ClaudeCodeRunner } from "../runner/claude-code-runner.js";
 
 // ---------------------------------------------------------------------------
@@ -193,6 +194,42 @@ describe.skipIf(shouldSkip)("ClaudeCodeRunner integration", () => {
       console.log("\n✅ Multi-step tool use test passed!");
       console.log(`   Response: ${result.response.slice(0, 100)}...`);
       console.log(`   Tool calls: ${result.toolCallsCount}`);
+    },
+    { timeout: 120_000 },
+  );
+
+  it(
+    "runStructured on ClaudeCodeAPIRunner (tools: []) — proves the CLI's force-include of the StructuredOutput carrier end to end (#547)",
+    async () => {
+      const agent = buildMathAgent();
+      const eventBus = new AgentEventBus();
+      const events: AgentEvent[] = [];
+      eventBus.subscribeAll((e) => events.push(e as AgentEvent));
+
+      // API runner preset: tools: [] — no agent-defined tools either, so if
+      // the SDK's tool list resolution hid the carrier there would be
+      // nothing on the wire to produce structured_output at all.
+      // `disableSandbox` keeps host config mode (like its sibling tests
+      // above) — this test isn't exercising OAuth isolation, and it would
+      // otherwise fail on a missing token instead of exercising the carrier.
+      const runner = new ClaudeCodeAPIRunner({ eventBus, disableSandbox: true });
+
+      const schema = z.object({ answer: z.number(), reasoning: z.string() });
+      const result = await runner.runStructured(
+        agent,
+        "What is 17 + 28? Answer with the number and a one-sentence reasoning.",
+        schema,
+        { eventBus, maxIterations: 5 },
+      );
+
+      expect(typeof result.object.answer).toBe("number");
+      expect(result.response).toBe(JSON.stringify(result.object));
+
+      // The carrier must never appear as an agent.tool.* event name.
+      const toolEventNames = events
+        .filter((e) => e.type.startsWith("agent.tool."))
+        .map((e) => (e as { toolName?: string }).toolName);
+      expect(toolEventNames).not.toContain("StructuredOutput");
     },
     { timeout: 120_000 },
   );

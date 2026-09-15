@@ -23,10 +23,12 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
 import type {
+  Options,
   PostToolUseHookInput,
   PreToolUseHookInput,
   SDKAssistantMessage,
   SDKDeferredToolUse,
+  SDKResultError,
   SDKResultMessage,
   SDKResultSuccess,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -128,5 +130,27 @@ describe("claude-agent-sdk message-union type contract", () => {
     expectTypeOf<PostToolUseHookInput["hook_event_name"]>().toEqualTypeOf<"PostToolUse">();
     expectTypeOf<PostToolUseHookInput>().toHaveProperty("tool_response").toEqualTypeOf<unknown>();
     expectTypeOf<PostToolUseHookInput>().toHaveProperty("tool_use_id").toEqualTypeOf<string>();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Structured output surface (#547) — pins the wire shapes runStructured()
+  // depends on so an SDK drift on these fails typecheck here, not at runtime.
+  // ---------------------------------------------------------------------------
+
+  it("Options.outputFormat is the json_schema shape runStructured() builds", () => {
+    expectTypeOf<NonNullable<Options["outputFormat"]>>().toEqualTypeOf<{
+      type: "json_schema";
+      schema: Record<string, unknown>;
+    }>();
+  });
+
+  it("SDKResultSuccess carries structured_output", () => {
+    expectTypeOf<SDKResultSuccess>().toHaveProperty("structured_output");
+  });
+
+  it("SDKResultError.subtype includes error_max_structured_output_retries", () => {
+    expectTypeOf<
+      Extract<SDKResultError["subtype"], "error_max_structured_output_retries">
+    >().toEqualTypeOf<"error_max_structured_output_retries">();
   });
 });
