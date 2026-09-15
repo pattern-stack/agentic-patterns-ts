@@ -275,8 +275,62 @@ Phase execution log — written by phase agents as gates fire.
 -->
 
 ## Spec Review
-<!-- written by: reviewer · gate 1.5 · /sdlc:critique -->
-_Awaiting spec critic._
+<!-- written by: reviewer · gate 1.5 · /sdlc:critique · lens=mixed -->
+
+**Target:** `.ai-docs/specs/547-cc-run-structured.md` (at `35decd9`)
+**Against:** cited-code (`origin/main` 7505cb5 tree + installed SDK/`ai` `.d.ts`)
+**Verdict:** REVISE
+
+**Blockers (2):**
+
+- [`.ai-docs/specs/547-cc-run-structured.md:263` (Out of scope) · mechanism at `packages/agent-runtime/src/runner/claude-code-runner.ts:307-346`] **The gate chain's interaction with the SDK's end-turn carrier tool is undefined, and the one line that touches it is mis-scoped.** The spec's own cited SDK mechanism (`sdk.d.ts:1858-1863`) says a `json_schema` turn ends on an MCP end-turn *tool* carrier. `_buildOptions` installs an unconditional `PreToolUse` hook (`claude-code-runner.ts:307`) that routes **every** tool call through `emitIntent()` → the gate chain, and returns `permissionDecision: "deny"` on rejection (`:324-334`). Consequences the spec never states: (a) `agent.tool.intent` / `.start` / `.end` **will** be emitted for the carrier — the Out-of-scope line reads as "these won't happen", and §Tests #1's "events are exactly `message.start` … `message.complete`" only holds because it runs against a `FakeAdapter`; (b) any gate that denies an unrecognized tool name silently kills the carrier, the result carries no `structured_output`, and §7 throws the generic `"the harness returned no structured output"` — misattributing a gate denial to a harness fault. Gates are the reason this runner family exists (`assertGateRequirements`, `emitIntent`, the whole `harness/` seam); leaving this undefined makes the feature unusable-and-unexplained on every gated runner. · _Fix:_ pick and write down one: (a) detect the carrier in `onPreToolUse` (tool name / `_meta['claude/endTurn']`) and return `{}` without publishing `agent.tool.*` or consulting gates; or (b) let it through, extend `assertGateRequirements` so a carrier-blocking gate fails loud at run start, and make §7's error distinguish "carrier denied by gate" from "harness produced nothing". Either way add a test, correct the Out-of-scope wording (the events are emitted, only their *interpretation* is out of scope), and amend §Tests #1 to say the event-exactness assertion is `FakeAdapter`-scoped.
+
+- [`§ Current state` (spec `:17-34`)] **The section asserts "verified at `origin/main` 7505cb5" but ~18 of its `path:line` citations do not resolve.** The substance is right in every case — the *locations* are not, and several are off by 10-55 lines, i.e. they point at unrelated code. One of them drives an edit (§7's `EMPTY_CANCELLED_ACC` extraction points at `_drainSession`'s tail, not the zeroed literal). A spec that claims verification and then mis-cites a third of its references cannot be trusted on the claims a reviewer *can't* check. · _Fix:_ re-derive every citation against the 7505cb5 tree. Corrected values:
+
+  | Spec claim | Cited | Actual |
+  |---|---|---|
+  | `RunnerProtocol.runStructured?` | `runner/types.ts:325-330` | `:341-351` (decl `:345`); `:325-330` is the interface doc + `run()` |
+  | `RunOptions.abortSignal` doc (§8) | `runner/types.ts:209-247` | doc `:197-234`, decl `:235`; `:236-246` is `allowOpenObjectSchemas` |
+  | `HarnessProbeResult.features` | `harness/types.ts:181-187` | `:188-194` |
+  | `HarnessRunRequest` | `harness/types.ts:287-311` | `:288-305` (`:311` is `HarnessAdapter`) |
+  | `HarnessRunAccounting` | `harness-event-translator.ts:52-60` | `:42-50` (`:52` is `class HarnessEventTranslator`) |
+  | `finalize()` | `harness-event-translator.ts:109-126` | `:119-136` |
+  | `onTerminal` | `harness-event-translator.ts:314-322` | `:259-267` |
+  | `mapFinishReason` | `cc-harness-translator.ts:45-58` | `:49-62` |
+  | `onResult` | `cc-harness-translator.ts:251-269` | `:254-270` |
+  | `ClaudeCodeAdapter.start()` | `claude-code-adapter.ts:130-143` | `:121-135` |
+  | `BuildSDKOptions` | `claude-code-adapter.ts:39-49` | `:38-48` |
+  | `ClaudeCodeRunner extends …` | `claude-code-runner.ts:157` | `:152` |
+  | `ClaudeCodeAPIRunner extends …` | `claude-code-api-runner.ts:44` | `:42` |
+  | `_buildOptions` | `claude-code-runner.ts:229-296` | `:225-289` |
+  | `_emitCancelledRun` zeroed acc (§7) | `coding-agent-runner.ts:311-319` | `:327-336` |
+  | `_emitError` (§7) | `coding-agent-runner.ts:490-509` | `:483-503` |
+  | AgentRunner `message.start` | `agent-runner.ts:1560-1575` | `:1556-1569` |
+  | AgentRunner return block | `agent-runner.ts:1902-1912` | `:1904-1915` |
+
+  Verified-correct (leave alone): `coding-agent-runner.ts:146` / `:182` / `:407-408`; `agent-runner.ts:119-137`, `:1497`, `:1508`, `:1518-1522`, `:1531-1532`, `:1596-1612`, `:1856-1873`, `:1875-1888`; `create-runner.ts:332-342`; terminal `HarnessEvent` `harness/types.ts:141-147`; every SDK `sdk.d.ts` citation (`:930-933`, `:1739-1750`, `:1858-1863`, `:2142`, `:4442`, `:4503`, `:7213`); `provider-utils` `:983` / `:1013-1021`; `package.json:66` / `:73`; the `durableRules` count (3 test files + adapter); all four named test seams.
+
+**Notes (7):**
+
+- [`§ Approach §7`] **New `ai` coupling in the harness-agnostic base.** `harness/coding-agent-runner.ts` imports nothing from `ai` today (only `claude-code-runner.ts`, `mock-runner.ts`, `message-utils.ts`, `usage-details.ts`, `agent-runner.ts` do). §7 adds `zodSchema` from `ai` to the CLI-harness base purely for a zod→JSON-Schema conversion. Defensible (one conversion shared by every future adapter) but undeclared — say so, and say why not `zod-to-json-schema` or per-adapter conversion.
+- [`§ Current state` bullet on `AgentRunner.runStructured` parity] **Two pre-flight steps of the parity reference are silently dropped.** `adviseStructuredRun(modelName, hasTools)` (`agent-runner.ts:1551`) and the post-validation `_maybeEmitRedaction` scan (`:1897`, #407) are both part of `AgentRunner.runStructured` and appear nowhere in the spec. The Acceptance section claims "deviations are only … `costUsd` … `messageHistory`, `modelParams`" — that list is incomplete. Also absent from the harness result: `usageDetails` and `gateway` (`_result()` at `coding-agent-runner.ts:471-479` emits neither). Either adopt or explicitly decline each, in the Acceptance list.
+- [`§11` · `docs/runners.md:126-173`] **§3.3 is an *event-emission* parity table, not a capability table.** Every row is an `agent.*` event type; a `runStructured()` row is categorically out of place there, and the "Remaining honest gaps" list beneath it is specifically about *event fidelity with no native source* (`durationMs`, `resultTokens`, synthesized iterations) — `messageHistory` / `modelParams` are option-plumbing gaps and don't belong in it. Separately, §3.3's prose enumerates the finishReason mapping (`docs/runners.md:157-160`: "`success`→`stop`, … else `unknown`") — §4 adds a fifth case and §11 doesn't update that sentence. §2.5 item 1 *is* the right anchor for the second edit ✓.
+- [`§ Acceptance` (spec `:258`)] **The "green" criterion doesn't match the merge gate.** CLAUDE.md: `main` requires status `check`, which is `build && check:dist-contract && typecheck && lint && test && check:model-facing-schemas && smoke:memory && check:docs-events` (root `package.json:26`). The spec names only four of the eight. Nothing in this change should break the other four, but the acceptance line should be `bun run check`.
+- [`§1` (spec `:60`)] **The given re-export line alone won't compile.** `export { RunCancelledError } from "./errors.js";` does not bind the name locally, and `agent-runner.ts` throws it at `:1519`, `:1633`, `:1707`, `:1775`, `:1834`. The file needs an `import` *and* an `export`. The parenthetical "(also used internally)" hints at this; make it explicit so a verbatim implementer doesn't hit TS2304. (The public path is otherwise sound: `src/index.ts:13` is `export * from "./runner/index.js"`, so a `runner/index.ts` export does surface publicly — verified.)
+- [`§ Current state` bullet on `zodSchema`] **The zod-4 tolerance is real but unreachable at this seam.** `zodSchema`'s signature does accept `$ZodType | z3.Schema` (verified, `provider-utils@5.0.25:1013`), but `RunnerProtocol.runStructured?` types `schema: ZodType<T>` from **zod 3** (`runner/types.ts:13`, `:348`), so a zod-4 schema can't reach any runner today. Presenting zod-4 support as a property of the chosen conversion oversells it — drop the claim or note it's blocked upstream at the protocol signature.
+- [`§7` error handling] **Three distinct failure modes collapse into one untyped `Error`.** "success but no payload", `error_max_structured_output_retries`, and `error_during_execution` all produce `new Error("runStructured: the harness returned no structured output (finishReason=…)")`, separable only by regex on the message. `AgentRunner` has the same untyped posture for validation failure, so this is parity — but it's also the moment to consider a named error, and §Tests covers `success`-no-payload (#5) and `max-structured-output-retries` (#6) while never naming the `error_during_execution` path the mission asked about. At minimum add it to the #5/#6 table.
+
+**Nits (5):**
+
+- [`§2` (spec `:72`)] The terminal variant is written as a standalone object type; the real `HarnessEvent` is `{ ids: NativeIds; parent?; meta? } & ( … union … )` (`harness/types.ts:107`). Copied verbatim it drops `ids`.
+- [`§3` (spec `:77`)] "spreads it only when `!== undefined`" is inconsistent with the sibling field in the same return object — `finalize()` assigns `costUsd: this.costUsd` unconditionally (`harness-event-translator.ts:131`). Both work; pick one house style.
+- [`§1` (spec `:60`)] `"./../errors.js"` — write `"../errors.js"`.
+- [`§9` (spec `:153`)] "revert any other drift" in `bun.lock` by hand is a risky instruction (a hand-edited lockfile can go inconsistent). Only `bun.lock:106` should move; if anything else does, re-run install rather than hand-revert, and say so.
+- [`§ File-level plan`] The new `__tests__/claude-code-runner-structured.test.ts` duplicates the `APIRunnerProbe`/`CCRunnerProbe` subclasses that already exist in `__tests__/claude-code-api-runner.test.ts:24`/`:33`. Extending that file, or exporting the probes, avoids a third copy.
+
+**Also verified as correct (no finding):** `zodSchema(z.object(…)).jsonSchema` was executed against the installed tree — it returns `{type:"object", properties, required, additionalProperties:false, $schema:"http://json-schema.org/draft-07/schema#"}` with no `$ref`/`definitions`, so §Tests #2's assertion holds and Open Question #2's premise is confirmed; `HarnessStartError("schema-incompatible", msg)` is a valid constructor (`harness/types.ts:239-249`); `FinishReason = string` (`harness/types.ts:69`) so the new value needs no type change; `_defaults` is spread first (`claude-code-runner.ts:237`) so a later `sdkOpts.outputFormat =` does win per-run; `harness-contract.test.ts:276` asserts `p.features.inputRewrite` property-wise, not `toEqual`, so adding `structuredOutput: true` to the adapter probe breaks nothing; `ClaudeCodeAdapter` is the only in-repo `HarnessAdapter` implementer besides the test fake, and both new seam fields are optional. One unlisted downstream effect worth knowing rather than fixing: `workflows/agent-step.ts:151` throws `StructuredOutputUnsupported` when `!runner.runStructured` — this change silently unlocks the structured `AgentStep` path for CC runners. That's the point of the issue, but it is a user-visible behavior change with no test and no mention.
+
+**Reviewed by:** reviewer agent · 2026-09-15T03:56:28Z
 
 ## Design Addendum
 <!-- written by: specifier · in response to REVISE verdict on Spec Review -->
