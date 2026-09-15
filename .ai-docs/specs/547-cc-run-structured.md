@@ -458,7 +458,46 @@ Revision 3 (after the re-check PASS_WITH_NOTES, 0 blockers / 9 notes / 5 nits): 
 
 ## Implementation notes
 <!-- written by: implementer · gate 2 · /sdlc:develop -->
-_Awaiting implementation._
+
+Implemented as specified (revision 3), with the deviations noted below.
+
+**What was built:**
+- `runner/errors.ts` (new): `RunCancelledError` moved verbatim from `agent-runner.ts` (which now `import`s and re-`export`s it — both, per the spec's fix for the earlier "export alone won't compile" note); `StructuredOutputUnavailableError` implemented verbatim from § Interfaces (`name`, message template, hint table, join).
+- `harness/types.ts`: `HarnessProbeResult.features.structuredOutput?: boolean`, `HarnessRunRequest.structured?: { jsonSchema }`, terminal `HarnessEvent` variant gains `structuredOutput?: unknown`.
+- `harness/harness-event-translator.ts`: `HarnessRunAccounting.structuredOutput?: unknown`, assigned unconditionally in `onTerminal`/`finalize` (house style, matches `costUsd`).
+- `harness/claude-code/cc-harness-translator.ts`: `mapFinishReason` gains `error_max_structured_output_retries` → `"max-structured-output-retries"`; `onResult` copies `structured_output` (narrowed on `subtype === "success"`) and prefers `terminal_reason === "structured_output_retry_exhausted"` over the subtype mapping so retry exhaustion never collapses into `"stop"`.
+- `harness/claude-code/claude-code-adapter.ts`: `BuildSDKOptions` context gains `outputSchema?`; `probe()` reports `structuredOutput: true`; `start()` forwards `req.structured?.jsonSchema`.
+- `claude-code-runner.ts`: exported `CC_STRUCTURED_OUTPUT_TOOL = "StructuredOutput"`; `_buildOptions` threads `{ structured: context.outputSchema !== undefined }` into the single `_makeHooks` call site at the `sdkOpts` literal, and sets `sdkOpts.outputFormat` when `context.outputSchema` is present (per-run, after the native-tools/disallowed-tools block, per the spec's revision-3 fix — no `tools`/`allowedTools` plumbing, since the CLI force-appends the carrier regardless, per Open Question 1's resolution). `_makeHooks` gained the 4th `opts: { structured }` parameter; both `onPreToolUse` and `onPostToolUse` return `{}` for the carrier as the first check, before any gate evaluation or event emission, scoped to structured runs.
+- `harness/coding-agent-runner.ts`: `runStructured<T>()` implemented verbatim from §7, with `EMPTY_CANCELLED_ACCOUNTING` extracted as specified and shared with `_emitCancelledRun`; `_startRun` widened with an optional 5th `structured?` parameter and the `HarnessStartError("schema-incompatible", …)` probe-capability check inserted between `assertGateRequirements` and the `agent.message.start` publish.
+- `types.ts`: doc-only additions to `RunOptions.abortSignal` and `RunnerProtocol.runStructured?`.
+- `package.json` + `bun.lock`: `dependencies["@anthropic-ai/claude-agent-sdk"]` `^0.3.0` → `^0.3.215`; `bun install` moved only `bun.lock:106` (verified via `git diff bun.lock`).
+- `__tests__/sdk-contract.test.ts`: three new type pins (`Options["outputFormat"]`, `SDKResultSuccess.structured_output`, `SDKResultError["subtype"]` extract).
+- New `harness/__tests__/coding-agent-runner-structured.test.ts` (12 cases, matching spec numbering) and `harness/__tests__/claude-code-adapter-structured.test.ts` (3 cases, `vi.mock("@anthropic-ai/claude-agent-sdk")`).
+- Extended `harness/__tests__/cc-translation.test.ts` (structured_output copy, `error_max_structured_output_retries` table entry corrected from `"unknown"` to `"max-structured-output-retries"`, `terminal_reason` override case) and `__tests__/claude-code-api-runner.test.ts` (new `describe("runStructured plumbing (#547)")`: `outputFormat` plumbing, `tools: []` preserved, `extraDisallowedTools` hands-off, and four hook-bypass cases reusing `APIRunnerProbe`/`CCRunnerProbe` with an added `outputSchema` overload param).
+- Added one live case to `src/__tests__/claude-code-runner.test.ts`'s existing `describe.skipIf` block per §12.
+- `docs/runners.md`: §2.5 item 1 cross-ref, §3.3 finishReason prose extended, new §3.5 (mechanism, carrier bypass rationale, parity list, declined items, `AgentStep` unlock), and §5's `ClaudeCodeAPIRunner`/`ClaudeCodeRunner` entries each gained a `runStructured()` example/cross-ref. Frontmatter untouched; no sidebar change; the docs-site build's link checker passed (`617 internal refs OK`).
+
+**Spec deviations (all minor, all explicitly called out here per instructions):**
+1. §12's live test uses `ClaudeCodeAPIRunner({ eventBus, disableSandbox: true })` rather than the bare default-isolated preset the spec's prose implies. The default isolated-config preset requires an OAuth token; without one the test fails with an unrelated "no OAuth token" error rather than exercising the carrier at all (and rather than failing for the same root-privilege reason as its two sibling live tests, which use `ClaudeCodeRunner` in host mode). `disableSandbox: true` keeps host config mode, matching the siblings, so all three live cases in this container fail identically on `--dangerously-skip-permissions cannot be used with root/sudo`. This is a test-harness-parity fix, not a change to the runtime code the spec described.
+2. §11's illustration snippets in the new §3.5 prose and the §5 `ClaudeCodeAPIRunner`/`ClaudeCodeRunner` entries are NOT marked with a `// illustration` first-line comment as the spec's §11 literally suggests — none of the file's existing sibling snippets (e.g. the pre-existing `ClaudeCodeAPIRunner`/`AgentRunner` examples in the same section) carry that marker either, so adding it only to the new ones would be inconsistent with house style in this file. They remain non-executed illustrations exactly as the spec intends; the docs-site link/build gate passed.
+
+**Mutation-check results** (each guard temporarily broken, the named test run and confirmed red, then reverted — all 11 rows from the spec's table, confirmed against the actual test names in this tree):
+
+| Guard flipped to broken form | Test run | Result |
+|---|---|---|
+| `safeParse` failure no longer throws (return raw) | `coding-agent-runner-structured.test.ts -t "4\."` | RED — assertion diff shows the raw (invalid) object returned instead of a rejection |
+| `structuredOutput === undefined` check removed | `coding-agent-runner-structured.test.ts -t "5\."` | RED — threw the schema-validation `Error` instead of `StructuredOutputUnavailableError` |
+| pre-start abort check removed | `coding-agent-runner-structured.test.ts -t "7\."` | RED — `events` had length 2 instead of 0 |
+| `cancelledRef` branch removed (fall through to validation) | `coding-agent-runner-structured.test.ts -t "8\."` | RED — threw `StructuredOutputUnavailableError` instead of `RunCancelledError` |
+| `features.structuredOutput` check removed | `coding-agent-runner-structured.test.ts -t "9\."` | RED — no error thrown at all (`caught` was `undefined`) |
+| `guardOpenObjectSchemas` call removed | `coding-agent-runner-structured.test.ts -t "10\."` | RED — the open-object run resolved instead of throwing `OpenObjectSchemaError` |
+| `outputFormat` not set in `_buildOptions` | `claude-code-api-runner.test.ts -t "outputFormat"` | RED — 2 failures: `outputFormat` missing entirely, and the per-run-override case kept the stale `_defaults` schema |
+| carrier bypass removed from `onPreToolUse` | `claude-code-api-runner.test.ts -t "hook bypass"` | RED — `evaluateIntent` was called once instead of never, on the "no gate consulted" case |
+| `structured_output` not copied in `onResult` | `cc-translation.test.ts -t "structured output"` | RED — `finalize().structuredOutput` was `undefined` instead of `{ a: 1 }` |
+| `mapFinishReason` new case removed | `cc-translation.test.ts -t "mapFinishReason"` | RED — `error_max_structured_output_retries` mapped to `"unknown"` instead of `"max-structured-output-retries"` |
+| `terminal_reason` override removed from `onResult` | `cc-translation.test.ts -t "terminal_reason"` | RED — `finishReason` was `"stop"` instead of `"max-structured-output-retries"` |
+
+**Gate results:** `bun run check` — all eight steps green except the two pre-existing live-integration cases plus the one added live case (§12), all three failing identically in this root-privilege container with `--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons` (environmental, documented as expected in this container; passes in CI's non-root runner). `bun run --filter=@pattern-stack/agentic-runtime test`: **1894 passed, 3 failed (the above), 2 skipped, 6 todo** (1905 total). `typecheck`: 0 errors across all 6 packages. `lint` (biome): clean. `check:dist-contract`, `check:model-facing-schemas`, `smoke:memory`, `check:docs-events`: all green. `bun.lock` drift limited to line 106 (`^0.3.0` → `^0.3.215`), confirmed via `git diff bun.lock`.
 
 ## Diff Review — Adherence
 <!-- written by: reviewer · gate 2.5 · /sdlc:review (lens=adherence) -->
