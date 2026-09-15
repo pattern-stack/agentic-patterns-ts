@@ -501,7 +501,36 @@ Implemented as specified (revision 3), with the deviations noted below.
 
 ## Diff Review — Adherence
 <!-- written by: reviewer · gate 2.5 · /sdlc:review (lens=adherence) -->
-_Awaiting adherence review._
+
+**Target:** `git diff 7505cb5...HEAD -- ':!.ai-docs'` (branch `feat/cc-runner-run-structured` @ `ee96c12`; 19 files, +1091/-48)
+**Against:** `.ai-docs/specs/547-cc-run-structured.md` (revision 3 — static sections Goal … Open questions)
+**Verdict:** REVISE
+
+**Coverage:** Approach §1–§12, File-level plan (3 create / 16 modify — exact match, no scope creep), Interfaces (all six declarations match), Tests (base 1–12, cc-translation ×4, api-runner plumbing ×8, adapter ×3, sdk-contract ×3, mutation table ×11). All five touched/added test files re-run here: **73 passed, 0 failed**. Cited SDK lines re-verified against the installed `0.3.226` `.d.ts` (`terminal_reason?: TerminalReason` on BOTH result variants `:4462`/`:4505`; `structured_output?: unknown` `:4503`; `error_max_structured_output_retries` in `SDKResultError["subtype"]` `:4442`; `structured_output_retry_exhausted` in `TerminalReason` `:7213`) — every citation the spec makes holds.
+
+Section-by-section: §1 ✅ verbatim (`name` assignment and hint table exactly as specified, `?? ""` join) · §2 ✅ three additive fields, `structuredOutput?` optional on `features` · §3 ✅ unconditional `finalize()` assignment, `_result()`/`_completeEvent()` build fields explicitly so nothing leaks into `run()`'s `RunResult` · §4 ✅ both the `mapFinishReason` case and the `terminal_reason` override, implemented as the spec's literal ternary · §5 ✅ · §6 ✅ step 1 (single `_makeHooks` call site amended at `claude-code-runner.ts:260-262` — no second call site exists, TS2554 hazard avoided), step 2 (`:273-275`, immediately after the `includePartialMessages` block, before `applyNativeTools` — per-run wins over `_defaults`), step 3 (no `tools`/`allowedTools`/`disallowedTools` plumbing anywhere) · §7 ✅ method implemented verbatim; `HarnessStartError` check sits between `assertGateRequirements` and the `agent.message.start` `createEvent`/`publish` (`coding-agent-runner.ts:490-497`), `EMPTY_CANCELLED_ACCOUNTING` extracted and shared, `:518-521` comment updated · §7a ✅ bypass is the first statement after `toolName` in BOTH hooks (`:337`, `:386`), scoped by `opts.structured` · §8 ✅ · §9 ✅ floor `^0.3.215`, lockfile drift is exactly `bun.lock:106` and nothing else · §10 ✅ · §11 ✅ right anchors (§2.5 item 1, §3.3 prose only — no row added to the parity table, new §3.5 between §3.4 and `## 4.`, §5 snippet + cross-ref), frontmatter untouched, no h1, no new links · §12 ⚠️ see Blocker 1.
+
+Acceptance claims spot-verified: `workflows/agent-step.ts:150` is a presence check (`if (!runner.runStructured)`), so the `AgentStep` unlock is real, not aspirational.
+
+**Declared deviations — both verified, both stand:**
+1. `disableSandbox: true` on the live runner — VALID. `ClaudeCodeAPIRunnerOptions.disableSandbox` (`claude-code-api-runner.ts:33`) resolves to `config: { mode: "host" }` (`:47`), matching the two sibling live tests; `nativeTools: "none"` is still pinned by the constructor, so the `tools: []` cell §12 targets is preserved. Justification holds.
+2. No `// illustration` marker on the docs snippets — VALID. `grep -n illustration docs/runners.md` → no hits, so the house-style claim is true; the new §5 snippet is a non-executed continuation of the preceding `ClaudeCodeAPIRunner` example.
+
+**Blockers (1):**
+- [`packages/agent-runtime/src/__tests__/claude-code-runner.test.ts:209-215`] §12 specifies "**a tool-less agent** on `ClaudeCodeAPIRunner` (the `tools: []` cell)". The added case uses `buildMathAgent()` (`:75`), whose role carries a `math_operations` `Capability` with two tools (`.withCapability(mathCapability)`, `:104`) — `_buildOptions` wires those as `mcpServers` + `allowedTools` via `buildAgentServers(agent)` (`claude-code-runner.ts:286`). The committed comment at `:209-211` — "no agent-defined tools either, so if the SDK's tool list resolution hid the carrier there would be **nothing on the wire** to produce `structured_output` at all" — is therefore false about its own setup. This is the one artifact that empirically settles Open Question 1 / the force-append claim, so a false premise in its comment is load-bearing. Undeclared in § Implementation notes. · _Fix:_ either (a) build a tool-less agent for this case (a `RoleBuilder` with no `.withCapability(…)`, same schema and assertions), which restores §12's cell exactly and makes the comment true; or (b) keep `buildMathAgent()` and rewrite `:209-211` to state what the setup actually proves (`tools: []` on the native axis with agent MCP tools present) and add the deviation to § Implementation notes.
+
+**Notes (3):**
+- [`packages/agent-runtime/src/runner/claude-code-runner.ts:1-21`, `:155-163`] §6's closing instruction — "Update the file header + class doc to say structured output is supported and how" — was not done; both are byte-identical to `7505cb5`, and the omission is not declared. The information did land elsewhere (`CC_STRUCTURED_OUTPUT_TOOL`'s doc `:54-64`, the base's `runStructured` JSDoc, `docs/runners.md` §3.5), so this is a trail gap, not a behavioural one.
+- [`.ai-docs/specs/547-cc-run-structured.md` § Implementation notes, `claude-code-runner.ts` bullet] The note says `outputFormat` is set "after the native-tools/disallowed-tools block". It is not: the assignment is at `:273-275`, immediately after the `includePartialMessages` block and *before* `applyNativeTools` (`:294`) — which is exactly what §6 step 2 specified. The code is right; the self-description is wrong. Worth correcting so a future reader doesn't chase a non-existent ordering dependency.
+- [mutation table, 11 rows] Not independently re-run — a `bun run check` was in flight from the lead session and mutating source would have corrupted it. What was verified instead: every named test exists under the claimed name, all pass, and every assertion body is substantive (no vacuous predicates). Residual risk is low but non-zero; a spot-check of two rows at validate would close it.
+
+**Nits (4):**
+- [`coding-agent-runner-structured.test.ts:257`, `:286`] Spec Tests #4/#5 say `agent.error {recoverable:false}`; the tests assert the event count (and, in #5, `errorType`) but never `recoverable`. `_emitError` is pre-existing so the behaviour is covered elsewhere.
+- [`coding-agent-runner-structured.test.ts:394`] Spec Tests #8 asks for the accrued "content/tokens" on the cancelled `message.complete`; only `content` is asserted.
+- [`coding-agent-runner-structured.test.ts:415`] Spec Tests #10 says OpenObjectSchemaError fires "before probe"; the fake has no probe counter, so the test proves only `adapter.startCalls === 0`.
+- [`claude-code-api-runner.test.ts:38-48`] `CCRunnerProbe.publicBuildOptions` gained the `outputSchema` parameter but no caller ever passes it (`ccProbe()` is called schema-less at `:105` only) — so `ClaudeCodeRunner`'s (`nativeTools: "all"`) `outputFormat` plumbing has no direct test, and the spec's "reusing `APIRunnerProbe`/`CCRunnerProbe`" is only half-realised.
+
+**Reviewed by:** reviewer agent · 2026-09-15T04:43:36Z
 
 ## Diff Review — Quality
 <!-- written by: reviewer · gate 2.5 · /sdlc:review (lens=quality) -->
