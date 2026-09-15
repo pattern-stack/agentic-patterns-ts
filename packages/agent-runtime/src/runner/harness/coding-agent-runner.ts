@@ -83,14 +83,14 @@ type StartRunPrep =
  * translator, so there is honestly nothing accrued. Shared by
  * `_emitCancelledRun` and `runStructured()` (#547).
  */
-const EMPTY_CANCELLED_ACCOUNTING: HarnessRunAccounting = {
+const EMPTY_CANCELLED_ACCOUNTING: HarnessRunAccounting = Object.freeze({
   content: "",
   inputTokens: 0,
   outputTokens: 0,
   toolCallsCount: 0,
   iterations: 0,
   finishReason: "cancelled",
-};
+});
 
 export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
   implements RunnerProtocol
@@ -178,23 +178,13 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     }
     const { session, translator } = prep;
 
-    const cancelledRef = { value: false };
-    try {
-      for await (const hEvent of this._drainSession(session, options, cancelledRef)) {
-        for (const apEvent of translator.translate(hEvent)) {
-          await bus.publish(apEvent);
-        }
-      }
-    } catch (err) {
-      await this._emitError(bus, err, traceId, runId, parentSpanId);
-      throw err;
-    } finally {
-      // Idempotent (a no-op if `_drainSession` already tore the session down
-      // on abort) — also the ONLY teardown on the normal/error paths, unchanged.
-      await session.close();
-    }
-
-    if (cancelledRef.value) {
+    const cancelled = await this._drainToBus(session, translator, options, {
+      bus,
+      traceId,
+      runId,
+      parentSpanId,
+    });
+    if (cancelled) {
       return this._emitCancelledRun(bus, startEvent, model, translator);
     }
 
@@ -280,38 +270,32 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     const { bus, startEvent, model, traceId, runId, parentSpanId } = prep;
 
     if (prep.cancelled) {
-      // The signal fired between the check above and `_startRun`'s own check.
-      await bus.publish(this._completeEvent(startEvent, EMPTY_CANCELLED_ACCOUNTING, model));
+      // The signal fired in the narrow window between the pre-start check
+      // above and `_startRun`'s own check — i.e. AFTER `agent.message.start`
+      // was published (during `probe()`/`assertGateRequirements`). The run is
+      // open on the bus now, so it is finalized with a cancelled
+      // `message.complete` (the #495 posture: never leave a row 'running') —
+      // the same post-start behaviour as `AgentRunner.runStructured`. Only the
+      // pre-start check above is event-free.
+      await this._emitCancelledRun(bus, startEvent, model);
       throw new RunCancelledError(
         "runStructured: aborted before the harness started (no structured output available)",
       );
     }
     const { session, translator } = prep;
 
-    const cancelledRef = { value: false };
-    try {
-      for await (const hEvent of this._drainSession(session, options, cancelledRef)) {
-        for (const apEvent of translator.translate(hEvent)) {
-          await bus.publish(apEvent);
-        }
-      }
-    } catch (err) {
-      await this._emitError(bus, err, traceId, runId, parentSpanId);
-      throw err;
-    } finally {
-      await session.close();
-    }
-
-    if (cancelledRef.value) {
-      // Parity with `AgentRunner`'s `emitCancelledTerminal` then throw: the
-      // accrued content/tokens are real (D5 posture), not fabricated as "".
-      await bus.publish(
-        this._completeEvent(
-          startEvent,
-          { ...translator.finalize(), finishReason: "cancelled" },
-          model,
-        ),
-      );
+    const cancelled = await this._drainToBus(session, translator, options, {
+      bus,
+      traceId,
+      runId,
+      parentSpanId,
+    });
+    if (cancelled) {
+      // Parity with `AgentRunner`'s `emitCancelledTerminal` then throw. The
+      // accrued content/tokens are real (D5 posture), not fabricated as "" —
+      // `_emitCancelledRun` merges them; its RunResult is discarded because a
+      // StructuredRunResult has no honest `object` to carry.
+      await this._emitCancelledRun(bus, startEvent, model, translator);
       throw new RunCancelledError(
         "runStructured: aborted while the harness was running (no structured output available)",
       );
@@ -341,6 +325,37 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
   // -------------------------------------------------------------------------
   // #368 — abort plumbing
   // -------------------------------------------------------------------------
+
+  /**
+   * The shared non-streaming drain used by `run()` and `runStructured()`:
+   * pull every normalized event through the translator onto the bus, emit
+   * `agent.error` and rethrow on a harness failure, and ALWAYS close the
+   * session (idempotent — a no-op if `_drainSession` already tore it down on
+   * abort; also the only teardown on the normal/error paths). Returns `true`
+   * when the drain ended because `options.abortSignal` fired. `stream()`
+   * keeps its own loop because it must `yield` each event as it goes.
+   */
+  private async _drainToBus(
+    session: HarnessSession,
+    translator: HarnessEventTranslator,
+    options: RunOptions | undefined,
+    ids: { bus: AgentEventBus; traceId: string; runId: string; parentSpanId: string | undefined },
+  ): Promise<boolean> {
+    const cancelledRef = { value: false };
+    try {
+      for await (const hEvent of this._drainSession(session, options, cancelledRef)) {
+        for (const apEvent of translator.translate(hEvent)) {
+          await ids.bus.publish(apEvent);
+        }
+      }
+    } catch (err) {
+      await this._emitError(ids.bus, err, ids.traceId, ids.runId, ids.parentSpanId);
+      throw err;
+    } finally {
+      await session.close();
+    }
+    return cancelledRef.value;
+  }
 
   /**
    * Drain `session`'s normalized `HarnessEvent` stream, racing every read
@@ -491,7 +506,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // of a harness whose probe does not report the capability.
     if (structured && probe.features.structuredOutput !== true) {
       throw new HarnessStartError(
-        "schema-incompatible",
+        "capability-missing",
         `${adapter.name}: runStructured is unavailable — the harness probe does not report features.structuredOutput`,
       );
     }
@@ -518,9 +533,11 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // has no cheap "top of iteration" boundary before its FIRST call — this
     // IS that boundary). `message.start` above still fires unconditionally —
     // parity with AgentRunner.run()/stream(), which do the same; only
-    // `runStructured()` (#547) checks abort BEFORE calling `_startRun`, so a
-    // pre-start cancel on that path emits nothing (parity with
-    // `AgentRunner.runStructured`).
+    // `runStructured()` (#547) additionally checks abort BEFORE calling
+    // `_startRun`, so a cancel that has already fired at entry emits nothing
+    // on that path (parity with `AgentRunner.runStructured`); a signal that
+    // fires inside this window (after `message.start`, during probe) is
+    // finalized by the caller with a cancelled `message.complete`.
     if (options?.abortSignal?.aborted) {
       return { cancelled: true, bus, startEvent, model, traceId, runId, parentSpanId };
     }

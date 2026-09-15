@@ -366,6 +366,38 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
     expect(adapter.startCalls).toBe(0);
   });
 
+  it("7b. abort firing AFTER message.start but before the harness launches finalizes with message.complete{cancelled} and rejects RunCancelledError; adapter.start never called", async () => {
+    const controller = new AbortController();
+    const session = new FakeSession([HAPPY_TERMINAL], { endCleanly: true });
+    // Fire the signal from inside probe(): that is the window between
+    // runStructured()'s pre-start check and _startRun's own check, and it
+    // runs after `agent.message.start` has been published.
+    const adapter = new (class extends FakeAdapter {
+      override async probe(): Promise<HarnessProbeResult> {
+        controller.abort();
+        return super.probe();
+      }
+    })(session);
+    const bus = new AgentEventBus();
+    const runner = new FakeRunner(adapter, bus);
+
+    const events: AgentEvent[] = [];
+    bus.subscribeAll((e) => events.push(e as AgentEvent));
+
+    let caught: unknown;
+    try {
+      await drainStructured(runner, ANSWER_SCHEMA, { abortSignal: controller.signal });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RunCancelledError);
+    expect(adapter.startCalls).toBe(0);
+    expect(events.map((e) => e.type)).toEqual(["agent.message.start", "agent.message.complete"]);
+    const complete = events[1] as { finishReason?: string; content?: string };
+    expect(complete.finishReason).toBe("cancelled");
+    expect(complete.content).toBe("");
+  });
+
   it("8. mid-run abort closes the session, publishes message.complete{finishReason:cancelled} with accrued content/tokens, rejects RunCancelledError", async () => {
     const controller = new AbortController();
     const session = new FakeSession([
@@ -408,7 +440,7 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
     expect(complete.outputTokens).toBe(0);
   });
 
-  it("9. adapter whose probe lacks features.structuredOutput rejects with HarnessStartError schema-incompatible, before any event, adapter.start never called", async () => {
+  it("9. adapter whose probe lacks features.structuredOutput rejects with HarnessStartError capability-missing, before any event, adapter.start never called", async () => {
     const session = new FakeSession([HAPPY_TERMINAL], { endCleanly: true });
     const adapter = new FakeAdapter(session, PROBE_NO_STRUCTURED);
     const bus = new AgentEventBus();
@@ -424,7 +456,7 @@ describe("CodingAgentRunner.runStructured() (#547)", () => {
       caught = err;
     }
     expect(caught).toBeInstanceOf(HarnessStartError);
-    expect((caught as HarnessStartError).code).toBe("schema-incompatible");
+    expect((caught as HarnessStartError).code).toBe("capability-missing");
     expect(events).toHaveLength(0);
     expect(adapter.startCalls).toBe(0);
   });

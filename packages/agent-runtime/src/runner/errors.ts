@@ -25,6 +25,13 @@ export class RunCancelledError extends Error {
 }
 
 /**
+ * The canonical run `finishReason` for "the harness exhausted its structured
+ * -output retry budget" (#547) — spelled once, read by the CC translator and
+ * the hint table below.
+ */
+export const FINISH_REASON_STRUCTURED_OUTPUT_RETRIES = "max-structured-output-retries";
+
+/**
  * Thrown by the `CodingAgentRunner` harness path (#547) when a run finished
  * with no `structured_output` payload. `finishReason` is the mapped harness
  * reason, so the failure modes are separable by field, not regex.
@@ -42,7 +49,7 @@ export class StructuredOutputUnavailableError extends Error {
 }
 
 const STRUCTURED_OUTPUT_HINTS: Readonly<Record<string, string>> = {
-  "max-structured-output-retries":
+  [FINISH_REASON_STRUCTURED_OUTPUT_RETRIES]:
     " — the model did not produce schema-conformant output within the CLI's retry budget; simplify the schema or the task",
   stop: " — the model ended the turn without calling the StructuredOutput carrier; if the CLI logged 'Init JSON schema rejected', the JSON Schema was not accepted",
 };

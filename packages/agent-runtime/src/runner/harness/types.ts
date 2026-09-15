@@ -239,17 +239,24 @@ export type DecisionVocabulary = Readonly<Partial<Record<AskRequestType, readonl
  */
 export type IntentEvaluator = (intent: ToolCallIntent, ctx?: AskContext) => Promise<GateEvaluation>;
 
+/** The failure classes a harness launch can report — see {@link HarnessStartError}. */
+export type HarnessStartErrorCode =
+  | "binary-missing"
+  | "auth-missing"
+  | "schema-incompatible"
+  | "launch-failed"
+  /** The run needs a capability the probe does not report (e.g. `runStructured` on a harness without `features.structuredOutput`, #547). */
+  | "capability-missing";
+
 /**
- * Structured startup failure thrown from `HarnessAdapter.start()`. `code`
- * distinguishes the failure class so callers can act (re-auth vs re-install vs
- * schema bump) without string-matching.
+ * Structured startup failure, thrown from `HarnessAdapter.start()` or from the
+ * base's run-start checks (`CodingAgentRunner._startRun`, before any event).
+ * `code` distinguishes the failure class so callers can act (re-auth vs
+ * re-install vs schema bump vs pick another runner) without string-matching.
  */
 export class HarnessStartError extends Error {
-  readonly code: "binary-missing" | "auth-missing" | "schema-incompatible" | "launch-failed";
-  constructor(
-    code: "binary-missing" | "auth-missing" | "schema-incompatible" | "launch-failed",
-    message: string,
-  ) {
+  readonly code: HarnessStartErrorCode;
+  constructor(code: HarnessStartErrorCode, message: string) {
     super(message);
     this.name = "HarnessStartError";
     this.code = code;

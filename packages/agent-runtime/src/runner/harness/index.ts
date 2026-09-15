@@ -30,6 +30,7 @@ export type {
   IntentEvaluator,
 } from "./types.js";
 export { HarnessStartError } from "./types.js";
+export type { HarnessStartErrorCode } from "./types.js";
 export {
   ClaudeCodeAdapter,
   ClaudeCodeSession,

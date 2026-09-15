@@ -8,7 +8,7 @@ related: ["#10", "#274", "#399", "PR #40 (superseded)", "software-patterns #190"
 
 **Size M · one PR from `feat/cc-runner-run-structured` (based on `origin/main` 7505cb5) · packages: runtime · Gate 1 = `gate:auto` (delegated run)**
 
-Revision 3 — re-cited against the 7505cb5 tree after the Gate 1.5 REVISE; rev 3 folds in the re-check's PASS_WITH_NOTES notes (see § Spec Review and § Design Addendum below).
+Revision 4 — rev 3 folded in the Gate 1.5 re-check notes; rev 4 folds in the Gate 2.5 quality notes (`capability-missing` error code, shared drain helper, post-start abort race made explicit, `CC_STRUCTURED_OUTPUT_TOOL` exported, shared finishReason constant). See § Spec Review, § Design Addendum, § Diff Review — Quality.
 
 ## Goal
 
@@ -31,7 +31,7 @@ Revision 3 — re-cited against the 7505cb5 tree after the Gate 1.5 REVISE; rev 
   - Validation: `schema.safeParse(rawObject)`; on failure emits `agent.error {recoverable:false}` and throws `Error("runStructured: model output failed schema validation — …")` (`:1856-1873`).
   - Success: `agent.message.complete` with `content: JSON.stringify(parsed.data)` (`:1875-1888`); `_maybeEmitRedaction` (Bifrost gateway scan, #407, `:1893-1900`); returns `{ response: JSON.stringify(parsed.data), inputTokens, outputTokens, toolCallsCount, iterations, finishReason, object: parsed.data, usageDetails?, gateway? }` (`:1904-1915`).
 - `RunCancelledError` is defined in `agent-runner.ts:119-137` and thrown at `:1519`, `:1633`, `:1707`, `:1775`, `:1834`; it is **not** re-exported from `runner/index.ts` / `src/index.ts` (verified by grep; `src/index.ts:13` is `export * from "./runner/index.js"`, so a `runner/index.ts` export surfaces publicly).
-- Harness seam: `HarnessRunRequest` (`harness/types.ts:288-305`) carries `agent/message/options/runId/traceId/parentSpanId/correlationId/streaming/evaluateIntent`; `HarnessProbeResult.features` (`:188-194`) has five booleans; `HarnessEvent` is `{ ids; parent?; meta? } & (…union…)` (`:107`) whose `terminal` variant (`:141-147`) carries `numTurns/usage/costUsd?/finishReason` (+ `meta.finalText`). `HarnessStartError(code, message)` (`:239-249`) accepts `"schema-incompatible"`. `FinishReason = string` (`:69`). `HarnessEventTranslator.onTerminal` (`harness/harness-event-translator.ts:259-267`) accrues into `HarnessRunAccounting` (`:42-50`), read by `finalize()` (`:119-136`, which assigns `costUsd: this.costUsd` unconditionally at `:131`).
+- Harness seam: `HarnessRunRequest` (`harness/types.ts:288-305`) carries `agent/message/options/runId/traceId/parentSpanId/correlationId/streaming/evaluateIntent`; `HarnessProbeResult.features` (`:188-194`) has five booleans; `HarnessEvent` is `{ ids; parent?; meta? } & (…union…)` (`:107`) whose `terminal` variant (`:141-147`) carries `numTurns/usage/costUsd?/finishReason` (+ `meta.finalText`). `HarnessStartError(code, message)` (`:239-249`) — its code union gains `"capability-missing"` (rev 4; `"schema-incompatible"` would mislabel "harness has no such capability"). `FinishReason = string` (`:69`). `HarnessEventTranslator.onTerminal` (`harness/harness-event-translator.ts:259-267`) accrues into `HarnessRunAccounting` (`:42-50`), read by `finalize()` (`:119-136`, which assigns `costUsd: this.costUsd` unconditionally at `:131`).
 - CC adapter: `ClaudeCodeAdapter.start()` (`harness/claude-code/claude-code-adapter.ts:121-135`) calls `buildOptions(agent, options, context)` then `query({ prompt, options })`; `BuildSDKOptions` context (`:38-48`) is `{ runId, traceId, parentSpanId?, correlationId?, includePartialMessages? }`; `probe()` (`:104-119`) returns the static feature table. `CCHarnessTranslator.onResult` (`cc-harness-translator.ts:254-270`) builds the terminal event from `SDKResultMessage`; `mapFinishReason` (`:49-62`) maps the four known subtypes, else `"unknown"`.
 - `_buildOptions` spreads `this._defaults` first (`claude-code-runner.ts:237`), so a per-run assignment afterwards wins.
 - `zodSchema()` from `ai` (re-exported from `@ai-sdk/provider-utils@5.0.25`, `dist/index.d.ts:1013-1021`) returns `Schema<T>` with `.jsonSchema: JSONSchema7 | PromiseLike<JSONSchema7>` (`:983`). Executed against the installed tree (Gate 1.5 reviewer): `zodSchema(z.object({answer:z.number(),reasoning:z.string()})).jsonSchema` → `{type:"object", properties, required, additionalProperties:false, $schema:"http://json-schema.org/draft-07/schema#"}`, no `$ref`/`definitions`. This is the same conversion `Output.object({ schema })` performs for `AgentRunner`, so both runners send the same JSON Schema shape. (`zodSchema` also accepts zod-4 schemas; `RunnerProtocol.runStructured?` types `schema: ZodType<T>` via `import type { ZodType } from "zod"` — `runner/types.ts:13`, `:348` — which resolves to whichever zod the consumer installs under the `^3.25.0 || ^4.1.8` peer range. This repo tests with zod 3; zod-4 behavior is untested and not a property this spec claims.)
@@ -128,7 +128,7 @@ Update the file header + class doc to say structured output is supported and how
 
 ```ts
 if (structured && probe.features.structuredOutput !== true) {
-  throw new HarnessStartError("schema-incompatible",
+  throw new HarnessStartError("capability-missing",
     `${adapter.name}: runStructured is unavailable — the harness probe does not report features.structuredOutput`);
 }
 ```
@@ -143,8 +143,8 @@ async runStructured<T>(agent: TAgent, message: string, schema: ZodType<T>, optio
   const jsonSchema = (await zodSchema(schema).jsonSchema) as Record<string, unknown>;
   const prep = await this._startRun(agent, message, options, /* streaming */ false, { jsonSchema });
   const { bus, startEvent, model, traceId, runId, parentSpanId } = prep;
-  if (prep.cancelled) {            // signal fired between the check above and _startRun's own check
-    await bus.publish(this._completeEvent(startEvent, EMPTY_CANCELLED_ACCOUNTING, model));
+  if (prep.cancelled) {            // signal fired AFTER message.start (during probe) but before the harness launched → finalize the open run (#495 posture), then throw
+    await this._emitCancelledRun(bus, startEvent, model);
     throw new RunCancelledError("runStructured: aborted before the harness started (no structured output available)");
   }
   const { session, translator } = prep;
@@ -276,7 +276,7 @@ All CI-path tests are fixture/contract tests — no subprocess, no network, no k
 6. terminal `finishReason:"max-structured-output-retries"` (no payload) → `StructuredOutputUnavailableError.finishReason === "max-structured-output-retries"`, `name === "StructuredOutputUnavailableError"`, message contains the retry hint; the emitted `agent.error.errorType === "StructuredOutputUnavailableError"`; terminal `finishReason:"error"` (the `error_during_execution` mapping) → `finishReason === "error"`, no hint.
 7. pre-fired `abortSignal` → rejects with `RunCancelledError` (`instanceof` + `name`), **zero** events published, `adapter.start` never called.
 8. mid-run abort (after the fake reaches its hang) → `session.close()` called, `message.complete {finishReason:"cancelled"}` published with the accrued content/tokens, rejects with `RunCancelledError`.
-9. adapter whose probe lacks `features.structuredOutput` → rejects with `HarnessStartError` code `"schema-incompatible"` **before** any event; `adapter.start` never called.
+9. adapter whose probe lacks `features.structuredOutput` → rejects with `HarnessStartError` code `"capability-missing"` **before** any event; `adapter.start` never called.
 10. `z.record(z.string())` schema → rejects with `OpenObjectSchemaError` before probe; with `allowOpenObjectSchemas:true` proceeds (spy on `console.warn`, restore).
 11. per-call `options.eventBus` receives the events, the constructor bus does not (#496 parity).
 12. `const r: RunnerProtocol = runner; typeof r.runStructured === "function"` — the `AgentStep` unlock (`workflows/agent-step.ts:151`) is now true for this family.
@@ -498,6 +498,8 @@ Implemented as specified (revision 3), with the deviations noted below.
 | `terminal_reason` override removed from `onResult` | `cc-translation.test.ts -t "terminal_reason"` | RED — `finishReason` was `"stop"` instead of `"max-structured-output-retries"` |
 
 **Fix round after Diff Review — Adherence (REVISE, lead-applied):** the §12 live case now builds a genuinely tool-less agent inline (`buildToolLessAgent()`, no Capability → no MCP servers, `agent.getTools().length === 0` asserted) and its comment states what the setup proves; `claude-code-runner.ts` file header + class doc now describe structured output (§6's closing instruction); this note's `outputFormat` placement sentence corrected; assertion gaps closed — `recoverable: false` asserted in base tests #4/#5, tokens asserted on the cancelled `message.complete` in #8, `probeCalls === 0` asserted in #10, and a `CCRunnerProbe` (`nativeTools: "all"`) `outputSchema` case added to the api-runner plumbing block.
+
+**Fix round after Diff Review — Quality (PASS_WITH_NOTES, lead-applied):** `_drainToBus()` extracted — `run()` and `runStructured()` share one drain/translate/error/close block, and `runStructured()`'s two cancel paths reuse `_emitCancelledRun()` (RunResult discarded); `HarnessStartError` gains a `"capability-missing"` code (exported `HarnessStartErrorCode`), used for "probe lacks `features.structuredOutput`" instead of the mislabelled `"schema-incompatible"`, and its class doc names the base's run-start checks as a throw site; the post-`message.start` abort race is now documented as finalize-then-throw (comment + docs §3.5) and covered by base test 7b (probe fires the signal); `CC_STRUCTURED_OUTPUT_TOOL` exported from `runner/index.ts`; `FINISH_REASON_STRUCTURED_OUTPUT_RETRIES` shared between `errors.ts` and the CC translator; `EMPTY_CANCELLED_ACCOUNTING` frozen; two vacuous `allowedTools` assertions removed. Not addressed (needs a live harness): CI coverage of the CLI force-append claim — the live §12 smoke is the only evidence, and it is skip-gated in CI; flagged in the result for Dug.
 
 **Gate results:** `bun run check` — all eight steps green except the two pre-existing live-integration cases plus the one added live case (§12), all three failing identically in this root-privilege container with `--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons` (environmental, documented as expected in this container; passes in CI's non-root runner). `bun run --filter=@pattern-stack/agentic-runtime test`: **1894 passed, 3 failed (the above), 2 skipped, 6 todo** (1905 total). `typecheck`: 0 errors across all 6 packages. `lint` (biome): clean. `check:dist-contract`, `check:model-facing-schemas`, `smoke:memory`, `check:docs-events`: all green. `bun.lock` drift limited to line 106 (`^0.3.0` → `^0.3.215`), confirmed via `git diff bun.lock`.
 

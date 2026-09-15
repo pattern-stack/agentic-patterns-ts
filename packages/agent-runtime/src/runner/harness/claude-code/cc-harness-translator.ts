@@ -35,6 +35,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { NativeIds } from "../../../gates/decisions.js";
+import { FINISH_REASON_STRUCTURED_OUTPUT_RETRIES } from "../../errors.js";
 import type { HarnessEvent } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ export function mapFinishReason(subtype: string | undefined): string {
     case "error_max_budget_usd":
       return "budget";
     case "error_max_structured_output_retries":
-      return "max-structured-output-retries";
+      return FINISH_REASON_STRUCTURED_OUTPUT_RETRIES;
     default:
       return "unknown";
   }
@@ -266,7 +267,7 @@ export class CCHarnessTranslator {
     // never collapses into a plain "stop" (#547).
     const finishReason =
       msg.terminal_reason === "structured_output_retry_exhausted"
-        ? "max-structured-output-retries"
+        ? FINISH_REASON_STRUCTURED_OUTPUT_RETRIES
         : mapFinishReason(msg.subtype);
     return {
       kind: "terminal",
