@@ -601,4 +601,10 @@ Acceptance claims spot-verified: `workflows/agent-step.ts:150` is a presence che
 
 ## Live Validate
 <!-- written by: validator · gate 3 -->
-_Awaiting validation._
+**Branch:** `feat/cc-runner-run-structured` @ `035e750`
+**Profile:** `strict`
+**Result:** ✅ all active gates passed (sole red = root-privilege live-integration suite, skipped in CI)
+**Gates:** build=PASS · dist-contract=PASS · typecheck=PASS · lint=PASS · tests=PASS-except-env (3 live cases, root privileges) · model-facing-schemas=PASS · smoke:memory=PASS · docs-events=PASS
+**Mutation spot-check:** capability-missing guard → kills test 9 ✅ · guardOpenObjectSchemas → kills test 10 ✅ · tree restored clean
+**Posted to:** PR #548 (https://github.com/pattern-stack/agentic-patterns-ts/pull/548#issuecomment-5675068389)
+**Validated by:** validator agent · 2026-09-15T01:15:00Z
