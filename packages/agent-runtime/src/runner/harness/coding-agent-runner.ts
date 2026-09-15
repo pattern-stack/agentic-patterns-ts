@@ -25,22 +25,32 @@
  * here; Codex (#330) will break it deliberately.
  */
 
-import { generateId } from "ai";
+import { generateId, zodSchema } from "ai";
+import type { ZodType } from "zod";
 
 import { type AgentEventBus, getAgentEventBus } from "../../events/agent-event-bus.js";
 import { type AgentEvent, createEvent } from "../../events/types.js";
 import type { HarnessDecision, NativeProposal, OperationClass } from "../../gates/decisions.js";
-import type { AgentLike, RunOptions, RunResult, RunnerProtocol } from "../types.js";
+import { RunCancelledError, StructuredOutputUnavailableError } from "../errors.js";
+import { guardOpenObjectSchemas } from "../schema-guard.js";
+import type {
+  AgentLike,
+  RunOptions,
+  RunResult,
+  RunnerProtocol,
+  StructuredRunResult,
+} from "../types.js";
 import { type DecisionValidation, validateDecision } from "./decision-validation.js";
 import { assertGateRequirements } from "./gate-requirements.js";
 import { HarnessEventTranslator, type HarnessRunAccounting } from "./harness-event-translator.js";
-import type {
-  AskRequestType,
-  HarnessAdapter,
-  HarnessEvent,
-  HarnessRunRequest,
-  HarnessSession,
-  ProbeContext,
+import {
+  type AskRequestType,
+  type HarnessAdapter,
+  type HarnessEvent,
+  type HarnessRunRequest,
+  type HarnessSession,
+  HarnessStartError,
+  type ProbeContext,
 } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -67,6 +77,20 @@ type StartRunPrep =
       readonly session: HarnessSession;
       readonly translator: HarnessEventTranslator;
     });
+
+/**
+ * The zeroed accounting for an entry-guard abort — never launched a
+ * translator, so there is honestly nothing accrued. Shared by
+ * `_emitCancelledRun` and `runStructured()` (#547).
+ */
+const EMPTY_CANCELLED_ACCOUNTING: HarnessRunAccounting = {
+  content: "",
+  inputTokens: 0,
+  outputTokens: 0,
+  toolCallsCount: 0,
+  iterations: 0,
+  finishReason: "cancelled",
+};
 
 export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
   implements RunnerProtocol
@@ -228,6 +252,92 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     yield complete;
   }
 
+  /**
+   * Execute an agent and return a schema-valid `object`, via the harness's
+   * native structured-output channel (#547) — parity with
+   * `AgentRunner.runStructured` on result shape, events, errors and
+   * cancellation. See `docs/runners.md` §3.5 for the mechanism and the
+   * declined parity items (`adviseStructuredRun`, `_maybeEmitRedaction`,
+   * `usageDetails`, `gateway` — provider-only concerns with no harness
+   * analogue).
+   */
+  async runStructured<T>(
+    agent: TAgent,
+    message: string,
+    schema: ZodType<T>,
+    options?: RunOptions,
+  ): Promise<StructuredRunResult<T>> {
+    guardOpenObjectSchemas(schema, options?.allowOpenObjectSchemas);
+    if (options?.abortSignal?.aborted) {
+      throw new RunCancelledError(
+        "runStructured: aborted before the run started (abortSignal already fired)",
+      );
+    }
+    const jsonSchema = (await zodSchema(schema).jsonSchema) as Record<string, unknown>;
+    const prep = await this._startRun(agent, message, options, /* streaming */ false, {
+      jsonSchema,
+    });
+    const { bus, startEvent, model, traceId, runId, parentSpanId } = prep;
+
+    if (prep.cancelled) {
+      // The signal fired between the check above and `_startRun`'s own check.
+      await bus.publish(this._completeEvent(startEvent, EMPTY_CANCELLED_ACCOUNTING, model));
+      throw new RunCancelledError(
+        "runStructured: aborted before the harness started (no structured output available)",
+      );
+    }
+    const { session, translator } = prep;
+
+    const cancelledRef = { value: false };
+    try {
+      for await (const hEvent of this._drainSession(session, options, cancelledRef)) {
+        for (const apEvent of translator.translate(hEvent)) {
+          await bus.publish(apEvent);
+        }
+      }
+    } catch (err) {
+      await this._emitError(bus, err, traceId, runId, parentSpanId);
+      throw err;
+    } finally {
+      await session.close();
+    }
+
+    if (cancelledRef.value) {
+      // Parity with `AgentRunner`'s `emitCancelledTerminal` then throw: the
+      // accrued content/tokens are real (D5 posture), not fabricated as "".
+      await bus.publish(
+        this._completeEvent(
+          startEvent,
+          { ...translator.finalize(), finishReason: "cancelled" },
+          model,
+        ),
+      );
+      throw new RunCancelledError(
+        "runStructured: aborted while the harness was running (no structured output available)",
+      );
+    }
+
+    const acc = translator.finalize();
+    if (acc.structuredOutput === undefined) {
+      const err = new StructuredOutputUnavailableError(acc.finishReason);
+      await this._emitError(bus, err, traceId, runId, parentSpanId);
+      throw err;
+    }
+    const parsed = schema.safeParse(acc.structuredOutput);
+    if (!parsed.success) {
+      // Parity with `AgentRunner.runStructured`'s validation-failure text.
+      const err = new Error(
+        `runStructured: model output failed schema validation — ${parsed.error.message}`,
+      );
+      await this._emitError(bus, err, traceId, runId, parentSpanId);
+      throw err;
+    }
+    const content = JSON.stringify(parsed.data);
+    const finalAcc: HarnessRunAccounting = { ...acc, content };
+    await bus.publish(this._completeEvent(startEvent, finalAcc, model));
+    return { ...this._result(finalAcc), object: parsed.data };
+  }
+
   // -------------------------------------------------------------------------
   // #368 — abort plumbing
   // -------------------------------------------------------------------------
@@ -326,14 +436,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // accrue — content is honestly "".
     const acc: HarnessRunAccounting = translator
       ? { ...translator.finalize(), finishReason: "cancelled" }
-      : {
-          content: "",
-          inputTokens: 0,
-          outputTokens: 0,
-          toolCallsCount: 0,
-          iterations: 0,
-          finishReason: "cancelled",
-        };
+      : EMPTY_CANCELLED_ACCOUNTING;
     await bus.publish(this._completeEvent(startEvent, acc, model));
     return this._result(acc);
   }
@@ -364,6 +467,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     message: string,
     options: RunOptions | undefined,
     streaming: boolean,
+    structured?: { readonly jsonSchema: Record<string, unknown> },
   ): Promise<StartRunPrep> {
     // #496: resolved once for THIS call and carried on the prep — never
     // rebinds the runner.
@@ -382,6 +486,15 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // harness can't provide.
     const probe = await adapter.probe(this.probeContext(agent, options));
     assertGateRequirements(bus.gates, probe, adapter.name);
+
+    // #547: fail loud, before any event, when a structured run is requested
+    // of a harness whose probe does not report the capability.
+    if (structured && probe.features.structuredOutput !== true) {
+      throw new HarnessStartError(
+        "schema-incompatible",
+        `${adapter.name}: runStructured is unavailable — the harness probe does not report features.structuredOutput`,
+      );
+    }
 
     const startEvent = createEvent("agent.message.start", {
       traceId,
@@ -405,7 +518,9 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
     // has no cheap "top of iteration" boundary before its FIRST call — this
     // IS that boundary). `message.start` above still fires unconditionally —
     // parity with AgentRunner.run()/stream(), which do the same; only
-    // `runStructured()` (not implemented by this base) skips it.
+    // `runStructured()` (#547) checks abort BEFORE calling `_startRun`, so a
+    // pre-start cancel on that path emits nothing (parity with
+    // `AgentRunner.runStructured`).
     if (options?.abortSignal?.aborted) {
       return { cancelled: true, bus, startEvent, model, traceId, runId, parentSpanId };
     }
@@ -422,6 +537,7 @@ export abstract class CodingAgentRunner<TAgent extends AgentLike = AgentLike>
       // #496: the gate seam is bound to THIS call's bus — parity with the
       // publish path above, so gates and subscribers always share a bus.
       evaluateIntent: bus.evaluateIntent.bind(bus),
+      ...(structured ? { structured } : {}),
     };
     const session = await adapter.start(req);
 

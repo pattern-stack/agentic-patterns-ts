@@ -4,6 +4,7 @@ export {
   modelSupportsToolsWithStructuredOutput,
 } from "./agent-runner.js";
 export type { AgentLike, AgentRunnerOptions, RunHeadersContext } from "./agent-runner.js";
+export { RunCancelledError, StructuredOutputUnavailableError } from "./errors.js";
 export { convertHistory } from "./message-utils.js";
 export {
   OpenObjectSchemaError,

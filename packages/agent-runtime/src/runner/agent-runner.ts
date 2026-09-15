@@ -116,25 +116,12 @@ export class ToolCallBlocked extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// RunCancelledError (#341 amendment)
+// RunCancelledError (#341 amendment; moved to ./errors.ts in #547, re-exported
+// here so existing throw sites and the public path both keep working)
 // ---------------------------------------------------------------------------
 
-/**
- * Thrown by `runStructured()` when `RunOptions.abortSignal` fires before a
- * schema-valid `object` exists to return. Unlike `stream()`/`run()` — whose
- * result shapes have no required "output" field, so they can return an
- * honest empty/cancelled result — `StructuredRunResult<T>` REQUIRES a
- * schema-valid `object: T`; there is no honest value to fabricate on abort.
- * Throwing (rather than the D1 return-never-throw posture) is the only
- * type-safe option here. `err.name === "RunCancelledError"` (or
- * `instanceof`) distinguishes this from a genuine schema/model failure.
- */
-export class RunCancelledError extends Error {
-  constructor(message = "runStructured aborted before a result was available") {
-    super(message);
-    this.name = "RunCancelledError";
-  }
-}
+import { RunCancelledError } from "./errors.js";
+export { RunCancelledError } from "./errors.js";
 
 /**
  * Abort-shaped rejection names, mirroring the SDK's own `isAbortError`

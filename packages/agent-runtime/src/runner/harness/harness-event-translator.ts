@@ -47,6 +47,8 @@ export interface HarnessRunAccounting {
   readonly toolCallsCount: number;
   readonly iterations: number;
   readonly finishReason: string;
+  /** The schema-conformant final object, present only on a structured run (#547). */
+  readonly structuredOutput?: unknown;
 }
 
 export class HarnessEventTranslator {
@@ -64,6 +66,7 @@ export class HarnessEventTranslator {
   private finishReason = "unknown";
   private reportedTurns: number | undefined;
   private finalTextFallback: string | undefined;
+  private structuredOutput: unknown;
 
   // Iteration / llm state
   private syntheticIterations = 0;
@@ -132,6 +135,7 @@ export class HarnessEventTranslator {
       toolCallsCount: this.toolCallsMade,
       iterations: this.reportedTurns ?? this.syntheticIterations,
       finishReason: this.finishReason,
+      structuredOutput: this.structuredOutput,
     };
   }
 
@@ -262,6 +266,7 @@ export class HarnessEventTranslator {
     this.costUsd = event.costUsd;
     this.reportedTurns = event.numTurns;
     this.finishReason = event.finishReason;
+    this.structuredOutput = event.structuredOutput;
     const finalText = event.meta?.finalText;
     if (typeof finalText === "string") this.finalTextFallback = finalText;
   }

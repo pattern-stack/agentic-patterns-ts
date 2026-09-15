@@ -144,6 +144,8 @@ export type HarnessEvent = { ids: NativeIds; parent?: ParentRef; meta?: HarnessE
       usage: TokenUsage;
       costUsd?: number;
       finishReason: FinishReason;
+      /** The schema-conformant final object, when the run was structured (#547). */
+      structuredOutput?: unknown;
     }
 );
 
@@ -191,6 +193,12 @@ export interface HarnessProbeResult {
     readonly partialStreaming: boolean;
     readonly inputRewrite: boolean;
     readonly durableRules: boolean;
+    /**
+     * Whether the harness can constrain its final output to a JSON Schema
+     * (`runStructured()`, #547). Optional so out-of-repo adapters written
+     * before this field existed stay valid; absent means unsupported.
+     */
+    readonly structuredOutput?: boolean;
   };
 }
 
@@ -302,6 +310,8 @@ export interface HarnessRunRequest<TAgent extends AgentLike = AgentLike> {
   readonly streaming: boolean;
   /** The base's gate-evaluation seam (see {@link IntentEvaluator}). */
   readonly evaluateIntent: IntentEvaluator;
+  /** Present only on the runStructured path: the JSON Schema the harness must constrain its final output to. */
+  readonly structured?: { readonly jsonSchema: Record<string, unknown> };
 }
 
 /**
