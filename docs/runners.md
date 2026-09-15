@@ -90,7 +90,7 @@ From `packages/agent-runtime/src/runner/agent-runner.ts`:
 
 These are not required for `createRunner()` but worth tracking — some of them meaningfully improve provider-specific UX.
 
-1. ~~**`generateObject` / `streamObject`** — structured-output path.~~ **Shipped.** `AgentRunner.runStructured()` provides the validated-Zod-object path; agents no longer have to emulate it through tool calls.
+1. ~~**`generateObject` / `streamObject`** — structured-output path.~~ **Shipped.** `AgentRunner.runStructured()` provides the validated-Zod-object path; agents no longer have to emulate it through tool calls. Also available on the Claude Code runners since #547 (native SDK `json_schema` output; see §3.5).
 2. ~~**Provider-specific `providerOptions`**~~ **Shipped (#514).** `RunOptions.modelParams.providerOptions` — e.g. `providerOptions.anthropic.thinking = { type: "enabled", budgetTokens: 10_000 }` — is forwarded verbatim to every provider call, and `modelParams.reasoningEffort` maps onto the SDK's top-level `reasoning` call setting (so a caller no longer has to reach for a provider-specific `providerOptions` key just to request reasoning effort). `AgentRunner` accepts a resolved `LanguageModelV2`/`LanguageModelV3`, not a raw model-factory string — the "raw `LanguageModelV1`" framing above was stale. Honored by `AgentRunner`'s five provider calls only today; harness-backed runners (`CodingAgentRunner` subclasses) and `MockRunner` ignore it — see `RunOptions.modelParams`'s doc comment. Workflow-seam forwarding is a follow-up, not shipped here.
 3. **Reasoning deltas** — **already shipped**, not a gap: `fullStream` emits `reasoning` parts for extended-thinking models, and `AgentRunner.stream()` already turns them into `agent.reasoning` events (`agent-runner.ts:2123`/`:2158`/`:2171`/`:2319`); `run()` emits `agent.reasoning` too (`:947`). This item's earlier claim that the switch statement "drops them on the floor" was stale before #514 landed and is corrected here rather than left to mislead.
 4. **Image / multimodal inputs** — `CoreMessage` content can be `{ type: "image", image: ... }`. Our `CanonicalMessage` shape is text-only. Out of scope for this doc.
@@ -154,8 +154,9 @@ Running the same agent through both runners:
 
 `RunResult` now carries the real `iterations` (from `num_turns`, not a hardcoded `1`), the
 mapped `finishReason` (`success`→`stop`, `error_max_turns`→`max-turns`,
-`error_during_execution`→`error`, `error_max_budget_usd`→`budget`, else `unknown`), and an
-optional `costUsd`.
+`error_during_execution`→`error`, `error_max_budget_usd`→`budget`,
+`error_max_structured_output_retries`→`max-structured-output-retries` (#547; see §3.5), else
+`unknown`), and an optional `costUsd`.
 
 **Remaining honest gaps** (no native source — left at zero/absent rather than faked):
 
@@ -176,6 +177,26 @@ cost display, `harness.native` panels) is out of scope here — tracked in #324.
 Use `ClaudeCodeAPIRunner` as the fallback when no API key is set but the user has a Claude Max login via the CLI. Prefer `AgentRunner + @ai-sdk/anthropic` when `ANTHROPIC_API_KEY` is available, since it gives richer events and doesn't require a subprocess.
 
 > **It also drops conversation history.** `ClaudeCodeAPIRunner` has no read site for `options.messageHistory` — only `AgentRunner`'s message assembly does. Landing on this runner turns every multi-turn conversation into a series of first turns, while still answering plausibly. That is why `createRunner()` refuses to fall through to it when a provider credential *is* present but its package can't load, and why the fallback's `reason` string says so out loud. See [ADR 0010](adr/0010-bundled-provider-packages.md) and #472.
+
+### 3.5 Structured output on the Claude Code runners (#547)
+
+`ClaudeCodeRunner` and `ClaudeCodeAPIRunner` implement `runStructured<T>(agent, message, schema, options)` on the shared `CodingAgentRunner` base, driven by the Claude Agent SDK's **native** `outputFormat: { type: "json_schema" }` — no prompt contract, no repair loop.
+
+**Mechanism.** The base converts the Zod schema to JSON Schema (`zodSchema(schema).jsonSchema`, the same conversion `AgentRunner.runStructured` uses) and hands it to the harness as `HarnessRunRequest.structured.jsonSchema`. The CC adapter passes it through as `outputFormat` on the SDK's `query()` options. The CLI ends a `json_schema` turn on an end-turn tool carrier — a built-in tool named `StructuredOutput` — followed by a `structured_output` attachment on the result; the translator copies that onto the terminal event's `structuredOutput`, and the base parses it against the schema before returning.
+
+**The carrier is not an agent tool.** It is the harness's *output channel* — the SDK's own docs describe its `tool_result` as a placeholder — so it bypasses the gate chain entirely: `_makeHooks`' `PreToolUse`/`PostToolUse` hooks return `{}` for it on a structured run before any gate evaluation or `agent.tool.*` emission, the same posture as `AgentRunner`'s `Output.object` path (which also emits no tool events). The bypass is scoped to structured runs only. The CLI force-appends the carrier to the resolved tool list after `tools`/`allowedTools` resolution whenever a schema is present, so it survives `tools: []` (the `ClaudeCodeAPIRunner` preset); a host's own `extraDisallowedTools: ["StructuredOutput"]` still strips it (that host gets an honest `StructuredOutputUnavailableError`).
+
+**Result / event / error / cancel parity** with `AgentRunner.runStructured`:
+
+- Same `StructuredRunResult<T>` shape: `RunResult & { object: T }`.
+- Same event pair on success — `agent.message.start` … `agent.message.complete` with `content` the `JSON.stringify`'d object.
+- Schema-invalid model output throws the same message text (`"runStructured: model output failed schema validation — …"`) after one `agent.error {recoverable:false}`.
+- A run that finishes with no `structured_output` payload throws a harness-only `StructuredOutputUnavailableError` (`finishReason` tells you which: `"stop"` = the model never called the carrier — including a schema Ajv rejected, which the CLI logs as `Init JSON schema rejected` and silently disables structured output rather than failing the run; `"max-structured-output-retries"` = the model couldn't produce schema-conformant output within the CLI's retry budget; anything else is the harness's own `finishReason`).
+- `RunOptions.abortSignal` mirrors `AgentRunner`: pre-start abort throws `RunCancelledError` with no events; mid-run abort tears the session down, emits `agent.message.complete {finishReason:"cancelled"}` with the accrued content/tokens (not `""` — the harness family's D5 posture: partial output the user already saw is real, not discarded), then throws `RunCancelledError`.
+
+**Declined parity items** (provider-only concerns with no harness analogue): `adviseStructuredRun` (an AI-SDK model-capability advisory — the harness resolves its own model), `_maybeEmitRedaction` (the Bifrost gateway metadata scan, #407 — there's no gateway on the subprocess path), and `usageDetails`/`gateway` on the result (`_result()` emits neither for `run()` either — same gap, not new). Also unchanged from `run()`/`stream()`: `messageHistory` and `modelParams` are not read on this runner family (§2.5 item 2, §3.4's conversation-history note).
+
+**Effect:** this also unlocks `AgentStep` structured outputs (`workflows/agent-step.ts`) on the Claude Code runners — a step declaring a non-string `output` schema no longer throws `StructuredOutputUnsupported` when routed through `ClaudeCodeRunner`/`ClaudeCodeAPIRunner`.
 
 ---
 
@@ -651,6 +672,18 @@ Uses the Claude Agent SDK subprocess but blocks Claude Code's native tools (`Rea
 
 **Trade-off:** `agent.iteration.*` and (in `run()`) `agent.llm.start` are *synthesized* boundaries (`meta.synthetic`), not causal ones, and per-call `agent.llm.end.durationMs` is best-effort (≈0 in `run()`). Use `AgentRunner + @ai-sdk/anthropic` if you want fully causal per-call timing in the admin dashboard. Since #323 this runner does emit per-call `agent.llm.end` tokens, real `agent.tool.end.durationMs`, mapped `finishReason`, and run `costUsd` (see §3.3).
 
+It also implements `runStructured()` (#547), driven by the SDK's native `outputFormat: json_schema` — no prompt contract, no repair loop:
+
+```ts
+import { z } from "zod";
+
+const schema = z.object({ answer: z.number(), reasoning: z.string() });
+const { object } = await runner.runStructured(agent, "What is 2 + 2?", schema);
+// object.answer === 4
+```
+
+See §3.5 for the mechanism, the carrier-tool bypass, and parity with `AgentRunner.runStructured`.
+
 #### `ClaudeCodeRunner` — Claude Code's native tools
 
 ```ts
@@ -660,7 +693,7 @@ const runner = new ClaudeCodeRunner();
 await runner.run(agent, "Review the last commit and fix the typo in README.md");
 ```
 
-Same as the API runner but leaves Claude Code's native tools (`Read`, `Write`, `Bash`, etc.) enabled. Use this when you actually want Claude Code to do file-system work.
+Same as the API runner but leaves Claude Code's native tools (`Read`, `Write`, `Bash`, etc.) enabled. Use this when you actually want Claude Code to do file-system work. Also has `runStructured()` — see the `ClaudeCodeAPIRunner` entry above and §3.5.
 
 #### `MockRunner` — deterministic tests
 
