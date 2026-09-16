@@ -231,6 +231,15 @@ export interface RunOptions {
    * returns — no `message.complete`, no `conversation.end` (this runner never
    * emits conversation events on any path; `Conversation.stream()` derives
    * `reason: "cancelled"` independently from `options.signal.aborted`).
+   *
+   * `runStructured()` on this family (#547) mirrors `AgentRunner`: a signal
+   * already fired at entry throws `RunCancelledError` with no events; a
+   * signal that fires after `agent.message.start` but before the subprocess
+   * launches (during the probe) finalizes the open run with
+   * `agent.message.complete {finishReason:"cancelled"}` and then throws; a
+   * mid-run abort tears the session down, emits the same cancelled
+   * `message.complete` with whatever accrued, then throws
+   * `RunCancelledError`.
    */
   abortSignal?: AbortSignal;
   /**
@@ -340,7 +349,10 @@ export interface RunnerProtocol {
   /**
    * Execute an agent and return a typed object validated against `schema`,
    * via a capability-gated structured-output path (see DESIGN §9.4).
-   * Optional — not all runners support structured output.
+   * Optional — not all runners support structured output. Implemented by
+   * `AgentRunner`, `MockRunner`, and the `CodingAgentRunner` family
+   * (`ClaudeCodeRunner` / `ClaudeCodeAPIRunner`, #547) — which also unlocks
+   * `AgentStep` structured outputs on those runners.
    */
   runStructured?<T>(
     agent: AgentLike,

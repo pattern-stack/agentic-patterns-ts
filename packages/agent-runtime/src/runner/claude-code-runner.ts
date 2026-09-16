@@ -10,7 +10,10 @@
  *    Agent SDK `query()` as a HarnessSession and translates SDK messages to
  *    normalized events (relocated {@link CCHarnessTranslator});
  *  - `_buildOptions()` — the SDK Options (system prompt, model map, isolated
- *    config env, native-tool axis) plus the PreToolUse/PostToolUse gate hooks;
+ *    config env, native-tool axis, and — on `runStructured()` — the SDK's native
+ *    `outputFormat: { type: "json_schema" }`, #547) plus the PreToolUse/PostToolUse
+ *    gate hooks (which let the CLI's `StructuredOutput` carrier tool through
+ *    ungated on structured runs — see {@link CC_STRUCTURED_OUTPUT_TOOL});
  *  - per-run correlation id injected via the session's `options.env` (NO
  *    `process.env` mutation — the old `setCorrelationEnv` race is gone).
  *
@@ -50,6 +53,18 @@ import { type AgentLikeForBridge, buildAgentServers } from "./sdk-bridge.js";
 import type { RunOptions } from "./types.js";
 
 export type { CCConfigSource, NativeToolsSetting, OAuthTokenSource } from "./cc-config.js";
+
+/**
+ * The CLI's built-in end-turn carrier tool for `outputFormat: { type:
+ * "json_schema" }` runs (#547). Pinned by binary evidence against CC 2.1.226
+ * (a built-in tool descriptor whose `name` is the literal `"StructuredOutput"`)
+ * — it is not a typed name anywhere in the SDK's `.d.ts`, so this constant is
+ * the one place to change if the CLI ever renames it. The CLI force-appends it
+ * to the resolved tool list whenever a schema is present (after `tools`
+ * resolution, so `tools: []` cannot hide it); `disallowedTools` runs after that
+ * append and CAN strip it — see `_buildOptions` step 3 and `_makeHooks` below.
+ */
+export const CC_STRUCTURED_OUTPUT_TOOL = "StructuredOutput";
 
 // ---------------------------------------------------------------------------
 // Model mapping
@@ -148,6 +163,14 @@ export interface ClaudeCodeRunnerOptions {
  * stream into the AgentEvent stream so gates, exporters, and UX work
  * transparently. Gate enforcement is handled via PreToolUse hooks — a blocked
  * ToolCallIntent returns `permissionDecision: 'deny'` so the tool never runs.
+ *
+ * `runStructured()` (#547) is inherited from the base and driven by the SDK's
+ * native `outputFormat: { type: "json_schema" }`: the base converts the Zod
+ * schema to JSON Schema and hands it down as `HarnessRunRequest.structured`;
+ * `_buildOptions` sets `outputFormat`; the CLI ends the turn on its
+ * `StructuredOutput` carrier (bypassed by the hooks, never gated) and the result's
+ * `structured_output` flows back through the terminal event. See
+ * `docs/runners.md` §3.5.
  */
 export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
   protected readonly _defaults: Partial<SDKOptions>;
@@ -231,6 +254,8 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
       parentSpanId?: string;
       correlationId?: string;
       includePartialMessages?: boolean;
+      /** The JSON Schema to constrain the run's output to, when structured (#547). */
+      outputSchema?: Record<string, unknown>;
     },
   ): SDKOptions {
     const sdkOpts: SDKOptions = {
@@ -240,11 +265,24 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
       maxTurns: options?.maxIterations ?? 10,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      hooks: this._makeHooks(context.runId, context.traceId, context.parentSpanId),
+      hooks: this._makeHooks(context.runId, context.traceId, context.parentSpanId, {
+        structured: context.outputSchema !== undefined,
+      }),
     };
 
     if (context.includePartialMessages) {
       sdkOpts.includePartialMessages = true;
+    }
+
+    // Native SDK structured output (#547): per-run wins over any
+    // `_defaults.outputFormat` since `_defaults` is spread first, above. The
+    // CLI force-appends its `StructuredOutput` carrier tool after base tool
+    // resolution whenever a schema is present, so it is reachable regardless
+    // of the native-tools axis below — never add it to `disallowedTools`, and
+    // never strip a host's own `extraDisallowedTools: ["StructuredOutput"]`
+    // (that host gets an honest `StructuredOutputUnavailableError`).
+    if (context.outputSchema) {
+      sdkOpts.outputFormat = { type: "json_schema", schema: context.outputSchema };
     }
 
     // Per-run correlation id → subprocess env (never a process.env mutation).
@@ -299,6 +337,7 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
     runId: string,
     traceId: string,
     parentSpanId: string | undefined,
+    opts: { structured: boolean },
   ): Partial<Record<string, HookCallbackMatcher[]>> {
     // Map tool_use_id → { span_id, startedAt } so start/end share a span_id
     // (exporters correlate the pair) and PostToolUse can diff durationMs (#323).
@@ -306,6 +345,13 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
 
     const onPreToolUse: HookCallback = async (input, toolUseId, _opts) => {
       const toolName = ((input as Record<string, unknown>).tool_name as string) ?? "";
+      // The StructuredOutput carrier (#547) is the harness's output channel,
+      // not an agent tool exercising a capability — same posture as
+      // AgentRunner's Output.object path, which emits no tool events. Bypass
+      // BOTH hooks together (see onPostToolUse below): skipping only this one
+      // would leave PostToolUse emitting a tool.end with no span. Scoped to
+      // structured runs so an ordinary run() is unaffected.
+      if (opts.structured && toolName === CC_STRUCTURED_OUTPUT_TOOL) return {};
       const toolInput = (input as Record<string, unknown>).tool_input;
       const tcId = toolUseId ?? generateId();
       const args =
@@ -348,6 +394,7 @@ export class ClaudeCodeRunner extends CodingAgentRunner<AgentLikeForBridge> {
 
     const onPostToolUse: HookCallback = async (input, toolUseId, _opts) => {
       const toolName = ((input as Record<string, unknown>).tool_name as string) ?? "";
+      if (opts.structured && toolName === CC_STRUCTURED_OUTPUT_TOOL) return {};
       const toolInput = (input as Record<string, unknown>).tool_input;
       const toolResponse = (input as Record<string, unknown>).tool_response;
       const tcId = toolUseId ?? generateId();

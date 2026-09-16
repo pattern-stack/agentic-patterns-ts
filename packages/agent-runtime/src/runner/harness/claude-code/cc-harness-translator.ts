@@ -35,6 +35,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import type { NativeIds } from "../../../gates/decisions.js";
+import { FINISH_REASON_STRUCTURED_OUTPUT_RETRIES } from "../../errors.js";
 import type { HarnessEvent } from "../types.js";
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,8 @@ export function mapFinishReason(subtype: string | undefined): string {
       return "error";
     case "error_max_budget_usd":
       return "budget";
+    case "error_max_structured_output_retries":
+      return FINISH_REASON_STRUCTURED_OUTPUT_RETRIES;
     default:
       return "unknown";
   }
@@ -255,6 +258,17 @@ export class CCHarnessTranslator {
     const usage = msg.usage as unknown as { input_tokens?: number; output_tokens?: number } | null;
     const finalText =
       msg.subtype === "success" && typeof msg.result === "string" ? msg.result : undefined;
+    const structuredOutput =
+      msg.subtype === "success" && msg.structured_output !== undefined
+        ? msg.structured_output
+        : undefined;
+    // A `success` result may still carry `terminal_reason:
+    // "structured_output_retry_exhausted"` — prefer it so retry exhaustion
+    // never collapses into a plain "stop" (#547).
+    const finishReason =
+      msg.terminal_reason === "structured_output_retry_exhausted"
+        ? FINISH_REASON_STRUCTURED_OUTPUT_RETRIES
+        : mapFinishReason(msg.subtype);
     return {
       kind: "terminal",
       ids: this.ids(),
@@ -264,7 +278,8 @@ export class CCHarnessTranslator {
         outputTokens: usage?.output_tokens ?? 0,
       },
       ...(msg.total_cost_usd !== undefined ? { costUsd: msg.total_cost_usd } : {}),
-      finishReason: mapFinishReason(msg.subtype),
+      finishReason,
+      ...(structuredOutput !== undefined ? { structuredOutput } : {}),
       ...(finalText !== undefined ? { meta: { finalText } } : {}),
     } as HarnessEvent;
   }

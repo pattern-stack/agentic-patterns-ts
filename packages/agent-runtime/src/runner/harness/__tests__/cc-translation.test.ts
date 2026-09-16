@@ -78,6 +78,8 @@ function resultSuccess(opts?: {
   result?: string;
   inputTokens?: number;
   outputTokens?: number;
+  structuredOutput?: unknown;
+  terminalReason?: string;
 }): SDKResultMessage {
   return {
     type: "result",
@@ -97,6 +99,8 @@ function resultSuccess(opts?: {
     permission_denials: [],
     uuid: "u-result",
     session_id: "sess",
+    ...(opts?.structuredOutput !== undefined ? { structured_output: opts.structuredOutput } : {}),
+    ...(opts?.terminalReason !== undefined ? { terminal_reason: opts.terminalReason } : {}),
   } as unknown as SDKResultMessage;
 }
 
@@ -216,7 +220,7 @@ describe("mapFinishReason (result subtype → canonical finishReason)", () => {
     ["error_max_turns", "max-turns"],
     ["error_during_execution", "error"],
     ["error_max_budget_usd", "budget"],
-    ["error_max_structured_output_retries", "unknown"],
+    ["error_max_structured_output_retries", "max-structured-output-retries"],
     ["something_new", "unknown"],
     [undefined, "unknown"],
   ];
@@ -453,6 +457,31 @@ describe("translation — finalize() accounting", () => {
     ]);
     finalize();
     expect(warn).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structured output (#547)
+// ---------------------------------------------------------------------------
+
+describe("translation — structured output (#547)", () => {
+  it("result with structured_output → terminal structuredOutput deep-equals it", () => {
+    const { finalize } = drive([resultSuccess({ structuredOutput: { a: 1 } })]);
+    expect(finalize().structuredOutput).toEqual({ a: 1 });
+  });
+
+  it("success without the field → structuredOutput is undefined", () => {
+    const { finalize } = drive([resultSuccess()]);
+    expect(finalize().structuredOutput).toBeUndefined();
+  });
+
+  it("a success result with terminal_reason structured_output_retry_exhausted and no payload → finishReason max-structured-output-retries", () => {
+    const { finalize } = drive([
+      resultSuccess({ terminalReason: "structured_output_retry_exhausted" }),
+    ]);
+    const acc = finalize();
+    expect(acc.finishReason).toBe("max-structured-output-retries");
+    expect(acc.structuredOutput).toBeUndefined();
   });
 });
 

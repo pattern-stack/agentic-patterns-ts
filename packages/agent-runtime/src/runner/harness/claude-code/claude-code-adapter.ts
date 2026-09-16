@@ -44,6 +44,8 @@ export type BuildSDKOptions = (
     parentSpanId?: string;
     correlationId?: string;
     includePartialMessages?: boolean;
+    /** The JSON Schema to constrain the run's output to, when structured (#547). */
+    outputSchema?: Record<string, unknown>;
   },
 ) => SDKOptions;
 
@@ -114,6 +116,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter<AgentLikeForBridge> {
         partialStreaming: true,
         inputRewrite: true,
         durableRules: true,
+        structuredOutput: true,
       },
     };
   }
@@ -125,6 +128,7 @@ export class ClaudeCodeAdapter implements HarnessAdapter<AgentLikeForBridge> {
       parentSpanId: req.parentSpanId,
       correlationId: req.correlationId,
       includePartialMessages: req.streaming,
+      outputSchema: req.structured?.jsonSchema,
     });
     const translator = new CCHarnessTranslator({
       fallbackModel: req.agent.getModel() ?? "",

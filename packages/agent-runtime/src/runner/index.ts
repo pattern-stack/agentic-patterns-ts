@@ -4,6 +4,11 @@ export {
   modelSupportsToolsWithStructuredOutput,
 } from "./agent-runner.js";
 export type { AgentLike, AgentRunnerOptions, RunHeadersContext } from "./agent-runner.js";
+export {
+  RunCancelledError,
+  StructuredOutputUnavailableError,
+  FINISH_REASON_STRUCTURED_OUTPUT_RETRIES,
+} from "./errors.js";
 export { convertHistory } from "./message-utils.js";
 export {
   OpenObjectSchemaError,
@@ -20,7 +25,7 @@ export type {
   CanonicalMessage,
   CanonicalMessagePart,
 } from "./types.js";
-export { ClaudeCodeRunner } from "./claude-code-runner.js";
+export { ClaudeCodeRunner, CC_STRUCTURED_OUTPUT_TOOL } from "./claude-code-runner.js";
 export type {
   ClaudeCodeRunnerOptions,
   CCConfigSource,
