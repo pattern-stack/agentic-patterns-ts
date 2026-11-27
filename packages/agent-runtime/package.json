@@ -1,6 +1,6 @@
 {
   "name": "@pattern-stack/agentic-runtime",
-  "version": "0.40.0",
+  "version": "0.40.1",
   "description": "Agent execution runtime — runner, events, gates, multi-agent, conversation, exporters",
   "license": "FSL-1.1-ALv2",
   "type": "module",
