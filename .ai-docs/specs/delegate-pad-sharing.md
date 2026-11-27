@@ -56,7 +56,7 @@ rail** (impossible today — the gap), and the **`agent.scratchpad.fork` event p
 
 **Downstream consumers**: aloevera-ts `examples/coordinator-stub/coordinator.ts`
 hand-builds the team only to get pad-aware *briefs* (`taskPrompt`); the sharing
-itself rides the stock chain. dealbrain holds evidence pools in closures citing the
+itself rides the stock chain. A consumer app holds evidence pools in closures citing the
 stale doc line.
 
 ## Corrections to the issue
@@ -71,7 +71,7 @@ stale doc line.
    sees the parent's run-scoped slots" cannot be asserted through the sugar.
    Parent→child visibility is asserted through the subagent's **tools**
    (`requireBackpack(ctx, pack)` reading parent-seeded entries) — which is the
-   dealbrain-relevant path anyway. (Prompt-level visibility through a custom
+   consumer-relevant path anyway. (Prompt-level visibility through a custom
    `AgentStep` is already pinned by host-propagation Test 1.)
 3. **The issue's `CoordinatorStep`-shaped sketch is awkward on the MockRunner
    rail.** With a typed (non-string) `output`, the internal leaf takes
@@ -116,7 +116,7 @@ Run-scoped share-through-fork **is** the intended default for `delegateTo` /
   over behavior the slot declaration already governs.
 - Fork-don't-alias (#124) already bounds the blast radius: no join/merge-back,
   branch scopes never escape the call.
-- Consumer evidence runs the other way: dealbrain's defect class came from state
+- Consumer evidence runs the other way: a consumer app's defect class came from state
   being INVISIBLE across the seam; nobody has asked for less visibility.
 
 Revisit only if a real consumer needs per-team isolation of run-scoped state
@@ -146,7 +146,7 @@ consumer tool would.
 `sequential-agents.ts` gets the corrected contract inline (it renders into the
 published `.d.ts` — the load-bearing surface a consumer cited as a design
 ruling). The ADR records *why* default-on with no knob. CHANGELOG names the
-semantics so dealbrain can retire closure seams against a stated contract.
+semantics so consumers can retire closure seams against a stated contract.
 
 ### D5 — Lockstep bump rides in this PR
 
@@ -210,7 +210,7 @@ structural edit.
 
 ### `docs/adr/0003-delegateto-pad-sharing-default.md` — NEW
 
-Context (the #124 chain, the stale doc, the dealbrain/aloevera evidence) →
+Context (the #124 chain, the stale doc, the consumer and aloevera evidence) →
 Decision (default-on, share-through-fork, no team-level knob; slot scope is the
 isolation control) → Consequences (docs are the contract; consumers retire
 closure seams; escape hatches; join/merge-back stays v2) → Alternatives
@@ -321,7 +321,7 @@ list (`:197-201`) gets a one-line pointer to the two suites that now exist.
 ## Addendum — runStructured tier-0 terminal short-circuit
 
 User-requested scope extension (2026-07-15), same seam family. Motivation
-(dealbrain overnight run 2026-07-15): when a tool-bearing agent's tier-1 loop
+(a consumer app's overnight run 2026-07-15): when a tool-bearing agent's tier-1 loop
 ends via a TERMINAL tool, `runStructured`'s 2-tier path re-converts the
 already-structured terminal result through a second LLM call — wasteful and
 demonstrably lossy (tier-2 on gemini flash-lite stripped `observation:`
@@ -452,7 +452,7 @@ it is not a `buildToolCtx` site — the spec's phrasing is precise); `events/typ
    (FanOut/Loop/`delegateTo` alike), not the delegation seam specifically — there is no
    single-slot way to say "shared across stages, isolated across sub-teams." But D1 explicitly
    defers the knob pending real demand, and the consumer evidence runs toward MORE visibility
-   (dealbrain's defect was invisibility), so deferring is well-justified YAGNI.
+   (the consumer app's defect was invisibility), so deferring is well-justified YAGNI.
 3. **Minor scope creep:** `docs/node-context.md` reword is beyond the issue's literal doc list
    (which names only `sequential-agents.ts`). Same stale-framing defect class, so defensible —
    just flagging it as an addition.

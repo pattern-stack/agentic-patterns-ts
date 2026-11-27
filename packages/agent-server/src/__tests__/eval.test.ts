@@ -63,7 +63,7 @@ function seedResult(
   opts: SeedResultOptions,
 ): void {
   const runId = store.startRun({
-    agentName: "dealbrain/curator",
+    agentName: "sales/curator",
     // `eval:` marker = runEval's EVAL_TRACE_PREFIX per-case traceId convention.
     traceId: `eval:${evalRunId}:${caseId}`,
     metadata: { evalRunId, caseId },
@@ -124,7 +124,7 @@ describe("eval routes", () => {
     // --- suite A: variant "a", split "dev" ---
     runAId = store.startEvalRun({
       setId: "bank",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       variant: "a",
       split: "dev",
       model: "sonnet",
@@ -164,7 +164,7 @@ describe("eval routes", () => {
     // --- suite B: variant "b", split "train", same set/target ---
     runBId = store.startEvalRun({
       setId: "bank",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       variant: "b",
       split: "train",
       model: "sonnet",
@@ -297,7 +297,7 @@ describe("eval routes", () => {
 
     it("narrows by ?target=", async () => {
       const app = mkApp(store);
-      const res = await app.request(`/eval/runs?target=${encodeURIComponent("dealbrain/curator")}`);
+      const res = await app.request(`/eval/runs?target=${encodeURIComponent("sales/curator")}`);
       const body = (await res.json()) as { runs: EvalRunRow[] };
       expect(body.runs.map((r) => r.id)).toEqual([runBId, runAId]);
     });
@@ -402,7 +402,7 @@ describe("eval routes", () => {
 
       expect(body.run.id).toBe(runAId);
       expect(body.run.setId).toBe("bank");
-      expect(body.run.targetId).toBe("dealbrain/curator");
+      expect(body.run.targetId).toBe("sales/curator");
       expect(body.run.variant).toBe("a");
       expect(body.run.split).toBe("dev");
       expect(body.run.status).toBe("ok");
@@ -515,7 +515,7 @@ describe("eval routes", () => {
     it("narrows by ?set= and ?target=", async () => {
       const app = mkApp(store);
       const res = await app.request(
-        `/eval/aggregates/splits?set=bank&target=${encodeURIComponent("dealbrain/curator")}`,
+        `/eval/aggregates/splits?set=bank&target=${encodeURIComponent("sales/curator")}`,
       );
       const body = (await res.json()) as { aggregates: unknown[] };
       expect(body.aggregates).toHaveLength(2);

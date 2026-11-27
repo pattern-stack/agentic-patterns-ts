@@ -29,7 +29,7 @@ different from production. At the same time, `sequentialAgent`'s published docs
 still said subagent teams could not see the pad, even though #124 had made the
 sharing ambient.
 
-Consumer evidence favors visibility. dealbrain kept evidence pools in closures
+Consumer evidence favors visibility. A consumer app kept evidence pools in closures
 because state appeared unavailable across delegation, while aloevera-ts
 hand-built team plumbing to make pad-aware briefs. Both are symptoms of an
 unstated or inconsistently exercised contract, not requests for stronger

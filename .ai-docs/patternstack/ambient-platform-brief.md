@@ -11,7 +11,7 @@ Make the pattern-stack ecosystem able to produce **ambient, always-on agent syst
 OpenClaw / Hermes-Agent class — *anywhere*: a central coordinator agent wrapping domain agents,
 running as a persistent daemon, triggered by schedules and external events, with cross-session
 memory and messaging-channel ingress. **Platform-first**: capabilities land in the framework and
-codegen substrate; apps (swe-brain, dealbrain) are first adopters, never the home. The MVP
+codegen substrate; apps (swe-brain and other consumer apps) are first adopters, never the home. The MVP
 competitor is a Slack-first ambient work-brain built by *generating* the product around a domain,
 not configuring a monolith.
 

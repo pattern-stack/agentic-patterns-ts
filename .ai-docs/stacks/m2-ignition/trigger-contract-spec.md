@@ -15,7 +15,7 @@ formalizes; designed so AgencyHost *wraps* it, never replaces it.
 - Nothing trigger-shaped exists in any package. Three parallel agent-identity notions
   (CLI `DiscoveredAgent.id`, server `AgentRegistration.id`, runner `role.name`) and the
   runtime layer has none of them — `RunRow.agentName` stores the role name, so a run
-  cannot be joined back to `dealbrain/pm`.
+  cannot be joined back to `sales/pm`.
 - The de-facto run-started event is `agent.message.start`; nothing anywhere records *why*
   a run happened.
 - `POST /eval/runs` starts runs by skipping `instantiate` + scope — the #268 bug class.

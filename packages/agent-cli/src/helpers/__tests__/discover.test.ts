@@ -116,9 +116,9 @@ describe("inferIdentity — domain namespacing", () => {
   });
 
   it("nested {domain}/agents/ → id namespaced by domain", () => {
-    const file = path.join(FX, "dealbrain/agents/retrieval/agent.ts");
+    const file = path.join(FX, "sales/agents/retrieval/agent.ts");
     expect(inferIdentity(file, "default", FX)).toEqual({
-      id: "dealbrain/retrieval",
+      id: "sales/retrieval",
       name: "Retrieval",
     });
   });
@@ -133,7 +133,7 @@ describe("discoverAgents — recursive across domains + dedupe", () => {
   it("finds child agents in nested {domain}/agents/ and namespaces their ids", async () => {
     const { agents: found, errors } = await discoverAgents(FX, ["*/agents/**/agent.{ts,js,mjs}"]);
     expect(errors).toEqual([]);
-    expect(found.map((a) => a.id).sort()).toEqual(["canvas/writer", "dealbrain/retrieval"]);
+    expect(found.map((a) => a.id).sort()).toEqual(["canvas/writer", "sales/retrieval"]);
   });
 });
 

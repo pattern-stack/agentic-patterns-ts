@@ -40,7 +40,7 @@ describe("fetchEvalRuns", () => {
         tsStart: "2026-07-01T10:00:00Z",
         tsEnd: "2026-07-01T10:05:00Z",
         setId: "bank",
-        targetId: "dealbrain/curator",
+        targetId: "sales/curator",
         variant: "baseline",
         split: "dev",
         model: "sonnet",
@@ -90,7 +90,7 @@ describe("fetchEvalRunDetail", () => {
         tsStart: "2026-07-01T10:00:00Z",
         tsEnd: "2026-07-01T10:05:00Z",
         setId: "bank",
-        targetId: "dealbrain/curator",
+        targetId: "sales/curator",
         variant: "baseline",
         split: "dev",
         model: "sonnet",
@@ -189,13 +189,13 @@ describe("fetchSplitAggregates", () => {
       mkResponse(200, { aggregates: [] }),
     );
 
-    await fetchSplitAggregates({ set: "bank", target: "dealbrain/curator" });
+    await fetchSplitAggregates({ set: "bank", target: "sales/curator" });
 
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     const url = call?.[0] as string;
     expect(url).toContain("/eval/aggregates/splits");
     expect(url).toContain("set=bank");
-    expect(url).toContain(`target=${encodeURIComponent("dealbrain/curator")}`);
+    expect(url).toContain(`target=${encodeURIComponent("sales/curator")}`);
     expect(url).not.toContain("variant=");
   });
 
@@ -219,7 +219,7 @@ describe("filterRuns", () => {
       tsStart: "2026-07-01T10:00:00Z",
       tsEnd: null,
       setId: "bank",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       variant: "baseline",
       split: "dev",
       model: "sonnet",
@@ -231,7 +231,7 @@ describe("filterRuns", () => {
       tsStart: "2026-07-02T10:00:00Z",
       tsEnd: null,
       setId: "bank",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       variant: "candidate",
       split: "train",
       model: "opus",

@@ -243,7 +243,7 @@ describe("ap eval — happy path", () => {
       { id: "c2", input: "world", expected: "world" },
     ]);
     const dbFile = dbPath();
-    const target = makeEchoTarget("dealbrain/curator");
+    const target = makeEchoTarget("sales/curator");
 
     await runSafely(
       runEvalCommand({
@@ -270,7 +270,7 @@ describe("ap eval — happy path", () => {
       expect(evalRun).toBeDefined();
       if (!evalRun) throw new Error("unreachable");
       expect(evalRun.setId).toBe("bank");
-      expect(evalRun.targetId).toBe("dealbrain/curator");
+      expect(evalRun.targetId).toBe("sales/curator");
       expect(evalRun.variant).toBe("baseline");
       expect(evalRun.split).toBeNull();
       expect(evalRun.model).toBeTruthy();

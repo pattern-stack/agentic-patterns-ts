@@ -158,7 +158,7 @@ Named, scoped, built only when a project actually needs them — documenting the
 point (the persistence surface is now *explicit*):
 
 - **#119 MemoryStore** — semantic cross-session recall (`write` / `search`, pluggable backend). YAGNI
-  for search-deal-context (its "memory" is the dealbrain corpus via query-surface). For agent-system #2.
+  for search-deal-context (its "memory" is the consumer app's corpus via query-surface). For agent-system #2.
 - **#120 ArtifactStore** — versioned blob storage. YAGNI for search-deal-context (text out, no binaries).
 - **`Session` aggregate** — conversation + scratchpad + ids (ADK `Session`-shaped). Build when
   persisted session-state is needed.
