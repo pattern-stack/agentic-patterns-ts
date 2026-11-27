@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.40.1 · core 0.18.1 (2026-11-27)
+
+First release published by CI under the `@pattern-stack/agentic-*` names, through npm trusted publishing (OIDC). No code changes from 0.40.0 / core 0.18.0.
+
+## 0.40.0 · core 0.18.0 (2026-11-26)
+
+First publish under the `@pattern-stack/agentic-*` names (renamed from `@agentic-patterns/*` in #483, which also relicensed to FSL-1.1-ALv2). Published by hand from `main` at `4a770d5`. Its changes are listed below. Despite the same numbers, these are newer than `@agentic-patterns/runtime@0.40.0` and `@agentic-patterns/core@0.18.0`.
 
 ### Features
 
