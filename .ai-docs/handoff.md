@@ -4,7 +4,7 @@
 >
 > He was driving through this entire session and **cannot read the screen**. Anything you only write is invisible to him. If that is still true when you pick this up:
 >
-> 1. **Speak immediately** — `~/Projects/dealbrain/scripts/tts "…"` (or the plugin copy, sdlc 0.2.25: `driving-mode`). Confirm you are up by *speaking*, not printing.
+> 1. **Speak immediately** — the `tts` script (the plugin copy, sdlc 0.2.25: `driving-mode`). Confirm you are up by *speaking*, not printing.
 > 2. **One message at a time.** The script serializes playback now; three messages once played simultaneously and he understood none of them. Never remove that mutex.
 > 3. **Announce, then wait.** For anything longer than a couple of sentences: speak a short "I have X ready, say when you're ready", then **stop**. He listens to music while driving and will miss an unannounced report.
 > 4. Summaries: ≤75 words, 2–3 sentences, lead with the takeaway, no code / paths / URLs / markdown, "Heads up:" for errors, phrase decisions as spoken questions.
@@ -84,7 +84,7 @@
 Doug pulled the credentials, authorised reading his local Bifrost, and then said: **switch to the local gateway, and use `gemini-3.5-flash-lite` instead of Claude.** Done. State:
 
 - **`.env.local` now points at the local box** — `AP_GATEWAY_BASE_URL=http://10.88.111.51:8080/v1`, basic auth `admin`, `AP_GATEWAY_VIRTUAL_KEY` = the **`pii-wrapper`** VK, `AP_GATEWAY_MODEL_PREFIX=auto` (the gateway returns `provider/model` ids). `AGENT_TIER=haiku` was **commented out** — it is superseded once a model is pinned, and having both is a quiet trap. The previous config is backed up as `.env.local.bak-<epoch>`.
-- **The VK came from the governance API, not the UI**: `GET /api/governance/virtual-keys` with basic auth returns them, each with a `value` (`sk-bf-…`). Three exist: `pii-wrapper` (anthropic + gemini + openai, **7 pinned models**), `claude-code-dev` (no provider configs), `deal brain-local-dev` (all three, `*`).
+- **The VK came from the governance API, not the UI**: `GET /api/governance/virtual-keys` with basic auth returns them, each with a `value` (`sk-bf-…`). Three exist: `pii-wrapper` (anthropic + gemini + openai, **7 pinned models**), `claude-code-dev` (no provider configs), `app-local-dev` (all three, `*`).
 - **The local gateway DOES carry Claude**, unlike the AWS-hosted one. Through `pii-wrapper` the catalog is exactly: `anthropic/claude-haiku-4-5-20251001`, `gemini/gemini-3.5-flash`, `gemini/gemini-3.5-flash-lite`, `gemini/gemini-flash-latest`, `openai/gpt-4.1-mini`, `openai/gpt-4o-mini`, `openai/o4-mini`.
 
 ⚠️ **Gemini is blocked upstream — this is the one thing standing between you and a working run.**
@@ -109,8 +109,8 @@ Doug's preference is the gateway, *"provided that gateway also runs through agen
 
 - **Clean:** one env var routes every agent through it, no code change.
 - **Presidio has a designed seam already:** `AP_GATEWAY_GUARDRAIL_IDS` → Bifrost `x-bf-guardrail-ids`, and **#407** covers typed guardrail violations + redaction events.
-- ❌ **The blocker:** the gateway configured in `.env.local` (`https://bifrost-development.findtempo.co/v1`) carries **188 models — 130 openai, 58 gemini, ZERO anthropic**. swe-brain's `workspace-analyst` declares `claude-sonnet-5`, and under a gateway the *declared* model is used. **So pointing swe-brain at that gateway fails on the first run.**
-- **There are two gateways, and they are genuinely different machines.** The credentials in `.env.local` point at `https://bifrost-development.findtempo.co/v1`, which resolves to `bifrost-alb-…us-east-1.elb.amazonaws.com` — an **AWS-hosted** deployment. Doug's own box is `http://10.88.111.51:8080` (Tailscale, ~44ms), and **Bifrost + Presidio both live there**. So the gateway the repo is configured against is *not* the one with Presidio on it. Untangle that before wiring swe-brain to either.
+- ❌ **The blocker:** the gateway configured in `.env.local` (a shared dev Bifrost gateway) carries **188 models — 130 openai, 58 gemini, ZERO anthropic**. swe-brain's `workspace-analyst` declares `claude-sonnet-5`, and under a gateway the *declared* model is used. **So pointing swe-brain at that gateway fails on the first run.**
+- **There are two gateways, and they are genuinely different machines.** The credentials in `.env.local` point at a shared dev Bifrost gateway, which resolves to `bifrost-alb-…us-east-1.elb.amazonaws.com` — an **AWS-hosted** deployment. Doug's own box is `http://10.88.111.51:8080` (Tailscale, ~44ms), and **Bifrost + Presidio both live there**. So the gateway the repo is configured against is *not* the one with Presidio on it. Untangle that before wiring swe-brain to either.
 - **The local box is a *governed* Bifrost instance and needs a virtual key.** Basic auth (`admin` / password in 1Password → OAuthPass) succeeds, and the request then fails at the Bifrost layer:
   ```
   GET http://10.88.111.51:8080/v1/models
@@ -131,7 +131,7 @@ Doug's preference is the gateway, *"provided that gateway also runs through agen
 
 ## Notes
 
-**`driving-mode` (plugin 0.2.25).** Doug drives for hours and cannot read the screen. Two rules learned live: **one voice message at a time** (three overlapped and he understood none — the script now holds a playback mutex; do not "simplify" it away), and **announce then wait** before any long report. Key resolution is `OPENAI_API_KEY` → `TTS_KEY_FILE` → `~/.config/claude-tts/key`; a symlink from there to `~/.config/dealbrain-tts/key` was added so the shipped skill finds his existing key instead of silently falling back to the macOS voice.
+**`driving-mode` (plugin 0.2.25).** Doug drives for hours and cannot read the screen. Two rules learned live: **one voice message at a time** (three overlapped and he understood none — the script now holds a playback mutex; do not "simplify" it away), and **announce then wait** before any long report. Key resolution is `OPENAI_API_KEY` → `TTS_KEY_FILE` → `~/.config/claude-tts/key`; a symlink from there to the older key location was added so the shipped skill finds his existing key instead of silently falling back to the macOS voice.
 
 **`guided-tour` (plugin 0.2.24).** One tour file, two modes: `narrate` drives the real browser over raw CDP (Playwright's `connectOverCDP` **hangs on Arc**; raw CDP is fine), `--verify` asserts and writes `report.json`. Tours live in the consuming project at `.claude/tours/`. Uncommitted tours exist for swe-brain (`ambient-loop.mjs`, with a deliberate red check on the run surface) and agentic-patterns (`playground-inventory.mjs`).
 

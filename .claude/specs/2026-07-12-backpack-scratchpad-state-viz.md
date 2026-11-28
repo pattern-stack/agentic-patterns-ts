@@ -3,7 +3,7 @@
 **Status:** ideation complete, concept mockup approved-pending-review — no product code changed.
 **Mockup:** [`2026-07-12-backpack-scratchpad-state-viz.mockup.html`](./2026-07-12-backpack-scratchpad-state-viz.mockup.html) (open in a browser; interactive).
 **Process:** 12-agent ideation run — 5 codebase readers → 4 independent concept designers → 3 judge lenses (debugging, first-contact, implementation). Delta Frames won all three votes.
-**Demo scenario:** the CRM retrieval agent (`retrieve → correlate → brief`, built on the `retrievalRole` preset) answering "Where does the Meridian Health deal stand?" — `search_deal_context` drops **observations** about the deal into `backpack.observations`; `hydrateThenDrop` + `list_artifacts` expands them to their **associated artifacts** via `source_refs.artifact_id`; correlate cuts stale/redundant items and emits `brief.highlights`. Deal content is fictional; field shapes match the Deal Brain CRM tools (`observation_id`, `deal_id`, `artifact_id`, artifact types `meeting`/`email`, sources `gong`/`gmail`).
+**Demo scenario:** the CRM retrieval agent (`retrieve → correlate → brief`, built on the `retrievalRole` preset) answering "Where does the Meridian Health deal stand?" — `search_deal_context` drops **observations** about the deal into `backpack.observations`; `hydrateThenDrop` + `list_artifacts` expands them to their **associated artifacts** via `source_refs.artifact_id`; correlate cuts stale/redundant items and emits `brief.highlights`. Deal content is fictional; field shapes match the reference CRM tools (`observation_id`, `deal_id`, `artifact_id`, artifact types `meeting`/`email`, sources `gong`/`gmail`).
 
 ## Goal
 

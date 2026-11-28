@@ -43,7 +43,7 @@ const detail: EvalCaseDetailResponse = {
     {
       evalRunId: "run-newest0",
       tsStart: "2026-07-02T10:00:00Z",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       variant: "candidate",
       split: "test",
       model: "opus",
@@ -58,7 +58,7 @@ const detail: EvalCaseDetailResponse = {
     {
       evalRunId: "run-oldest0",
       tsStart: "2026-07-01T10:00:00Z",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       variant: "baseline",
       split: "test",
       model: "sonnet",

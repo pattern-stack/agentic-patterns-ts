@@ -618,7 +618,7 @@ Adding a model to the capable set is one entry, after verification. Default for 
 
 ### 9.5 Empirical validation (trial harness)
 
-Verified live through the dealbrain Bifrost gateway via two throwaway harnesses — `packages/agent-runtime/scripts/structured-output-trial.ts` and `two-tier-fallback-trial.ts`:
+Verified live through a consumer app's Bifrost gateway via two throwaway harnesses — `packages/agent-runtime/scripts/structured-output-trial.ts` and `two-tier-fallback-trial.ts`:
 
 - **No-tools `Output.object`: passed on every model tested** (gemini 2.5/3.1/3.5, openai gpt-4o/gpt-5) → the universal path; `runStructured`'s no-tools branch is safe everywhere.
 - **Single-call tools+structured: `openai/*` ✓, `gemini-3.5-flash` ✓; `gemini ≤3.1 / 2.5` ✗** (invalid JSON / "No output specified", tool never fired) → this is the per-model gap the capability gate exists for.

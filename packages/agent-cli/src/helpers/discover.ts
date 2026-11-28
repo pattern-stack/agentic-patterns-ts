@@ -401,8 +401,8 @@ export async function discoverAgents(
  *   - local name: a meaningful named export wins (`reviewerAgent` → `reviewer`);
  *     `default`/`rootAgent` fall back to the filename (`foo.agent.ts` → `foo`)
  *     and then the folder (`foo/agent.ts` → `foo`).
- *   - domain: dirs between `root` and a nested `agents/` (`dealbrain/agents/x`
- *     → `dealbrain`). A top-level `agents/` (no dir above it) → no domain.
+ *   - domain: dirs between `root` and a nested `agents/` (`sales/agents/x`
+ *     → `sales`). A top-level `agents/` (no dir above it) → no domain.
  *   - id: `domain/local` when there's a domain, else `local`.
  */
 export function inferIdentity(

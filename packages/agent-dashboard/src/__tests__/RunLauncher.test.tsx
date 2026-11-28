@@ -20,7 +20,7 @@ const sets = [
   },
 ];
 
-const agents = [{ id: "dealbrain/curator", name: "curator", description: "" }];
+const agents = [{ id: "sales/curator", name: "curator", description: "" }];
 
 const scorers = [
   { id: "exact-match", description: "" },
@@ -123,7 +123,7 @@ describe("RunLauncher", () => {
     await openAndPopulate();
 
     fireEvent.change(screen.getByLabelText("Set"), { target: { value: "bank" } });
-    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "dealbrain/curator" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "sales/curator" } });
 
     expect(screen.queryByText("Run the held-out test split")).toBeNull();
     fireEvent.change(screen.getByLabelText("Split"), { target: { value: "test" } });
@@ -139,7 +139,7 @@ describe("RunLauncher", () => {
     const body = JSON.parse((postCall?.[1] as RequestInit).body as string);
     expect(body).toEqual({
       setId: "bank",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       split: "test",
       allowTest: true,
       scorer: "exact-match",
@@ -160,7 +160,7 @@ describe("RunLauncher", () => {
     expect((screen.getByLabelText("Scorer") as HTMLSelectElement).value).toBe("exact-match");
 
     fireEvent.change(screen.getByLabelText("Set"), { target: { value: "bank" } });
-    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "dealbrain/curator" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "sales/curator" } });
     fireEvent.change(screen.getByLabelText("Scorer"), { target: { value: "set-membership" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
@@ -171,7 +171,7 @@ describe("RunLauncher", () => {
     const body = JSON.parse((postCall?.[1] as RequestInit).body as string);
     expect(body).toEqual({
       setId: "bank",
-      targetId: "dealbrain/curator",
+      targetId: "sales/curator",
       scorer: "set-membership",
     });
   });
@@ -182,7 +182,7 @@ describe("RunLauncher", () => {
     await openAndPopulate();
 
     fireEvent.change(screen.getByLabelText("Set"), { target: { value: "bank" } });
-    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "dealbrain/curator" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "sales/curator" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => {
@@ -202,7 +202,7 @@ describe("RunLauncher", () => {
     await openAndPopulate();
 
     fireEvent.change(screen.getByLabelText("Set"), { target: { value: "bank" } });
-    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "dealbrain/curator" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "sales/curator" } });
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
 
     await waitFor(() => {

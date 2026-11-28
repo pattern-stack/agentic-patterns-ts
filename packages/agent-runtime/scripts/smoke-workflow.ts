@@ -11,8 +11,8 @@
  *   - Loop (critique/revise) with a predicate on typed output
  *   - Slot/Scratchpad: run-scoped write, read from inside forked FanOut branches
  *
- * Run (uses the dealbrain Bifrost creds; gemini/openai need no extra key):
- *   set -a; . /Users/dug/Projects/dealbrain/.env; set +a
+ * Run (uses Bifrost gateway creds; gemini/openai need no extra key):
+ *   set -a; . path/to/bifrost.env; set +a
  *   export BIFROST_BASE_URL="${BIFROST_BASE_URL%/}/v1"
  *   export SMOKE_MODEL="gemini/gemini-2.5-flash"   # or openai/gpt-4o
  *   bun run packages/agent-runtime/scripts/smoke-workflow.ts

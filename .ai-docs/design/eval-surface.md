@@ -328,7 +328,7 @@ only the case-bank + suite-run + annotation tables — **not** a parallel run st
   to publish the store standalone.
 - **Judge is not gated on this stack landing** — E6 is decoupled and last.
 - **Consumer gold stays in the consumer.** The framework ships loaders + the discipline; the
-  beanmaxx/dealbrain gold banks remain in canvas-workstation.
+  beanmaxx and other consumer gold banks remain in canvas-workstation.
 
 ## 14. Reference assets to promote (paths)
 

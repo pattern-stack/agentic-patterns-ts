@@ -12,8 +12,8 @@
  * result) rather than the true product — proving the sub-node was called and
  * its return used, not that the coordinator computed it itself.
  *
- * Run (uses the dealbrain Bifrost creds):
- *   set -a; . /Users/dug/Projects/dealbrain/.env; set +a
+ * Run (uses Bifrost gateway creds):
+ *   set -a; . path/to/bifrost.env; set +a
  *   export BIFROST_BASE_URL="${BIFROST_BASE_URL%/}/v1"
  *   export SMOKE_MODEL="gemini/gemini-2.5-flash"   # or openai/gpt-4o
  *   bun run packages/agent-runtime/scripts/smoke-coordinator.ts

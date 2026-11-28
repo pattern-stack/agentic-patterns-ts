@@ -38,7 +38,7 @@ function mkFetchResponse(status: number, body: unknown) {
 const agents: RosterAgent[] = [
   {
     id: "curator-1",
-    name: "dealbrain/curator",
+    name: "sales/curator",
     description: "Curates the deal bank.",
     role: { id: "curator", name: "Curator" },
     readiness: { ready: true, missing: [] },

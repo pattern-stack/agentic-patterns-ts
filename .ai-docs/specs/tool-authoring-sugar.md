@@ -662,7 +662,7 @@ Add three distinct CHANGELOG bullets—one each for `defineTool`, literal factor
 | **OpenAI rule is applied to tool inputs accidentally** | Document that the initial `openai` rule set represents structured-output conversion. Do not imply a general provider-wide rule. |
 | **Existing runtime guard overlaps schema linting** | Leave `guardOpenObjectSchemas` and `runStructured` untouched; it currently runs before an LLM call ([agent-runner.ts:876](/Users/dug/Projects/dug/agentic-patterns-ts/packages/agent-runtime/src/runner/agent-runner.ts:876)). Consolidation is outside #264. |
 | **Terminal tool returns fail validation** | Validation failure is an errored call, so current terminal semantics correctly do not terminate; the existing contract already says only successful terminal calls end the loop ([toolbox.ts:66](/Users/dug/Projects/dug/agentic-patterns-ts/packages/agent-core/src/molecules/toolbox.ts:66)). |
-| **Dealbrain migration breakage** | Adoption is per tool. Tools already self-calling `returns.parse` should remove that call when moving to `defineTool`; tools intentionally emitting extra keys can temporarily set `validateReturns: false`. No downstream toolbox/capability/runtime type changes are required. |
+| **Consumer migration breakage** | Adoption is per tool. Tools already self-calling `returns.parse` should remove that call when moving to `defineTool`; tools intentionally emitting extra keys can temporarily set `validateReturns: false`. No downstream toolbox/capability/runtime type changes are required. |
 
 ---
 

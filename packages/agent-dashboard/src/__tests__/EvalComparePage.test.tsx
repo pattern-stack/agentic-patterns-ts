@@ -16,7 +16,7 @@ function mkRun(overrides: Partial<EvalRunRow>): EvalRunRow {
     tsStart: "2026-07-01T10:00:00Z",
     tsEnd: "2026-07-01T10:05:00Z",
     setId: "bank",
-    targetId: "dealbrain/curator",
+    targetId: "sales/curator",
     variant: "x",
     split: "dev",
     model: "sonnet",

@@ -38,7 +38,7 @@ export const SAMPLE_REQUEST =
   "What landed this week — any meetings or threads I should know about?";
 
 export const SAMPLE_ANSWER =
-  "This week's signal: the **Q3 roadmap review** (4 attendees, organized by priya@findtempo.co) " +
+  "This week's signal: the **Q3 roadmap review** (4 attendees, organized by priya@example.com) " +
   "and a **vendor security questionnaire** from acme. Both trace back to Monday's planning thread; " +
   "nothing else is material. Want me to draft a reply to the questionnaire?";
 
@@ -74,7 +74,7 @@ export const SAMPLE_EVENTS: EventLite[] = [
     toolName: "search",
     durationMs: 318,
     result: [
-      { id: "eml-7a3", title: "Re: Q3 roadmap review", from: "priya@findtempo.co" },
+      { id: "eml-7a3", title: "Re: Q3 roadmap review", from: "priya@example.com" },
       { id: "eml-8c1", title: "Vendor security questionnaire", from: "security@acme.com" },
     ],
   },
@@ -84,7 +84,7 @@ export const SAMPLE_EVENTS: EventLite[] = [
     seq: 8,
     toolName: "fetch",
     durationMs: 274,
-    result: { title: "Roadmap review", organizer: "priya@findtempo.co", attendees: 4, total: 4 },
+    result: { title: "Roadmap review", organizer: "priya@example.com", attendees: 4, total: 4 },
   },
 
   // ── iteration 2 — curate the two reads ──

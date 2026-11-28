@@ -10,7 +10,7 @@
  * composed end-to-end == correct structured output with tool data, no single-call.
  *
  * Run:
- *   set -a; . /Users/dug/Projects/dealbrain/.env; set +a
+ *   set -a; . path/to/bifrost.env; set +a
  *   export BIFROST_BASE_URL="${BIFROST_BASE_URL%/}/v1"
  *   export BIFROST_MODEL="gemini/gemini-3.1-flash-lite"
  *   bun run packages/agent-runtime/scripts/two-tier-fallback-trial.ts

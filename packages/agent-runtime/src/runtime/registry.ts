@@ -3,7 +3,7 @@
  *
  * Before this, agent identity lived only ABOVE the runtime: the CLI's
  * discovery (`DiscoveredAgent.id`) and the server's `AgentRegistration.id`
- * both know `dealbrain/pm`; the runtime knew nothing but `role.name`. A
+ * both know `sales/pm`; the runtime knew nothing but `role.name`. A
  * daemon-tier caller (`runFromTrigger`, M3's AgencyHost) cannot import
  * either, so the runtime defines the minimal structural protocol and the
  * hosts adapt to it — the same posture as `ToolExecutor`, `ConversationStore`,
@@ -21,7 +21,7 @@ import type { AgentLike } from "../runner/types.js";
 
 /** A registry row — what a caller can list and address. */
 export interface AgentRef {
-  /** The registration id (`dealbrain/pm`) — the canonical "named agent" handle. */
+  /** The registration id (`sales/pm`) — the canonical "named agent" handle. */
   readonly id: string;
   /** Human-facing name. */
   readonly name: string;

@@ -75,9 +75,9 @@ const instanceDetail: RoleDetail = {
   agents: [
     {
       id: "curator-1",
-      name: "dealbrain/curator",
+      name: "sales/curator",
       model: "sonnet",
-      background: { org: "dealbrain" },
+      background: { org: "sales" },
       awareness: { domains: ["listings", "pricing"] },
       mission: { objective: "Curate the deal bank" },
     },

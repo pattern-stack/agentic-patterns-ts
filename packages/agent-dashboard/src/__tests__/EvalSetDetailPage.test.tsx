@@ -48,7 +48,7 @@ const runs: EvalRunRow[] = [
     tsStart: "2026-07-01T10:00:00Z",
     tsEnd: "2026-07-01T10:05:00Z",
     setId: "bank",
-    targetId: "dealbrain/curator",
+    targetId: "sales/curator",
     variant: "baseline",
     split: "train",
     model: "sonnet",

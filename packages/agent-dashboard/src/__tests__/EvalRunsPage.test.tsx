@@ -40,7 +40,7 @@ const runs: EvalRunRow[] = [
     tsStart: "2026-07-01T10:00:00Z",
     tsEnd: "2026-07-01T10:05:00Z",
     setId: "bank",
-    targetId: "dealbrain/curator",
+    targetId: "sales/curator",
     variant: "baseline",
     split: "dev",
     model: "sonnet",
@@ -54,7 +54,7 @@ const runs: EvalRunRow[] = [
     tsStart: "2026-07-02T10:00:00Z",
     tsEnd: null,
     setId: "bank",
-    targetId: "dealbrain/curator",
+    targetId: "sales/curator",
     variant: "candidate",
     split: "train",
     model: "opus",
@@ -72,7 +72,7 @@ const threeRuns: EvalRunRow[] = [
     tsStart: "2026-07-03T10:00:00Z",
     tsEnd: "2026-07-03T10:05:00Z",
     setId: "bank",
-    targetId: "dealbrain/curator",
+    targetId: "sales/curator",
     variant: "third",
     split: "test",
     model: "sonnet",
@@ -162,7 +162,7 @@ describe("EvalRunsPage", () => {
     const rows = within(table!);
 
     expect(rows.getByText("baseline")).toBeTruthy();
-    expect(rows.getAllByText("dealbrain/curator").length).toBeGreaterThan(0);
+    expect(rows.getAllByText("sales/curator").length).toBeGreaterThan(0);
     expect(rows.getByText("candidate")).toBeTruthy();
     expect(rows.getByText("ok")).toBeTruthy();
     expect(rows.getByText("running")).toBeTruthy();
